@@ -24,7 +24,11 @@
 #      are explicitly moved to the output component.
 # ============================================================================
 
-namespace eval RB2W {
+if {![namespace exists ::HWFlow]} {
+    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+}
+
+namespace eval ::RB2W {
     variable VERSION "Release-1.2-Safe"
 
     # ---------------- Hole / washer parameters ----------------
@@ -81,14 +85,14 @@ namespace eval RB2W {
     variable currentComponentName ""
 }
 
-proc RB2W::log {msg} {
+proc ::RB2W::log {msg} {
     variable VERBOSE
     if {$VERBOSE} {
         puts "[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}] RB2W: $msg"
     }
 }
 
-proc RB2W::status {msg {force 0}} {
+proc ::RB2W::status {msg {force 0}} {
     variable USE_STATUS_PROGRESS
     variable FORCE_STATUS_UPDATE
     if {!$USE_STATUS_PROGRESS} { return }
@@ -96,14 +100,58 @@ proc RB2W::status {msg {force 0}} {
     if {$FORCE_STATUS_UPDATE || $force} { catch {update idletasks} }
 }
 
-proc RB2W::resetOverallProgress {} {
+proc ::RB2W::resetOverallProgress {} {
     variable statusLastPercent
     variable statusLastTime
     set statusLastPercent -100.0
     set statusLastTime 0
 }
 
-proc RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex loopTotal candidateHoles created skipped {force 0}} {
+proc ::RB2W::stateKeys {} {
+    return {
+        MIN_HOLE_DIAMETER MAX_HOLE_DIAMETER CIRCULARITY_TOL
+        MIN_HOLE_EDGE_NODES MAX_HOLE_EDGE_NODES INNER_WASHER_NODE_LOOPS
+        OUTER_RING_CIRCULARITY_TOL CENTER_OFFSET_TOL
+        MIN_WASHER_WIDTH_ABS MIN_WASHER_WIDTH_RATIO WASHER_ELEM_COUNT_TOL
+        MIN_OUTER_NODE_RATIO MAX_OUTER_NODE_RATIO
+        RBE2_DOF RBE2_COMPONENT_PREFIX BATCH_ORGANIZE_RBE2 ORGANIZE_BATCH_SIZE
+        SHOW_OUTPUT_COMPONENTS FORCE_BROWSER_REFRESH
+        SKIP_COMPONENT_IF_EXISTING_RBE2 CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2
+        CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2 OUTPUT_COMPONENT_SUFFIX_SCAN_LIMIT
+        VERBOSE LOG_EACH_CREATED LOG_EACH_SKIPPED PERFORMANCE_MODE USE_NODE_XYZ_CACHE
+        USE_STATUS_PROGRESS PROGRESS_LOOP_STEP UI_UPDATE_STEP FORCE_STATUS_UPDATE
+        STATUS_PERCENT_STEP STATUS_MIN_INTERVAL_MS
+    }
+}
+
+proc ::RB2W::loadState {} {
+    if {[llength [info commands ::HWFlow::loadState]] == 0} {
+        return
+    }
+    set state [::HWFlow::loadState shell_washer_hole_rbe2]
+    foreach key [::RB2W::stateKeys] {
+        if {[dict exists $state $key]} {
+            upvar #0 ::RB2W::$key v
+            set v [dict get $state $key]
+        }
+    }
+}
+
+proc ::RB2W::saveState {} {
+    if {[llength [info commands ::HWFlow::saveState]] == 0} {
+        return
+    }
+    set state [dict create]
+    foreach key [::RB2W::stateKeys] {
+        upvar #0 ::RB2W::$key v
+        if {[info exists v]} {
+            dict set state $key $v
+        }
+    }
+    ::HWFlow::saveState shell_washer_hole_rbe2 $state
+}
+
+proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex loopTotal candidateHoles created skipped {force 0}} {
     variable STATUS_PERCENT_STEP
     variable STATUS_MIN_INTERVAL_MS
     variable statusLastPercent
@@ -122,7 +170,7 @@ proc RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex loop
     RB2W::status $msg $force
 }
 
-proc RB2W::beginPerformanceMode {} {
+proc ::RB2W::beginPerformanceMode {} {
     variable PERFORMANCE_MODE
     variable USE_STATUS_PROGRESS
     if {!$PERFORMANCE_MODE} { return }
@@ -130,34 +178,77 @@ proc RB2W::beginPerformanceMode {} {
     catch {*setoption entity_highlighting=0}
     if {$USE_STATUS_PROGRESS} {
         catch {*setoption block_messages=0}
+        catch {hm_blockmessages 0}
     } else {
         catch {*setoption block_messages=1}
+        catch {hm_blockmessages 1}
     }
     catch {*setoption block_redraw=1}
+    catch {hm_blockredraw 1}
     catch {hwbrowsermanager view flush false}
     catch {hmbr_signals buffer start}
 }
 
-proc RB2W::endPerformanceMode {} {
-    variable PERFORMANCE_MODE
-    if {!$PERFORMANCE_MODE} { return }
+proc ::RB2W::enableInteractiveBrowserUpdates {} {
     catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {*setoption block_redraw=0}
     catch {*setoption block_messages=0}
-    catch {*setoption entity_highlighting=1}
-    RB2W::showAllOutputComponents
-    RB2W::refreshBrowsersAndGraphics
-    RB2W::log "Performance mode OFF."
+    catch {hm_blockredraw 0}
+    catch {hm_blockmessages 0}
+    catch {hm_blockerrormessages 0}
+    catch {hm_commandfilestate 1}
+    catch {hm_setmouse 1}
+    catch {update idletasks}
 }
 
-proc RB2W::clearNodeXYZCache {} {
+proc ::RB2W::resumePerformanceModeAfterBrowserUpdate {} {
+    variable PERFORMANCE_MODE
+    variable USE_STATUS_PROGRESS
+    if {!$PERFORMANCE_MODE} { return }
+
+    if {$USE_STATUS_PROGRESS} {
+        catch {*setoption block_messages=0}
+        catch {hm_blockmessages 0}
+    } else {
+        catch {*setoption block_messages=1}
+        catch {hm_blockmessages 1}
+    }
+    catch {*setoption block_redraw=1}
+    catch {hm_blockredraw 1}
+}
+
+proc ::RB2W::endPerformanceMode {} {
+    variable PERFORMANCE_MODE
+    if {$PERFORMANCE_MODE} {
+        catch {*setoption block_redraw=0}
+        catch {*setoption block_messages=0}
+        catch {*setoption entity_highlighting=1}
+        catch {hm_blockredraw 0}
+        catch {hm_blockmessages 0}
+    }
+    RB2W::enableInteractiveBrowserUpdates
+    catch {hwbrowsermanager view flush true}
+    RB2W::showAllOutputComponents
+    RB2W::refreshBrowsersAndGraphics 1
+    if {$PERFORMANCE_MODE} {
+        RB2W::log "Performance mode OFF."
+    }
+}
+
+proc ::RB2W::clearNodeXYZCache {} {
     variable nodeXYZCache
     catch {array unset nodeXYZCache}
     array set nodeXYZCache {}
 }
 
-proc RB2W::uniq {lst} {
+proc ::RB2W::clearComponentElemCache {} {
+    variable componentElemsCache
+    catch {array unset componentElemsCache}
+    array set componentElemsCache {}
+}
+
+proc ::RB2W::uniq {lst} {
     array set seen {}
     foreach x $lst { if {$x ne ""} { set seen($x) 1 } }
     set out [array names seen]
@@ -166,12 +257,12 @@ proc RB2W::uniq {lst} {
     return $out
 }
 
-proc RB2W::edgeKey {a b} {
+proc ::RB2W::edgeKey {a b} {
     if {$a < $b} { return "${a}:${b}" }
     return "${b}:${a}"
 }
 
-proc RB2W::addUniqueToArrayList {arrayName key value} {
+proc ::RB2W::addUniqueToArrayList {arrayName key value} {
     upvar $arrayName arr
     if {![info exists arr($key)]} {
         set arr($key) [list $value]
@@ -180,12 +271,12 @@ proc RB2W::addUniqueToArrayList {arrayName key value} {
     }
 }
 
-proc RB2W::bumpReason {arrayName reason} {
+proc ::RB2W::bumpReason {arrayName reason} {
     upvar $arrayName arr
     if {![info exists arr($reason)]} { set arr($reason) 1 } else { incr arr($reason) }
 }
 
-proc RB2W::formatReasonStats {arrayName} {
+proc ::RB2W::formatReasonStats {arrayName} {
     upvar $arrayName arr
     set parts {}
     foreach k [lsort [array names arr]] { lappend parts "$k=$arr($k)" }
@@ -193,7 +284,7 @@ proc RB2W::formatReasonStats {arrayName} {
     return [join $parts "; "]
 }
 
-proc RB2W::getElemNodes {eid} {
+proc ::RB2W::getElemNodes {eid} {
     set nodes {}
     if {![catch {set nodes [hm_getvalue elems id=$eid dataname=nodes]}] && [llength $nodes] >= 3} { return $nodes }
     if {![catch {set nodes [hm_nodelist $eid]}] && [llength $nodes] >= 3} { return $nodes }
@@ -204,7 +295,7 @@ proc RB2W::getElemNodes {eid} {
     return $nodes
 }
 
-proc RB2W::getNodeXYZRaw {nid} {
+proc ::RB2W::getNodeXYZRaw {nid} {
     set ok 1
     if {[catch {set x [hm_getvalue nodes id=$nid dataname=x]}]} { set ok 0 }
     if {[catch {set y [hm_getvalue nodes id=$nid dataname=y]}]} { set ok 0 }
@@ -221,7 +312,7 @@ proc RB2W::getNodeXYZRaw {nid} {
     error "Cannot read coordinates of node $nid"
 }
 
-proc RB2W::getNodeXYZ {nid} {
+proc ::RB2W::getNodeXYZ {nid} {
     variable USE_NODE_XYZ_CACHE
     variable nodeXYZCache
     if {$USE_NODE_XYZ_CACHE && [info exists nodeXYZCache($nid)]} { return $nodeXYZCache($nid) }
@@ -230,14 +321,14 @@ proc RB2W::getNodeXYZ {nid} {
     return $xyz
 }
 
-proc RB2W::distance3 {p q} {
+proc ::RB2W::distance3 {p q} {
     set dx [expr {[lindex $p 0] - [lindex $q 0]}]
     set dy [expr {[lindex $p 1] - [lindex $q 1]}]
     set dz [expr {[lindex $p 2] - [lindex $q 2]}]
     return [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
 }
 
-proc RB2W::loopGeometry {nodes} {
+proc ::RB2W::loopGeometry {nodes} {
     set n [llength $nodes]
     if {$n == 0} { error "empty loop" }
     set sx 0.0; set sy 0.0; set sz 0.0
@@ -267,7 +358,12 @@ proc RB2W::loopGeometry {nodes} {
     return [list $center $meanr $rel $minr $maxr]
 }
 
-proc RB2W::getElemsByComp {compId} {
+proc ::RB2W::getElemsByComp {compId} {
+    variable componentElemsCache
+    if {[info exists componentElemsCache($compId)]} {
+        return $componentElemsCache($compId)
+    }
+
     *clearmark elems 1
     set elems {}
     if {![catch {*createmark elems 1 "by comp id" $compId}]} { set elems [hm_getmark elems 1] }
@@ -276,10 +372,12 @@ proc RB2W::getElemsByComp {compId} {
         if {![catch {*createmark elems 1 "by collector id" $compId}]} { set elems [hm_getmark elems 1] }
     }
     catch {*clearmark elems 1}
-    return [RB2W::uniq $elems]
+    set elems [RB2W::uniq $elems]
+    set componentElemsCache($compId) $elems
+    return $elems
 }
 
-proc RB2W::buildGraph {elems} {
+proc ::RB2W::buildGraph {elems} {
     variable elemNodes
     variable edgeElems
     variable nodeAdj
@@ -315,7 +413,7 @@ proc RB2W::buildGraph {elems} {
     }
 }
 
-proc RB2W::findFreeEdgeLoops {} {
+proc ::RB2W::findFreeEdgeLoops {} {
     variable edgeElems
     array set freeAdj {}
     array set freeEdgesByNodePair {}
@@ -360,7 +458,7 @@ proc RB2W::findFreeEdgeLoops {} {
     return $loops
 }
 
-proc RB2W::seedElemsFromLoop {edgeKeys} {
+proc ::RB2W::seedElemsFromLoop {edgeKeys} {
     variable edgeElems
     set seeds {}
     foreach k $edgeKeys {
@@ -369,7 +467,7 @@ proc RB2W::seedElemsFromLoop {edgeKeys} {
     return [RB2W::uniq $seeds]
 }
 
-proc RB2W::expandElementLayers {seedElems layerCount} {
+proc ::RB2W::expandElementLayers {seedElems layerCount} {
     variable elemNbrs
     if {$layerCount <= 1} { return [RB2W::uniq $seedElems] }
     array set selected {}
@@ -389,14 +487,14 @@ proc RB2W::expandElementLayers {seedElems layerCount} {
     return [RB2W::uniq [array names selected]]
 }
 
-proc RB2W::nodesFromElems {elems} {
+proc ::RB2W::nodesFromElems {elems} {
     variable elemNodes
     set ns {}
     foreach e $elems { if {[info exists elemNodes($e)]} { foreach n $elemNodes($e) { lappend ns $n } } }
     return [RB2W::uniq $ns]
 }
 
-proc RB2W::listSubtract {all remove} {
+proc ::RB2W::listSubtract {all remove} {
     array set rm {}
     foreach n $remove { set rm($n) 1 }
     set out {}
@@ -404,13 +502,13 @@ proc RB2W::listSubtract {all remove} {
     return [RB2W::uniq $out]
 }
 
-proc RB2W::componentExistsByName {compName} {
+proc ::RB2W::componentExistsByName {compName} {
     if {![catch {set exists [hm_entityinfo exist components $compName -byname]}]} { return $exists }
     if {![catch {set cid [hm_entityinfo id components $compName -byname]}] && $cid ne "" && $cid != 0} { return 1 }
     return 0
 }
 
-proc RB2W::componentIdByName {compName} {
+proc ::RB2W::componentIdByName {compName} {
     foreach etype {components comps component} {
         if {![catch {set cid [hm_entityinfo id $etype $compName -byname]}] && $cid ne "" && $cid != 0} { return $cid }
     }
@@ -426,7 +524,7 @@ proc RB2W::componentIdByName {compName} {
     return ""
 }
 
-proc RB2W::getComponentName {compId} {
+proc ::RB2W::getComponentName {compId} {
     foreach etype {comps components component} {
         if {![catch {set n [hm_getcollectorname $etype $compId]}] && $n ne ""} { return $n }
     }
@@ -437,7 +535,7 @@ proc RB2W::getComponentName {compId} {
     return "comp_$compId"
 }
 
-proc RB2W::sanitizeNamePart {raw fallback} {
+proc ::RB2W::sanitizeNamePart {raw fallback} {
     set s [string trim $raw]
     if {$s eq ""} { set s $fallback }
     regsub -all {[^[:alnum:]_.-]+} $s "_" s
@@ -448,14 +546,14 @@ proc RB2W::sanitizeNamePart {raw fallback} {
     return $s
 }
 
-proc RB2W::sourceOutputBaseName {sourceCompId} {
+proc ::RB2W::sourceOutputBaseName {sourceCompId} {
     variable RBE2_COMPONENT_PREFIX
     set srcName [RB2W::getComponentName $sourceCompId]
     set safeSrc [RB2W::sanitizeNamePart $srcName "comp_$sourceCompId"]
     return "${RBE2_COMPONENT_PREFIX}_${safeSrc}"
 }
 
-proc RB2W::uniqueComponentName {baseName} {
+proc ::RB2W::uniqueComponentName {baseName} {
     set base [RB2W::sanitizeNamePart $baseName "AUTO_RBE2"]
     if {![RB2W::componentExistsByName $base]} { return $base }
     for {set i 1} {$i <= 999} {incr i} {
@@ -465,7 +563,7 @@ proc RB2W::uniqueComponentName {baseName} {
     return [format "%s_%s" $base [clock seconds]]
 }
 
-proc RB2W::setCurrentComponent {compName} {
+proc ::RB2W::setCurrentComponent {compName} {
     variable currentComponentName
     if {[info exists currentComponentName] && $currentComponentName eq $compName} { return }
     if {[catch {*currentcollector component $compName} err1]} {
@@ -476,8 +574,46 @@ proc RB2W::setCurrentComponent {compName} {
     set currentComponentName $compName
 }
 
-proc RB2W::ensureOutputComponent {sourceCompId} {
+proc ::RB2W::createComponentByName {compName} {
+    variable PERFORMANCE_MODE
+    if {[RB2W::componentExistsByName $compName]} {
+        RB2W::setCurrentComponent $compName
+        return
+    }
+
+    if {!$PERFORMANCE_MODE} {
+        RB2W::enableInteractiveBrowserUpdates
+    }
+    set histName "Created Component $compName"
+    set histStarted 0
+    catch {*startnotehistorystate $histName}
+    set histStarted 1
+
+    set createCode [catch {*collectorcreateonly comps $compName "" 11} err1]
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly components $compName "" 11} err1]
+    }
+    if {$createCode} {
+        if {[catch {*createentity comps name=$compName} err2]} {
+            if {$histStarted} { catch {*endnotehistorystate $histName} }
+            if {!$PERFORMANCE_MODE} {
+                RB2W::resumePerformanceModeAfterBrowserUpdate
+            }
+            error "Cannot create output component $compName: $err1 / $err2"
+        }
+    }
+    if {$histStarted} { catch {*endnotehistorystate $histName} }
+
+    RB2W::setCurrentComponent $compName
+    if {!$PERFORMANCE_MODE} {
+        RB2W::showOutputComponent $compName 1
+        RB2W::resumePerformanceModeAfterBrowserUpdate
+    }
+}
+
+proc ::RB2W::ensureOutputComponent {sourceCompId} {
     variable outputCompBySource
+    variable PERFORMANCE_MODE
     if {[info exists outputCompBySource($sourceCompId)]} {
         set outName $outputCompBySource($sourceCompId)
         RB2W::setCurrentComponent $outName
@@ -486,14 +622,16 @@ proc RB2W::ensureOutputComponent {sourceCompId} {
     set srcName [RB2W::getComponentName $sourceCompId]
     set baseName [RB2W::sourceOutputBaseName $sourceCompId]
     set outName [RB2W::uniqueComponentName $baseName]
-    if {[catch {*createentity comps name=$outName} err]} { error "Cannot create output component $outName: $err" }
+    RB2W::createComponentByName $outName
     set outputCompBySource($sourceCompId) $outName
-    RB2W::setCurrentComponent $outName
+    if {!$PERFORMANCE_MODE} {
+        RB2W::showOutputComponent $outName 0
+    }
     RB2W::log "Output component created for source component $sourceCompId ($srcName): $outName"
     return $outName
 }
 
-proc RB2W::markComponentByName {compName markId} {
+proc ::RB2W::markComponentByName {compName markId} {
     foreach etype {components comps} {
         catch {*clearmark $etype $markId}
         if {![catch {*createmark $etype $markId "by name only" $compName}]} {
@@ -504,7 +642,7 @@ proc RB2W::markComponentByName {compName markId} {
     if {$cid ne ""} {
         foreach etype {components comps} {
             catch {*clearmark $etype $markId}
-            if {![catch {*createmark $etype $markId $cid}]} {
+            if {![catch {*createmark $etype $markId "by id only" $cid}]} {
                 if {![catch {set ids [hm_getmark $etype $markId]}] && [llength $ids] > 0} { return $etype }
             }
         }
@@ -512,40 +650,98 @@ proc RB2W::markComponentByName {compName markId} {
     return ""
 }
 
-proc RB2W::showOutputComponent {compName {refreshNow 0}} {
+proc ::RB2W::showOutputComponent {compName {refreshNow 0}} {
     variable SHOW_OUTPUT_COMPONENTS
     if {!$SHOW_OUTPUT_COMPONENTS} { return }
+    set compId [RB2W::componentIdByName $compName]
     set markType [RB2W::markComponentByName $compName 2]
     if {$markType ne ""} {
+        catch {*marksuppressactive $markType 2 0}
+        catch {*marksuppressoutput $markType 2 0}
         catch {*displaycollectorsbymark $markType 2 on 1 1}
+        catch {*displaycollectorsbymark components 2 on 1 1}
+        catch {*displaycollectorsbymark comps 2 on 1 1}
         catch {*displaycollectorsallbymark 2 on 1 1}
         catch {*clearmark $markType 2}
+    }
+    catch {*displaycollector component on $compName 1 1}
+    catch {*displaycollector components on $compName 1 1}
+    catch {*displaycollectorwithfilter component on $compName 1 1}
+    catch {*displaycollectorwithfilter components on $compName 1 1}
+    if {$compId ne ""} {
+        catch {*showentity comps "by id" $compId}
+        catch {*showentity components "by id" $compId}
     }
     if {$refreshNow} { RB2W::refreshBrowsersAndGraphics }
 }
 
-proc RB2W::showAllOutputComponents {} {
+proc ::RB2W::showAllOutputComponents {} {
     variable outputCompBySource
     if {![array exists outputCompBySource]} { return }
     foreach k [array names outputCompBySource] { RB2W::showOutputComponent $outputCompBySource($k) 0 }
 }
 
-proc RB2W::refreshBrowsersAndGraphics {} {
+proc ::RB2W::refreshBrowsersAndGraphics {{force 0}} {
     variable FORCE_BROWSER_REFRESH
-    if {!$FORCE_BROWSER_REFRESH} { return }
+    if {!$FORCE_BROWSER_REFRESH && !$force} { return }
+    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {hm_redraw}
     catch {update idletasks}
+    catch {update}
 }
 
-proc RB2W::moveMarkToComponent {entityTypes markId compName} {
+proc ::RB2W::countEntitiesInComponent {compName entityType} {
+    set compId [RB2W::componentIdByName $compName]
+    foreach ctype {components comps} {
+        if {![catch {set n [hm_entityincollector $ctype $compName $entityType 0 0 -byname]}] && $n ne ""} {
+            return $n
+        }
+        if {$compId ne "" && ![catch {set n [hm_entityincollector $ctype $compId $entityType 0 0 -byid]}] && $n ne ""} {
+            return $n
+        }
+    }
+
+    catch {*clearmark $entityType 1}
+    if {$compId ne "" && ![catch {*createmark $entityType 1 "by comp id" $compId}]} {
+        if {![catch {set ids [hm_getmark $entityType 1]}]} {
+            catch {*clearmark $entityType 1}
+            return [llength $ids]
+        }
+    }
+    if {![catch {*createmark $entityType 1 "by comp name" $compName}]} {
+        if {![catch {set ids [hm_getmark $entityType 1]}]} {
+            catch {*clearmark $entityType 1}
+            return [llength $ids]
+        }
+    }
+    catch {*clearmark $entityType 1}
+    return "?"
+}
+
+proc ::RB2W::outputComponentSummary {} {
+    variable outputCompBySource
+    if {![array exists outputCompBySource]} { return "" }
+
+    set lines {}
+    foreach sourceId [lsort -integer [array names outputCompBySource]] {
+        set compName $outputCompBySource($sourceId)
+        set compId [RB2W::componentIdByName $compName]
+        set elemCount [RB2W::countEntitiesInComponent $compName elems]
+        set nodeCount [RB2W::countEntitiesInComponent $compName nodes]
+        lappend lines "$compName  id=$compId  elems=$elemCount  nodes=$nodeCount"
+    }
+    return [join $lines \n]
+}
+
+proc ::RB2W::moveMarkToComponent {entityTypes markId compName} {
     foreach etype $entityTypes {
         if {![catch {*movemark $etype $markId $compName} err]} { return 1 }
     }
     return 0
 }
 
-proc RB2W::listChunks {lst chunkSize} {
+proc ::RB2W::listChunks {lst chunkSize} {
     if {$chunkSize <= 0} { set chunkSize 500 }
     set out {}
     set n [llength $lst]
@@ -557,7 +753,7 @@ proc RB2W::listChunks {lst chunkSize} {
     return $out
 }
 
-proc RB2W::organizeCreatedRBE2Elements {elemIds outComp} {
+proc ::RB2W::organizeCreatedRBE2Elements {elemIds outComp} {
     variable ORGANIZE_BATCH_SIZE
     set elemIds [RB2W::uniq $elemIds]
     set total [llength $elemIds]
@@ -579,7 +775,7 @@ proc RB2W::organizeCreatedRBE2Elements {elemIds outComp} {
     return $moved
 }
 
-proc RB2W::getLastCreatedOnMark {entityTypes markId} {
+proc ::RB2W::getLastCreatedOnMark {entityTypes markId} {
     foreach etype $entityTypes {
         if {![catch {set latest [hm_latestentityid $etype]}] && $latest ne "" && $latest != 0} {
             catch {*clearmark $etype $markId}
@@ -596,9 +792,24 @@ proc RB2W::getLastCreatedOnMark {entityTypes markId} {
 }
 
 # ---------------- Existing RBE2 safety detection ----------------
-proc RB2W::elemLooksLikeRBE2 {eid} {
+proc ::RB2W::elemConfigLooksLikePlainShell {cfg} {
+    set u [string toupper [string trim "$cfg"]]
+    if {$u eq ""} { return 0 }
+    if {[string first "RBE2" $u] >= 0 || [string first "RIGID" $u] >= 0} { return 0 }
+    if {[regexp {(SHELL|TRIA|QUAD|CQUAD|CTRIA)} $u]} { return 1 }
+    if {[regexp {^[0-9]+$} $u] && [lsearch -exact {103 104 106 108} $u] >= 0} { return 1 }
+    return 0
+}
+
+proc ::RB2W::elemLooksLikeRBE2 {eid} {
+    if {![catch {set cfg [hm_getvalue elems id=$eid dataname=config]}] && $cfg ne ""} {
+        set u [string toupper "$cfg"]
+        if {[string first "RBE2" $u] >= 0 || [string first "RIGIDLINK" $u] >= 0} { return 1 }
+        if {[RB2W::elemConfigLooksLikePlainShell $cfg]} { return 0 }
+    }
+
     # Fast/fuzzy string checks from common element data names.
-    foreach dn {typename solverkeyword solvername cardimage config} {
+    foreach dn {typename solverkeyword solvername cardimage} {
         if {![catch {set v [hm_getvalue elems id=$eid dataname=$dn]}] && $v ne ""} {
             set u [string toupper "$v"]
             if {[string first "RBE2" $u] >= 0 || [string first "RIGIDLINK" $u] >= 0} { return 1 }
@@ -613,7 +824,7 @@ proc RB2W::elemLooksLikeRBE2 {eid} {
     return 0
 }
 
-proc RB2W::componentHasRBE2 {compId} {
+proc ::RB2W::componentHasRBE2 {compId} {
     set elems [RB2W::getElemsByComp $compId]
     foreach e $elems {
         if {[RB2W::elemLooksLikeRBE2 $e]} { return [list 1 $e] }
@@ -621,7 +832,7 @@ proc RB2W::componentHasRBE2 {compId} {
     return [list 0 ""]
 }
 
-proc RB2W::outputComponentCandidatesForSource {sourceCompId} {
+proc ::RB2W::outputComponentCandidatesForSource {sourceCompId} {
     variable OUTPUT_COMPONENT_SUFFIX_SCAN_LIMIT
     set base [RB2W::sourceOutputBaseName $sourceCompId]
     set out {}
@@ -634,7 +845,7 @@ proc RB2W::outputComponentCandidatesForSource {sourceCompId} {
     return $out
 }
 
-proc RB2W::existingRBE2CheckForSource {sourceCompId} {
+proc ::RB2W::existingRBE2CheckForSource {sourceCompId} {
     variable CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2
     variable CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2
 
@@ -661,7 +872,7 @@ proc RB2W::existingRBE2CheckForSource {sourceCompId} {
     return [list 0 ""]
 }
 
-proc RB2W::createCenterNode {center outComp} {
+proc ::RB2W::createCenterNode {center outComp} {
     foreach {x y z} $center {}
     RB2W::setCurrentComponent $outComp
     catch {*clearmark nodes 1}
@@ -673,13 +884,15 @@ proc RB2W::createCenterNode {center outComp} {
     return [lindex $newNodes 0]
 }
 
-proc RB2W::createRigidLink {centerNode depNodes outComp} {
+proc ::RB2W::createRigidLink {centerNode depNodes outComp} {
     variable RBE2_DOF
     set depNodes [RB2W::uniq $depNodes]
     if {[llength $depNodes] < 3} { error "Too few dependent nodes." }
     set idx [lsearch -exact $depNodes $centerNode]
     if {$idx >= 0} { set depNodes [lreplace $depNodes $idx $idx] }
     RB2W::setCurrentComponent $outComp
+    set beforeElem ""
+    catch {set beforeElem [hm_latestentityid elems]}
     catch {*clearmark nodes 2}
     eval *createmark nodes 2 $depNodes
     *rigidlink $centerNode 2 $RBE2_DOF
@@ -687,13 +900,19 @@ proc RB2W::createRigidLink {centerNode depNodes outComp} {
     set lastInfo [RB2W::getLastCreatedOnMark {elems elements} 1]
     set newElems [lindex $lastInfo 1]
     if {[llength $newElems] == 0} {
+        set latestElem ""
+        if {![catch {set latestElem [hm_latestentityid elems]}] && $latestElem ne "" && $latestElem != 0 && $latestElem ne $beforeElem} {
+            set newElems [list $latestElem]
+        }
+    }
+    if {[llength $newElems] == 0} {
         RB2W::log "Warning: created rigidlink for center node $centerNode, but could not capture the new element id for batch organization."
         return {}
     }
     return $newElems
 }
 
-proc RB2W::isValidHoleLoop {loopDict} {
+proc ::RB2W::isValidHoleLoop {loopDict} {
     variable MIN_HOLE_DIAMETER
     variable MAX_HOLE_DIAMETER
     variable CIRCULARITY_TOL
@@ -717,7 +936,7 @@ proc RB2W::isValidHoleLoop {loopDict} {
     return [list 1 $g]
 }
 
-proc RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
+proc ::RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
     variable INNER_WASHER_NODE_LOOPS
     variable OUTER_RING_CIRCULARITY_TOL
     variable CENTER_OFFSET_TOL
@@ -761,12 +980,13 @@ proc RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
     return [list 1 "ok" $info]
 }
 
-proc RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
+proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
     variable LOG_EACH_CREATED
     variable LOG_EACH_SKIPPED
     variable PROGRESS_LOOP_STEP
     variable UI_UPDATE_STEP
     variable BATCH_ORGANIZE_RBE2
+    variable PERFORMANCE_MODE
 
     RB2W::clearNodeXYZCache
     array set reasons {}
@@ -861,6 +1081,9 @@ proc RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
         set needMove [llength [RB2W::uniq $createdRBE2Elems]]
         if {$organizeMoved < $needMove} { RB2W::log "Warning: component $compId batch-organized $organizeMoved/$needMove RBE2 element(s) into $outComp." }
     }
+    if {!$PERFORMANCE_MODE && $outComp ne "" && $created > 0} {
+        RB2W::showOutputComponent $outComp 0
+    }
 
     set totalTime [expr {[clock milliseconds] - $t0}]
     set overallDone [expr {100.0 * ($compIndex / double($compTotal))}]
@@ -870,7 +1093,7 @@ proc RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
     return [list $created $skipped $candidateHoles $organizeMoved]
 }
 
-proc RB2W::printParameterLog {} {
+proc ::RB2W::printParameterLog {} {
     variable VERSION
     variable MIN_HOLE_DIAMETER; variable MAX_HOLE_DIAMETER; variable CIRCULARITY_TOL
     variable MIN_HOLE_EDGE_NODES; variable MAX_HOLE_EDGE_NODES; variable INNER_WASHER_NODE_LOOPS
@@ -891,13 +1114,16 @@ proc RB2W::printParameterLog {} {
     RB2W::log "Performance: performanceMode=$PERFORMANCE_MODE, nodeXYZCache=$USE_NODE_XYZ_CACHE, statusProgress=$USE_STATUS_PROGRESS, progressStep=$PROGRESS_LOOP_STEP, uiUpdateStep=$UI_UPDATE_STEP, forceStatusUpdate=$FORCE_STATUS_UPDATE, statusPercentStep=$STATUS_PERCENT_STEP, statusMinIntervalMs=$STATUS_MIN_INTERVAL_MS, logEachCreated=$LOG_EACH_CREATED, logEachSkipped=$LOG_EACH_SKIPPED"
 }
 
-proc RB2W::main {} {
+proc ::RB2W::main {} {
     variable outputCompBySource
     variable currentComponentName
     variable SKIP_COMPONENT_IF_EXISTING_RBE2
+    variable PERFORMANCE_MODE
+    RB2W::loadState
     set currentComponentName ""
     catch {array unset outputCompBySource}
     array set outputCompBySource {}
+    RB2W::clearComponentElemCache
 
     set runStart [clock milliseconds]
     RB2W::log "==== Shell washer-hole RBE2 creation started ===="
@@ -911,6 +1137,7 @@ proc RB2W::main {} {
     if {[llength $comps] == 0} {
         tk_messageBox -icon info -title "RB2W" -message "No component selected."
         RB2W::log "No component selected. Finished."
+        RB2W::saveState
         return
     }
 
@@ -946,7 +1173,7 @@ proc RB2W::main {} {
             set totalSkipped [expr {$totalSkipped + [lindex $result 1]}]
             set totalCandidates [expr {$totalCandidates + [lindex $result 2]}]
             set totalOrganized [expr {$totalOrganized + [lindex $result 3]}]
-            catch {update}
+            if {!$PERFORMANCE_MODE} { catch {update} }
         }
     } procErr procOpts]
     RB2W::endPerformanceMode
@@ -960,6 +1187,10 @@ proc RB2W::main {} {
 
     set runMs [expr {[clock milliseconds] - $runStart}]
     set msg "Washer-hole RBE2 creation finished.\nSelected components: [llength $comps]\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"
+    set outSummary [RB2W::outputComponentSummary]
+    if {$outSummary ne ""} {
+        append msg "\n\nOutput components:\n$outSummary"
+    }
     if {$safetySkipped > 0} {
         set shown [lrange $safetyMessages 0 4]
         append msg "\n\nSafety skipped examples:\n[join $shown \n]"
@@ -967,5 +1198,10 @@ proc RB2W::main {} {
     }
     RB2W::status "RB2W overall 100.0% | finished | components=[llength $comps] | created=$totalCreated safetySkipped=$safetySkipped skipped=$totalSkipped candidates=$totalCandidates" 1
     RB2W::log "==== Finished: components=[llength $comps], safetySkipped=$safetySkipped, candidates=$totalCandidates, created=$totalCreated, organized=$totalOrganized, skipped=$totalSkipped, runtime=${runMs}ms ===="
+    RB2W::saveState
     tk_messageBox -icon info -title "RB2W" -message $msg
+}
+
+proc ::RB2W::run {} {
+    ::RB2W::main
 }

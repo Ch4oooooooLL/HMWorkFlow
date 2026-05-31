@@ -29,10 +29,16 @@
 #     version; it focuses on reliable geometry connection and organization.
 # ============================================================================
 
+if {![namespace exists ::HWFlow]} {
+    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+}
+
 namespace eval ::RB2Bolt {
+    variable VERSION "0.5"
+
     variable P
     array set P {
-        selectMode       components
+        selectMode       elements
         axisMode         AUTO
         gapTol           100.0
         offsetTol        5.0
@@ -56,6 +62,26 @@ proc ::RB2Bolt::msg {txt} {
     catch {hm_usermessage $txt}
     catch {puts $txt}
     catch {update}
+}
+
+proc ::RB2Bolt::backToHome {w} {
+    if {[llength [info commands ::HWFlow::backToHome]] > 0} {
+        ::HWFlow::backToHome $w
+    } else {
+        catch {destroy $w}
+    }
+}
+
+proc ::RB2Bolt::loadState {} {
+    if {[llength [info commands ::HWFlow::applyStateToArray]] > 0} {
+        ::HWFlow::applyStateToArray rbe2_bolt_connector ::RB2Bolt::P
+    }
+}
+
+proc ::RB2Bolt::saveState {} {
+    if {[llength [info commands ::HWFlow::saveArrayState]] > 0} {
+        ::HWFlow::saveArrayState rbe2_bolt_connector ::RB2Bolt::P
+    }
 }
 
 proc ::RB2Bolt::abs {v} {
@@ -162,89 +188,99 @@ proc ::RB2Bolt::chooseModeDiameter {ds} {
 proc ::RB2Bolt::showDialog {} {
     variable P
     variable done
+    variable VERSION
+    ::RB2Bolt::loadState
     set done 0
 
     catch {destroy .rb2bolt_dlg}
-    toplevel .rb2bolt_dlg
-    wm title .rb2bolt_dlg "RBE2 Bolt Connector v0.5"
-    wm resizable .rb2bolt_dlg 0 0
+    set w .rb2bolt_dlg
+    toplevel $w
+    wm title $w "RBE2 Bolt Connector v$VERSION"
+    wm resizable $w 0 0
 
-    set r 0
-    label .rb2bolt_dlg.l0 -text "选择对象"
-    tk_optionMenu .rb2bolt_dlg.m0 ::RB2Bolt::P(selectMode) components elements
-    grid .rb2bolt_dlg.l0 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.m0 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    frame $w.main -padx 12 -pady 10
+    pack $w.main -fill both -expand 1
 
-    label .rb2bolt_dlg.l1 -text "搜索轴向"
-    tk_optionMenu .rb2bolt_dlg.m1 ::RB2Bolt::P(axisMode) AUTO X Y Z
-    grid .rb2bolt_dlg.l1 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.m1 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    label $w.main.title -text "RBE2 Bolt Connector" -font {Arial 10 bold}
+    grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
-    label .rb2bolt_dlg.l2 -text "轴向最大连接距离"
-    entry .rb2bolt_dlg.e2 -textvariable ::RB2Bolt::P(gapTol) -width 14
-    grid .rb2bolt_dlg.l2 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.e2 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    labelframe $w.main.sel -text "1. Selection Scope" -padx 8 -pady 8
+    grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    label .rb2bolt_dlg.l3 -text "横向中心偏心容差"
-    entry .rb2bolt_dlg.e3 -textvariable ::RB2Bolt::P(offsetTol) -width 14
-    grid .rb2bolt_dlg.l3 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.e3 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    label $w.main.sel.l_mode -text "Select by" -anchor w
+    tk_optionMenu $w.main.sel.m_mode ::RB2Bolt::P(selectMode) elements components
+    grid $w.main.sel.l_mode -row 0 -column 0 -sticky w -padx {0 8}
+    grid $w.main.sel.m_mode -row 0 -column 1 -sticky w
 
-    label .rb2bolt_dlg.l4 -text "最小RBE2数量/组"
-    entry .rb2bolt_dlg.e4 -textvariable ::RB2Bolt::P(minGroupSize) -width 14
-    grid .rb2bolt_dlg.l4 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.e4 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    labelframe $w.main.param -text "2. Grouping and Modeling Parameters" -padx 8 -pady 8
+    grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    label .rb2bolt_dlg.l5 -text "最小CBEAM长度"
-    entry .rb2bolt_dlg.e5 -textvariable ::RB2Bolt::P(minBeamLength) -width 14
-    grid .rb2bolt_dlg.l5 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.e5 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    label $w.main.param.l_axis -text "Search axis" -anchor w
+    tk_optionMenu $w.main.param.m_axis ::RB2Bolt::P(axisMode) AUTO X Y Z
+    label $w.main.param.l_type -text "Element type" -anchor w
+    tk_optionMenu $w.main.param.m_type ::RB2Bolt::P(elemType) CBEAM CBAR
+    grid $w.main.param.l_axis -row 0 -column 0 -sticky w -padx {0 6} -pady 2
+    grid $w.main.param.m_axis -row 0 -column 1 -sticky w -padx {0 18} -pady 2
+    grid $w.main.param.l_type -row 0 -column 2 -sticky w -padx {0 6} -pady 2
+    grid $w.main.param.m_type -row 0 -column 3 -sticky w -pady 2
 
-    label .rb2bolt_dlg.l6 -text "平面RBE2绝对厚度判据"
-    entry .rb2bolt_dlg.e6 -textvariable ::RB2Bolt::P(planeAbsTol) -width 14
-    grid .rb2bolt_dlg.l6 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.e6 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    set fields {
+        {gapTol        "Max axial connection distance"}
+        {offsetTol     "Transverse center offset tolerance"}
+        {minGroupSize  "Minimum RBE2 count per group"}
+        {minBeamLength "Minimum CBEAM length"}
+        {planeAbsTol   "Planar RBE2 thickness criterion"}
+        {compPrefix    "Output component prefix"}
+        {propName      "1D property name (optional)"}
+    }
 
-    label .rb2bolt_dlg.l7 -text "元素类型"
-    tk_optionMenu .rb2bolt_dlg.m7 ::RB2Bolt::P(elemType) CBEAM CBAR
-    grid .rb2bolt_dlg.l7 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.m7 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    set i 0
+    foreach item $fields {
+        set key [lindex $item 0]
+        set name [lindex $item 1]
+        set row [expr {1 + ($i / 2)}]
+        set col [expr {($i % 2) * 2}]
 
-    label .rb2bolt_dlg.l8 -text "输出Component前缀"
-    entry .rb2bolt_dlg.e8 -textvariable ::RB2Bolt::P(compPrefix) -width 14
-    grid .rb2bolt_dlg.l8 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.e8 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+        label $w.main.param.l_$key -text $name -anchor w
+        entry $w.main.param.e_$key -textvariable ::RB2Bolt::P($key) -width 16
+        grid $w.main.param.l_$key -row $row -column $col -sticky w -padx {0 6} -pady 2
+        grid $w.main.param.e_$key -row $row -column [expr {$col + 1}] -sticky w -padx {0 18} -pady 2
+        incr i
+    }
 
-    label .rb2bolt_dlg.l9 -text "1D属性名称(可选)"
-    entry .rb2bolt_dlg.e9 -textvariable ::RB2Bolt::P(propName) -width 14
-    grid .rb2bolt_dlg.l9 -row $r -column 0 -sticky e -padx 6 -pady 4
-    grid .rb2bolt_dlg.e9 -row $r -column 1 -sticky ew -padx 6 -pady 4
-    incr r
+    labelframe $w.main.opt -text "3. Options" -padx 8 -pady 8
+    grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    checkbutton .rb2bolt_dlg.c10 -text "仅预览分组，不创建CBEAM" -variable ::RB2Bolt::P(dryRun)
-    grid .rb2bolt_dlg.c10 -row $r -column 0 -columnspan 2 -sticky w -padx 6 -pady 4
-    incr r
+    checkbutton $w.main.opt.dry -text "Preview groups only; do not create CBEAM/CBAR" -variable ::RB2Bolt::P(dryRun)
+    grid $w.main.opt.dry -row 0 -column 0 -sticky w -pady 2
 
-    frame .rb2bolt_dlg.btns
-    button .rb2bolt_dlg.btns.ok -text "确定" -width 10 -command {set ::RB2Bolt::done 1}
-    button .rb2bolt_dlg.btns.cancel -text "取消" -width 10 -command {set ::RB2Bolt::done -1}
-    pack .rb2bolt_dlg.btns.ok .rb2bolt_dlg.btns.cancel -side left -padx 8 -pady 8
-    grid .rb2bolt_dlg.btns -row $r -column 0 -columnspan 2
+    frame $w.btn -padx 12 -pady 10
+    pack $w.btn -fill x
 
-    bind .rb2bolt_dlg <Return> {set ::RB2Bolt::done 1}
-    bind .rb2bolt_dlg <Escape> {set ::RB2Bolt::done -1}
+    button $w.btn.cancel -text "Back to Home" -width 14 -command {set ::RB2Bolt::done -2}
+    button $w.btn.ok -text "OK" -width 10 -command {set ::RB2Bolt::done 1}
+    pack $w.btn.cancel -side right -padx 4
+    pack $w.btn.ok -side right -padx 4
+
+    bind $w <Return> {set ::RB2Bolt::done 1}
+    bind $w <Escape> {set ::RB2Bolt::done -1}
+    wm protocol $w WM_DELETE_WINDOW {set ::RB2Bolt::done -1}
+
+    update idletasks
+    set sw [winfo screenwidth $w]
+    set sh [winfo screenheight $w]
+    set ww [winfo reqwidth $w]
+    set wh [winfo reqheight $w]
+    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
 
     tkwait variable ::RB2Bolt::done
-    catch {destroy .rb2bolt_dlg}
+    set goHome [expr {$done == -2}]
+    ::RB2Bolt::saveState
+    catch {destroy $w}
+    if {$goHome} {
+        ::RB2Bolt::backToHome ""
+        return 0
+    }
     return [expr {$done == 1}]
 }
 
@@ -252,18 +288,18 @@ proc ::RB2Bolt::validateParams {} {
     variable P
     foreach key {gapTol offsetTol minBeamLength planeAbsTol planeFlatRatio radialAbsTol radialRelTol} {
         if {[catch {expr {double($P($key))}} v]} {
-            tk_messageBox -icon error -message "参数 $key 不是有效数字。"
+            tk_messageBox -icon error -message "Parameter $key is not a valid number."
             return 0
         }
         set P($key) $v
     }
     if {[catch {expr {int($P(minGroupSize))}} v]} {
-        tk_messageBox -icon error -message "最小RBE2数量/组 不是有效整数。"
+        tk_messageBox -icon error -message "Minimum RBE2 count per group is not a valid integer."
         return 0
     }
     set P(minGroupSize) $v
     if {$P(gapTol) <= 0 || $P(offsetTol) <= 0 || $P(minGroupSize) < 2} {
-        tk_messageBox -icon error -message "轴向距离、横向容差必须 > 0；最小RBE2数量必须 >= 2。"
+        tk_messageBox -icon error -message "Axial distance and transverse tolerance must be > 0; minimum RBE2 count must be >= 2."
         return 0
     }
     set P(compPrefix) [safeName $P(compPrefix)]
@@ -584,17 +620,93 @@ proc ::RB2Bolt::groupDiameter {g} {
 }
 
 # ------------------------- creation ----------------------------------------
+proc ::RB2Bolt::enableInteractiveBrowserUpdates {} {
+    catch {hmbr_signals buffer stop}
+    catch {hwbrowsermanager view flush true}
+    catch {*setoption block_redraw=0}
+    catch {*setoption block_messages=0}
+    catch {hm_blockredraw 0}
+    catch {hm_blockmessages 0}
+    catch {hm_blockerrormessages 0}
+    catch {hm_commandfilestate 1}
+    catch {update idletasks}
+}
+
 proc ::RB2Bolt::ensureComponent {name} {
     set id ""
     if {![catch {hm_getvalue comps name=$name dataname=id} id] && $id ne "" && $id != 0} {
         catch {*currentcollector component $name}
+        ::RB2Bolt::refreshComponentBrowser $name
         return $id
     }
-    *createentity comps name=$name
+
+    ::RB2Bolt::enableInteractiveBrowserUpdates
+    set histName "Created Component $name"
+    catch {*startnotehistorystate $histName}
+    set createCode [catch {*collectorcreateonly comps $name "" 11} err1]
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly components $name "" 11} err1]
+    }
+    if {$createCode} {
+        if {[catch {*createentity comps name=$name} err2]} {
+            catch {*endnotehistorystate $histName}
+            error "Cannot create component $name: $err1 / $err2"
+        }
+    }
+    catch {*endnotehistorystate $histName}
+
     set id 0
     catch {set id [hm_getvalue comps name=$name dataname=id]}
     catch {*currentcollector component $name}
+    ::RB2Bolt::refreshComponentBrowser $name
     return $id
+}
+
+proc ::RB2Bolt::uniqList {lst} {
+    set out {}
+    array set seen {}
+    foreach v $lst {
+        if {$v eq ""} {continue}
+        if {![info exists seen($v)]} {
+            set seen($v) 1
+            lappend out $v
+        }
+    }
+    return $out
+}
+
+proc ::RB2Bolt::markComponentByName {compName markId} {
+    foreach etype {components comps} {
+        catch {*clearmark $etype $markId}
+        foreach selector {"by name only" "by name"} {
+            if {![catch {*createmark $etype $markId $selector $compName}]} {
+                if {![catch {set ids [hm_getmark $etype $markId]}] && [llength $ids] > 0} {
+                    return $etype
+                }
+            }
+        }
+    }
+    return ""
+}
+
+proc ::RB2Bolt::refreshComponentBrowser {compName} {
+    set markType [::RB2Bolt::markComponentByName $compName 2]
+    if {$markType ne ""} {
+        catch {*marksuppressactive $markType 2 0}
+        catch {*marksuppressoutput $markType 2 0}
+        catch {*displaycollectorsbymark $markType 2 on 1 1}
+        catch {*displaycollectorsallbymark 2 on 1 1}
+        catch {*clearmark $markType 2}
+    }
+    catch {*displaycollector component on $compName 1 1}
+    catch {*displaycollector components on $compName 1 1}
+    catch {*displaycollectorwithfilter component on $compName 1 1}
+    catch {*displaycollectorwithfilter components on $compName 1 1}
+    catch {hmbr_signals buffer stop}
+    catch {hwbrowsermanager view flush true}
+    catch {hm_redraw}
+    catch {update idletasks}
+    catch {update}
 }
 
 proc ::RB2Bolt::orientVecForNodes {n1 n2} {
@@ -696,6 +808,7 @@ proc ::RB2Bolt::createBolts {groups} {
     set spatialOnlyGroups 0
     set groupCount [llength $groups]
     set gi 0
+    set outputComps {}
 
     foreach item $groups {
         incr gi
@@ -719,6 +832,9 @@ proc ::RB2Bolt::createBolts {groups} {
         msg "Bolt group $gi / $groupCount, axis=$axis, D=$dia, RBE2=[llength $g], adjacent_segments=[llength $pairs], skipped_segments=$unpaired"
 
         if {$P(dryRun)} {continue}
+        if {[llength $pairs] > 0} {
+            lappend outputComps $compName
+        }
 
         foreach pr $pairs {
             set r1 [lindex $pr 0]
@@ -733,6 +849,11 @@ proc ::RB2Bolt::createBolts {groups} {
         }
         incr skipped $unpaired
     }
+
+    foreach compName [::RB2Bolt::uniqList $outputComps] {
+        ::RB2Bolt::refreshComponentBrowser $compName
+    }
+
     return [list $created $skipped $pairTotal $spatialOnlyGroups]
 }
 
@@ -744,26 +865,27 @@ proc ::RB2Bolt::run {} {
         return
     }
     if {![validateParams]} {return}
+    ::RB2Bolt::saveState
 
     msg "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."
 
     set elemIds [selectedElementIds]
     if {[llength $elemIds] == 0} {
-        tk_messageBox -icon warning -message "没有选择到元素。"
+        tk_messageBox -icon warning -message "No elements were selected."
         return
     }
 
     msg "Selected elements: [llength $elemIds]"
     set records [collectRBE2Records $elemIds]
     if {[llength $records] < 2} {
-        tk_messageBox -icon warning -message "选中范围内可用 RBE2 少于 2 个，无法创建螺栓连接。"
+        tk_messageBox -icon warning -message "Fewer than 2 usable RBE2 elements were found in the selection."
         return
     }
 
     msg "Valid RBE2 records: [llength $records]. Building groups..."
     set groups [buildGroups $records]
     if {[llength $groups] == 0} {
-        tk_messageBox -icon warning -message "未找到满足容差条件的 RBE2 分组。可尝试增大轴向最大连接距离或横向中心偏心容差。"
+        tk_messageBox -icon warning -message "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."
         return
     }
 
@@ -772,9 +894,7 @@ proc ::RB2Bolt::run {} {
     set skipped [lindex $result 1]
     set spatialOnlyGroups [lindex $result 3]
 
-    set txt "RBE2 Bolt Connector finished.\n\nRBE2数量: [llength $records]\n分组数量: [llength $groups]\n空间RBE2-only跳过组数: $spatialOnlyGroups\n创建 $P(elemType): $created\n跳过/失败: $skipped"
+    set txt "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped/failed: $skipped"
     tk_messageBox -icon info -message $txt
     msg $txt
 }
-
-

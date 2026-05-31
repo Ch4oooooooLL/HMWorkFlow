@@ -1,0 +1,5 @@
+# Hole/washer rules for midsurface cleanup. The first demo only stores rules.
+hole_dia_min|hole_dia_max|action|washer_layers|note
+0|5|delete|0|small holes
+5|12|keep_washer|2|normal bolt holes
+12|999|keep_washer|3|large bolt holes

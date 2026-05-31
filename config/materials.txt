@@ -1,0 +1,5 @@
+key|display|density|E|nu|yield|ultimate|note
+Q235|Q235|7.85e-9|210000|0.30|235|370|steel
+Q345|Q345|7.85e-9|206000|0.30|345|470|steel
+AL6061|AL6061|2.70e-9|69000|0.33|275|310|aluminum
+QT500|QT500|7.20e-9|169000|0.28|320|500|casting
