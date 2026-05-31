@@ -67,38 +67,38 @@ proc ::CompWorkflow::showCategoryPanel {} {
 
     ::CompWorkflow::loadState
     set ui(classifyComps) ""
-    set ui(classifyText) "No components selected"
+    set ui(classifyText) [::HWFlow::txt "未选择组件" "No components selected"]
     set ui(status) ""
 
     catch {destroy .comp_category}
     set w .comp_category
     toplevel $w
-    wm title $w "Component Type Classification v$VERSION"
+    wm title $w "[::HWFlow::txt "组件类型分类" "Component Type Classification"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text "Component Type Classification" -font {Arial 11 bold}
+    label $w.main.title -text [::HWFlow::txt "组件类型分类" "Component Type Classification"] -font {Arial 11 bold}
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w -pady {0 8}
 
-    labelframe $w.main.classify -text "Classify Components" -padx 8 -pady 8
+    labelframe $w.main.classify -text [::HWFlow::txt "组件分类" "Classify Components"] -padx 8 -pady 8
     grid $w.main.classify -row 1 -column 0 -sticky news -pady {0 8}
 
-    label $w.main.classify.l_cat -text "Category"
+    label $w.main.classify.l_cat -text [::HWFlow::txt "类型" "Category"]
     tk_optionMenu $w.main.classify.m_cat ::CompWorkflow::ui(classifyCategory) SHELL SOLID CASTING
-    button $w.main.classify.pick -text "Pick Components" -width 18 -command "::CompWorkflow::pickClassifyComponents"
+    button $w.main.classify.pick -text [::HWFlow::txt "选择组件" "Pick Components"] -width 18 -command "::CompWorkflow::pickClassifyComponents"
     label $w.main.classify.info -textvariable ::CompWorkflow::ui(classifyText) -width 40 -anchor w
-    button $w.main.classify.apply -text "Apply Category" -width 18 -command "::CompWorkflow::applyCategory"
+    button $w.main.classify.apply -text [::HWFlow::txt "应用类型" "Apply Category"] -width 18 -command "::CompWorkflow::applyCategory"
     grid $w.main.classify.l_cat -row 0 -column 0 -sticky w -padx {0 6} -pady 3
     grid $w.main.classify.m_cat -row 0 -column 1 -sticky w -pady 3
     grid $w.main.classify.pick -row 1 -column 0 -sticky w -padx {0 6} -pady 3
     grid $w.main.classify.info -row 1 -column 1 -sticky w -pady 3
     grid $w.main.classify.apply -row 2 -column 0 -columnspan 2 -sticky e -pady {8 0}
 
-    labelframe $w.main.rules -text "Naming Rule" -padx 8 -pady 8
+    labelframe $w.main.rules -text [::HWFlow::txt "命名规则" "Naming Rule"] -padx 8 -pady 8
     grid $w.main.rules -row 2 -column 0 -sticky ew -pady {0 8}
-    message $w.main.rules.msg -width 520 -anchor w -text "NAME -> CATEGORY_NAME. Existing category prefixes are replaced."
+    message $w.main.rules.msg -width 520 -anchor w -text [::HWFlow::txt "NAME -> CATEGORY_NAME。已有类型前缀将被替换。" "NAME -> CATEGORY_NAME. Existing category prefixes are replaced."]
     grid $w.main.rules.msg -row 0 -column 0 -sticky ew
 
     label $w.main.status -textvariable ::CompWorkflow::ui(status) -width 70 -anchor w
@@ -106,7 +106,7 @@ proc ::CompWorkflow::showCategoryPanel {} {
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
-    button $w.btn.back -text "Back to Home" -width 14 -command "::CompWorkflow::saveState; ::CompWorkflow::backToHome $w"
+    button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::CompWorkflow::saveState; ::CompWorkflow::backToHome $w"
     pack $w.btn.back -side right
 
     bind $w <Escape> "::CompWorkflow::saveState; destroy $w"
@@ -128,46 +128,46 @@ proc ::CompWorkflow::showMaterialPanel {} {
         set ui(selectedMaterial) ""
     }
     set ui(materialComps) ""
-    set ui(materialText) "No components selected"
+    set ui(materialText) [::HWFlow::txt "未选择组件" "No components selected"]
     set ui(status) ""
 
     catch {destroy .material_assign}
     set w .material_assign
     toplevel $w
-    wm title $w "Material Assignment v$VERSION"
+    wm title $w "[::HWFlow::txt "材料标识分配" "Material Assignment"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text "Material Assignment" -font {Arial 11 bold}
+    label $w.main.title -text [::HWFlow::txt "材料标识分配" "Material Assignment"] -font {Arial 11 bold}
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w -pady {0 8}
 
-    labelframe $w.main.mat -text "Material Library" -padx 8 -pady 8
+    labelframe $w.main.mat -text [::HWFlow::txt "材料库" "Material Library"] -padx 8 -pady 8
     grid $w.main.mat -row 1 -column 0 -sticky news -pady {0 8}
 
     listbox $w.main.mat.list -height 8 -width 28 -exportselection 0
     scrollbar $w.main.mat.ys -orient vertical -command "$w.main.mat.list yview"
     $w.main.mat.list configure -yscrollcommand "$w.main.mat.ys set"
-    button $w.main.mat.reload -text "Reload" -width 10 -command "::CompWorkflow::reloadMaterials"
-    button $w.main.mat.edit -text "Edit TXT" -width 10 -command "::CompWorkflow::showMaterialEditor"
+    button $w.main.mat.reload -text [::HWFlow::txt "重新加载" "Reload"] -width 10 -command "::CompWorkflow::reloadMaterials"
+    button $w.main.mat.edit -text [::HWFlow::txt "编辑 TXT" "Edit TXT"] -width 10 -command "::CompWorkflow::showMaterialEditor"
     grid $w.main.mat.list -row 0 -column 0 -columnspan 2 -sticky news -pady 3
     grid $w.main.mat.ys -row 0 -column 2 -sticky ns -pady 3
     grid $w.main.mat.reload -row 1 -column 0 -sticky w -pady 3
     grid $w.main.mat.edit -row 1 -column 1 -sticky w -pady 3
 
-    labelframe $w.main.sel -text "Classified Components" -padx 8 -pady 8
+    labelframe $w.main.sel -text [::HWFlow::txt "已分类组件" "Classified Components"] -padx 8 -pady 8
     grid $w.main.sel -row 2 -column 0 -sticky ew -pady {0 8}
-    button $w.main.sel.pick -text "Pick Components" -width 18 -command "::CompWorkflow::pickMaterialComponents"
+    button $w.main.sel.pick -text [::HWFlow::txt "选择组件" "Pick Components"] -width 18 -command "::CompWorkflow::pickMaterialComponents"
     label $w.main.sel.info -textvariable ::CompWorkflow::ui(materialText) -width 42 -anchor w
-    button $w.main.sel.apply -text "Apply Material" -width 18 -command "::CompWorkflow::applyMaterial"
+    button $w.main.sel.apply -text [::HWFlow::txt "应用材料标识" "Apply Material"] -width 18 -command "::CompWorkflow::applyMaterial"
     grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 6} -pady 3
     grid $w.main.sel.info -row 0 -column 1 -sticky w -pady 3
     grid $w.main.sel.apply -row 1 -column 0 -columnspan 2 -sticky e -pady {8 0}
 
-    labelframe $w.main.rules -text "Naming Rule" -padx 8 -pady 8
+    labelframe $w.main.rules -text [::HWFlow::txt "命名规则" "Naming Rule"] -padx 8 -pady 8
     grid $w.main.rules -row 3 -column 0 -sticky ew -pady {0 8}
-    message $w.main.rules.msg -width 520 -anchor w -text "CATEGORY_NAME -> CATEGORY_NAME_MATERIAL. Existing material suffixes from the material library are replaced."
+    message $w.main.rules.msg -width 520 -anchor w -text [::HWFlow::txt "CATEGORY_NAME -> CATEGORY_NAME_MATERIAL。已在材料库中定义的材料后缀将被替换。" "CATEGORY_NAME -> CATEGORY_NAME_MATERIAL. Existing material suffixes from the material library are replaced."]
     grid $w.main.rules.msg -row 0 -column 0 -sticky ew
 
     label $w.main.status -textvariable ::CompWorkflow::ui(status) -width 70 -anchor w
@@ -175,7 +175,7 @@ proc ::CompWorkflow::showMaterialPanel {} {
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
-    button $w.btn.back -text "Back to Home" -width 14 -command "::CompWorkflow::saveState; ::CompWorkflow::backToHome $w"
+    button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::CompWorkflow::saveState; ::CompWorkflow::backToHome $w"
     pack $w.btn.back -side right
 
     bind $w <Escape> "::CompWorkflow::saveState; destroy $w"
@@ -226,7 +226,7 @@ proc ::CompWorkflow::reloadMaterials {} {
     ::HWFlow::loadMaterials
     ::CompWorkflow::refreshMaterialList
     ::CompWorkflow::saveState
-    set ::CompWorkflow::ui(status) "Material library reloaded."
+    set ::CompWorkflow::ui(status) [::HWFlow::txt "材料库已重新加载。" "Material library reloaded."]
 }
 
 proc ::CompWorkflow::onMaterialSelect {} {
@@ -249,7 +249,7 @@ proc ::CompWorkflow::showMaterialEditor {} {
     catch {destroy .material_editor}
     set w .material_editor
     toplevel $w
-    wm title $w "Edit Material Library"
+    wm title $w [::HWFlow::txt "编辑材料库" "Edit Material Library"]
     wm resizable $w 1 1
 
     frame $w.main -padx 10 -pady 10
@@ -267,8 +267,8 @@ proc ::CompWorkflow::showMaterialEditor {} {
 
     frame $w.btn -padx 10 -pady 8
     pack $w.btn -fill x
-    button $w.btn.back -text "Back to Home" -width 14 -command "::CompWorkflow::saveState; catch {destroy .material_editor}; ::CompWorkflow::backToHome .material_assign"
-    button $w.btn.save -text "Save" -width 10 -command "::CompWorkflow::saveMaterialEditor"
+    button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::CompWorkflow::saveState; catch {destroy .material_editor}; ::CompWorkflow::backToHome .material_assign"
+    button $w.btn.save -text [::HWFlow::txt "保存" "Save"] -width 10 -command "::CompWorkflow::saveMaterialEditor"
     pack $w.btn.back -side right -padx 4
     pack $w.btn.save -side right -padx 4
     bind $w <Escape> "destroy .material_editor"
@@ -289,14 +289,14 @@ proc ::CompWorkflow::saveMaterialEditor {} {
 proc ::CompWorkflow::pickClassifyComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 "Select components to classify"
+    *createmarkpanel comps 1 [::HWFlow::txt "选择需要分类的组件" "Select components to classify"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     set ui(classifyComps) $comps
     if {[llength $comps] == 0} {
-        set ui(classifyText) "No components selected"
+        set ui(classifyText) [::HWFlow::txt "未选择组件" "No components selected"]
     } else {
-        set ui(classifyText) "Selected [llength $comps] component(s)"
+        set ui(classifyText) [::HWFlow::txt "已选择 [llength $comps] 个组件" "Selected [llength $comps] component(s)"]
     }
     catch {raise .comp_category}
     catch {focus .comp_category}
@@ -305,14 +305,14 @@ proc ::CompWorkflow::pickClassifyComponents {} {
 proc ::CompWorkflow::pickMaterialComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 "Select classified components for material assignment"
+    *createmarkpanel comps 1 [::HWFlow::txt "选择需要分配材料标识的已分类组件" "Select classified components for material assignment"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     set ui(materialComps) $comps
     if {[llength $comps] == 0} {
-        set ui(materialText) "No components selected"
+        set ui(materialText) [::HWFlow::txt "未选择组件" "No components selected"]
     } else {
-        set ui(materialText) "Selected [llength $comps] component(s)"
+        set ui(materialText) [::HWFlow::txt "已选择 [llength $comps] 个组件" "Selected [llength $comps] component(s)"]
     }
     catch {raise .material_assign}
     catch {focus .material_assign}
@@ -323,7 +323,7 @@ proc ::CompWorkflow::applyCategory {} {
     set comps $ui(classifyComps)
     set category [string toupper [string trim $ui(classifyCategory)]]
     if {[llength $comps] == 0} {
-        tk_messageBox -icon warning -title "Component Type Classification" -message "Pick components first."
+        tk_messageBox -icon warning -title [::HWFlow::txt "组件类型分类" "Component Type Classification"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
 
@@ -344,8 +344,8 @@ proc ::CompWorkflow::applyCategory {} {
     ::HWFlow::addComponentsToAssembly $category $ids 9
     ::HWFlow::refreshBrowser
     ::CompWorkflow::saveState
-    set ui(status) "Classified [llength $ids] component(s) into $category."
-    tk_messageBox -icon info -title "Component Type Classification" -message "Category applied:\n[join [lrange $renamed 0 12] \n]"
+    set ui(status) [::HWFlow::txt "已将 [llength $ids] 个组件分类为 $category。" "Classified [llength $ids] component(s) into $category."]
+    tk_messageBox -icon info -title [::HWFlow::txt "组件类型分类" "Component Type Classification"] -message "[::HWFlow::txt "类型已应用：" "Category applied:"]\n[join [lrange $renamed 0 12] \n]"
 }
 
 proc ::CompWorkflow::applyMaterial {} {
@@ -353,11 +353,11 @@ proc ::CompWorkflow::applyMaterial {} {
     set comps $ui(materialComps)
     set matKey [string trim $ui(selectedMaterial)]
     if {[llength $comps] == 0} {
-        tk_messageBox -icon warning -title "Material Assignment" -message "Pick components first."
+        tk_messageBox -icon warning -title [::HWFlow::txt "材料标识分配" "Material Assignment"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
     if {$matKey eq "" || [::HWFlow::materialRowByKey $matKey] eq ""} {
-        tk_messageBox -icon warning -title "Material Assignment" -message "Select a valid material."
+        tk_messageBox -icon warning -title [::HWFlow::txt "材料标识分配" "Material Assignment"] -message [::HWFlow::txt "请选择有效的材料标识。" "Select a valid material."]
         return
     }
 
@@ -368,7 +368,7 @@ proc ::CompWorkflow::applyMaterial {} {
         set oldName [::HWFlow::componentName $compId]
         set category [::HWFlow::componentCategoryFromName $oldName]
         if {$category eq "" || $category in {SEAM CONNECTOR SOURCE_GEOM}} {
-            lappend skipped "$oldName: no supported category prefix"
+            lappend skipped [::HWFlow::txt "$oldName：未识别到受支持的类型前缀" "$oldName: no supported category prefix"]
             continue
         }
         set newName [::HWFlow::replaceMaterialInName $oldName $matKey]
@@ -389,19 +389,19 @@ proc ::CompWorkflow::applyMaterial {} {
 
     ::HWFlow::refreshBrowser
     ::CompWorkflow::saveState
-    set msg "Material $matKey applied to [llength $renamed] component(s)."
+    set msg [::HWFlow::txt "材料标识 $matKey 已应用到 [llength $renamed] 个组件。" "Material $matKey applied to [llength $renamed] component(s)."]
     if {[llength $skipped] > 0} {
-        append msg "\nSkipped [llength $skipped] component(s)."
+        append msg [::HWFlow::txt "\n跳过 [llength $skipped] 个组件。" "\nSkipped [llength $skipped] component(s)."]
     }
     set ui(status) $msg
     set detail $msg
     if {[llength $renamed] > 0} {
-        append detail "\n\nRenamed:\n[join [lrange $renamed 0 12] \n]"
+        append detail [::HWFlow::txt "\n\n已重命名：\n[join [lrange $renamed 0 12] \n]" "\n\nRenamed:\n[join [lrange $renamed 0 12] \n]"]
     }
     if {[llength $skipped] > 0} {
-        append detail "\n\nSkipped:\n[join [lrange $skipped 0 8] \n]"
+        append detail [::HWFlow::txt "\n\n已跳过：\n[join [lrange $skipped 0 8] \n]" "\n\nSkipped:\n[join [lrange $skipped 0 8] \n]"]
     }
-    tk_messageBox -icon info -title "Material Assignment" -message $detail
+    tk_messageBox -icon info -title [::HWFlow::txt "材料标识分配" "Material Assignment"] -message $detail
 }
 
 proc ::CompWorkflow::runCategory {} {

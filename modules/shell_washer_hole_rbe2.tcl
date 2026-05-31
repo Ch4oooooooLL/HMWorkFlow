@@ -166,7 +166,7 @@ proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex lo
     set statusLastPercent $overallPct
     set statusLastTime $now
     set pctText [format %.1f $overallPct]
-    set msg "RB2W overall ${pctText}% | comp $compIndex/$compTotal: $compName | loop $loopIndex/$loopTotal | created=$created skipped=$skipped candidates=$candidateHoles"
+    set msg [::HWFlow::txt "RB2W 总进度 ${pctText}% | 组件 $compIndex/$compTotal：$compName | 环线 $loopIndex/$loopTotal | 已创建=$created 已跳过=$skipped 候选=$candidateHoles" "RB2W overall ${pctText}% | comp $compIndex/$compTotal: $compName | loop $loopIndex/$loopTotal | created=$created skipped=$skipped candidates=$candidateHoles"]
     RB2W::status $msg $force
 }
 
@@ -174,7 +174,7 @@ proc ::RB2W::beginPerformanceMode {} {
     variable PERFORMANCE_MODE
     variable USE_STATUS_PROGRESS
     if {!$PERFORMANCE_MODE} { return }
-    RB2W::log "Performance mode ON."
+    RB2W::log [::HWFlow::txt "性能模式已开启。" "Performance mode ON."]
     catch {*setoption entity_highlighting=0}
     if {$USE_STATUS_PROGRESS} {
         catch {*setoption block_messages=0}
@@ -232,7 +232,7 @@ proc ::RB2W::endPerformanceMode {} {
     RB2W::showAllOutputComponents
     RB2W::refreshBrowsersAndGraphics 1
     if {$PERFORMANCE_MODE} {
-        RB2W::log "Performance mode OFF."
+        RB2W::log [::HWFlow::txt "性能模式已关闭。" "Performance mode OFF."]
     }
 }
 
@@ -309,7 +309,7 @@ proc ::RB2W::getNodeXYZRaw {nid} {
     if {$ok} { return [list $x $y $z] }
 
     if {![catch {set xyz [join [hm_nodevalue $nid]]}] && [llength $xyz] >= 3} { return [lrange $xyz 0 2] }
-    error "Cannot read coordinates of node $nid"
+    error [::HWFlow::txt "无法读取节点 $nid 的坐标。" "Cannot read coordinates of node $nid"]
 }
 
 proc ::RB2W::getNodeXYZ {nid} {
@@ -330,7 +330,7 @@ proc ::RB2W::distance3 {p q} {
 
 proc ::RB2W::loopGeometry {nodes} {
     set n [llength $nodes]
-    if {$n == 0} { error "empty loop" }
+    if {$n == 0} { error [::HWFlow::txt "空环线。" "empty loop"] }
     set sx 0.0; set sy 0.0; set sz 0.0
     set xyzList {}
     foreach nid $nodes {
@@ -568,7 +568,7 @@ proc ::RB2W::setCurrentComponent {compName} {
     if {[info exists currentComponentName] && $currentComponentName eq $compName} { return }
     if {[catch {*currentcollector component $compName} err1]} {
         if {[catch {*currentcollector(component,$compName)} err2]} {
-            error "Cannot set current component to $compName: $err1 / $err2"
+            error [::HWFlow::txt "无法将当前组件设置为 $compName：$err1 / $err2" "Cannot set current component to $compName: $err1 / $err2"]
         }
     }
     set currentComponentName $compName
@@ -599,7 +599,7 @@ proc ::RB2W::createComponentByName {compName} {
             if {!$PERFORMANCE_MODE} {
                 RB2W::resumePerformanceModeAfterBrowserUpdate
             }
-            error "Cannot create output component $compName: $err1 / $err2"
+            error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
         }
     }
     if {$histStarted} { catch {*endnotehistorystate $histName} }
@@ -880,14 +880,14 @@ proc ::RB2W::createCenterNode {center outComp} {
     set lastInfo [RB2W::getLastCreatedOnMark {nodes} 1]
     set newNodes [lindex $lastInfo 1]
     catch {*clearmark nodes 1}
-    if {[llength $newNodes] == 0} { error "Center node was not created." }
+    if {[llength $newNodes] == 0} { error [::HWFlow::txt "中心节点未创建。" "Center node was not created."] }
     return [lindex $newNodes 0]
 }
 
 proc ::RB2W::createRigidLink {centerNode depNodes outComp} {
     variable RBE2_DOF
     set depNodes [RB2W::uniq $depNodes]
-    if {[llength $depNodes] < 3} { error "Too few dependent nodes." }
+    if {[llength $depNodes] < 3} { error [::HWFlow::txt "从属节点数量不足。" "Too few dependent nodes."] }
     set idx [lsearch -exact $depNodes $centerNode]
     if {$idx >= 0} { set depNodes [lreplace $depNodes $idx $idx] }
     RB2W::setCurrentComponent $outComp
@@ -1126,17 +1126,17 @@ proc ::RB2W::main {} {
     RB2W::clearComponentElemCache
 
     set runStart [clock milliseconds]
-    RB2W::log "==== Shell washer-hole RBE2 creation started ===="
+    RB2W::log [::HWFlow::txt "==== 壳单元垫圈孔 RBE2 创建开始 ====" "==== Shell washer-hole RBE2 creation started ===="]
     RB2W::printParameterLog
-    RB2W::log "Select shell component(s) with standard washer mesh around bolt holes."
+    RB2W::log [::HWFlow::txt "请选择孔周已划分标准垫圈网格的壳单元组件。" "Select shell component(s) with standard washer mesh around bolt holes."]
 
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 "Select shell component(s) for washer-hole RBE2 creation"
+    *createmarkpanel comps 1 [::HWFlow::txt "选择用于创建垫圈孔 RBE2 的壳单元组件" "Select shell component(s) for washer-hole RBE2 creation"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     if {[llength $comps] == 0} {
-        tk_messageBox -icon info -title "RB2W" -message "No component selected."
-        RB2W::log "No component selected. Finished."
+        tk_messageBox -icon info -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "未选择组件。" "No component selected."]
+        RB2W::log [::HWFlow::txt "未选择组件，流程结束。" "No component selected. Finished."]
         RB2W::saveState
         return
     }
@@ -1162,7 +1162,7 @@ proc ::RB2W::main {} {
                     incr safetySkipped
                     set reason [lindex $check 1]
                     lappend safetyMessages "$cname: $reason"
-                    RB2W::log "Safety skip: source component $c ($cname) skipped because $reason."
+                    RB2W::log [::HWFlow::txt "安全检查跳过：源组件 $c ($cname) 已跳过，原因：$reason。" "Safety skip: source component $c ($cname) skipped because $reason."]
                     set overallDone [expr {100.0 * ($compIndex / double($compTotal))}]
                     RB2W::overallStatus $overallDone $compIndex $compTotal $cname 0 0 0 0 0 1
                     continue
@@ -1180,26 +1180,26 @@ proc ::RB2W::main {} {
 
     if {$procCode} {
         set runMs [expr {[clock milliseconds] - $runStart}]
-        RB2W::log "ERROR after ${runMs}ms: $procErr"
-        tk_messageBox -icon error -title "RB2W" -message "Script stopped because of an error:\n$procErr"
+        RB2W::log [::HWFlow::txt "执行 ${runMs}ms 后发生错误：$procErr" "ERROR after ${runMs}ms: $procErr"]
+        tk_messageBox -icon error -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "脚本因错误中止：\n$procErr" "Script stopped because of an error:\n$procErr"]
         return -options $procOpts $procErr
     }
 
     set runMs [expr {[clock milliseconds] - $runStart}]
-    set msg "Washer-hole RBE2 creation finished.\nSelected components: [llength $comps]\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"
+    set msg [::HWFlow::txt "壳单元垫圈孔 RBE2 创建完成。\n选择组件数：[llength $comps]\n安全检查跳过组件数：$safetySkipped\n候选孔数量：$totalCandidates\n已创建 RBE2 数量：$totalCreated\n已归集 RBE2 单元数：$totalOrganized\n跳过的环线/候选数量：$totalSkipped\n运行时间：${runMs} ms" "Washer-hole RBE2 creation finished.\nSelected components: [llength $comps]\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"]
     set outSummary [RB2W::outputComponentSummary]
     if {$outSummary ne ""} {
-        append msg "\n\nOutput components:\n$outSummary"
+        append msg [::HWFlow::txt "\n\n输出组件：\n$outSummary" "\n\nOutput components:\n$outSummary"]
     }
     if {$safetySkipped > 0} {
         set shown [lrange $safetyMessages 0 4]
-        append msg "\n\nSafety skipped examples:\n[join $shown \n]"
+        append msg [::HWFlow::txt "\n\n安全检查跳过示例：\n[join $shown \n]" "\n\nSafety skipped examples:\n[join $shown \n]"]
         if {[llength $safetyMessages] > 5} { append msg "\n..." }
     }
-    RB2W::status "RB2W overall 100.0% | finished | components=[llength $comps] | created=$totalCreated safetySkipped=$safetySkipped skipped=$totalSkipped candidates=$totalCandidates" 1
-    RB2W::log "==== Finished: components=[llength $comps], safetySkipped=$safetySkipped, candidates=$totalCandidates, created=$totalCreated, organized=$totalOrganized, skipped=$totalSkipped, runtime=${runMs}ms ===="
+    RB2W::status [::HWFlow::txt "RB2W 总进度 100.0% | 已完成 | 组件数=[llength $comps] | 已创建=$totalCreated 安全跳过=$safetySkipped 已跳过=$totalSkipped 候选=$totalCandidates" "RB2W overall 100.0% | finished | components=[llength $comps] | created=$totalCreated safetySkipped=$safetySkipped skipped=$totalSkipped candidates=$totalCandidates"] 1
+    RB2W::log [::HWFlow::txt "==== 完成：组件数=[llength $comps]，安全跳过=$safetySkipped，候选=$totalCandidates，已创建=$totalCreated，已归集=$totalOrganized，已跳过=$totalSkipped，运行时间=${runMs}ms ====" "==== Finished: components=[llength $comps], safetySkipped=$safetySkipped, candidates=$totalCandidates, created=$totalCreated, organized=$totalOrganized, skipped=$totalSkipped, runtime=${runMs}ms ===="]
     RB2W::saveState
-    tk_messageBox -icon info -title "RB2W" -message $msg
+    tk_messageBox -icon info -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message $msg
 }
 
 proc ::RB2W::run {} {

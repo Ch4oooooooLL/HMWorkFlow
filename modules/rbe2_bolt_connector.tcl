@@ -195,29 +195,29 @@ proc ::RB2Bolt::showDialog {} {
     catch {destroy .rb2bolt_dlg}
     set w .rb2bolt_dlg
     toplevel $w
-    wm title $w "RBE2 Bolt Connector v$VERSION"
+    wm title $w "[::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text "RBE2 Bolt Connector" -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -font {Arial 10 bold}
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
-    labelframe $w.main.sel -text "1. Selection Scope" -padx 8 -pady 8
+    labelframe $w.main.sel -text [::HWFlow::txt "1. 选择范围" "1. Selection Scope"] -padx 8 -pady 8
     grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    label $w.main.sel.l_mode -text "Select by" -anchor w
+    label $w.main.sel.l_mode -text [::HWFlow::txt "选择方式" "Select by"] -anchor w
     tk_optionMenu $w.main.sel.m_mode ::RB2Bolt::P(selectMode) elements components
     grid $w.main.sel.l_mode -row 0 -column 0 -sticky w -padx {0 8}
     grid $w.main.sel.m_mode -row 0 -column 1 -sticky w
 
-    labelframe $w.main.param -text "2. Grouping and Modeling Parameters" -padx 8 -pady 8
+    labelframe $w.main.param -text [::HWFlow::txt "2. 分组与建模参数" "2. Grouping and Modeling Parameters"] -padx 8 -pady 8
     grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    label $w.main.param.l_axis -text "Search axis" -anchor w
+    label $w.main.param.l_axis -text [::HWFlow::txt "搜索轴向" "Search axis"] -anchor w
     tk_optionMenu $w.main.param.m_axis ::RB2Bolt::P(axisMode) AUTO X Y Z
-    label $w.main.param.l_type -text "Element type" -anchor w
+    label $w.main.param.l_type -text [::HWFlow::txt "单元类型" "Element type"] -anchor w
     tk_optionMenu $w.main.param.m_type ::RB2Bolt::P(elemType) CBEAM CBAR
     grid $w.main.param.l_axis -row 0 -column 0 -sticky w -padx {0 6} -pady 2
     grid $w.main.param.m_axis -row 0 -column 1 -sticky w -padx {0 18} -pady 2
@@ -225,19 +225,19 @@ proc ::RB2Bolt::showDialog {} {
     grid $w.main.param.m_type -row 0 -column 3 -sticky w -pady 2
 
     set fields {
-        {gapTol        "Max axial connection distance"}
-        {offsetTol     "Transverse center offset tolerance"}
-        {minGroupSize  "Minimum RBE2 count per group"}
-        {minBeamLength "Minimum CBEAM length"}
-        {planeAbsTol   "Planar RBE2 thickness criterion"}
-        {compPrefix    "Output component prefix"}
-        {propName      "1D property name (optional)"}
+        {gapTol        "最大轴向连接距离" "Max axial connection distance"}
+        {offsetTol     "横向中心偏移容差" "Transverse center offset tolerance"}
+        {minGroupSize  "每组最少 RBE2 数量" "Minimum RBE2 count per group"}
+        {minBeamLength "最小梁单元长度" "Minimum CBEAM length"}
+        {planeAbsTol   "平面 RBE2 厚度判据" "Planar RBE2 thickness criterion"}
+        {compPrefix    "输出组件前缀" "Output component prefix"}
+        {propName      "1D 属性名称（可选）" "1D property name (optional)"}
     }
 
     set i 0
     foreach item $fields {
         set key [lindex $item 0]
-        set name [lindex $item 1]
+        set name [::HWFlow::txt [lindex $item 1] [lindex $item 2]]
         set row [expr {1 + ($i / 2)}]
         set col [expr {($i % 2) * 2}]
 
@@ -248,17 +248,17 @@ proc ::RB2Bolt::showDialog {} {
         incr i
     }
 
-    labelframe $w.main.opt -text "3. Options" -padx 8 -pady 8
+    labelframe $w.main.opt -text [::HWFlow::txt "3. 选项" "3. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    checkbutton $w.main.opt.dry -text "Preview groups only; do not create CBEAM/CBAR" -variable ::RB2Bolt::P(dryRun)
+    checkbutton $w.main.opt.dry -text [::HWFlow::txt "仅预览分组，不创建 CBEAM/CBAR" "Preview groups only; do not create CBEAM/CBAR"] -variable ::RB2Bolt::P(dryRun)
     grid $w.main.opt.dry -row 0 -column 0 -sticky w -pady 2
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
 
-    button $w.btn.cancel -text "Back to Home" -width 14 -command {set ::RB2Bolt::done -2}
-    button $w.btn.ok -text "OK" -width 10 -command {set ::RB2Bolt::done 1}
+    button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command {set ::RB2Bolt::done -2}
+    button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command {set ::RB2Bolt::done 1}
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
 
@@ -288,18 +288,18 @@ proc ::RB2Bolt::validateParams {} {
     variable P
     foreach key {gapTol offsetTol minBeamLength planeAbsTol planeFlatRatio radialAbsTol radialRelTol} {
         if {[catch {expr {double($P($key))}} v]} {
-            tk_messageBox -icon error -message "Parameter $key is not a valid number."
+            tk_messageBox -icon error -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "参数 $key 不是有效数值。" "Parameter $key is not a valid number."]
             return 0
         }
         set P($key) $v
     }
     if {[catch {expr {int($P(minGroupSize))}} v]} {
-        tk_messageBox -icon error -message "Minimum RBE2 count per group is not a valid integer."
+        tk_messageBox -icon error -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "每组最少 RBE2 数量必须为有效整数。" "Minimum RBE2 count per group is not a valid integer."]
         return 0
     }
     set P(minGroupSize) $v
     if {$P(gapTol) <= 0 || $P(offsetTol) <= 0 || $P(minGroupSize) < 2} {
-        tk_messageBox -icon error -message "Axial distance and transverse tolerance must be > 0; minimum RBE2 count must be >= 2."
+        tk_messageBox -icon error -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "轴向距离和横向容差必须大于 0；每组最少 RBE2 数量必须不小于 2。" "Axial distance and transverse tolerance must be > 0; minimum RBE2 count must be >= 2."]
         return 0
     }
     set P(compPrefix) [safeName $P(compPrefix)]
@@ -317,7 +317,7 @@ proc ::RB2Bolt::selectedElementIds {} {
     catch {hm_markclear comps 1}
 
     if {$P(selectMode) eq "components"} {
-        *createmarkpanel comps 1 "Select components containing RBE2 elements"
+        *createmarkpanel comps 1 [::HWFlow::txt "选择包含 RBE2 单元的组件" "Select components containing RBE2 elements"]
         set comps [hm_getmark comps 1]
         if {[llength $comps] == 0} {return {}}
         foreach cid $comps {
@@ -327,7 +327,7 @@ proc ::RB2Bolt::selectedElementIds {} {
             }
         }
     } else {
-        *createmarkpanel elems 1 "Select RBE2 elements"
+        *createmarkpanel elems 1 [::HWFlow::txt "选择 RBE2 单元" "Select RBE2 elements"]
         foreach e [hm_getmark elems 1] {lappend out $e}
     }
     return [lsort -integer -unique $out]
@@ -423,7 +423,7 @@ proc ::RB2Bolt::collectRBE2Records {elemIds} {
     foreach eid $elemIds {
         incr i
         if {[expr {$i % 200}] == 0} {
-            msg "Reading RBE2: $i / $total"
+            msg [::HWFlow::txt "正在读取 RBE2：$i / $total" "Reading RBE2: $i / $total"]
         }
         set rec [rbe2Record $eid]
         if {$rec ne ""} {lappend records $rec}
@@ -650,7 +650,7 @@ proc ::RB2Bolt::ensureComponent {name} {
     if {$createCode} {
         if {[catch {*createentity comps name=$name} err2]} {
             catch {*endnotehistorystate $histName}
-            error "Cannot create component $name: $err1 / $err2"
+            error [::HWFlow::txt "无法创建组件 $name：$err1 / $err2" "Cannot create component $name: $err1 / $err2"]
         }
     }
     catch {*endnotehistorystate $histName}
@@ -741,7 +741,7 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
     # type setting. In Nastran/OptiStruct profiles, set: 1D > elem types > BAR2 = CBEAM.
     set ov [orientVecForNodes $n1 $n2]
     if {[catch {*createvector 1 [lindex $ov 0] [lindex $ov 1] [lindex $ov 2]} verr]} {
-        msg "Create orientation vector failed for nodes $n1-$n2: $verr"
+        msg [::HWFlow::txt "节点 $n1-$n2 的方向向量创建失败：$verr" "Create orientation vector failed for nodes $n1-$n2: $verr"]
         return 0
     }
 
@@ -776,7 +776,7 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
     if {$P(propName) ne ""} {lappend cmd property=$P(propName)}
     set err3 ""
     if {[catch {eval $cmd} err3]} {
-        msg "Create $elemType failed: nodes $n1-$n2; $lastErr; create1d=$err3"
+        msg [::HWFlow::txt "$elemType 创建失败：节点 $n1-$n2；$lastErr；create1d=$err3" "Create $elemType failed: nodes $n1-$n2; $lastErr; create1d=$err3"]
         return 0
     }
     return 1
@@ -821,7 +821,7 @@ proc ::RB2Bolt::createBolts {groups} {
         if {![groupHasPlanar $g]} {
             incr spatialOnlyGroups
             incr skipped [expr {[llength $pairs] + $unpaired}]
-            msg "Bolt group $gi / $groupCount, axis=$axis, spatial-only RBE2 group, RBE2=[llength $g], skipped_creation=1"
+            msg [::HWFlow::txt "螺栓分组 $gi / $groupCount，轴向=$axis，空间型 RBE2-only 分组，RBE2=[llength $g]，已跳过创建=1" "Bolt group $gi / $groupCount, axis=$axis, spatial-only RBE2 group, RBE2=[llength $g], skipped_creation=1"]
             continue
         }
 
@@ -829,7 +829,7 @@ proc ::RB2Bolt::createBolts {groups} {
         if {$dia <= 0} {set dia UNKNOWN}
         set compName [safeName [format "%s_D%s_%s" $P(compPrefix) $dia $P(elemType)]]
 
-        msg "Bolt group $gi / $groupCount, axis=$axis, D=$dia, RBE2=[llength $g], adjacent_segments=[llength $pairs], skipped_segments=$unpaired"
+        msg [::HWFlow::txt "螺栓分组 $gi / $groupCount，轴向=$axis，D=$dia，RBE2=[llength $g]，相邻连接段=[llength $pairs]，跳过连接段=$unpaired" "Bolt group $gi / $groupCount, axis=$axis, D=$dia, RBE2=[llength $g], adjacent_segments=[llength $pairs], skipped_segments=$unpaired"]
 
         if {$P(dryRun)} {continue}
         if {[llength $pairs] > 0} {
@@ -861,31 +861,31 @@ proc ::RB2Bolt::createBolts {groups} {
 proc ::RB2Bolt::run {} {
     variable P
     if {![showDialog]} {
-        msg "RBE2 Bolt Connector cancelled."
+        msg [::HWFlow::txt "RBE2 螺栓连接生成已取消。" "RBE2 Bolt Connector cancelled."]
         return
     }
     if {![validateParams]} {return}
     ::RB2Bolt::saveState
 
-    msg "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."
+    msg [::HWFlow::txt "RBE2 螺栓连接生成开始。若需要 CBEAM 输出，请确认 BAR2 单元类型已设置为 CBEAM。" "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."]
 
     set elemIds [selectedElementIds]
     if {[llength $elemIds] == 0} {
-        tk_messageBox -icon warning -message "No elements were selected."
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "未选择任何单元。" "No elements were selected."]
         return
     }
 
-    msg "Selected elements: [llength $elemIds]"
+    msg [::HWFlow::txt "已选择单元数：[llength $elemIds]" "Selected elements: [llength $elemIds]"]
     set records [collectRBE2Records $elemIds]
     if {[llength $records] < 2} {
-        tk_messageBox -icon warning -message "Fewer than 2 usable RBE2 elements were found in the selection."
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择集中可用 RBE2 单元少于 2 个。" "Fewer than 2 usable RBE2 elements were found in the selection."]
         return
     }
 
-    msg "Valid RBE2 records: [llength $records]. Building groups..."
+    msg [::HWFlow::txt "有效 RBE2 记录数：[llength $records]。正在建立分组..." "Valid RBE2 records: [llength $records]. Building groups..."]
     set groups [buildGroups $records]
     if {[llength $groups] == 0} {
-        tk_messageBox -icon warning -message "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "没有 RBE2 分组满足当前容差。可尝试增大轴向连接距离或横向中心偏移容差。" "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."]
         return
     }
 
@@ -894,7 +894,7 @@ proc ::RB2Bolt::run {} {
     set skipped [lindex $result 1]
     set spatialOnlyGroups [lindex $result 3]
 
-    set txt "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped/failed: $skipped"
-    tk_messageBox -icon info -message $txt
+    set txt [::HWFlow::txt "RBE2 螺栓连接生成已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped/failed: $skipped"]
+    tk_messageBox -icon info -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message $txt
     msg $txt
 }

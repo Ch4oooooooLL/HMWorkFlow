@@ -86,54 +86,54 @@ proc ::MidSurf::showPanel {} {
     }
     set ui(ok) 0
     set ui(selectedComps) ""
-    set ui(selectedText) "No components selected"
+    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
 
     set w .midsurf_dlg
     toplevel $w
-    wm title $w "MidSurf v$VERSION"
+    wm title $w "[::HWFlow::txt "钣金中面抽取" "MidSurf"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text "Midsurface Extraction" -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "钣金中面抽取" "Midsurface Extraction"] -font {Arial 10 bold}
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
-    labelframe $w.main.sel -text "1. Component Selection" -padx 8 -pady 8
+    labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
     grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    button $w.main.sel.pick -text "Pick / Repick Components" -width 24 -command "::MidSurf::pickComponents"
+    button $w.main.sel.pick -text [::HWFlow::txt "选择/重选组件" "Pick / Repick Components"] -width 24 -command "::MidSurf::pickComponents"
     label $w.main.sel.info -textvariable ::MidSurf::ui(selectedText) -width 64 -anchor w
     grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 8}
     grid $w.main.sel.info -row 0 -column 1 -sticky w
 
-    labelframe $w.main.param -text "2. Midsurface Parameters" -padx 8 -pady 8
+    labelframe $w.main.param -text [::HWFlow::txt "2. 中面抽取参数" "2. Midsurface Parameters"] -padx 8 -pady 8
     grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     set r 0
-    label $w.main.param.l_method -text "Extraction Method" -anchor w
+    label $w.main.param.l_method -text [::HWFlow::txt "抽取方法" "Extraction Method"] -anchor w
     tk_optionMenu $w.main.param.m_method ::MidSurf::ui(rerunType) 0 3 6 9
-    label $w.main.param.tip_method -text "0=offset, 3=offset+planes, 6=skin offset, 9=offset+planes+sweeps" -anchor w
+    label $w.main.param.tip_method -text [::HWFlow::txt "0=偏置，3=偏置+平面，6=蒙皮偏置，9=偏置+平面+扫掠" "0=offset, 3=offset+planes, 6=skin offset, 9=offset+planes+sweeps"] -anchor w
     grid $w.main.param.l_method -row $r -column 0 -sticky w -padx {0 6} -pady 2
     grid $w.main.param.m_method -row $r -column 1 -sticky w -padx {0 10} -pady 2
     grid $w.main.param.tip_method -row $r -column 2 -columnspan 2 -sticky w -pady 2
     incr r
 
     set fields {
-        {alignSteps            "Step alignment"}
-        {midPosition           "Mid position"}
-        {maxRTtRatio           "Max R/T"}
-        {maxThicknessRatio     "Max thickness ratio"}
-        {surfaceNormals        "Surface normals"}
-        {variableThicknessTol  "Variable thickness tolerance"}
-        {fallbackThickness     "Fallback thickness"}
-        {thicknessFormat       "Thickness format"}
+        {alignSteps            "阶梯对齐步数" "Step alignment"}
+        {midPosition           "中面位置" "Mid position"}
+        {maxRTtRatio           "最大 R/T 比" "Max R/T"}
+        {maxThicknessRatio     "最大厚度比" "Max thickness ratio"}
+        {surfaceNormals        "曲面法向" "Surface normals"}
+        {variableThicknessTol  "变厚容差" "Variable thickness tolerance"}
+        {fallbackThickness     "备用厚度" "Fallback thickness"}
+        {thicknessFormat       "厚度格式" "Thickness format"}
     }
 
     set i 0
     foreach item $fields {
         set key [lindex $item 0]
-        set name [lindex $item 1]
+        set name [::HWFlow::txt [lindex $item 1] [lindex $item 2]]
         set row [expr {$r + ($i / 2)}]
         set col [expr {($i % 2) * 2}]
 
@@ -145,14 +145,14 @@ proc ::MidSurf::showPanel {} {
     }
     set r [expr {$r + 4}]
 
-    labelframe $w.main.opt -text "3. Options" -padx 8 -pady 8
+    labelframe $w.main.opt -text [::HWFlow::txt "3. 选项" "3. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    checkbutton $w.main.opt.clean -text "Require no existing Middle Surface component before running" \
+    checkbutton $w.main.opt.clean -text [::HWFlow::txt "运行前要求不存在 Middle Surface 临时组件" "Require no existing Middle Surface component before running"] \
         -variable ::MidSurf::ui(requireCleanMiddle)
-    checkbutton $w.main.opt.trans -text "Keep input geometry transparency" \
+    checkbutton $w.main.opt.trans -text [::HWFlow::txt "保留输入几何透明状态" "Keep input geometry transparency"] \
         -variable ::MidSurf::ui(keepTransparency)
-    checkbutton $w.main.opt.hide -text "Hide source geometry component after extraction" \
+    checkbutton $w.main.opt.hide -text [::HWFlow::txt "抽取后隐藏源几何组件" "Hide source geometry component after extraction"] \
         -variable ::MidSurf::ui(hideSourceComponent)
     grid $w.main.opt.clean -row 0 -column 0 -sticky w -pady 2
     grid $w.main.opt.trans -row 1 -column 0 -sticky w -pady 2
@@ -161,8 +161,8 @@ proc ::MidSurf::showPanel {} {
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
 
-    button $w.btn.cancel -text "Back to Home" -width 14 -command "::MidSurf::savePanelState; set ::MidSurf::ui(ok) 0; ::MidSurf::backToHome .midsurf_dlg"
-    button $w.btn.start -text "Start Extraction" -width 16 -command "::MidSurf::acceptPanel"
+    button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::MidSurf::savePanelState; set ::MidSurf::ui(ok) 0; ::MidSurf::backToHome .midsurf_dlg"
+    button $w.btn.start -text [::HWFlow::txt "开始抽取" "Start Extraction"] -width 16 -command "::MidSurf::acceptPanel"
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.start -side right -padx 4
 
@@ -184,16 +184,16 @@ proc ::MidSurf::pickComponents {} {
     variable ui
 
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 "Select geometry components for midsurface extraction"
+    *createmarkpanel comps 1 [::HWFlow::txt "选择需要抽取中面的几何组件" "Select geometry components for midsurface extraction"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
 
     if {[llength $comps] == 0} {
         set ui(selectedComps) ""
-        set ui(selectedText) "No components selected"
+        set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
     } else {
         set ui(selectedComps) [::MidSurf::uniq $comps]
-        set ui(selectedText) "Selected [llength $ui(selectedComps)] component(s)"
+        set ui(selectedText) [::HWFlow::txt "已选择 [llength $ui(selectedComps)] 个组件" "Selected [llength $ui(selectedComps)] component(s)"]
     }
 
     catch {raise .midsurf_dlg}
@@ -205,42 +205,42 @@ proc ::MidSurf::acceptPanel {} {
     variable ui
 
     if {[llength $ui(selectedComps)] == 0} {
-        tk_messageBox -icon warning -title "MidSurf" -message "Pick components first."
+        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
 
     foreach k {alignSteps extractByComp rerunType stitchTolMode surfaceNormals requireCleanMiddle keepTransparency hideSourceComponent} {
         if {![string is integer -strict $ui($k)]} {
-            tk_messageBox -icon warning -title "MidSurf" -message "$k must be an integer."
+            tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
             return
         }
     }
 
     foreach k {midPosition maxRTtRatio maxThicknessRatio fallbackThickness variableThicknessTol} {
         if {![string is double -strict $ui($k)]} {
-            tk_messageBox -icon warning -title "MidSurf" -message "$k must be a number."
+            tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
             return
         }
     }
 
     if {$ui(alignSteps) < 0 || $ui(alignSteps) > 5} {
-        tk_messageBox -icon warning -title "MidSurf" -message "alignSteps must be between 0 and 5."
+        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "alignSteps 必须在 0 到 5 之间。" "alignSteps must be between 0 and 5."]
         return
     }
     if {$ui(midPosition) < 0.0 || $ui(midPosition) > 1.0} {
-        tk_messageBox -icon warning -title "MidSurf" -message "midPosition must be between 0 and 1."
+        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "midPosition 必须在 0 到 1 之间。" "midPosition must be between 0 and 1."]
         return
     }
     if {$ui(maxRTtRatio) <= 0.0 || $ui(maxThicknessRatio) <= 1.0} {
-        tk_messageBox -icon warning -title "MidSurf" -message "maxRTtRatio must be > 0 and maxThicknessRatio must be > 1."
+        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "maxRTtRatio 必须大于 0，maxThicknessRatio 必须大于 1。" "maxRTtRatio must be > 0 and maxThicknessRatio must be > 1."]
         return
     }
     if {$ui(variableThicknessTol) < 0.0} {
-        tk_messageBox -icon warning -title "MidSurf" -message "variableThicknessTol cannot be negative."
+        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "variableThicknessTol 不能为负值。" "variableThicknessTol cannot be negative."]
         return
     }
     if {[string trim $ui(thicknessFormat)] eq ""} {
-        tk_messageBox -icon warning -title "MidSurf" -message "thicknessFormat cannot be empty."
+        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "thicknessFormat 不能为空。" "thicknessFormat cannot be empty."]
         return
     }
 
@@ -267,16 +267,16 @@ proc ::MidSurf::askThickness {compName defaultValue reason} {
 
     set w .midsurf_thick
     toplevel $w
-    wm title $w "Input Thickness"
+    wm title $w [::HWFlow::txt "输入厚度" "Input Thickness"]
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text "Thickness could not be read reliably:" -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "无法可靠读取厚度：" "Thickness could not be read reliably:"] -font {Arial 10 bold}
     label $w.main.comp -text $compName -anchor w
     message $w.main.reason -text $reason -width 420 -anchor w
-    label $w.main.lbl -text "Enter thickness T for naming:" -anchor w
+    label $w.main.lbl -text [::HWFlow::txt "输入用于命名的厚度 T：" "Enter thickness T for naming:"] -anchor w
     entry $w.main.entry -textvariable ::MidSurf::ui(promptValue) -width 20
 
     grid $w.main.title -row 0 -column 0 -columnspan 2 -sticky w -pady {0 4}
@@ -287,8 +287,8 @@ proc ::MidSurf::askThickness {compName defaultValue reason} {
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
-    button $w.btn.cancel -text "Use UNKNOWN" -width 14 -command "set ::MidSurf::ui(promptOk) -1; destroy .midsurf_thick"
-    button $w.btn.ok -text "OK" -width 10 -command "::MidSurf::acceptThicknessPrompt"
+    button $w.btn.cancel -text [::HWFlow::txt "使用 UNKNOWN" "Use UNKNOWN"] -width 14 -command "set ::MidSurf::ui(promptOk) -1; destroy .midsurf_thick"
+    button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command "::MidSurf::acceptThicknessPrompt"
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
 
@@ -314,7 +314,7 @@ proc ::MidSurf::acceptThicknessPrompt {} {
 
     set v [string trim $ui(promptValue)]
     if {![string is double -strict $v] || $v <= 0.0} {
-        tk_messageBox -icon warning -title "MidSurf" -message "Thickness must be a number greater than 0."
+        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "厚度必须为大于 0 的数值。" "Thickness must be a number greater than 0."]
         return
     }
 
@@ -735,7 +735,7 @@ proc ::MidSurf::extractMidsurface {entityType} {
         return
     }
 
-    error "midsurface_extract_10 failed. 19-arg error: $err19; 17-arg error: $err17"
+    error [::HWFlow::txt "midsurface_extract_10 执行失败。19 参数错误：$err19；17 参数错误：$err17" "midsurface_extract_10 failed. 19-arg error: $err19; 17-arg error: $err17"]
 }
 
 proc ::MidSurf::renameMiddleSurface {sourceName thickness midCompId} {
@@ -756,7 +756,7 @@ proc ::MidSurf::renameMiddleSurface {sourceName thickness midCompId} {
         if {[catch {*renamecollector component $cfg(middleSurfaceName) $outName} err]} {
             if {[catch {*renamecollector components $cfg(middleSurfaceName) $outName} err2]} {
                 catch {*endnotehistorystate $histName}
-                error "Cannot rename $cfg(middleSurfaceName) to $outName: $err / $err2"
+                error [::HWFlow::txt "无法将 $cfg(middleSurfaceName) 重命名为 $outName：$err / $err2" "Cannot rename $cfg(middleSurfaceName) to $outName: $err / $err2"]
             }
         }
         catch {*endnotehistorystate $histName}
@@ -787,10 +787,10 @@ proc ::MidSurf::processComponent {compId} {
     variable cfg
 
     set sourceName [::MidSurf::getComponentName $compId]
-    ::MidSurf::msg "MidSurf: processing $sourceName"
+    ::MidSurf::msg [::HWFlow::txt "中面抽取：正在处理 $sourceName" "MidSurf: processing $sourceName"]
 
     if {$cfg(requireCleanMiddle) && [::MidSurf::componentExistsByName $cfg(middleSurfaceName)]} {
-        error "Component \"$cfg(middleSurfaceName)\" already exists. Rename/delete it before running, or disable the clean Middle Surface check."
+        error [::HWFlow::txt "组件 \"$cfg(middleSurfaceName)\" 已存在。请在运行前重命名/删除该组件，或关闭 Middle Surface 清洁检查。" "Component \"$cfg(middleSurfaceName)\" already exists. Rename/delete it before running, or disable the clean Middle Surface check."]
     }
 
     set markInfo [::MidSurf::markInputGeometry $compId]
@@ -798,26 +798,26 @@ proc ::MidSurf::processComponent {compId} {
     set entities [lindex $markInfo 1]
 
     if {$entityType eq "" || [llength $entities] == 0} {
-        error "Component $sourceName contains no solids or surfaces."
+        error [::HWFlow::txt "组件 $sourceName 中没有可抽取的实体或曲面。" "Component $sourceName contains no solids or surfaces."]
     }
 
     ::MidSurf::extractMidsurface $entityType
 
     set midCompId [::MidSurf::componentIdByName $cfg(middleSurfaceName)]
     if {$midCompId eq ""} {
-        error "Extraction finished, but \"$cfg(middleSurfaceName)\" component was not found."
+        error [::HWFlow::txt "中面抽取已结束，但未找到 \"$cfg(middleSurfaceName)\" 组件。" "Extraction finished, but \"$cfg(middleSurfaceName)\" component was not found."]
     }
 
     set newSurfs [::MidSurf::getCompEntityIds $midCompId surfaces surfs]
     if {[llength $newSurfs] == 0} {
-        error "Extraction finished, but \"$cfg(middleSurfaceName)\" contains no surfaces."
+        error [::HWFlow::txt "中面抽取已结束，但 \"$cfg(middleSurfaceName)\" 组件中没有曲面。" "Extraction finished, but \"$cfg(middleSurfaceName)\" contains no surfaces."]
     }
 
     set thickness [::MidSurf::chooseThickness $compId $sourceName $midCompId]
     set outName [::MidSurf::renameMiddleSurface $sourceName $thickness $midCompId]
     ::MidSurf::hideSourceComponent $sourceName
 
-    ::MidSurf::msg "MidSurf: $sourceName -> $outName, surfaces=[llength $newSurfs]"
+    ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName -> $outName，曲面数=[llength $newSurfs]" "MidSurf: $sourceName -> $outName, surfaces=[llength $newSurfs]"]
     return [list $outName [llength $newSurfs] $thickness]
 }
 
@@ -831,7 +831,7 @@ proc ::MidSurf::run {} {
     variable VERSION
 
     if {![::MidSurf::showPanel]} {
-        catch {hm_usermessage "MidSurf cancelled."}
+        catch {hm_usermessage [::HWFlow::txt "中面抽取已取消。" "MidSurf cancelled."]}
         return
     }
 
@@ -847,7 +847,7 @@ proc ::MidSurf::run {} {
     set failures {}
     set createdNames {}
 
-    ::MidSurf::msg "MidSurf v$VERSION started. Components=[llength $comps]"
+    ::MidSurf::msg [::HWFlow::txt "中面抽取 v$VERSION 开始，组件数=[llength $comps]" "MidSurf v$VERSION started. Components=[llength $comps]"]
 
     foreach compId $comps {
         set sourceName [::MidSurf::getComponentName $compId]
@@ -855,7 +855,7 @@ proc ::MidSurf::run {} {
         if {[catch {set result [::MidSurf::processComponent $compId]} err]} {
             incr stat(skipped)
             lappend failures "$sourceName: $err"
-            ::MidSurf::msg "MidSurf warning: $sourceName skipped. $err"
+            ::MidSurf::msg [::HWFlow::txt "中面抽取警告：$sourceName 已跳过。$err" "MidSurf warning: $sourceName skipped. $err"]
             continue
         }
 
@@ -867,10 +867,10 @@ proc ::MidSurf::run {} {
 
     ::MidSurf::clearMarks
 
-    set msg "MidSurf v$VERSION finished.\n\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped/failed: $stat(skipped)"
+    set msg [::HWFlow::txt "中面抽取 v$VERSION 已完成。\n\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped/failed: $stat(skipped)"]
 
     if {[llength $createdNames] > 0} {
-        append msg "\n\nCreated:\n"
+        append msg [::HWFlow::txt "\n\n已创建：\n" "\n\nCreated:\n"]
         append msg [join [lrange $createdNames 0 9] "\n"]
         if {[llength $createdNames] > 10} {
             append msg "\n..."
@@ -878,13 +878,13 @@ proc ::MidSurf::run {} {
     }
 
     if {[llength $failures] > 0} {
-        append msg "\n\nFailures:\n"
+        append msg [::HWFlow::txt "\n\n失败项：\n" "\n\nFailures:\n"]
         append msg [join [lrange $failures 0 4] "\n"]
         if {[llength $failures] > 5} {
             append msg "\n..."
         }
     }
 
-    catch {tk_messageBox -icon info -title "MidSurf v$VERSION" -message $msg}
+    catch {tk_messageBox -icon info -title "[::HWFlow::txt "钣金中面抽取" "MidSurf"] v$VERSION" -message $msg}
     ::MidSurf::msg $msg
 }

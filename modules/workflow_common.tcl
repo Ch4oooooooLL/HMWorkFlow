@@ -9,11 +9,112 @@
 namespace eval ::HWFlow {
     variable VERSION "0.1"
     variable ROOT_DIR [file dirname [file dirname [file normalize [info script]]]]
+    variable GLOBAL_CONFIG_FILE [file join $ROOT_DIR "config.yaml"]
     variable CONFIG_DIR [file join $ROOT_DIR "config"]
     variable MATERIAL_FILE [file join $CONFIG_DIR "materials.txt"]
     variable CATEGORIES {SHELL SOLID CASTING SOURCE_GEOM SEAM CONNECTOR}
+    variable LANGUAGE "zh_CN"
+    variable LANGUAGE_LOADED 0
     variable materialRows {}
     variable materialKeys {}
+}
+
+proc ::HWFlow::globalConfigFile {} {
+    variable GLOBAL_CONFIG_FILE
+    return $GLOBAL_CONFIG_FILE
+}
+
+proc ::HWFlow::defaultGlobalConfigText {} {
+    return [join {
+        {# HyperMesh 前处理工作流全局配置 / HyperMesh Preprocess Workflow global configuration}
+        {workflow:}
+        {  # 界面语言 / UI language: zh_CN or en_US}
+        {  language: zh_CN}
+    } "\n"]
+}
+
+proc ::HWFlow::ensureGlobalConfig {} {
+    set f [::HWFlow::globalConfigFile]
+    if {![file exists $f]} {
+        ::HWFlow::writeTextFile $f [::HWFlow::defaultGlobalConfigText]
+    }
+    return $f
+}
+
+proc ::HWFlow::normalizeLanguage {value} {
+    regsub {\s+#.*$} $value "" value
+    set v [string tolower [string trim $value "\"' "]]
+    switch -glob -- $v {
+        zh -
+        zh_cn -
+        zh-cn -
+        chinese -
+        cn {
+            return zh_CN
+        }
+        en -
+        en_us -
+        en-us -
+        english {
+            return en_US
+        }
+        default {
+            return zh_CN
+        }
+    }
+}
+
+proc ::HWFlow::loadGlobalConfig {} {
+    variable LANGUAGE
+    variable LANGUAGE_LOADED
+
+    set LANGUAGE zh_CN
+    set path [::HWFlow::ensureGlobalConfig]
+    set inWorkflow 0
+    foreach rawLine [split [::HWFlow::readTextFile $path] "\n"] {
+        set line [string trim $rawLine]
+        if {$line eq "" || [string index $line 0] eq "#"} {
+            continue
+        }
+        if {[regexp {^workflow\s*:\s*$} $line]} {
+            set inWorkflow 1
+            continue
+        }
+        if {[regexp {^[A-Za-z0-9_.-]+\s*:\s*$} $line]} {
+            set inWorkflow 0
+            continue
+        }
+        if {$inWorkflow && [regexp {^language\s*:\s*(.+)$} $line -> value]} {
+            set LANGUAGE [::HWFlow::normalizeLanguage $value]
+            break
+        }
+        if {[regexp {^workflow\.language\s*:\s*(.+)$} $line -> value]} {
+            set LANGUAGE [::HWFlow::normalizeLanguage $value]
+            break
+        }
+    }
+    set LANGUAGE_LOADED 1
+    return $LANGUAGE
+}
+
+proc ::HWFlow::language {} {
+    variable LANGUAGE
+    variable LANGUAGE_LOADED
+    if {!$LANGUAGE_LOADED} {
+        ::HWFlow::loadGlobalConfig
+    }
+    return $LANGUAGE
+}
+
+proc ::HWFlow::isChinese {} {
+    return [expr {[::HWFlow::language] eq "zh_CN"}]
+}
+
+proc ::HWFlow::txt {zh en} {
+    if {[::HWFlow::isChinese]} {
+        return $zh
+    }
+    return $en
 }
 
 proc ::HWFlow::configDir {} {
@@ -450,7 +551,7 @@ proc ::HWFlow::renameComponent {oldName newName} {
     }
     if {[catch {*renamecollector component $oldName $candidate} err1]} {
         if {[catch {*renamecollector components $oldName $candidate} err2]} {
-            error "Cannot rename component $oldName to $candidate: $err1 / $err2"
+            error [::HWFlow::txt "无法将组件 $oldName 重命名为 $candidate：$err1 / $err2" "Cannot rename component $oldName to $candidate: $err1 / $err2"]
         }
     }
     return $candidate

@@ -103,59 +103,59 @@ proc ::AutoHoleRBE2::showPanel {} {
 
     set ui(ok) 0
     set ui(selectedComps) ""
-    set ui(selectedText) "No components selected"
+    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
 
     set w .autoHoleRBE2
     toplevel $w
-    wm title $w "AutoHoleRBE2 v$VERSION"
+    wm title $w "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text "Through-Hole RBE2 Creation" -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "实体贯通孔 RBE2 创建" "Through-Hole RBE2 Creation"] -font {Arial 10 bold}
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
-    labelframe $w.main.sel -text "1. Component Selection" -padx 8 -pady 8
+    labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
     grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    button $w.main.sel.pick -text "Pick / Repick Components" -width 24 -command "::AutoHoleRBE2::pickComponents"
+    button $w.main.sel.pick -text [::HWFlow::txt "选择/重选组件" "Pick / Repick Components"] -width 24 -command "::AutoHoleRBE2::pickComponents"
     label $w.main.sel.info -textvariable ::AutoHoleRBE2::ui(selectedText) -width 72 -anchor w
 
     grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 8}
     grid $w.main.sel.info -row 0 -column 1 -sticky w
 
-    labelframe $w.main.preset -text "2. Parameter Presets" -padx 8 -pady 8
+    labelframe $w.main.preset -text [::HWFlow::txt "2. 参数预设" "2. Parameter Presets"] -padx 8 -pady 8
     grid $w.main.preset -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    button $w.main.preset.normal -text "Default" -width 12 -command "::AutoHoleRBE2::applyPreset normal"
-    button $w.main.preset.loose  -text "Loose" -width 12 -command "::AutoHoleRBE2::applyPreset loose"
-    button $w.main.preset.strict -text "Strict" -width 12 -command "::AutoHoleRBE2::applyPreset strict"
+    button $w.main.preset.normal -text [::HWFlow::txt "默认" "Default"] -width 12 -command "::AutoHoleRBE2::applyPreset normal"
+    button $w.main.preset.loose  -text [::HWFlow::txt "宽松" "Loose"] -width 12 -command "::AutoHoleRBE2::applyPreset loose"
+    button $w.main.preset.strict -text [::HWFlow::txt "严格" "Strict"] -width 12 -command "::AutoHoleRBE2::applyPreset strict"
 
     grid $w.main.preset.normal -row 0 -column 0 -sticky w -padx {0 6}
     grid $w.main.preset.loose  -row 0 -column 1 -sticky w -padx {0 6}
     grid $w.main.preset.strict -row 0 -column 2 -sticky w
 
-    labelframe $w.main.param -text "3. Detection Parameters" -padx 8 -pady 8
+    labelframe $w.main.param -text [::HWFlow::txt "3. 识别参数" "3. Detection Parameters"] -padx 8 -pady 8
     grid $w.main.param -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     set fields {
-        {featureAngleDeg  "Smooth patch angle"}
-        {cylFitTol        "Cylinder fit tolerance"}
-        {loopRadiusTol    "End-loop radius tolerance"}
-        {loopNormalTolDeg "Opening normal tolerance"}
-        {minWallNodes     "Minimum wall nodes"}
-        {minLoopNodes     "Minimum opening nodes"}
-        {minRadius        "Minimum hole radius"}
-        {maxRadius        "Maximum hole radius"}
-        {dof              "RBE2 DOF"}
-        {resultCompName   "Result component"}
+        {featureAngleDeg  "光顺面片角度" "Smooth patch angle"}
+        {cylFitTol        "圆柱拟合容差" "Cylinder fit tolerance"}
+        {loopRadiusTol    "端部环半径容差" "End-loop radius tolerance"}
+        {loopNormalTolDeg "开口法向容差" "Opening normal tolerance"}
+        {minWallNodes     "最少孔壁节点数" "Minimum wall nodes"}
+        {minLoopNodes     "最少开口节点数" "Minimum opening nodes"}
+        {minRadius        "最小孔半径" "Minimum hole radius"}
+        {maxRadius        "最大孔半径" "Maximum hole radius"}
+        {dof              "RBE2 自由度" "RBE2 DOF"}
+        {resultCompName   "结果组件" "Result component"}
     }
 
     set i 0
     foreach item $fields {
         set key  [lindex $item 0]
-        set name [lindex $item 1]
+        set name [::HWFlow::txt [lindex $item 1] [lindex $item 2]]
 
         set r [expr {$i / 2}]
         set c [expr {($i % 2) * 2}]
@@ -169,16 +169,16 @@ proc ::AutoHoleRBE2::showPanel {} {
         incr i
     }
 
-    labelframe $w.main.opt -text "4. Options" -padx 8 -pady 8
+    labelframe $w.main.opt -text [::HWFlow::txt "4. 选项" "4. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 4 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    checkbutton $w.main.opt.inner -text "Check inner-hole normal direction" \
+    checkbutton $w.main.opt.inner -text [::HWFlow::txt "检查孔内壁法向方向" "Check inner-hole normal direction"] \
         -variable ::AutoHoleRBE2::ui(requireInnerNormal)
-    checkbutton $w.main.opt.pre -text "Delete ^faces before running" \
+    checkbutton $w.main.opt.pre -text [::HWFlow::txt "运行前删除 ^faces 临时组件" "Delete ^faces before running"] \
         -variable ::AutoHoleRBE2::ui(preDeleteOldFaces)
-    checkbutton $w.main.opt.del -text "Delete ^faces after running" \
+    checkbutton $w.main.opt.del -text [::HWFlow::txt "运行后删除 ^faces 临时组件" "Delete ^faces after running"] \
         -variable ::AutoHoleRBE2::ui(deleteTempFaces)
-    checkbutton $w.main.opt.log -text "Save log" \
+    checkbutton $w.main.opt.log -text [::HWFlow::txt "保存日志" "Save log"] \
         -variable ::AutoHoleRBE2::ui(saveLog)
 
     grid $w.main.opt.inner -row 0 -column 0 -columnspan 2 -sticky w -pady 2
@@ -189,8 +189,8 @@ proc ::AutoHoleRBE2::showPanel {} {
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
 
-    button $w.btn.cancel -text "Back to Home" -width 14 -command "::AutoHoleRBE2::savePanelState; set ::AutoHoleRBE2::ui(ok) 0; ::AutoHoleRBE2::backToHome .autoHoleRBE2"
-    button $w.btn.start  -text "Start RBE2 Creation" -width 18 -command "::AutoHoleRBE2::acceptPanel"
+    button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::AutoHoleRBE2::savePanelState; set ::AutoHoleRBE2::ui(ok) 0; ::AutoHoleRBE2::backToHome .autoHoleRBE2"
+    button $w.btn.start  -text [::HWFlow::txt "开始创建 RBE2" "Start RBE2 Creation"] -width 18 -command "::AutoHoleRBE2::acceptPanel"
 
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.start  -side right -padx 4
@@ -213,15 +213,15 @@ proc ::AutoHoleRBE2::pickComponents {} {
     variable ui
 
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 "Select solid mesh components"
+    *createmarkpanel comps 1 [::HWFlow::txt "选择实体网格组件" "Select solid mesh components"]
     set comps [hm_getmark comps 1]
 
     if {[llength $comps] == 0} {
         set ui(selectedComps) ""
-        set ui(selectedText) "No components selected"
+        set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
     } else {
         set ui(selectedComps) $comps
-        set ui(selectedText) "Selected [llength $comps] component(s)"
+        set ui(selectedText) [::HWFlow::txt "已选择 [llength $comps] 个组件" "Selected [llength $comps] component(s)"]
     }
 
     catch {raise .autoHoleRBE2}
@@ -267,7 +267,7 @@ proc ::AutoHoleRBE2::acceptPanel {} {
     variable ui
 
     if {[llength $ui(selectedComps)] == 0} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Pick components first."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
 
@@ -277,7 +277,7 @@ proc ::AutoHoleRBE2::acceptPanel {} {
     }
     foreach k $doubleKeys {
         if {![string is double -strict $ui($k)]} {
-            tk_messageBox -icon warning -title "AutoHoleRBE2" -message "$k must be a number."
+            tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
             return
         }
     }
@@ -288,43 +288,43 @@ proc ::AutoHoleRBE2::acceptPanel {} {
     }
     foreach k $intKeys {
         if {![string is integer -strict $ui($k)]} {
-            tk_messageBox -icon warning -title "AutoHoleRBE2" -message "$k must be an integer."
+            tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
             return
         }
     }
 
     if {$ui(featureAngleDeg) <= 0 || $ui(featureAngleDeg) >= 180} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Smooth patch angle must be between 0 and 180."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "光顺面片角度必须在 0 到 180 之间。" "Smooth patch angle must be between 0 and 180."]
         return
     }
 
     if {$ui(loopNormalTolDeg) <= 0 || $ui(loopNormalTolDeg) >= 90} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Opening normal tolerance must be between 0 and 90."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "开口法向容差必须在 0 到 90 之间。" "Opening normal tolerance must be between 0 and 90."]
         return
     }
 
     if {$ui(cylFitTol) < 0 || $ui(loopRadiusTol) < 0} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Tolerances cannot be negative."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "容差不能为负值。" "Tolerances cannot be negative."]
         return
     }
 
     if {$ui(minWallNodes) < 3 || $ui(minLoopNodes) < 3} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Node-count thresholds must be at least 3."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "节点数量阈值至少为 3。" "Node-count thresholds must be at least 3."]
         return
     }
 
     if {$ui(minRadius) < 0 || $ui(maxRadius) < 0} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Radius limits cannot be negative."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "孔半径限制不能为负值。" "Radius limits cannot be negative."]
         return
     }
 
     if {$ui(maxRadius) > 0 && $ui(minRadius) > $ui(maxRadius)} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Minimum hole radius cannot exceed maximum hole radius."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "最小孔半径不能大于最大孔半径。" "Minimum hole radius cannot exceed maximum hole radius."]
         return
     }
 
     if {[string trim $ui(resultCompName)] eq ""} {
-        tk_messageBox -icon warning -title "AutoHoleRBE2" -message "Result component name cannot be empty."
+        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "结果组件名称不能为空。" "Result component name cannot be empty."]
         return
     }
 
@@ -519,7 +519,7 @@ proc ::AutoHoleRBE2::nodeXYZ {nodeId} {
         return [list [lindex $val 0] [lindex $val 1] [lindex $val 2]]
     }
 
-    error "Cannot read coordinates for node $nodeId."
+    error [::HWFlow::txt "无法读取节点 $nodeId 的坐标。" "Cannot read coordinates for node $nodeId."]
 }
 
 proc ::AutoHoleRBE2::elemNodes {elemId} {
@@ -531,7 +531,7 @@ proc ::AutoHoleRBE2::elemNodes {elemId} {
         return $nodes
     }
 
-    error "Cannot read nodes for element $elemId."
+    error [::HWFlow::txt "无法读取单元 $elemId 的节点。" "Cannot read nodes for element $elemId."]
 }
 
 proc ::AutoHoleRBE2::elemConfig {elemId} {
@@ -990,7 +990,7 @@ proc ::AutoHoleRBE2::ensureComponent {compName} {
         if {$createCode} {
             if {[catch {*createentity comps name=$compName} err2]} {
                 catch {*endnotehistorystate $histName}
-                error "Cannot create component $compName: $err1 / $err2"
+                error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
             }
         }
         catch {*endnotehistorystate $histName}
@@ -1075,7 +1075,7 @@ proc ::AutoHoleRBE2::runCore {} {
 
     set comps $ui(selectedComps)
 
-    ::AutoHoleRBE2::message "Selected [llength $comps] component(s)."
+    ::AutoHoleRBE2::message [::HWFlow::txt "已选择 [llength $comps] 个组件。" "Selected [llength $comps] component(s)."]
 
     ::AutoHoleRBE2::clearMarks
     eval *createmark comps 1 $comps
@@ -1085,22 +1085,22 @@ proc ::AutoHoleRBE2::runCore {} {
     set stat(sourceElems) [llength $sourceElems]
 
     if {$stat(sourceElems) == 0} {
-        error "Selected components contain no elements."
+        error [::HWFlow::txt "所选组件中没有单元。" "Selected components contain no elements."]
     }
 
     foreach elemId $sourceElems {
         if {![::AutoHoleRBE2::isSolidElem $elemId]} {
-            error "Selected components contain non-3D solid elements. Example: elem=$elemId, config=[::AutoHoleRBE2::elemConfig $elemId]"
+            error [::HWFlow::txt "所选组件包含非三维实体单元。示例：单元=$elemId，config=[::AutoHoleRBE2::elemConfig $elemId]" "Selected components contain non-3D solid elements. Example: elem=$elemId, config=[::AutoHoleRBE2::elemConfig $elemId]"]
         }
     }
 
     if {$cfg(preDeleteOldFaces)} {
         if {[::AutoHoleRBE2::deleteComponentByName $cfg(faceCompName)]} {
-            ::AutoHoleRBE2::message "Deleted old temporary free-face component: $cfg(faceCompName)"
+            ::AutoHoleRBE2::message [::HWFlow::txt "已删除旧的自由面临时组件：$cfg(faceCompName)" "Deleted old temporary free-face component: $cfg(faceCompName)"]
         }
     }
 
-    ::AutoHoleRBE2::message "Generating free faces..."
+    ::AutoHoleRBE2::message [::HWFlow::txt "正在生成自由面..." "Generating free faces..."]
     ::AutoHoleRBE2::clearMarks
     eval *createmark comps 1 $comps
     *findfaces components 1
@@ -1110,10 +1110,10 @@ proc ::AutoHoleRBE2::runCore {} {
     set stat(freeFaces) [llength $faceElems]
 
     if {$stat(freeFaces) == 0} {
-        error "No free faces were generated. Confirm that selected components contain valid solid mesh."
+        error [::HWFlow::txt "未生成自由面。请确认所选组件包含有效的实体网格。" "No free faces were generated. Confirm that selected components contain valid solid mesh."]
     }
 
-    ::AutoHoleRBE2::message "Analyzing free faces..."
+    ::AutoHoleRBE2::message [::HWFlow::txt "正在分析自由面..." "Analyzing free faces..."]
     array set faceNodes {}
     array set faceNormals {}
     array set edgeFaces {}
@@ -1137,16 +1137,16 @@ proc ::AutoHoleRBE2::runCore {} {
     set stat(validFaces) [llength $validFaces]
 
     if {$stat(validFaces) == 0} {
-        error "Failed to read free faces."
+        error [::HWFlow::txt "自由面读取失败。" "Failed to read free faces."]
     }
 
-    ::AutoHoleRBE2::message "Detecting smooth patches..."
+    ::AutoHoleRBE2::message [::HWFlow::txt "正在识别光顺面片..." "Detecting smooth patches..."]
     set segments [::AutoHoleRBE2::segmentFaces $validFaces faceNodes faceNormals edgeFaces]
     set stat(segments) [llength $segments]
 
     ::AutoHoleRBE2::ensureComponent $cfg(resultCompName)
 
-    ::AutoHoleRBE2::message "Detecting holes and creating RBE2 elements..."
+    ::AutoHoleRBE2::message [::HWFlow::txt "正在识别孔并创建 RBE2 单元..." "Detecting holes and creating RBE2 elements..."]
     foreach segment $segments {
         set result [::AutoHoleRBE2::evaluateHoleSegment $segment faceNodes faceNormals edgeFaces]
 
@@ -1167,7 +1167,7 @@ proc ::AutoHoleRBE2::runCore {} {
 
     if {$cfg(deleteTempFaces)} {
         if {[::AutoHoleRBE2::deleteComponentByName $cfg(faceCompName)]} {
-            ::AutoHoleRBE2::message "Deleted temporary free-face component: $cfg(faceCompName)"
+            ::AutoHoleRBE2::message [::HWFlow::txt "已删除自由面临时组件：$cfg(faceCompName)" "Deleted temporary free-face component: $cfg(faceCompName)"]
         }
     }
 
@@ -1184,12 +1184,12 @@ proc ::AutoHoleRBE2::run {} {
     variable VERSION
 
     if {![::AutoHoleRBE2::showPanel]} {
-        catch {hm_usermessage "AutoHoleRBE2 cancelled."}
+        catch {hm_usermessage [::HWFlow::txt "实体贯通孔 RBE2 已取消。" "AutoHoleRBE2 cancelled."]}
         return
     }
 
     ::AutoHoleRBE2::initLog
-    ::AutoHoleRBE2::message "AutoHoleRBE2 v$VERSION started."
+    ::AutoHoleRBE2::message [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 开始。" "AutoHoleRBE2 v$VERSION started."]
 
     set failed 0
     set errMsg ""
@@ -1207,22 +1207,22 @@ proc ::AutoHoleRBE2::run {} {
     }
 
     if {!$failed} {
-        set msg "AutoHoleRBE2 v$VERSION finished.\n\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated RBE2: $stat(created)"
+        set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 已完成。\n\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 RBE2：$stat(created)" "AutoHoleRBE2 v$VERSION finished.\n\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated RBE2: $stat(created)"]
 
         if {$cfg(logFile) ne ""} {
-            append msg "\n\nLog: $cfg(logFile)"
+            append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
         }
 
-        ::AutoHoleRBE2::message "Finished: created $stat(created) RBE2 element(s)."
-        catch {tk_messageBox -icon info -title "AutoHoleRBE2 v$VERSION" -message $msg}
+        ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 RBE2 单元。" "Finished: created $stat(created) RBE2 element(s)."]
+        catch {tk_messageBox -icon info -title "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION" -message $msg}
     } else {
-        set msg "AutoHoleRBE2 v$VERSION failed:\n\n$errMsg"
+        set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 执行失败：\n\n$errMsg" "AutoHoleRBE2 v$VERSION failed:\n\n$errMsg"]
 
         if {$cfg(logFile) ne ""} {
-            append msg "\n\nLog: $cfg(logFile)"
+            append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
         }
 
-        catch {tk_messageBox -icon warning -title "AutoHoleRBE2 v$VERSION" -message $msg}
+        catch {tk_messageBox -icon warning -title "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION" -message $msg}
     }
 
     ::AutoHoleRBE2::closeLog

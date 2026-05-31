@@ -192,38 +192,38 @@ proc ::SeamSurf::showPanel {} {
     catch {destroy .seam_surface}
     set w .seam_surface
     toplevel $w
-    wm title $w "Seam Surface Creation v$VERSION"
+    wm title $w "[::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text "Seam Surface Creation" -font {Arial 11 bold}
+    label $w.main.title -text [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -font {Arial 11 bold}
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
-    labelframe $w.main.mode -text "1. Seam Type" -padx 8 -pady 8
+    labelframe $w.main.mode -text [::HWFlow::txt "1. 焊缝类型" "1. Seam Type"] -padx 8 -pady 8
     grid $w.main.mode -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    radiobutton $w.main.mode.ls -text "Line-Surface: project selected line to selected surface" \
+    radiobutton $w.main.mode.ls -text [::HWFlow::txt "线-面：将所选边线投影到目标曲面" "Line-Surface: project selected line to selected surface"] \
         -variable ::SeamSurf::ui(mode) -value LINE_SURFACE
-    radiobutton $w.main.mode.ll -text "Line-Line: bridge two selected boundary lines" \
+    radiobutton $w.main.mode.ll -text [::HWFlow::txt "线-线：桥接两条边界线" "Line-Line: bridge two selected boundary lines"] \
         -variable ::SeamSurf::ui(mode) -value LINE_LINE
     grid $w.main.mode.ls -row 0 -column 0 -sticky w -pady 2
     grid $w.main.mode.ll -row 1 -column 0 -sticky w -pady 2
 
-    labelframe $w.main.param -text "2. Parameters" -padx 8 -pady 8
+    labelframe $w.main.param -text [::HWFlow::txt "2. 参数" "2. Parameters"] -padx 8 -pady 8
     grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     set fields {
-        {max_gap_tol "Max gap tolerance"}
-        {stitch_tolerance "Stitch tolerance"}
-        {line_sync_divisions "Line sync divisions"}
-        {thickness_format "Thickness format"}
+        {max_gap_tol "最大间隙容差" "Max gap tolerance"}
+        {stitch_tolerance "缝合容差" "Stitch tolerance"}
+        {line_sync_divisions "线同步分段数" "Line sync divisions"}
+        {thickness_format "厚度格式" "Thickness format"}
     }
     set r 0
     foreach item $fields {
         set key [lindex $item 0]
-        set text [lindex $item 1]
+        set text [::HWFlow::txt [lindex $item 1] [lindex $item 2]]
         label $w.main.param.l_$key -text $text -anchor w
         entry $w.main.param.e_$key -textvariable ::SeamSurf::ui($key) -width 16
         grid $w.main.param.l_$key -row $r -column 0 -sticky w -padx {0 8} -pady 2
@@ -231,19 +231,19 @@ proc ::SeamSurf::showPanel {} {
         incr r
     }
 
-    label $w.main.param.l_comp -text "Component mode" -anchor w
+    label $w.main.param.l_comp -text [::HWFlow::txt "组件模式" "Component mode"] -anchor w
     tk_optionMenu $w.main.param.m_comp ::SeamSurf::ui(component_mode) by_thickness per_seam
     grid $w.main.param.l_comp -row 0 -column 2 -sticky w -padx {0 8} -pady 2
     grid $w.main.param.m_comp -row 0 -column 3 -sticky w -pady 2
 
-    labelframe $w.main.opt -text "3. Options" -padx 8 -pady 8
+    labelframe $w.main.opt -text [::HWFlow::txt "3. 选项" "3. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    checkbutton $w.main.opt.topo -text "Connect seam topology to adjacent midsurfaces" \
+    checkbutton $w.main.opt.topo -text [::HWFlow::txt "将焊缝面拓扑缝合到相邻中面" "Connect seam topology to adjacent midsurfaces"] \
         -variable ::SeamSurf::ui(topology_connect)
-    checkbutton $w.main.opt.prompt -text "Ask only when automatic seam detection cannot continue" \
+    checkbutton $w.main.opt.prompt -text [::HWFlow::txt "仅在自动焊缝识别无法继续时提示人工选择" "Ask only when automatic seam detection cannot continue"] \
         -variable ::SeamSurf::ui(prompt_candidates)
-    checkbutton $w.main.opt.clean -text "Delete copied construction lines after creating the seam surface" \
+    checkbutton $w.main.opt.clean -text [::HWFlow::txt "创建焊缝面后删除复制的构造线" "Delete copied construction lines after creating the seam surface"] \
         -variable ::SeamSurf::ui(delete_construction_lines)
     grid $w.main.opt.topo -row 0 -column 0 -sticky w -pady 2
     grid $w.main.opt.prompt -row 1 -column 0 -sticky w -pady 2
@@ -254,9 +254,9 @@ proc ::SeamSurf::showPanel {} {
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
-    button $w.btn.back -text "Back to Home" -width 14 -command "::SeamSurf::savePanelState; set ::SeamSurf::ui(ok) 0; ::SeamSurf::backToHome .seam_surface"
-    button $w.btn.save -text "Save Rules" -width 12 -command "::SeamSurf::savePanelState"
-    button $w.btn.start -text "Start" -width 10 -command "::SeamSurf::acceptPanel"
+    button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::SeamSurf::savePanelState; set ::SeamSurf::ui(ok) 0; ::SeamSurf::backToHome .seam_surface"
+    button $w.btn.save -text [::HWFlow::txt "保存规则" "Save Rules"] -width 12 -command "::SeamSurf::savePanelState"
+    button $w.btn.start -text [::HWFlow::txt "开始" "Start"] -width 10 -command "::SeamSurf::acceptPanel"
     pack $w.btn.back -side right -padx 4
     pack $w.btn.start -side right -padx 4
     pack $w.btn.save -side right -padx 4
@@ -274,21 +274,21 @@ proc ::SeamSurf::acceptPanel {} {
 
     foreach key {max_gap_tol stitch_tolerance} {
         if {![string is double -strict $ui($key)] || $ui($key) < 0} {
-            tk_messageBox -icon warning -title "Seam Surface Creation" -message "$key must be a non-negative number."
+            tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "$key 必须为非负数值。" "$key must be a non-negative number."]
             return
         }
     }
     if {![string is integer -strict $ui(line_sync_divisions)] || $ui(line_sync_divisions) < 1} {
-        tk_messageBox -icon warning -title "Seam Surface Creation" -message "line_sync_divisions must be a positive integer."
+        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "line_sync_divisions 必须为正整数。" "line_sync_divisions must be a positive integer."]
         return
     }
     if {$ui(component_mode) ni {by_thickness per_seam}} {
-        tk_messageBox -icon warning -title "Seam Surface Creation" -message "component_mode must be by_thickness or per_seam."
+        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "component_mode 必须为 by_thickness 或 per_seam。" "component_mode must be by_thickness or per_seam."]
         return
     }
     set ui(mode) [::SeamSurf::normalizeMode $ui(mode)]
     if {[string trim $ui(thickness_format)] eq ""} {
-        tk_messageBox -icon warning -title "Seam Surface Creation" -message "thickness_format cannot be empty."
+        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "thickness_format 不能为空。" "thickness_format cannot be empty."]
         return
     }
 
@@ -346,7 +346,7 @@ proc ::SeamSurf::selectOneSurface {prompt} {
     set ids [::SeamSurf::getMarkIds surfs 1]
     catch {*clearmark surfs 1}
     if {[llength $ids] == 0} {
-        error "No surface was selected."
+        error [::HWFlow::txt "未选择曲面。" "No surface was selected."]
     }
     return [lindex $ids 0]
 }
@@ -448,13 +448,13 @@ proc ::SeamSurf::askThickness {label defaultValue reason} {
 
     set w .seam_thickness
     toplevel $w
-    wm title $w "Input Thickness"
+    wm title $w [::HWFlow::txt "输入厚度" "Input Thickness"]
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
     message $w.main.msg -width 420 -text "$label\n$reason"
-    label $w.main.lab -text "Thickness"
+    label $w.main.lab -text [::HWFlow::txt "厚度" "Thickness"]
     entry $w.main.entry -textvariable ::SeamSurf::ui(promptValue) -width 18
     grid $w.main.msg -row 0 -column 0 -columnspan 2 -sticky ew -pady {0 8}
     grid $w.main.lab -row 1 -column 0 -sticky w -padx {0 8}
@@ -462,8 +462,8 @@ proc ::SeamSurf::askThickness {label defaultValue reason} {
 
     frame $w.btn -padx 12 -pady 8
     pack $w.btn -fill x
-    button $w.btn.cancel -text "Cancel" -width 10 -command "set ::SeamSurf::ui(promptOk) -1; destroy .seam_thickness"
-    button $w.btn.ok -text "OK" -width 10 -command "::SeamSurf::acceptThicknessPrompt"
+    button $w.btn.cancel -text [::HWFlow::txt "取消" "Cancel"] -width 10 -command "set ::SeamSurf::ui(promptOk) -1; destroy .seam_thickness"
+    button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command "::SeamSurf::acceptThicknessPrompt"
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
 
@@ -472,7 +472,7 @@ proc ::SeamSurf::askThickness {label defaultValue reason} {
     ::SeamSurf::centerWindow $w
     tkwait window $w
     if {$ui(promptOk) < 0} {
-        error "Thickness input was cancelled."
+        error [::HWFlow::txt "厚度输入已取消。" "Thickness input was cancelled."]
     }
     return $ui(promptValue)
 }
@@ -481,7 +481,7 @@ proc ::SeamSurf::acceptThicknessPrompt {} {
     variable ui
     set v [string trim $ui(promptValue)]
     if {![string is double -strict $v] || $v <= 0} {
-        tk_messageBox -icon warning -title "Input Thickness" -message "Thickness must be a number greater than 0."
+        tk_messageBox -icon warning -title [::HWFlow::txt "输入厚度" "Input Thickness"] -message [::HWFlow::txt "厚度必须为大于 0 的数值。" "Thickness must be a number greater than 0."]
         return
     }
     set ui(promptValue) $v
@@ -546,7 +546,7 @@ proc ::SeamSurf::thicknessFromSurface {surfId} {
     if {$t ne ""} {
         return $t
     }
-    return [::SeamSurf::askThickness "Surface $surfId" "" "Cannot read a _T thickness token from component \"$compName\"."]
+    return [::SeamSurf::askThickness [::HWFlow::txt "曲面 $surfId" "Surface $surfId"] "" [::HWFlow::txt "无法从组件 \"$compName\" 中读取 _T 厚度标识。" "Cannot read a _T thickness token from component \"$compName\"."]]
 }
 
 proc ::SeamSurf::lineOwnerSurfaces {lineId} {
@@ -596,8 +596,8 @@ proc ::SeamSurf::chooseFromList {title items labels} {
 
     frame $w.btn -padx 12 -pady 8
     pack $w.btn -fill x
-    button $w.btn.cancel -text "Cancel" -width 10 -command "set ::SeamSurf::ui(pickOk) -1; destroy .seam_pick"
-    button $w.btn.ok -text "OK" -width 10 -command "::SeamSurf::acceptListPick $w.main.list [list $items]"
+    button $w.btn.cancel -text [::HWFlow::txt "取消" "Cancel"] -width 10 -command "set ::SeamSurf::ui(pickOk) -1; destroy .seam_pick"
+    button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command "::SeamSurf::acceptListPick $w.main.list [list $items]"
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
 
@@ -607,7 +607,7 @@ proc ::SeamSurf::chooseFromList {title items labels} {
     ::SeamSurf::centerWindow $w
     tkwait window $w
     if {$ui(pickOk) < 0} {
-        error "$title was cancelled."
+        error [::HWFlow::txt "$title 已取消。" "$title was cancelled."]
     }
     return $ui(pickValue)
 }
@@ -616,7 +616,7 @@ proc ::SeamSurf::acceptListPick {listWidget items} {
     variable ui
     set sel [$listWidget curselection]
     if {[llength $sel] == 0} {
-        tk_messageBox -icon warning -title "Select Item" -message "Select one item."
+        tk_messageBox -icon warning -title [::HWFlow::txt "选择项目" "Select Item"] -message [::HWFlow::txt "请选择一个项目。" "Select one item."]
         return
     }
     set idx [lindex $sel 0]
@@ -651,8 +651,8 @@ proc ::SeamSurf::resolveLineOwnerSurface {lineId label {avoidSurf ""}} {
         return [lindex $surfs 0]
     }
 
-    tk_messageBox -icon info -title "Seam Surface Creation" -message "$label line $lineId has no readable owner surface. Select the owner midsurface now."
-    return [::SeamSurf::selectOneSurface "Select owner midsurface for $label line $lineId"]
+    tk_messageBox -icon info -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "$label 线 $lineId 没有可读取的所属曲面。请手动选择所属中面。" "$label line $lineId has no readable owner surface. Select the owner midsurface now."]
+    return [::SeamSurf::selectOneSurface [::HWFlow::txt "选择 $label 线 $lineId 的所属中面" "Select owner midsurface for $label line $lineId"]]
 }
 
 proc ::SeamSurf::surfaceEdges {surfId} {
@@ -752,7 +752,7 @@ proc ::SeamSurf::linePointAtParam {lineId param} {
         return $out
     }
 
-    error "Cannot read coordinates on line/edge $lineId."
+    error [::HWFlow::txt "无法读取线/边 $lineId 上的坐标。" "Cannot read coordinates on line/edge $lineId."]
 }
 
 proc ::SeamSurf::lineEndPoints {lineId} {
@@ -765,7 +765,7 @@ proc ::SeamSurf::lineEndPoints {lineId} {
     if {$ep ne ""} {
         return $ep
     }
-    error "Cannot read endpoints for line/edge $lineId."
+    error [::HWFlow::txt "无法读取线/边 $lineId 的端点。" "Cannot read endpoints for line/edge $lineId."]
 }
 
 proc ::SeamSurf::isClosedLine {lineId} {
@@ -831,7 +831,7 @@ proc ::SeamSurf::surfaceClosestPoint {surfId point} {
         return [list $closest [::SeamSurf::dist3 $point $closest]]
     }
 
-    error "Cannot find closest point on surface $surfId."
+    error [::HWFlow::txt "无法在曲面 $surfId 上找到最近点。" "Cannot find closest point on surface $surfId."]
 }
 
 proc ::SeamSurf::runAverageDistance {samples} {
@@ -859,7 +859,7 @@ proc ::SeamSurf::chooseBestPairedRun {samples label} {
     variable cfg
 
     if {[llength $samples] < 2} {
-        error "Cannot sample enough paired points for $label."
+        error [::HWFlow::txt "$label 无法采样到足够的成对点。" "Cannot sample enough paired points for $label."]
     }
 
     set run {}
@@ -884,7 +884,7 @@ proc ::SeamSurf::chooseBestPairedRun {samples label} {
     }
 
     if {$cfg(max_gap_tol) > 0 && [llength $bestRun] < 2} {
-        error "No continuous paired span is within max_gap_tol=$cfg(max_gap_tol) for $label. Nearest sampled distance=[format %.6g $minDist]."
+        error [::HWFlow::txt "$label 在 max_gap_tol=$cfg(max_gap_tol) 内没有连续成对跨度。最近采样距离=[format %.6g $minDist]。" "No continuous paired span is within max_gap_tol=$cfg(max_gap_tol) for $label. Nearest sampled distance=[format %.6g $minDist]."]
     }
     if {[llength $bestRun] < 2} {
         set bestRun $samples
@@ -896,7 +896,7 @@ proc ::SeamSurf::chooseBestCircularPairedRun {samples label} {
     variable cfg
 
     if {[llength $samples] < 2} {
-        error "Cannot sample enough paired points for $label."
+        error [::HWFlow::txt "$label 无法采样到足够的成对点。" "Cannot sample enough paired points for $label."]
     }
 
     if {$cfg(max_gap_tol) <= 0} {
@@ -944,7 +944,7 @@ proc ::SeamSurf::chooseBestCircularPairedRun {samples label} {
     }
 
     if {[llength $bestRun] < 2} {
-        error "No continuous paired span is within max_gap_tol=$cfg(max_gap_tol) for $label. Nearest sampled distance=[format %.6g $minDist]."
+        error [::HWFlow::txt "$label 在 max_gap_tol=$cfg(max_gap_tol) 内没有连续成对跨度。最近采样距离=[format %.6g $minDist]。" "No continuous paired span is within max_gap_tol=$cfg(max_gap_tol) for $label. Nearest sampled distance=[format %.6g $minDist]."]
     }
     return $bestRun
 }
@@ -992,7 +992,7 @@ proc ::SeamSurf::pairedRunCoords {samples label} {
     }
 
     if {[llength $cleanSource] < 2 || [llength $cleanTarget] < 2} {
-        error "Paired points collapsed while building $label."
+        error [::HWFlow::txt "构建 $label 时成对点退化。" "Paired points collapsed while building $label."]
     }
     return [list $cleanSource $cleanTarget]
 }
@@ -1102,7 +1102,7 @@ proc ::SeamSurf::linePairStats {sourceLine targetLine} {
     set samples [::SeamSurf::lineSampleCoords $sourceLine]
     set total [llength $samples]
     if {$total < 2} {
-        error "Cannot sample source edge $sourceLine."
+        error [::HWFlow::txt "无法采样源边 $sourceLine。" "Cannot sample source edge $sourceLine."]
     }
 
     set run {}
@@ -1246,10 +1246,10 @@ proc ::SeamSurf::chooseNearestTargetSurfaceEdge {sourceLine targetSurf} {
     }
 
     if {$bestLine eq ""} {
-        error "No readable target surface edge was found on surface $targetSurf."
+        error [::HWFlow::txt "曲面 $targetSurf 上未找到可读取的目标边。" "No readable target surface edge was found on surface $targetSurf."]
     }
     if {[::SeamSurf::gapExceeded $bestDist $cfg(max_gap_tol)]} {
-        error "Nearest target surface edge is [format %.6g $bestDist] away from the source edge, greater than max_gap_tol=$cfg(max_gap_tol)."
+        error [::HWFlow::txt "最近目标边与源边距离为 [format %.6g $bestDist]，大于 max_gap_tol=$cfg(max_gap_tol)。" "Nearest target surface edge is [format %.6g $bestDist] away from the source edge, greater than max_gap_tol=$cfg(max_gap_tol)."]
     }
     return [list $bestLine $bestDist]
 }
@@ -1258,10 +1258,10 @@ proc ::SeamSurf::chooseTFreeEdgePair {sourceSurf targetSurf} {
     set sourceEdges [::SeamSurf::freeSurfaceEdges $sourceSurf]
     set targetEdges [::SeamSurf::freeSurfaceEdges $targetSurf]
     if {[llength $sourceEdges] == 0} {
-        error "No free edge was found on source surface $sourceSurf."
+        error [::HWFlow::txt "源曲面 $sourceSurf 上未找到自由边。" "No free edge was found on source surface $sourceSurf."]
     }
     if {[llength $targetEdges] == 0} {
-        error "No free edge was found on target surface $targetSurf."
+        error [::HWFlow::txt "目标曲面 $targetSurf 上未找到自由边。" "No free edge was found on target surface $targetSurf."]
     }
 
     set bestSource ""
@@ -1287,7 +1287,7 @@ proc ::SeamSurf::chooseTFreeEdgePair {sourceSurf targetSurf} {
     }
 
     if {$bestSource eq "" || $bestTarget eq ""} {
-        error "No stable free-edge pair was found between source surface $sourceSurf and target surface $targetSurf."
+        error [::HWFlow::txt "源曲面 $sourceSurf 与目标曲面 $targetSurf 之间未找到稳定的自由边配对。" "No stable free-edge pair was found between source surface $sourceSurf and target surface $targetSurf."]
     }
     return [list $bestSource $bestTarget $sourceSurf $targetSurf $bestStats]
 }
@@ -1318,13 +1318,13 @@ proc ::SeamSurf::chooseTProjectionPair {sourceSurf targetSurf} {
         }
     }
     if {[llength $candidates] == 0} {
-        error "No readable free-edge candidate was found on the first selected T seam surface."
+        error [::HWFlow::txt "第一个已选 T 型焊缝面上未找到可读取的自由边候选。" "No readable free-edge candidate was found on the first selected T seam surface."]
     }
 
     set best [lindex [lsort -real -index 0 $candidates] 0]
     set d [lindex $best 0]
     if {[::SeamSurf::gapExceeded $d $cfg(max_gap_tol)]} {
-        error "Nearest source free edge is [format %.6g $d] away from the second selected surface, greater than max_gap_tol=$cfg(max_gap_tol)."
+        error [::HWFlow::txt "最近源自由边与第二个已选曲面的距离为 [format %.6g $d]，大于 max_gap_tol=$cfg(max_gap_tol)。" "Nearest source free edge is [format %.6g $d] away from the second selected surface, greater than max_gap_tol=$cfg(max_gap_tol)."]
     }
     return $best
 }
@@ -1363,7 +1363,7 @@ proc ::SeamSurf::createTempNodeAtCoord {point} {
     if {[llength $nodes] > 0} {
         return [lindex $nodes end]
     }
-    error "Temporary node was not created."
+    error [::HWFlow::txt "临时节点未创建。" "Temporary node was not created."]
 }
 
 proc ::SeamSurf::deleteTempNodes {nodeIds} {
@@ -1388,7 +1388,7 @@ proc ::SeamSurf::captureCreatedLine {before} {
         set created [::SeamSurf::getLastCreated {lines line}]
     }
     if {[llength $created] == 0} {
-        error "Construction line was not created."
+        error [::HWFlow::txt "构造线未创建。" "Construction line was not created."]
     }
     return [lindex $created end]
 }
@@ -1396,7 +1396,7 @@ proc ::SeamSurf::captureCreatedLine {before} {
 proc ::SeamSurf::createLineFromCoords {coords} {
     set coords [::SeamSurf::cleanCoordList $coords]
     if {[llength $coords] < 2} {
-        error "Cannot create a construction line with fewer than two distinct points."
+        error [::HWFlow::txt "少于两个不同点，无法创建构造线。" "Cannot create a construction line with fewer than two distinct points."]
     }
 
     set before [::SeamSurf::latestId {lines line}]
@@ -1425,13 +1425,13 @@ proc ::SeamSurf::createLineFromCoords {coords} {
         return [::SeamSurf::captureCreatedLine $before]
     }
 
-    error "Construction line was not created. linecreatefromnodes=$errNodes; linecreatestraight=$errStraight"
+    error [::HWFlow::txt "构造线未创建。linecreatefromnodes=$errNodes；linecreatestraight=$errStraight" "Construction line was not created. linecreatefromnodes=$errNodes; linecreatestraight=$errStraight"]
 }
 
 proc ::SeamSurf::createLineOnSurfaceFromCoords {targetSurf coords} {
     set coords [::SeamSurf::cleanCoordList $coords]
     if {[llength $coords] < 2} {
-        error "Cannot create a target line with fewer than two distinct projected points."
+        error [::HWFlow::txt "少于两个不同投影点，无法创建目标线。" "Cannot create a target line with fewer than two distinct projected points."]
     }
 
     set before [::SeamSurf::latestId {lines line}]
@@ -1460,7 +1460,7 @@ proc ::SeamSurf::createLineOnSurfaceFromCoords {targetSurf coords} {
     if {![catch {set freeLine [::SeamSurf::createLineFromCoords $coords]} errFree]} {
         return $freeLine
     }
-    error "Projected target line was not created on surface $targetSurf. linecreatefromnodesonsurface=$errSurface; free line fallback=$errFree"
+    error [::HWFlow::txt "未能在曲面 $targetSurf 上创建投影目标线。linecreatefromnodesonsurface=$errSurface；自由线回退=$errFree" "Projected target line was not created on surface $targetSurf. linecreatefromnodesonsurface=$errSurface; free line fallback=$errFree"]
 }
 
 proc ::SeamSurf::syncedConstructionLines {lineA lineB} {
@@ -1514,7 +1514,7 @@ proc ::SeamSurf::setCurrentComponent {compName} {
     if {[catch {*currentcollector component $compName} err1]} {
         if {[catch {*currentcollector components $compName} err2]} {
             if {[catch {*currentcollector(component,$compName)} err3]} {
-                error "Cannot set current component to $compName: $err1 / $err2 / $err3"
+                error [::HWFlow::txt "无法将当前组件设置为 $compName：$err1 / $err2 / $err3" "Cannot set current component to $compName: $err1 / $err2 / $err3"]
             }
         }
     }
@@ -1613,7 +1613,7 @@ proc ::SeamSurf::ensureSeamComponent {thickness} {
     if {$createCode} {
         if {[catch {*createentity comps name=$compName} err2]} {
             catch {*endnotehistorystate $histName}
-            error "Cannot create seam component $compName: $err1 / $err2"
+            error [::HWFlow::txt "无法创建焊缝组件 $compName：$err1 / $err2" "Cannot create seam component $compName: $err1 / $err2"]
         }
     }
     catch {*endnotehistorystate $histName}
@@ -1674,10 +1674,10 @@ proc ::SeamSurf::splitSurfaceWithLine {targetSurf lineId} {
     catch {*clearmark surfs 1}
     catch {*clearmark lines 2}
     if {[catch {*createmark surfs 1 $targetSurf} errSurf]} {
-        error "Cannot mark target surface $targetSurf: $errSurf"
+        error [::HWFlow::txt "无法标记目标曲面 $targetSurf：$errSurf" "Cannot mark target surface $targetSurf: $errSurf"]
     }
     if {[catch {*createmark lines 2 $lineId} errLine]} {
-        error "Cannot mark projection line $lineId: $errLine"
+        error [::HWFlow::txt "无法标记投影线 $lineId：$errLine" "Cannot mark projection line $lineId: $errLine"]
     }
     *createvector 1 0.0 0.0 1.0
 
@@ -1710,7 +1710,7 @@ proc ::SeamSurf::projectLineToSurface {sourceLine targetSurf} {
         set targetSurfs [::SeamSurf::uniq [concat $targetSurfs $newSurfs]]
         set targetLines [::SeamSurf::uniq [concat $targetLines $newLines]]
     } else {
-        ::SeamSurf::msg "Line-Surface topology split warning: $splitErr. Seam will still be created from the explicit projection line."
+        ::SeamSurf::msg [::HWFlow::txt "线-面拓扑分割警告：$splitErr。将继续基于显式投影线创建焊缝面。" "Line-Surface topology split warning: $splitErr. Seam will still be created from the explicit projection line."]
     }
 
     return [list $targetLine $targetSurfs $targetLines {}]
@@ -1726,7 +1726,7 @@ proc ::SeamSurf::createRuledSurfaceBetweenLines {lineA lineB} {
     if {[catch {*surfacecreateruled 1 1 0 2 1 0 0} err1]} {
         set err2 ""
         if {[catch {*surfaceskin 1 1} err2]} {
-            error "Could not create seam surface between lines $lineA and $lineB. ruled=$err1; skin=$err2"
+            error [::HWFlow::txt "无法在线 $lineA 与线 $lineB 之间创建焊缝面。ruled=$err1；skin=$err2" "Could not create seam surface between lines $lineA and $lineB. ruled=$err1; skin=$err2"]
         }
     }
 
@@ -1739,7 +1739,7 @@ proc ::SeamSurf::createRuledSurfaceBetweenLines {lineA lineB} {
         set newSurfs [::SeamSurf::getLastCreated {surfs surfaces}]
     }
     if {[llength $newSurfs] == 0} {
-        error "Seam surface command finished but the new surface ID could not be captured."
+        error [::HWFlow::txt "焊缝面命令已结束，但未能捕获新曲面 ID。" "Seam surface command finished but the new surface ID could not be captured."]
     }
     return [lindex $newSurfs end]
 }
@@ -1773,7 +1773,7 @@ proc ::SeamSurf::stitchSeamSurface {seamSurfs neighborSurfs} {
     catch {*clearmark surfs 1}
     if {[catch {eval *createmark surfs 1 $ids} errMark]} {
         catch {*clearmark surfs 1}
-        ::SeamSurf::msg "Seam stitch warning: could not mark surfaces: $errMark"
+        ::SeamSurf::msg [::HWFlow::txt "焊缝面缝合警告：无法标记曲面：$errMark" "Seam stitch warning: could not mark surfaces: $errMark"]
         return 0
     }
     set ok 1
@@ -1785,7 +1785,7 @@ proc ::SeamSurf::stitchSeamSurface {seamSurfs neighborSurfs} {
         }
     }
     if {!$stitched} {
-        ::SeamSurf::msg "Seam stitch warning: $errStitch"
+        ::SeamSurf::msg [::HWFlow::txt "焊缝面缝合警告：$errStitch" "Seam stitch warning: $errStitch"]
         set ok 0
     }
     catch {*clearmark surfs 1}
@@ -1823,7 +1823,7 @@ proc ::SeamSurf::createSeam {sourceLine targetLine sourceSurfs targetSurfs thick
     if {$stitchOk} {
         incr stat(stitched)
     }
-    lappend stat(details) "Surface $seamSurf -> $compName"
+    lappend stat(details) [::HWFlow::txt "曲面 $seamSurf -> $compName" "Surface $seamSurf -> $compName"]
     return [list $seamSurf $compName $sourceCopy $targetCopy]
 }
 
@@ -1840,10 +1840,10 @@ proc ::SeamSurf::createSeamFromPairedCoords {sourceCoords targetCoords sourceSur
         if {![catch {set splitInfo [::SeamSurf::splitSurfaceWithLine $targetSurfForLine $targetCopy]} splitErr]} {
             set targetSurfs [::SeamSurf::uniq [concat $targetSurfs [lindex $splitInfo 0]]]
         } else {
-            ::SeamSurf::msg "Line-Surface topology split warning: $splitErr. Seam will still be created only between the recorded source span line and recorded projection line."
+            ::SeamSurf::msg [::HWFlow::txt "线-面拓扑分割警告：$splitErr。将仅在已记录的源跨度线与投影线之间创建焊缝面。" "Line-Surface topology split warning: $splitErr. Seam will still be created only between the recorded source span line and recorded projection line."]
         }
     }
-    ::SeamSurf::msg "Line-Surface recorded lines: source span line $sourceCopy -> projection line $targetCopy."
+    ::SeamSurf::msg [::HWFlow::txt "线-面记录线：源跨度线 $sourceCopy -> 投影线 $targetCopy。" "Line-Surface recorded lines: source span line $sourceCopy -> projection line $targetCopy."]
 
     set seamSurf [::SeamSurf::createRuledSurfaceBetweenLines $sourceCopy $targetCopy]
     set stitchOk [::SeamSurf::stitchSeamSurface [list $seamSurf] [concat $sourceSurfs $targetSurfs]]
@@ -1854,15 +1854,15 @@ proc ::SeamSurf::createSeamFromPairedCoords {sourceCoords targetCoords sourceSur
     if {$stitchOk} {
         incr stat(stitched)
     }
-    lappend stat(details) "Surface $seamSurf -> $compName"
+    lappend stat(details) [::HWFlow::txt "曲面 $seamSurf -> $compName" "Surface $seamSurf -> $compName"]
     return [list $seamSurf $compName $sourceCopy $targetCopy]
 }
 
 proc ::SeamSurf::processTSurface {} {
-    set sourceSurf [::SeamSurf::selectOneSurface "Select source midsurface for T seam: its free edge will pair with the second surface edge"]
-    set targetSurf [::SeamSurf::selectOneSurface "Select target midsurface for T seam: its nearest free edge will be paired"]
+    set sourceSurf [::SeamSurf::selectOneSurface [::HWFlow::txt "选择 T 型焊缝源中面：其自由边将与第二个面的边界配对" "Select source midsurface for T seam: its free edge will pair with the second surface edge"]]
+    set targetSurf [::SeamSurf::selectOneSurface [::HWFlow::txt "选择 T 型焊缝目标中面：将匹配其最近自由边" "Select target midsurface for T seam: its nearest free edge will be paired"]]
     if {$sourceSurf == $targetSurf} {
-        error "Source and target surfaces must be different."
+        error [::HWFlow::txt "源曲面和目标曲面必须不同。" "Source and target surfaces must be different."]
     }
 
     set t1 [::SeamSurf::thicknessFromSurface $sourceSurf]
@@ -1874,11 +1874,11 @@ proc ::SeamSurf::processTSurface {} {
         set sourceEdge [lindex $edgePair 0]
         set targetLine [lindex $edgePair 1]
         set stats [lindex $edgePair 4]
-        ::SeamSurf::msg "T seam free-edge pair: source edge $sourceEdge -> target edge $targetLine, coverage=[format %.2f [dict get $stats coverage]], avg gap=[format %.6g [dict get $stats avgDist]]."
+        ::SeamSurf::msg [::HWFlow::txt "T 型焊缝自由边配对：源边 $sourceEdge -> 目标边 $targetLine，覆盖率=[format %.2f [dict get $stats coverage]]，平均间隙=[format %.6g [dict get $stats avgDist]]。" "T seam free-edge pair: source edge $sourceEdge -> target edge $targetLine, coverage=[format %.2f [dict get $stats coverage]], avg gap=[format %.6g [dict get $stats avgDist]]."]
         return [::SeamSurf::createSeam $sourceEdge $targetLine [list $sourceSurf] [list $targetSurf] $thickness]
     }
 
-    ::SeamSurf::msg "T seam free-edge pair warning: $edgePairErr. Using projection fallback."
+    ::SeamSurf::msg [::HWFlow::txt "T 型焊缝自由边配对警告：$edgePairErr。将使用投影回退方案。" "T seam free-edge pair warning: $edgePairErr. Using projection fallback."]
     set pair [::SeamSurf::chooseTProjectionPair $sourceSurf $targetSurf]
     set sourceEdge [lindex $pair 1]
 
@@ -1890,15 +1890,15 @@ proc ::SeamSurf::processTSurface {} {
 }
 
 proc ::SeamSurf::processLineLine {} {
-    set lines [::SeamSurf::selectLines "Select two boundary lines for Line-Line seam"]
+    set lines [::SeamSurf::selectLines [::HWFlow::txt "选择两条用于线-线焊缝的边界线" "Select two boundary lines for Line-Line seam"]]
     if {[llength $lines] != 2} {
-        error "Line-Line seam requires exactly two boundary lines. Selected [llength $lines]."
+        error [::HWFlow::txt "线-线焊缝需要且仅需要两条边界线。当前已选择 [llength $lines] 条。" "Line-Line seam requires exactly two boundary lines. Selected [llength $lines]."]
     }
     set lineA [lindex $lines 0]
     set lineB [lindex $lines 1]
 
-    set surfA [::SeamSurf::resolveLineOwnerSurface $lineA "First"]
-    set surfB [::SeamSurf::resolveLineOwnerSurface $lineB "Second"]
+    set surfA [::SeamSurf::resolveLineOwnerSurface $lineA [::HWFlow::txt "第一条" "First"]]
+    set surfB [::SeamSurf::resolveLineOwnerSurface $lineB [::HWFlow::txt "第二条" "Second"]]
     set t1 [::SeamSurf::thicknessFromSurface $surfA]
     set t2 [::SeamSurf::thicknessFromSurface $surfB]
     set thickness [::SeamSurf::minThickness $t1 $t2]
@@ -1907,15 +1907,15 @@ proc ::SeamSurf::processLineLine {} {
 }
 
 proc ::SeamSurf::processLineSurface {} {
-    set lines [::SeamSurf::selectLines "Select source line for Line-Surface seam"]
+    set lines [::SeamSurf::selectLines [::HWFlow::txt "选择线-面焊缝的源边线" "Select source line for Line-Surface seam"]]
     if {[llength $lines] != 1} {
-        error "Line-Surface seam requires exactly one source line. Selected [llength $lines]."
+        error [::HWFlow::txt "线-面焊缝需要且仅需要一条源边线。当前已选择 [llength $lines] 条。" "Line-Surface seam requires exactly one source line. Selected [llength $lines]."]
     }
     set sourceLine [lindex $lines 0]
-    set targetSurf [::SeamSurf::selectOneSurface "Select target midsurface for Line-Surface seam"]
-    set sourceSurf [::SeamSurf::resolveLineOwnerSurface $sourceLine "Source" $targetSurf]
+    set targetSurf [::SeamSurf::selectOneSurface [::HWFlow::txt "选择线-面焊缝的目标中面" "Select target midsurface for Line-Surface seam"]]
+    set sourceSurf [::SeamSurf::resolveLineOwnerSurface $sourceLine [::HWFlow::txt "源" "Source"] $targetSurf]
     if {$sourceSurf == $targetSurf} {
-        error "Source and target surfaces must be different."
+        error [::HWFlow::txt "源曲面和目标曲面必须不同。" "Source and target surfaces must be different."]
     }
 
     set t1 [::SeamSurf::thicknessFromSurface $sourceSurf]
@@ -1943,7 +1943,7 @@ proc ::SeamSurf::run {} {
     variable stat
 
     if {![::SeamSurf::showPanel]} {
-        catch {hm_usermessage "Seam Surface Creation cancelled."}
+        catch {hm_usermessage [::HWFlow::txt "焊缝面创建已取消。" "Seam Surface Creation cancelled."]}
         return
     }
 
@@ -1955,7 +1955,7 @@ proc ::SeamSurf::run {} {
         details {}
     }
 
-    ::SeamSurf::msg "Seam Surface Creation v$::SeamSurf::VERSION started."
+    ::SeamSurf::msg [::HWFlow::txt "焊缝面创建 v$::SeamSurf::VERSION 开始。" "Seam Surface Creation v$::SeamSurf::VERSION started."]
     set ui(mode) [::SeamSurf::normalizeMode $ui(mode)]
     set err ""
     set code [catch {
@@ -1967,7 +1967,7 @@ proc ::SeamSurf::run {} {
                 ::SeamSurf::processLineLine
             }
             default {
-                error "Unsupported seam mode: $ui(mode)"
+                error [::HWFlow::txt "不支持的焊缝模式：$ui(mode)" "Unsupported seam mode: $ui(mode)"]
             }
         }
     } err]
@@ -1975,16 +1975,16 @@ proc ::SeamSurf::run {} {
     ::HWFlow::refreshBrowser
     if {$code} {
         incr stat(failed)
-        set msg "Seam Surface Creation failed:\n$err"
-        catch {tk_messageBox -icon error -title "Seam Surface Creation" -message $msg}
+        set msg [::HWFlow::txt "焊缝面创建失败：\n$err" "Seam Surface Creation failed:\n$err"]
+        catch {tk_messageBox -icon error -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message $msg}
         ::SeamSurf::msg $msg
         return
     }
 
-    set msg "Seam Surface Creation finished.\n\nCreated seam surfaces: $stat(created)\nTopology stitched: $stat(stitched)"
+    set msg [::HWFlow::txt "焊缝面创建已完成。\n\n已创建焊缝面：$stat(created)\n已完成拓扑缝合：$stat(stitched)" "Seam Surface Creation finished.\n\nCreated seam surfaces: $stat(created)\nTopology stitched: $stat(stitched)"]
     if {[llength $stat(details)] > 0} {
         append msg "\n\n[join $stat(details) \n]"
     }
-    catch {tk_messageBox -icon info -title "Seam Surface Creation" -message $msg}
+    catch {tk_messageBox -icon info -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message $msg}
     ::SeamSurf::msg $msg
 }
