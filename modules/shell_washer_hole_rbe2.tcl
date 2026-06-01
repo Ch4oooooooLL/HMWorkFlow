@@ -426,6 +426,10 @@ proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex lo
     set statusLastTime $now
     set pctText [format %.1f $overallPct]
     set msg [::HWFlow::txt "RB2W 总进度 ${pctText}% | 组件 $compIndex/$compTotal：$compName | 环线 $loopIndex/$loopTotal | 已创建=$created 已跳过=$skipped 候选=$candidateHoles" "RB2W overall ${pctText}% | comp $compIndex/$compTotal: $compName | loop $loopIndex/$loopTotal | created=$created skipped=$skipped candidates=$candidateHoles"]
+    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        set title [::HWFlow::txt "壳单元垫圈孔 RBE2 正在执行" "Shell Washer-Hole RBE2 running"]
+        catch {::HWFlow::progressUpdate $overallPct $title $msg $force}
+    }
     RB2W::status $msg $force
 }
 
@@ -1597,6 +1601,13 @@ proc ::RB2W::main {} {
     set totalCreated 0; set totalSkipped 0; set totalCandidates 0; set totalOrganized 0
     set safetySkipped 0
     set safetyMessages {}
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "壳单元垫圈孔 RBE2" "Shell Washer-Hole RBE2"] \
+            [::HWFlow::txt "准备处理所选组件..." "Preparing selected components..."] \
+            0]
+    }
 
     RB2W::beginPerformanceMode
     RB2W::resetOverallProgress
@@ -1631,6 +1642,9 @@ proc ::RB2W::main {} {
     if {$procCode} {
         set runMs [expr {[clock milliseconds] - $runStart}]
         RB2W::log [::HWFlow::txt "执行 ${runMs}ms 后发生错误：$procErr" "ERROR after ${runMs}ms: $procErr"]
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "执行中止。" "Run stopped."] 100.0}
+        }
         tk_messageBox -icon error -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "脚本因错误中止：\n$procErr" "Script stopped because of an error:\n$procErr"]
         return -options $procOpts $procErr
     }
@@ -1649,6 +1663,9 @@ proc ::RB2W::main {} {
     RB2W::status [::HWFlow::txt "RB2W 总进度 100.0% | 已完成 | 组件数=[llength $comps] | 已创建=$totalCreated 安全跳过=$safetySkipped 已跳过=$totalSkipped 候选=$totalCandidates" "RB2W overall 100.0% | finished | components=[llength $comps] | created=$totalCreated safetySkipped=$safetySkipped skipped=$totalSkipped candidates=$totalCandidates"] 1
     RB2W::log [::HWFlow::txt "==== 完成：组件数=[llength $comps]，安全跳过=$safetySkipped，候选=$totalCandidates，已创建=$totalCreated，已归集=$totalOrganized，已跳过=$totalSkipped，运行时间=${runMs}ms ====" "==== Finished: components=[llength $comps], safetySkipped=$safetySkipped, candidates=$totalCandidates, created=$totalCreated, organized=$totalOrganized, skipped=$totalSkipped, runtime=${runMs}ms ===="]
     RB2W::saveState
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "RB2W 总进度 100.0% | 已完成" "RB2W overall 100.0% | finished"] 100.0}
+    }
     tk_messageBox -icon info -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message $msg
 }
 

@@ -184,6 +184,7 @@ proc ::HWToolkit::clearExistingWindows {} {
 
     foreach w {
         .hwtoolkit
+        .hwflow_progress
         .comp_category
         .material_assign
         .material_editor

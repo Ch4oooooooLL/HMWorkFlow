@@ -17,6 +17,10 @@ namespace eval ::HWFlow {
     variable LANGUAGE_LOADED 0
     variable materialRows {}
     variable materialKeys {}
+    variable progressWin ".hwflow_progress"
+    variable progressMessage ""
+    variable progressDetail ""
+    variable progressCancelRequested 0
 }
 
 proc ::HWFlow::globalConfigFile {} {
@@ -674,6 +678,140 @@ proc ::HWFlow::refreshBrowser {} {
     catch {hm_redraw}
     catch {update idletasks}
     catch {update}
+}
+
+proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
+    variable progressWin
+    variable progressMessage
+    variable progressDetail
+    variable progressCancelRequested
+
+    set progressMessage $message
+    set progressDetail ""
+    set progressCancelRequested 0
+
+    if {[llength [info commands toplevel]] == 0} {
+        return 0
+    }
+
+    set w $progressWin
+    catch {destroy $w}
+    if {[catch {
+        toplevel $w
+        wm title $w $title
+        wm resizable $w 0 0
+
+        frame $w.main -padx 14 -pady 12
+        pack $w.main -fill both -expand 1
+
+        label $w.main.title -text $title -font {Arial 10 bold} -anchor w
+        label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 430 -justify left
+        label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 430 -justify left
+        canvas $w.main.bar -width 430 -height 18 -highlightthickness 1 -highlightbackground #8a8a8a -background white
+        $w.main.bar create rectangle 0 0 0 18 -tags fill -fill #2f74d0 -outline ""
+        $w.main.bar create text 215 9 -tags text -text "0.0%" -fill #222222 -font {Arial 8}
+
+        grid $w.main.title -row 0 -column 0 -sticky ew -pady {0 6}
+        grid $w.main.msg -row 1 -column 0 -sticky ew
+        grid $w.main.detail -row 2 -column 0 -sticky ew -pady {2 8}
+        grid $w.main.bar -row 3 -column 0 -sticky ew
+
+        if {$allowCancel} {
+            frame $w.btn -padx 14 -pady {0 12}
+            pack $w.btn -fill x
+            button $w.btn.cancel -text [::HWFlow::txt "取消" "Cancel"] -width 10 -command ::HWFlow::progressRequestCancel
+            pack $w.btn.cancel -side right
+            wm protocol $w WM_DELETE_WINDOW ::HWFlow::progressRequestCancel
+        } else {
+            wm protocol $w WM_DELETE_WINDOW [list destroy $w]
+        }
+
+        update idletasks
+        set sw [winfo screenwidth $w]
+        set sh [winfo screenheight $w]
+        set ww [winfo reqwidth $w]
+        set wh [winfo reqheight $w]
+        wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
+        catch {raise $w}
+    }]} {
+        catch {destroy $w}
+        return 0
+    }
+
+    ::HWFlow::progressUpdate 0.0 $message "" 1
+    return 1
+}
+
+proc ::HWFlow::progressUpdate {percent {message ""} {detail ""} {force 0}} {
+    variable progressWin
+    variable progressMessage
+    variable progressDetail
+
+    if {$message ne ""} {
+        set progressMessage $message
+    }
+    if {$detail ne ""} {
+        set progressDetail $detail
+    }
+
+    if {![string is double -strict $percent]} {
+        set percent 0.0
+    }
+    if {$percent < 0.0} { set percent 0.0 }
+    if {$percent > 100.0} { set percent 100.0 }
+
+    if {[llength [info commands winfo]] == 0} {
+        return [::HWFlow::progressCancelled]
+    }
+    if {![winfo exists $progressWin]} {
+        return [::HWFlow::progressCancelled]
+    }
+
+    set bar $progressWin.main.bar
+    if {[winfo exists $bar]} {
+        set width [$bar cget -width]
+        set height [$bar cget -height]
+        set fillWidth [expr {int(double($width) * double($percent) / 100.0)}]
+        $bar coords fill 0 0 $fillWidth $height
+        $bar coords text [expr {int(double($width) / 2.0)}] [expr {int(double($height) / 2.0)}]
+        $bar itemconfigure text -text "[format %.1f $percent]%"
+    }
+
+    catch {update idletasks}
+    if {$force} {
+        catch {update}
+    }
+    return [::HWFlow::progressCancelled]
+}
+
+proc ::HWFlow::progressRequestCancel {} {
+    variable progressWin
+    variable progressMessage
+    variable progressCancelRequested
+
+    set progressCancelRequested 1
+    set progressMessage [::HWFlow::txt "正在请求取消，请等待当前步骤结束..." "Cancel requested. Waiting for the current step to finish..."]
+    catch {$progressWin.btn.cancel configure -state disabled}
+    catch {update idletasks}
+}
+
+proc ::HWFlow::progressCancelled {} {
+    variable progressCancelRequested
+    return $progressCancelRequested
+}
+
+proc ::HWFlow::progressClose {{message ""} {percent 100.0}} {
+    variable progressWin
+
+    if {$message ne ""} {
+        catch {::HWFlow::progressUpdate $percent $message "" 1}
+    }
+    if {[llength [info commands winfo]] > 0} {
+        if {[winfo exists $progressWin]} {
+            catch {destroy $progressWin}
+        }
+    }
+    catch {update idletasks}
 }
 
 proc ::HWFlow::backToHome {{window ""}} {
