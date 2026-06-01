@@ -55,6 +55,7 @@ namespace eval ::RB2Bolt {
     }
     variable done 0
     variable _sortAxis 2
+    variable beamSegmentIndex
 }
 
 # ------------------------- small utilities ---------------------------------
@@ -309,27 +310,45 @@ proc ::RB2Bolt::validateParams {} {
 }
 
 # ------------------------- selection and RBE2 parsing -----------------------
+proc ::RB2Bolt::clearSelectionMarks {} {
+    foreach etype {elems elements comps components} {
+        foreach markId {1 2} {
+            catch {*clearmark $etype $markId}
+            catch {hm_markclear $etype $markId}
+        }
+    }
+    catch {hm_redraw}
+    catch {update idletasks}
+}
+
 proc ::RB2Bolt::selectedElementIds {} {
     variable P
     set out {}
-    catch {hm_markclear elems 1}
-    catch {hm_markclear elems 2}
-    catch {hm_markclear comps 1}
+    ::RB2Bolt::clearSelectionMarks
 
     if {$P(selectMode) eq "components"} {
         *createmarkpanel comps 1 [::HWFlow::txt "选择包含 RBE2 单元的组件" "Select components containing RBE2 elements"]
         set comps [hm_getmark comps 1]
-        if {[llength $comps] == 0} {return {}}
+        catch {*clearmark comps 1}
+        catch {*clearmark components 1}
+        if {[llength $comps] == 0} {
+            ::RB2Bolt::clearSelectionMarks
+            return {}
+        }
         foreach cid $comps {
-            catch {hm_markclear elems 2}
+            catch {*clearmark elems 2}
+            catch {*clearmark elements 2}
             if {![catch {*createmark elems 2 "by comp id" $cid}]} {
                 foreach e [hm_getmark elems 2] {lappend out $e}
             }
         }
+        catch {*clearmark elems 2}
+        catch {*clearmark elements 2}
     } else {
         *createmarkpanel elems 1 [::HWFlow::txt "选择 RBE2 单元" "Select RBE2 elements"]
         foreach e [hm_getmark elems 1] {lappend out $e}
     }
+    ::RB2Bolt::clearSelectionMarks
     return [lsort -integer -unique $out]
 }
 
@@ -709,6 +728,98 @@ proc ::RB2Bolt::refreshComponentBrowser {compName} {
     catch {update}
 }
 
+proc ::RB2Bolt::componentIdByName {name} {
+    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
+        return [::HWFlow::componentIdByName $name]
+    }
+    foreach etype {components comps component} {
+        if {![catch {set id [hm_entityinfo id $etype $name -byname]}] && $id ne "" && $id != 0} {
+            return $id
+        }
+    }
+    return ""
+}
+
+proc ::RB2Bolt::getElemsByComp {compId} {
+    if {[llength [info commands ::HWFlow::getCompEntityIds]] > 0} {
+        return [::HWFlow::getCompEntityIds $compId elems elems]
+    }
+    set elems {}
+    catch {*clearmark elems 2}
+    if {![catch {*createmark elems 2 "by comp id" $compId}]} {
+        catch {set elems [hm_getmark elems 2]}
+    }
+    catch {*clearmark elems 2}
+    return [lsort -integer -unique $elems]
+}
+
+proc ::RB2Bolt::beamSegmentKey {n1 n2 elemType propName} {
+    return [::HWFlow::nodePairKey $n1 $n2 "[string toupper $elemType]|$propName"]
+}
+
+proc ::RB2Bolt::elemLooksLike1DConnector {eid elemType} {
+    set target [string toupper $elemType]
+    foreach dn {typename solverkeyword solvername cardimage config} {
+        if {![catch {set v [hm_getvalue elems id=$eid dataname=$dn]}] && $v ne ""} {
+            set u [string toupper "$v"]
+            if {[string first $target $u] >= 0 || [string first "BEAM" $u] >= 0 || [string first "BAR" $u] >= 0} {
+                return 1
+            }
+        }
+    }
+    return 0
+}
+
+proc ::RB2Bolt::indexExistingBeamSegments {compName elemType} {
+    variable P
+    variable beamSegmentIndex
+    set indexKey "$compName|$elemType|$P(propName)"
+    if {[info exists beamSegmentIndex(__indexed,$indexKey)]} {
+        return 0
+    }
+    set beamSegmentIndex(__indexed,$indexKey) 1
+
+    set compId [::RB2Bolt::componentIdByName $compName]
+    if {$compId eq ""} {
+        return 0
+    }
+
+    set count 0
+    foreach eid [::RB2Bolt::getElemsByComp $compId] {
+        if {[catch {set nodes [hm_getvalue elems id=$eid dataname=nodes]}] || [llength $nodes] < 2} {
+            continue
+        }
+        if {![::RB2Bolt::elemLooksLike1DConnector $eid $elemType] && [llength $nodes] != 2} {
+            continue
+        }
+        set key [::RB2Bolt::beamSegmentKey [lindex $nodes 0] [lindex $nodes 1] $elemType $P(propName)]
+        set beamSegmentIndex($key) $eid
+        incr count
+    }
+    return $count
+}
+
+proc ::RB2Bolt::existingBeamSegment {n1 n2 elemType compName} {
+    variable P
+    variable beamSegmentIndex
+    ::RB2Bolt::indexExistingBeamSegments $compName $elemType
+    set key [::RB2Bolt::beamSegmentKey $n1 $n2 $elemType $P(propName)]
+    if {[info exists beamSegmentIndex($key)]} {
+        return [list 1 $beamSegmentIndex($key) $key]
+    }
+    return [list 0 "" $key]
+}
+
+proc ::RB2Bolt::rememberBeamSegment {n1 n2 elemType compName elemId} {
+    variable P
+    variable beamSegmentIndex
+    set key [::RB2Bolt::beamSegmentKey $n1 $n2 $elemType $P(propName)]
+    if {$elemId eq ""} {
+        set elemId created
+    }
+    set beamSegmentIndex($key) $elemId
+}
+
 proc ::RB2Bolt::orientVecForNodes {n1 n2} {
     set a [nodeXYZ $n1]
     set b [nodeXYZ $n2]
@@ -734,6 +845,12 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
     set len [dist3 [lindex $xyz1 0] [lindex $xyz1 1] [lindex $xyz1 2] [lindex $xyz2 0] [lindex $xyz2 1] [lindex $xyz2 2]]
     if {$len <= $P(minBeamLength)} {return 0}
 
+    set existing [::RB2Bolt::existingBeamSegment $n1 $n2 $elemType $compName]
+    if {[lindex $existing 0]} {
+        msg [::HWFlow::txt "$elemType 已存在，跳过节点 $n1-$n2。" "$elemType already exists, skipped nodes $n1-$n2."]
+        return -1
+    }
+
     ensureComponent $compName
 
     # HyperMesh 2019 compatible creation path.
@@ -758,13 +875,29 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
     set lastErr ""
     foreach prop $propCandidates {
         set err1 ""
+        set beforeElem ""
+        catch {set beforeElem [hm_latestentityid elems]}
         set rc1 [catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop 0 0 0 0 0 0 0 0} err1]
-        if {$rc1 == 0} {return 1}
+        if {$rc1 == 0} {
+            set elemId ""
+            catch {set elemId [hm_latestentityid elems]}
+            if {$elemId eq $beforeElem} { set elemId "" }
+            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
+            return 1
+        }
         set lastErr "barFull=$err1"
 
         set err2 ""
+        set beforeElem ""
+        catch {set beforeElem [hm_latestentityid elems]}
         set rc2 [catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop} err2]
-        if {$rc2 == 0} {return 1}
+        if {$rc2 == 0} {
+            set elemId ""
+            catch {set elemId [hm_latestentityid elems]}
+            if {$elemId eq $beforeElem} { set elemId "" }
+            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
+            return 1
+        }
         append lastErr "; barShort=$err2"
     }
 
@@ -775,10 +908,16 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
     set cmd [list *createelements1d nodes list=1 elemsize=$len elemtype=$elemType useshell=0 breakangle=0 elemdensity=1 useelemdensity=0 biasdensity=0 biasstyle=0]
     if {$P(propName) ne ""} {lappend cmd property=$P(propName)}
     set err3 ""
+    set beforeElem ""
+    catch {set beforeElem [hm_latestentityid elems]}
     if {[catch {eval $cmd} err3]} {
         msg [::HWFlow::txt "$elemType 创建失败：节点 $n1-$n2；$lastErr；create1d=$err3" "Create $elemType failed: nodes $n1-$n2; $lastErr; create1d=$err3"]
         return 0
     }
+    set elemId ""
+    catch {set elemId [hm_latestentityid elems]}
+    if {$elemId eq $beforeElem} { set elemId "" }
+    ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
     return 1
 }
 
@@ -804,6 +943,7 @@ proc ::RB2Bolt::createBolts {groups} {
     variable P
     set created 0
     set skipped 0
+    set skippedExisting 0
     set pairTotal 0
     set spatialOnlyGroups 0
     set groupCount [llength $groups]
@@ -841,8 +981,11 @@ proc ::RB2Bolt::createBolts {groups} {
             set r2 [lindex $pr 1]
             set n1 [lindex $r1 1]
             set n2 [lindex $r2 1]
-            if {[createBeamBetween $n1 $n2 $P(elemType) $compName]} {
+            set createResult [createBeamBetween $n1 $n2 $P(elemType) $compName]
+            if {$createResult > 0} {
                 incr created
+            } elseif {$createResult < 0} {
+                incr skippedExisting
             } else {
                 incr skipped
             }
@@ -854,12 +997,13 @@ proc ::RB2Bolt::createBolts {groups} {
         ::RB2Bolt::refreshComponentBrowser $compName
     }
 
-    return [list $created $skipped $pairTotal $spatialOnlyGroups]
+    return [list $created $skipped $pairTotal $spatialOnlyGroups $skippedExisting]
 }
 
 # ------------------------- entry point -------------------------------------
 proc ::RB2Bolt::run {} {
     variable P
+    variable beamSegmentIndex
     if {![showDialog]} {
         msg [::HWFlow::txt "RBE2 螺栓连接生成已取消。" "RBE2 Bolt Connector cancelled."]
         return
@@ -871,6 +1015,7 @@ proc ::RB2Bolt::run {} {
 
     set elemIds [selectedElementIds]
     if {[llength $elemIds] == 0} {
+        ::RB2Bolt::clearSelectionMarks
         tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "未选择任何单元。" "No elements were selected."]
         return
     }
@@ -878,6 +1023,7 @@ proc ::RB2Bolt::run {} {
     msg [::HWFlow::txt "已选择单元数：[llength $elemIds]" "Selected elements: [llength $elemIds]"]
     set records [collectRBE2Records $elemIds]
     if {[llength $records] < 2} {
+        ::RB2Bolt::clearSelectionMarks
         tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择集中可用 RBE2 单元少于 2 个。" "Fewer than 2 usable RBE2 elements were found in the selection."]
         return
     }
@@ -885,16 +1031,21 @@ proc ::RB2Bolt::run {} {
     msg [::HWFlow::txt "有效 RBE2 记录数：[llength $records]。正在建立分组..." "Valid RBE2 records: [llength $records]. Building groups..."]
     set groups [buildGroups $records]
     if {[llength $groups] == 0} {
+        ::RB2Bolt::clearSelectionMarks
         tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "没有 RBE2 分组满足当前容差。可尝试增大轴向连接距离或横向中心偏移容差。" "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."]
         return
     }
 
+    catch {array unset beamSegmentIndex}
+    array set beamSegmentIndex {}
     set result [createBolts $groups]
     set created [lindex $result 0]
     set skipped [lindex $result 1]
     set spatialOnlyGroups [lindex $result 3]
+    set skippedExisting [lindex $result 4]
 
-    set txt [::HWFlow::txt "RBE2 螺栓连接生成已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped/failed: $skipped"]
+    set txt [::HWFlow::txt "RBE2 螺栓连接生成已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n已跳过既有 $P(elemType)：$skippedExisting\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped existing $P(elemType): $skippedExisting\nSkipped/failed: $skipped"]
+    ::RB2Bolt::clearSelectionMarks
     tk_messageBox -icon info -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message $txt
     msg $txt
 }

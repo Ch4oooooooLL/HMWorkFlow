@@ -60,6 +60,7 @@ namespace eval ::AutoHoleRBE2 {
 
     variable stat
     array set stat {}
+    variable existingRBE2ByWallNodes
 }
 
 proc ::AutoHoleRBE2::backToHome {w} {
@@ -1035,6 +1036,114 @@ proc ::AutoHoleRBE2::refreshComponentBrowser {compName} {
     catch {update}
 }
 
+proc ::AutoHoleRBE2::componentIdByName {compName} {
+    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
+        return [::HWFlow::componentIdByName $compName]
+    }
+    foreach etype {components comps component} {
+        if {![catch {set cid [hm_entityinfo id $etype $compName -byname]}] && $cid ne "" && $cid != 0} {
+            return $cid
+        }
+    }
+    return ""
+}
+
+proc ::AutoHoleRBE2::getElemsByComp {compId} {
+    if {[llength [info commands ::HWFlow::getCompEntityIds]] > 0} {
+        return [::HWFlow::getCompEntityIds $compId elems elems]
+    }
+    set elems {}
+    catch {*clearmark elems 2}
+    if {![catch {*createmark elems 2 "by comp id" $compId}]} {
+        catch {set elems [hm_getmark elems 2]}
+    }
+    catch {*clearmark elems 2}
+    return [::AutoHoleRBE2::uniq $elems]
+}
+
+proc ::AutoHoleRBE2::elemLooksLikeRBE2 {elemId} {
+    if {![catch {set cfgVal [hm_getvalue elems id=$elemId dataname=config]}] && $cfgVal ne ""} {
+        set u [string toupper "$cfgVal"]
+        if {$u eq "55" || [string first "RBE2" $u] >= 0 || [string first "RIGID" $u] >= 0} {
+            return 1
+        }
+    }
+    foreach dn {typename solverkeyword solvername cardimage} {
+        if {![catch {set v [hm_getvalue elems id=$elemId dataname=$dn]}] && $v ne ""} {
+            set u [string toupper "$v"]
+            if {[string first "RBE2" $u] >= 0 || [string first "RIGID" $u] >= 0} {
+                return 1
+            }
+        }
+    }
+    if {![catch {set depmax [hm_getvalue elems id=$elemId dataname=dependentnodesmax]}] && $depmax ne ""} {
+        if {[catch {expr {$depmax > 0}} ok] == 0 && $ok} {
+            return 1
+        }
+    }
+    return 0
+}
+
+proc ::AutoHoleRBE2::rbe2DependentNodeKey {elemId} {
+    if {![::AutoHoleRBE2::elemLooksLikeRBE2 $elemId]} {
+        return ""
+    }
+    if {[catch {set allNodes [hm_getvalue elems id=$elemId dataname=nodes]}] || [llength $allNodes] == 0} {
+        return ""
+    }
+    set independent ""
+    catch {set independent [hm_getvalue elems id=$elemId dataname=independentnode.id]}
+    set depNodes {}
+    foreach n $allNodes {
+        if {$independent ne "" && $n == $independent} {
+            continue
+        }
+        lappend depNodes $n
+    }
+    if {[llength $depNodes] == 0} {
+        return ""
+    }
+    return [::HWFlow::nodeSetKey $depNodes]
+}
+
+proc ::AutoHoleRBE2::initExistingRBE2Index {compName} {
+    variable existingRBE2ByWallNodes
+    catch {array unset existingRBE2ByWallNodes}
+    array set existingRBE2ByWallNodes {}
+
+    set compId [::AutoHoleRBE2::componentIdByName $compName]
+    if {$compId eq ""} {
+        return 0
+    }
+
+    set count 0
+    foreach elemId [::AutoHoleRBE2::getElemsByComp $compId] {
+        set key [::AutoHoleRBE2::rbe2DependentNodeKey $elemId]
+        if {$key ne ""} {
+            set existingRBE2ByWallNodes($key) $elemId
+            incr count
+        }
+    }
+    return $count
+}
+
+proc ::AutoHoleRBE2::existingRBE2ForWallNodes {wallNodes} {
+    variable existingRBE2ByWallNodes
+    set key [::HWFlow::nodeSetKey $wallNodes]
+    if {[info exists existingRBE2ByWallNodes($key)]} {
+        return [list 1 $existingRBE2ByWallNodes($key) $key]
+    }
+    return [list 0 "" $key]
+}
+
+proc ::AutoHoleRBE2::rememberCreatedRBE2 {wallNodes elemId} {
+    variable existingRBE2ByWallNodes
+    if {$elemId eq ""} {
+        return
+    }
+    set existingRBE2ByWallNodes([::HWFlow::nodeSetKey $wallNodes]) $elemId
+}
+
 proc ::AutoHoleRBE2::createRBE2 {wallNodes center} {
     variable cfg
 
@@ -1042,13 +1151,21 @@ proc ::AutoHoleRBE2::createRBE2 {wallNodes center} {
     set y [lindex $center 1]
     set z [lindex $center 2]
 
+    set beforeElem ""
+    catch {set beforeElem [hm_latestentityid elems]}
     *createnode $x $y $z 0 0 0
     set centerNode [hm_latestentityid nodes]
 
     eval *createmark nodes 2 $wallNodes
     *rigidlink $centerNode 2 $cfg(dof)
+    catch {*clearmark nodes 2}
 
-    return $centerNode
+    set elemId ""
+    if {![catch {set latestElem [hm_latestentityid elems]}] && $latestElem ne "" && $latestElem != 0 && $latestElem ne $beforeElem} {
+        set elemId $latestElem
+    }
+
+    return [list $centerNode $elemId]
 }
 
 proc ::AutoHoleRBE2::clearMarks {} {
@@ -1071,6 +1188,7 @@ proc ::AutoHoleRBE2::runCore {} {
         validFaces 0
         segments 0
         created 0
+        skippedExisting 0
     }
 
     set comps $ui(selectedComps)
@@ -1144,7 +1262,11 @@ proc ::AutoHoleRBE2::runCore {} {
     set segments [::AutoHoleRBE2::segmentFaces $validFaces faceNodes faceNormals edgeFaces]
     set stat(segments) [llength $segments]
 
-    ::AutoHoleRBE2::ensureComponent $cfg(resultCompName)
+    set existingCount [::AutoHoleRBE2::initExistingRBE2Index $cfg(resultCompName)]
+    if {$existingCount > 0} {
+        ::AutoHoleRBE2::message [::HWFlow::txt "已索引结果组件中的既有 RBE2：$existingCount 个。" "Indexed existing RBE2 elements in result component: $existingCount."]
+    }
+    set resultCompReady 0
 
     ::AutoHoleRBE2::message [::HWFlow::txt "正在识别孔并创建 RBE2 单元..." "Detecting holes and creating RBE2 elements..."]
     foreach segment $segments {
@@ -1159,10 +1281,25 @@ proc ::AutoHoleRBE2::runCore {} {
         set radius     [lindex $result 2]
         set holeLength [lindex $result 3]
 
-        set centerNode [::AutoHoleRBE2::createRBE2 $wallNodes $center]
+        set existing [::AutoHoleRBE2::existingRBE2ForWallNodes $wallNodes]
+        if {[lindex $existing 0]} {
+            incr stat(skippedExisting)
+            ::AutoHoleRBE2::log "SKIP" "existingRBE2=[lindex $existing 1] wallNodes=[llength $wallNodes] radius=$radius length=$holeLength center=$center"
+            continue
+        }
+
+        if {!$resultCompReady} {
+            ::AutoHoleRBE2::ensureComponent $cfg(resultCompName)
+            set resultCompReady 1
+        }
+
+        set createdInfo [::AutoHoleRBE2::createRBE2 $wallNodes $center]
+        set centerNode [lindex $createdInfo 0]
+        set elemId [lindex $createdInfo 1]
+        ::AutoHoleRBE2::rememberCreatedRBE2 $wallNodes $elemId
         incr stat(created)
 
-        ::AutoHoleRBE2::log "MAKE" "centerNode=$centerNode wallNodes=[llength $wallNodes] radius=$radius length=$holeLength center=$center"
+        ::AutoHoleRBE2::log "MAKE" "centerNode=$centerNode rbe2=$elemId wallNodes=[llength $wallNodes] radius=$radius length=$holeLength center=$center"
     }
 
     if {$cfg(deleteTempFaces)} {
@@ -1171,7 +1308,7 @@ proc ::AutoHoleRBE2::runCore {} {
         }
     }
 
-    if {$stat(created) > 0} {
+    if {$stat(created) > 0 || $stat(skippedExisting) > 0} {
         ::AutoHoleRBE2::refreshComponentBrowser $cfg(resultCompName)
     }
 
@@ -1207,13 +1344,13 @@ proc ::AutoHoleRBE2::run {} {
     }
 
     if {!$failed} {
-        set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 已完成。\n\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 RBE2：$stat(created)" "AutoHoleRBE2 v$VERSION finished.\n\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated RBE2: $stat(created)"]
+        set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 已完成。\n\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 RBE2：$stat(created)\n已跳过既有 RBE2：$stat(skippedExisting)" "AutoHoleRBE2 v$VERSION finished.\n\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated RBE2: $stat(created)\nSkipped existing RBE2: $stat(skippedExisting)"]
 
         if {$cfg(logFile) ne ""} {
             append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
         }
 
-        ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 RBE2 单元。" "Finished: created $stat(created) RBE2 element(s)."]
+        ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 RBE2 单元，跳过既有 $stat(skippedExisting) 个。" "Finished: created $stat(created) RBE2 element(s), skipped $stat(skippedExisting) existing."]
         catch {tk_messageBox -icon info -title "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION" -message $msg}
     } else {
         set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 执行失败：\n\n$errMsg" "AutoHoleRBE2 v$VERSION failed:\n\n$errMsg"]

@@ -40,6 +40,7 @@ namespace eval ::SeamSurf {
 
     variable stat
     array set stat {}
+    variable seamKeyIndex
 }
 
 proc ::SeamSurf::defaultRuleText {} {
@@ -1627,6 +1628,54 @@ proc ::SeamSurf::ensureSeamComponent {thickness} {
     return [list $compName $compId]
 }
 
+proc ::SeamSurf::linePairSeamKey {lineA lineB sourceSurfs targetSurfs thickness} {
+    set tText [::SeamSurf::formatThickness $thickness]
+    set lines [lsort -integer [list $lineA $lineB]]
+    set surfs [lsort -integer -unique [concat $sourceSurfs $targetSurfs]]
+    return "linepair|T$tText|L=[join $lines ,]|S=[join $surfs ,]"
+}
+
+proc ::SeamSurf::coordPairSeamKey {sourceCoords targetCoords thickness} {
+    set tText [::SeamSurf::formatThickness $thickness]
+    set sourceKey [::HWFlow::coordListKey [::SeamSurf::cleanCoordList $sourceCoords] 0.001]
+    set targetKey [::HWFlow::coordListKey [::SeamSurf::cleanCoordList $targetCoords] 0.001]
+    if {[string compare $sourceKey $targetKey] > 0} {
+        set tmp $sourceKey
+        set sourceKey $targetKey
+        set targetKey $tmp
+    }
+    return "coords|T$tText|A=$sourceKey|B=$targetKey"
+}
+
+proc ::SeamSurf::seamTagName {key} {
+    return [::HWFlow::entityTagName SEAM_SURF $key]
+}
+
+proc ::SeamSurf::existingSeamByKey {key} {
+    variable seamKeyIndex
+    if {[info exists seamKeyIndex($key)]} {
+        return [list 1 $seamKeyIndex($key)]
+    }
+
+    set tagName [::SeamSurf::seamTagName $key]
+    set surfId [::HWFlow::entityIdByName {surfs surfaces} $tagName]
+    if {$surfId ne ""} {
+        set seamKeyIndex($key) $surfId
+        return [list 1 $surfId]
+    }
+    return [list 0 ""]
+}
+
+proc ::SeamSurf::tagSeamSurface {surfId key} {
+    variable seamKeyIndex
+    set tagName [::SeamSurf::seamTagName $key]
+    foreach etype {surfs surfaces} {
+        catch {*setvalue $etype id=$surfId name=$tagName}
+    }
+    set seamKeyIndex($key) $surfId
+    return $tagName
+}
+
 proc ::SeamSurf::copyLineOrEdgeToCurrent {lineId} {
     set before [::SeamSurf::latestId {lines line}]
     catch {*clearmark lines 1}
@@ -1808,6 +1857,15 @@ proc ::SeamSurf::minThickness {a b} {
 proc ::SeamSurf::createSeam {sourceLine targetLine sourceSurfs targetSurfs thickness} {
     variable stat
 
+    set seamKey [::SeamSurf::linePairSeamKey $sourceLine $targetLine $sourceSurfs $targetSurfs $thickness]
+    set existing [::SeamSurf::existingSeamByKey $seamKey]
+    if {[lindex $existing 0]} {
+        incr stat(skippedExisting)
+        set compName [::SeamSurf::seamComponentName $thickness]
+        lappend stat(details) [::HWFlow::txt "既有曲面 [lindex $existing 1] -> $compName，已跳过" "Existing surface [lindex $existing 1] -> $compName, skipped"]
+        return [list [lindex $existing 1] $compName "" "" existing]
+    }
+
     set compInfo [::SeamSurf::ensureSeamComponent $thickness]
     set compName [lindex $compInfo 0]
 
@@ -1815,6 +1873,7 @@ proc ::SeamSurf::createSeam {sourceLine targetLine sourceSurfs targetSurfs thick
     set sourceCopy [lindex $pair 0]
     set targetCopy [lindex $pair 1]
     set seamSurf [::SeamSurf::createRuledSurfaceBetweenLines $sourceCopy $targetCopy]
+    ::SeamSurf::tagSeamSurface $seamSurf $seamKey
     set stitchOk [::SeamSurf::stitchSeamSurface [list $seamSurf] [concat $sourceSurfs $targetSurfs]]
     ::SeamSurf::deleteConstructionLines [list $sourceCopy $targetCopy]
     ::SeamSurf::refreshComponentBrowser $compName
@@ -1829,6 +1888,15 @@ proc ::SeamSurf::createSeam {sourceLine targetLine sourceSurfs targetSurfs thick
 
 proc ::SeamSurf::createSeamFromPairedCoords {sourceCoords targetCoords sourceSurfs targetSurfs thickness {targetSurfForLine ""}} {
     variable stat
+
+    set seamKey [::SeamSurf::coordPairSeamKey $sourceCoords $targetCoords $thickness]
+    set existing [::SeamSurf::existingSeamByKey $seamKey]
+    if {[lindex $existing 0]} {
+        incr stat(skippedExisting)
+        set compName [::SeamSurf::seamComponentName $thickness]
+        lappend stat(details) [::HWFlow::txt "既有曲面 [lindex $existing 1] -> $compName，已跳过" "Existing surface [lindex $existing 1] -> $compName, skipped"]
+        return [list [lindex $existing 1] $compName "" "" existing]
+    }
 
     set compInfo [::SeamSurf::ensureSeamComponent $thickness]
     set compName [lindex $compInfo 0]
@@ -1846,6 +1914,7 @@ proc ::SeamSurf::createSeamFromPairedCoords {sourceCoords targetCoords sourceSur
     ::SeamSurf::msg [::HWFlow::txt "线-面记录线：源跨度线 $sourceCopy -> 投影线 $targetCopy。" "Line-Surface recorded lines: source span line $sourceCopy -> projection line $targetCopy."]
 
     set seamSurf [::SeamSurf::createRuledSurfaceBetweenLines $sourceCopy $targetCopy]
+    ::SeamSurf::tagSeamSurface $seamSurf $seamKey
     set stitchOk [::SeamSurf::stitchSeamSurface [list $seamSurf] [concat $sourceSurfs $targetSurfs]]
     ::SeamSurf::deleteConstructionLines [list $sourceCopy $targetCopy]
     ::SeamSurf::refreshComponentBrowser $compName
@@ -1882,11 +1951,11 @@ proc ::SeamSurf::processTSurface {} {
     set pair [::SeamSurf::chooseTProjectionPair $sourceSurf $targetSurf]
     set sourceEdge [lindex $pair 1]
 
-    set projection [::SeamSurf::projectLineToSurface $sourceEdge $targetSurf]
-    set targetLine [lindex $projection 0]
-    set targetSurfs [lindex $projection 1]
+    set paired [::SeamSurf::projectLinePairedCoordsToSurface $sourceEdge $targetSurf]
+    set sourceCoords [lindex $paired 0]
+    set targetCoords [lindex $paired 1]
 
-    return [::SeamSurf::createSeam $sourceEdge $targetLine [list $sourceSurf] $targetSurfs $thickness]
+    return [::SeamSurf::createSeamFromPairedCoords $sourceCoords $targetCoords [list $sourceSurf] [list $targetSurf] $thickness $targetSurf]
 }
 
 proc ::SeamSurf::processLineLine {} {
@@ -1941,6 +2010,7 @@ proc ::SeamSurf::run {} {
     variable cfg
     variable ui
     variable stat
+    variable seamKeyIndex
 
     if {![::SeamSurf::showPanel]} {
         catch {hm_usermessage [::HWFlow::txt "焊缝面创建已取消。" "Seam Surface Creation cancelled."]}
@@ -1951,9 +2021,12 @@ proc ::SeamSurf::run {} {
     array set stat {
         created 0
         stitched 0
+        skippedExisting 0
         failed 0
         details {}
     }
+    catch {array unset seamKeyIndex}
+    array set seamKeyIndex {}
 
     ::SeamSurf::msg [::HWFlow::txt "焊缝面创建 v$::SeamSurf::VERSION 开始。" "Seam Surface Creation v$::SeamSurf::VERSION started."]
     set ui(mode) [::SeamSurf::normalizeMode $ui(mode)]
@@ -1981,7 +2054,7 @@ proc ::SeamSurf::run {} {
         return
     }
 
-    set msg [::HWFlow::txt "焊缝面创建已完成。\n\n已创建焊缝面：$stat(created)\n已完成拓扑缝合：$stat(stitched)" "Seam Surface Creation finished.\n\nCreated seam surfaces: $stat(created)\nTopology stitched: $stat(stitched)"]
+    set msg [::HWFlow::txt "焊缝面创建已完成。\n\n已创建焊缝面：$stat(created)\n已跳过既有焊缝面：$stat(skippedExisting)\n已完成拓扑缝合：$stat(stitched)" "Seam Surface Creation finished.\n\nCreated seam surfaces: $stat(created)\nSkipped existing seam surfaces: $stat(skippedExisting)\nTopology stitched: $stat(stitched)"]
     if {[llength $stat(details)] > 0} {
         append msg "\n\n[join $stat(details) \n]"
     }

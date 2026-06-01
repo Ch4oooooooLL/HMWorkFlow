@@ -3,6 +3,9 @@
 AutoHoleRBE2_v*.log
 config/*_state.txt
 
+# Packaged workflow archives
+dist/
+
 # HyperMesh / solver result and session outputs
 *.h3d
 *.op2

@@ -169,12 +169,14 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::CompWorkflow::saveState}
     catch {::MidSurf::savePanelState}
     catch {::AutoHoleRBE2::savePanelState}
+    catch {::RB2W::savePanelState}
     catch {::RB2Bolt::saveState}
     catch {::SeamSurf::savePanelState}
 
     catch {set ::MidSurf::ui(ok) 0}
     catch {set ::MidSurf::ui(promptOk) -1}
     catch {set ::AutoHoleRBE2::ui(ok) 0}
+    catch {set ::RB2W::ui(ok) 0}
     catch {set ::RB2Bolt::done -1}
     catch {set ::SeamSurf::ui(ok) 0}
     catch {set ::SeamSurf::ui(promptOk) -1}
@@ -188,6 +190,7 @@ proc ::HWToolkit::clearExistingWindows {} {
         .midsurf_dlg
         .midsurf_thick
         .autoHoleRBE2
+        .rb2w_panel
         .rb2bolt_dlg
         .seam_surface
         .seam_thickness

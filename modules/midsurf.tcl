@@ -553,6 +553,23 @@ proc ::MidSurf::uniqueComponentName {baseName} {
     return [format "%s_%s" $base [clock seconds]]
 }
 
+proc ::MidSurf::deleteComponentByName {compName} {
+    foreach etype {components comps} {
+        catch {*clearmark $etype 2}
+        foreach selector {"by name only" "by name"} {
+            if {![catch {*createmark $etype 2 $selector $compName}]} {
+                if {![catch {set ids [hm_getmark $etype 2]}] && [llength $ids] > 0} {
+                    catch {*deletemark $etype 2}
+                    catch {*clearmark $etype 2}
+                    return 1
+                }
+            }
+        }
+        catch {*clearmark $etype 2}
+    }
+    return 0
+}
+
 proc ::MidSurf::clearMarks {} {
     foreach etype {comps components solids surfs surfaces elems nodes points lines} {
         catch {*clearmark $etype 1}
@@ -669,6 +686,60 @@ proc ::MidSurf::chooseThickness {sourceCompId sourceName midCompId} {
     return $t
 }
 
+proc ::MidSurf::sourceThicknessCandidate {sourceCompId} {
+    variable cfg
+
+    set vals [::MidSurf::readComponentThickness $sourceCompId]
+    foreach surf [::MidSurf::getCompEntityIds $sourceCompId surfaces surfs] {
+        set vals [concat $vals [::MidSurf::readThicknessFromSurface $surf]]
+    }
+    set vals [concat $vals [::MidSurf::readThicknessFromPoints $sourceCompId]]
+
+    set t [::MidSurf::median $vals]
+    if {$t eq "" && $cfg(fallbackThickness) > 0.0} {
+        return $cfg(fallbackThickness)
+    }
+    return $t
+}
+
+proc ::MidSurf::outputNameForSource {sourceName thickness} {
+    set tText [::MidSurf::formatThickness $thickness]
+    if {[namespace exists ::HWFlow]} {
+        return [::HWFlow::formatMidsurfName $sourceName $tText]
+    }
+    return "${sourceName}_T${tText}"
+}
+
+proc ::MidSurf::existingOutputForSource {sourceCompId sourceName {thickness ""}} {
+    if {$thickness eq ""} {
+        set thickness [::MidSurf::sourceThicknessCandidate $sourceCompId]
+    }
+    if {$thickness eq ""} {
+        return {}
+    }
+
+    set base [::MidSurf::outputNameForSource $sourceName $thickness]
+    set candidates [list $base]
+    for {set i 1} {$i <= 999} {incr i} {
+        lappend candidates [format "%s_%02d" $base $i]
+    }
+
+    foreach name $candidates {
+        set cid [::MidSurf::componentIdByName $name]
+        if {$cid eq ""} {
+            if {$name eq $base} {
+                continue
+            }
+            break
+        }
+        set surfs [::MidSurf::getCompEntityIds $cid surfaces surfs]
+        if {[llength $surfs] > 0} {
+            return [list $name [llength $surfs] $thickness]
+        }
+    }
+    return {}
+}
+
 # ----------------------------------------------------------------------
 # HyperMesh operations
 # ----------------------------------------------------------------------
@@ -741,13 +812,11 @@ proc ::MidSurf::extractMidsurface {entityType} {
 proc ::MidSurf::renameMiddleSurface {sourceName thickness midCompId} {
     variable cfg
 
-    set tText [::MidSurf::formatThickness $thickness]
-    if {[namespace exists ::HWFlow]} {
-        set outBase [::HWFlow::formatMidsurfName $sourceName $tText]
-    } else {
-        set outBase "${sourceName}_T${tText}"
+    set outName [::MidSurf::outputNameForSource $sourceName $thickness]
+    set existingId [::MidSurf::componentIdByName $outName]
+    if {$existingId ne "" && $existingId ne $midCompId} {
+        error [::HWFlow::txt "目标中面组件 $outName 已存在，本次创建已跳过。" "Target midsurface component $outName already exists; this creation was skipped."]
     }
-    set outName [::MidSurf::uniqueComponentName $outBase]
 
     if {$outName ne $cfg(middleSurfaceName)} {
         ::MidSurf::enableInteractiveBrowserUpdates
@@ -789,6 +858,14 @@ proc ::MidSurf::processComponent {compId} {
     set sourceName [::MidSurf::getComponentName $compId]
     ::MidSurf::msg [::HWFlow::txt "中面抽取：正在处理 $sourceName" "MidSurf: processing $sourceName"]
 
+    set existing [::MidSurf::existingOutputForSource $compId $sourceName]
+    if {[llength $existing] > 0} {
+        set outName [lindex $existing 0]
+        set surfCount [lindex $existing 1]
+        ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName 对应的 $outName 已存在，跳过创建。" "MidSurf: $sourceName already has $outName, skipped creation."]
+        return [list $outName $surfCount [lindex $existing 2] existing]
+    }
+
     if {$cfg(requireCleanMiddle) && [::MidSurf::componentExistsByName $cfg(middleSurfaceName)]} {
         error [::HWFlow::txt "组件 \"$cfg(middleSurfaceName)\" 已存在。请在运行前重命名/删除该组件，或关闭 Middle Surface 清洁检查。" "Component \"$cfg(middleSurfaceName)\" already exists. Rename/delete it before running, or disable the clean Middle Surface check."]
     }
@@ -814,6 +891,15 @@ proc ::MidSurf::processComponent {compId} {
     }
 
     set thickness [::MidSurf::chooseThickness $compId $sourceName $midCompId]
+    set existing [::MidSurf::existingOutputForSource $compId $sourceName $thickness]
+    if {[llength $existing] > 0} {
+        ::MidSurf::deleteComponentByName $cfg(middleSurfaceName)
+        set outName [lindex $existing 0]
+        set surfCount [lindex $existing 1]
+        ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName 对应的 $outName 已存在，已清理本轮临时中面并跳过创建。" "MidSurf: $sourceName already has $outName; cleaned this run's temporary midsurface and skipped creation."]
+        return [list $outName $surfCount [lindex $existing 2] existing]
+    }
+
     set outName [::MidSurf::renameMiddleSurface $sourceName $thickness $midCompId]
     ::MidSurf::hideSourceComponent $sourceName
 
@@ -838,6 +924,7 @@ proc ::MidSurf::run {} {
     array set stat {
         selected 0
         created 0
+        existing 0
         skipped 0
         surfaces 0
     }
@@ -846,6 +933,7 @@ proc ::MidSurf::run {} {
     set stat(selected) [llength $comps]
     set failures {}
     set createdNames {}
+    set existingNames {}
 
     ::MidSurf::msg [::HWFlow::txt "中面抽取 v$VERSION 开始，组件数=[llength $comps]" "MidSurf v$VERSION started. Components=[llength $comps]"]
 
@@ -859,20 +947,32 @@ proc ::MidSurf::run {} {
             continue
         }
 
-        incr stat(created)
-        set stat(surfaces) [expr {$stat(surfaces) + [lindex $result 1]}]
-        lappend createdNames [lindex $result 0]
+        if {[llength $result] >= 4 && [lindex $result 3] eq "existing"} {
+            incr stat(existing)
+            lappend existingNames [lindex $result 0]
+        } else {
+            incr stat(created)
+            set stat(surfaces) [expr {$stat(surfaces) + [lindex $result 1]}]
+            lappend createdNames [lindex $result 0]
+        }
         catch {update}
     }
 
     ::MidSurf::clearMarks
 
-    set msg [::HWFlow::txt "中面抽取 v$VERSION 已完成。\n\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped/failed: $stat(skipped)"]
+    set msg [::HWFlow::txt "中面抽取 v$VERSION 已完成。\n\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n已跳过既有中面：$stat(existing)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped existing midsurfaces: $stat(existing)\nSkipped/failed: $stat(skipped)"]
 
     if {[llength $createdNames] > 0} {
         append msg [::HWFlow::txt "\n\n已创建：\n" "\n\nCreated:\n"]
         append msg [join [lrange $createdNames 0 9] "\n"]
         if {[llength $createdNames] > 10} {
+            append msg "\n..."
+        }
+    }
+    if {[llength $existingNames] > 0} {
+        append msg [::HWFlow::txt "\n\n已存在并跳过：\n" "\n\nAlready existed and skipped:\n"]
+        append msg [join [lrange $existingNames 0 9] "\n"]
+        if {[llength $existingNames] > 10} {
             append msg "\n..."
         }
     }

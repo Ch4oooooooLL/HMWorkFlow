@@ -1,8 +1,8 @@
 # ============================================================================
-# shell_washer_hole_rbe2_release_v1_2_safe.tcl
-# Version : Release 1.2 Safe
+# shell_washer_hole_rbe2_release_v1_3_oval.tcl
+# Version : Release 1.3 Oval
 # Purpose : For shell components with standard washer mesh around bolt holes,
-#           identify circular inner free-edge hole loops, verify the first
+#           identify circular/oval inner free-edge hole loops, verify the first
 #           washer ring, tie the inner free-edge loop + first outer washer
 #           node loop, create a center node, and create an RBE2/rigidlink.
 # Target  : HyperMesh 2019 Tcl style
@@ -29,16 +29,21 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::RB2W {
-    variable VERSION "Release-1.2-Safe"
+    variable VERSION "Release-1.3-Oval"
 
     # ---------------- Hole / washer parameters ----------------
     variable MIN_HOLE_DIAMETER           6.0
     variable MAX_HOLE_DIAMETER           30.0
     variable CIRCULARITY_TOL             0.08
+    variable ALLOW_OVAL_HOLES            1
+    variable MAX_OVAL_AXIS_RATIO         3.50
+    variable OVAL_RADIAL_FIT_TOL         0.45
     variable MIN_HOLE_EDGE_NODES         8
     variable MAX_HOLE_EDGE_NODES         200
     variable INNER_WASHER_NODE_LOOPS     2
     variable OUTER_RING_CIRCULARITY_TOL  0.20
+    variable OUTER_OVAL_RADIAL_FIT_TOL   0.55
+    variable OUTER_OVAL_AXIS_RATIO_TOL   0.45
     variable CENTER_OFFSET_TOL           0.20
     variable MIN_WASHER_WIDTH_ABS        0.30
     variable MIN_WASHER_WIDTH_RATIO      0.05
@@ -54,8 +59,9 @@ namespace eval ::RB2W {
     variable SHOW_OUTPUT_COMPONENTS      1
     variable FORCE_BROWSER_REFRESH       1
 
-    # Safety check.  Keep both enabled by default to prevent duplicate RBE2.
-    variable SKIP_COMPONENT_IF_EXISTING_RBE2            1
+    # Object-level duplicate checks are always applied; this coarse component
+    # gate remains available for conservative legacy workflows.
+    variable SKIP_COMPONENT_IF_EXISTING_RBE2            0
     variable CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2   1
     variable CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2   1
     variable OUTPUT_COMPONENT_SUFFIX_SCAN_LIMIT         999
@@ -81,8 +87,11 @@ namespace eval ::RB2W {
     variable nodeAdj
     variable elemNbrs
     variable outputCompBySource
+    variable existingRBE2ByDepNodes
     variable nodeXYZCache
     variable currentComponentName ""
+    variable ui
+    array set ui {}
 }
 
 proc ::RB2W::log {msg} {
@@ -110,8 +119,10 @@ proc ::RB2W::resetOverallProgress {} {
 proc ::RB2W::stateKeys {} {
     return {
         MIN_HOLE_DIAMETER MAX_HOLE_DIAMETER CIRCULARITY_TOL
+        ALLOW_OVAL_HOLES MAX_OVAL_AXIS_RATIO OVAL_RADIAL_FIT_TOL
         MIN_HOLE_EDGE_NODES MAX_HOLE_EDGE_NODES INNER_WASHER_NODE_LOOPS
-        OUTER_RING_CIRCULARITY_TOL CENTER_OFFSET_TOL
+        OUTER_RING_CIRCULARITY_TOL OUTER_OVAL_RADIAL_FIT_TOL
+        OUTER_OVAL_AXIS_RATIO_TOL CENTER_OFFSET_TOL
         MIN_WASHER_WIDTH_ABS MIN_WASHER_WIDTH_RATIO WASHER_ELEM_COUNT_TOL
         MIN_OUTER_NODE_RATIO MAX_OUTER_NODE_RATIO
         RBE2_DOF RBE2_COMPONENT_PREFIX BATCH_ORGANIZE_RBE2 ORGANIZE_BATCH_SIZE
@@ -149,6 +160,254 @@ proc ::RB2W::saveState {} {
         }
     }
     ::HWFlow::saveState shell_washer_hole_rbe2 $state
+}
+
+proc ::RB2W::backToHome {w} {
+    if {[llength [info commands ::HWFlow::backToHome]] > 0} {
+        ::HWFlow::backToHome $w
+    } else {
+        catch {destroy $w}
+    }
+}
+
+proc ::RB2W::savePanelState {} {
+    variable ui
+    foreach key [::RB2W::stateKeys] {
+        if {[info exists ui($key)]} {
+            upvar #0 ::RB2W::$key v
+            set v $ui($key)
+        }
+    }
+    ::RB2W::saveState
+}
+
+proc ::RB2W::showPanel {} {
+    variable ui
+    variable VERSION
+
+    catch {destroy .rb2w_panel}
+    ::RB2W::loadState
+
+    foreach key [::RB2W::stateKeys] {
+        upvar #0 ::RB2W::$key v
+        if {[info exists v]} {
+            set ui($key) $v
+        }
+    }
+
+    set ui(ok) 0
+    set ui(selectedComps) ""
+    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
+
+    set w .rb2w_panel
+    toplevel $w
+    wm title $w "[::HWFlow::txt "壳单元垫圈孔 RBE2" "Shell Washer-Hole RBE2"] v$VERSION"
+    wm resizable $w 0 0
+
+    frame $w.main -padx 12 -pady 10
+    pack $w.main -fill both -expand 1
+
+    label $w.main.title -text [::HWFlow::txt "壳单元垫圈孔 RBE2 创建" "Shell Washer-Hole RBE2 Creation"] -font {Arial 10 bold}
+    grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
+
+    labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
+    grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    button $w.main.sel.pick -text [::HWFlow::txt "选择/重选组件" "Pick / Repick Components"] -width 24 -command "::RB2W::pickComponents"
+    label $w.main.sel.info -textvariable ::RB2W::ui(selectedText) -width 72 -anchor w
+    grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 8}
+    grid $w.main.sel.info -row 0 -column 1 -sticky w
+
+    labelframe $w.main.preset -text [::HWFlow::txt "2. 参数预设" "2. Parameter Presets"] -padx 8 -pady 8
+    grid $w.main.preset -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    button $w.main.preset.normal -text [::HWFlow::txt "默认" "Default"] -width 12 -command "::RB2W::applyPreset normal"
+    button $w.main.preset.loose  -text [::HWFlow::txt "椭圆宽松" "Loose Oval"] -width 12 -command "::RB2W::applyPreset loose"
+    button $w.main.preset.strict -text [::HWFlow::txt "严格" "Strict"] -width 12 -command "::RB2W::applyPreset strict"
+    grid $w.main.preset.normal -row 0 -column 0 -sticky w -padx {0 6}
+    grid $w.main.preset.loose  -row 0 -column 1 -sticky w -padx {0 6}
+    grid $w.main.preset.strict -row 0 -column 2 -sticky w
+
+    labelframe $w.main.param -text [::HWFlow::txt "3. 识别与垫圈参数" "3. Detection and Washer Parameters"] -padx 8 -pady 8
+    grid $w.main.param -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+
+    set fields {
+        {MIN_HOLE_DIAMETER          "最小孔径"              "Minimum hole diameter"}
+        {MAX_HOLE_DIAMETER          "最大孔径"              "Maximum hole diameter"}
+        {MIN_HOLE_EDGE_NODES        "最少孔边节点"          "Minimum edge nodes"}
+        {MAX_HOLE_EDGE_NODES        "最多孔边节点"          "Maximum edge nodes"}
+        {CIRCULARITY_TOL            "圆孔圆度容差"          "Circularity tolerance"}
+        {MAX_OVAL_AXIS_RATIO        "椭圆 a/b 最大半径比"   "Max oval a/b radius ratio"}
+        {OVAL_RADIAL_FIT_TOL        "椭圆拟合容差"          "Oval fit tolerance"}
+        {OUTER_OVAL_RADIAL_FIT_TOL  "外圈椭圆容差"          "Outer oval tolerance"}
+        {OUTER_OVAL_AXIS_RATIO_TOL  "内外椭圆比差容差"      "Inner/outer oval ratio tolerance"}
+        {CENTER_OFFSET_TOL          "内外中心偏移容差"      "Center offset tolerance"}
+        {INNER_WASHER_NODE_LOOPS    "绑定 washer 节点圈数"  "Washer node loops to tie"}
+        {RBE2_DOF                   "RBE2 自由度"           "RBE2 DOF"}
+        {RBE2_COMPONENT_PREFIX      "输出组件前缀"          "Output component prefix"}
+    }
+
+    set i 0
+    foreach item $fields {
+        set key  [lindex $item 0]
+        set name [::HWFlow::txt [lindex $item 1] [lindex $item 2]]
+        set r [expr {$i / 2}]
+        set c [expr {($i % 2) * 2}]
+        label $w.main.param.l_$key -text $name -anchor w
+        entry $w.main.param.e_$key -textvariable ::RB2W::ui($key) -width 18
+        grid $w.main.param.l_$key -row $r -column $c -sticky w -padx {0 6} -pady 2
+        grid $w.main.param.e_$key -row $r -column [expr {$c+1}] -sticky w -padx {0 18} -pady 2
+        incr i
+    }
+
+    labelframe $w.main.opt -text [::HWFlow::txt "4. 选项" "4. Options"] -padx 8 -pady 8
+    grid $w.main.opt -row 4 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    checkbutton $w.main.opt.oval -text [::HWFlow::txt "允许识别椭圆孔" "Allow oval holes"] -variable ::RB2W::ui(ALLOW_OVAL_HOLES)
+    checkbutton $w.main.opt.skip -text [::HWFlow::txt "组件已有 RBE2 时跳过" "Skip component if RBE2 exists"] -variable ::RB2W::ui(SKIP_COMPONENT_IF_EXISTING_RBE2)
+    checkbutton $w.main.opt.src -text [::HWFlow::txt "检查源组件已有 RBE2" "Check source component"] -variable ::RB2W::ui(CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2)
+    checkbutton $w.main.opt.out -text [::HWFlow::txt "检查输出组件已有 RBE2" "Check output components"] -variable ::RB2W::ui(CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2)
+    checkbutton $w.main.opt.batch -text [::HWFlow::txt "批量归集 RBE2 到输出组件" "Batch organize RBE2 elements"] -variable ::RB2W::ui(BATCH_ORGANIZE_RBE2)
+    checkbutton $w.main.opt.perf -text [::HWFlow::txt "性能模式" "Performance mode"] -variable ::RB2W::ui(PERFORMANCE_MODE)
+    grid $w.main.opt.oval  -row 0 -column 0 -sticky w -pady 2
+    grid $w.main.opt.skip  -row 0 -column 1 -sticky w -pady 2
+    grid $w.main.opt.src   -row 1 -column 0 -sticky w -pady 2
+    grid $w.main.opt.out   -row 1 -column 1 -sticky w -pady 2
+    grid $w.main.opt.batch -row 2 -column 0 -sticky w -pady 2
+    grid $w.main.opt.perf  -row 2 -column 1 -sticky w -pady 2
+
+    frame $w.btn -padx 12 -pady 10
+    pack $w.btn -fill x
+    button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; ::RB2W::backToHome .rb2w_panel"
+    button $w.btn.save -text [::HWFlow::txt "保存配置" "Save Config"] -width 12 -command "::RB2W::savePanelState"
+    button $w.btn.start -text [::HWFlow::txt "开始创建 RBE2" "Start RBE2 Creation"] -width 18 -command "::RB2W::acceptPanel"
+    pack $w.btn.back  -side right -padx 4
+    pack $w.btn.save  -side right -padx 4
+    pack $w.btn.start -side right -padx 4
+
+    bind $w <Escape> "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; destroy .rb2w_panel"
+    wm protocol $w WM_DELETE_WINDOW "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; destroy .rb2w_panel"
+
+    update idletasks
+    set sw [winfo screenwidth $w]
+    set sh [winfo screenheight $w]
+    set ww [winfo reqwidth $w]
+    set wh [winfo reqheight $w]
+    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
+
+    tkwait window $w
+    return $ui(ok)
+}
+
+proc ::RB2W::pickComponents {} {
+    variable ui
+    catch {*clearmark comps 1}
+    *createmarkpanel comps 1 [::HWFlow::txt "选择用于创建垫圈孔 RBE2 的壳单元组件" "Select shell component(s) for washer-hole RBE2 creation"]
+    set comps [hm_getmark comps 1]
+    catch {*clearmark comps 1}
+    if {[llength $comps] == 0} {
+        set ui(selectedComps) ""
+        set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
+    } else {
+        set ui(selectedComps) [RB2W::uniq $comps]
+        set ui(selectedText) [::HWFlow::txt "已选择 [llength $ui(selectedComps)] 个组件" "Selected [llength $ui(selectedComps)] component(s)"]
+    }
+    catch {raise .rb2w_panel}
+    catch {focus .rb2w_panel}
+}
+
+proc ::RB2W::applyPreset {mode} {
+    variable ui
+    switch -- $mode {
+        strict {
+            set ui(CIRCULARITY_TOL) 0.06
+            set ui(MAX_OVAL_AXIS_RATIO) 2.50
+            set ui(OVAL_RADIAL_FIT_TOL) 0.32
+            set ui(OUTER_OVAL_RADIAL_FIT_TOL) 0.40
+            set ui(OUTER_OVAL_AXIS_RATIO_TOL) 0.30
+            set ui(CENTER_OFFSET_TOL) 0.15
+        }
+        loose {
+            set ui(ALLOW_OVAL_HOLES) 1
+            set ui(CIRCULARITY_TOL) 0.10
+            set ui(MAX_OVAL_AXIS_RATIO) 4.50
+            set ui(OVAL_RADIAL_FIT_TOL) 0.55
+            set ui(OUTER_OVAL_RADIAL_FIT_TOL) 0.65
+            set ui(OUTER_OVAL_AXIS_RATIO_TOL) 0.60
+            set ui(CENTER_OFFSET_TOL) 0.30
+        }
+        default {
+            set ui(ALLOW_OVAL_HOLES) 1
+            set ui(CIRCULARITY_TOL) 0.08
+            set ui(MAX_OVAL_AXIS_RATIO) 3.50
+            set ui(OVAL_RADIAL_FIT_TOL) 0.45
+            set ui(OUTER_OVAL_RADIAL_FIT_TOL) 0.55
+            set ui(OUTER_OVAL_AXIS_RATIO_TOL) 0.45
+            set ui(CENTER_OFFSET_TOL) 0.20
+        }
+    }
+}
+
+proc ::RB2W::acceptPanel {} {
+    variable ui
+
+    if {[llength $ui(selectedComps)] == 0} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
+        return
+    }
+
+    set doubleKeys {
+        MIN_HOLE_DIAMETER MAX_HOLE_DIAMETER CIRCULARITY_TOL
+        MAX_OVAL_AXIS_RATIO OVAL_RADIAL_FIT_TOL OUTER_OVAL_RADIAL_FIT_TOL
+        OUTER_OVAL_AXIS_RATIO_TOL CENTER_OFFSET_TOL
+    }
+    foreach k $doubleKeys {
+        if {![string is double -strict $ui($k)]} {
+            tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
+            return
+        }
+    }
+
+    set intKeys {
+        MIN_HOLE_EDGE_NODES MAX_HOLE_EDGE_NODES INNER_WASHER_NODE_LOOPS
+        RBE2_DOF ALLOW_OVAL_HOLES SKIP_COMPONENT_IF_EXISTING_RBE2
+        CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2 CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2
+        BATCH_ORGANIZE_RBE2 PERFORMANCE_MODE
+    }
+    foreach k $intKeys {
+        if {![string is integer -strict $ui($k)]} {
+            tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
+            return
+        }
+    }
+
+    if {$ui(MIN_HOLE_DIAMETER) < 0 || $ui(MAX_HOLE_DIAMETER) <= 0 || $ui(MIN_HOLE_DIAMETER) > $ui(MAX_HOLE_DIAMETER)} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "孔径范围无效。" "Invalid hole diameter range."]
+        return
+    }
+    if {$ui(MIN_HOLE_EDGE_NODES) < 3 || $ui(MAX_HOLE_EDGE_NODES) < $ui(MIN_HOLE_EDGE_NODES)} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "孔边节点数量范围无效。" "Invalid edge node range."]
+        return
+    }
+    if {$ui(INNER_WASHER_NODE_LOOPS) < 2} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "绑定 washer 节点圈数至少为 2。" "Washer node loops must be at least 2."]
+        return
+    }
+    if {$ui(MAX_OVAL_AXIS_RATIO) < 1.0} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "椭圆 a/b 最大半径比必须不小于 1。" "Max oval a/b radius ratio must be at least 1."]
+        return
+    }
+    foreach k {CIRCULARITY_TOL OVAL_RADIAL_FIT_TOL OUTER_OVAL_RADIAL_FIT_TOL OUTER_OVAL_AXIS_RATIO_TOL CENTER_OFFSET_TOL} {
+        if {$ui($k) < 0} {
+            tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "$k 不能为负值。" "$k cannot be negative."]
+            return
+        }
+    }
+    if {[string trim $ui(RBE2_COMPONENT_PREFIX)] eq ""} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "输出组件前缀不能为空。" "Output component prefix cannot be empty."]
+        return
+    }
+
+    ::RB2W::savePanelState
+    set ui(ok) 1
+    destroy .rb2w_panel
 }
 
 proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex loopTotal candidateHoles created skipped {force 0}} {
@@ -355,7 +614,43 @@ proc ::RB2W::loopGeometry {nodes} {
     foreach r $radii { set dr [expr {$r - $meanr}]; set ss [expr {$ss + $dr*$dr}] }
     set rms [expr {sqrt($ss / double($n))}]
     if {$meanr <= 1.0e-12} { set rel 999.0 } else { set rel [expr {$rms / $meanr}] }
-    return [list $center $meanr $rel $minr $maxr]
+    if {$minr <= 1.0e-12} {
+        set axisRatio 999.0
+    } else {
+        set axisRatio [expr {$maxr / $minr}]
+    }
+    set shape [dict create \
+        meanR $meanr \
+        minR $minr \
+        maxR $maxr \
+        meanD [expr {2.0 * $meanr}] \
+        minD [expr {2.0 * $minr}] \
+        maxD [expr {2.0 * $maxr}] \
+        radialRel $rel \
+        axisRatio $axisRatio]
+    return [list $center $meanr $rel $minr $maxr $shape]
+}
+
+proc ::RB2W::loopShape {geom} {
+    if {[llength $geom] >= 6} { return [lindex $geom 5] }
+    set meanr [lindex $geom 1]
+    set rel [lindex $geom 2]
+    set minr [lindex $geom 3]
+    set maxr [lindex $geom 4]
+    if {$minr <= 1.0e-12} {
+        set axisRatio 999.0
+    } else {
+        set axisRatio [expr {$maxr / $minr}]
+    }
+    return [dict create \
+        meanR $meanr \
+        minR $minr \
+        maxR $maxr \
+        meanD [expr {2.0 * $meanr}] \
+        minD [expr {2.0 * $minr}] \
+        maxD [expr {2.0 * $maxr}] \
+        radialRel $rel \
+        axisRatio $axisRatio]
 }
 
 proc ::RB2W::getElemsByComp {compId} {
@@ -621,7 +916,7 @@ proc ::RB2W::ensureOutputComponent {sourceCompId} {
     }
     set srcName [RB2W::getComponentName $sourceCompId]
     set baseName [RB2W::sourceOutputBaseName $sourceCompId]
-    set outName [RB2W::uniqueComponentName $baseName]
+    set outName [RB2W::sanitizeNamePart $baseName "AUTO_RBE2"]
     RB2W::createComponentByName $outName
     set outputCompBySource($sourceCompId) $outName
     if {!$PERFORMANCE_MODE} {
@@ -872,6 +1167,84 @@ proc ::RB2W::existingRBE2CheckForSource {sourceCompId} {
     return [list 0 ""]
 }
 
+proc ::RB2W::rbe2DependentNodeKey {eid} {
+    if {![RB2W::elemLooksLikeRBE2 $eid]} { return "" }
+    if {[catch {set allNodes [hm_getvalue elems id=$eid dataname=nodes]}] || [llength $allNodes] == 0} {
+        return ""
+    }
+    set independent ""
+    catch {set independent [hm_getvalue elems id=$eid dataname=independentnode.id]}
+    set depNodes {}
+    foreach n $allNodes {
+        if {$independent ne "" && $n == $independent} { continue }
+        lappend depNodes $n
+    }
+    if {[llength $depNodes] == 0} { return "" }
+    return [::HWFlow::nodeSetKey $depNodes]
+}
+
+proc ::RB2W::indexRBE2InComponent {compId} {
+    variable existingRBE2ByDepNodes
+    set count 0
+    foreach eid [RB2W::getElemsByComp $compId] {
+        set key [RB2W::rbe2DependentNodeKey $eid]
+        if {$key ne ""} {
+            set existingRBE2ByDepNodes($key) $eid
+            incr count
+        }
+    }
+    return $count
+}
+
+proc ::RB2W::initExistingRBE2IndexForSource {sourceCompId outComp} {
+    variable existingRBE2ByDepNodes
+    variable CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2
+    variable CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2
+
+    catch {array unset existingRBE2ByDepNodes}
+    array set existingRBE2ByDepNodes {}
+
+    set compIds {}
+    if {$CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2} {
+        foreach outName [RB2W::outputComponentCandidatesForSource $sourceCompId] {
+            set outId [RB2W::componentIdByName $outName]
+            if {$outId ne ""} { lappend compIds $outId }
+        }
+        if {$outComp ne ""} {
+            set outId [RB2W::componentIdByName $outComp]
+            if {$outId ne ""} { lappend compIds $outId }
+        }
+    }
+    if {$CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2} {
+        lappend compIds $sourceCompId
+    }
+
+    array set seen {}
+    set count 0
+    foreach compId $compIds {
+        if {$compId eq "" || [info exists seen($compId)]} { continue }
+        set seen($compId) 1
+        set count [expr {$count + [RB2W::indexRBE2InComponent $compId]}]
+    }
+    return $count
+}
+
+proc ::RB2W::existingRBE2ForDepNodes {depNodes} {
+    variable existingRBE2ByDepNodes
+    set key [::HWFlow::nodeSetKey $depNodes]
+    if {[info exists existingRBE2ByDepNodes($key)]} {
+        return [list 1 $existingRBE2ByDepNodes($key) $key]
+    }
+    return [list 0 "" $key]
+}
+
+proc ::RB2W::rememberRBE2ForDepNodes {depNodes elemIds} {
+    variable existingRBE2ByDepNodes
+    set elemId [lindex $elemIds 0]
+    if {$elemId eq ""} { return }
+    set existingRBE2ByDepNodes([::HWFlow::nodeSetKey $depNodes]) $elemId
+}
+
 proc ::RB2W::createCenterNode {center outComp} {
     foreach {x y z} $center {}
     RB2W::setCurrentComponent $outComp
@@ -916,6 +1289,9 @@ proc ::RB2W::isValidHoleLoop {loopDict} {
     variable MIN_HOLE_DIAMETER
     variable MAX_HOLE_DIAMETER
     variable CIRCULARITY_TOL
+    variable ALLOW_OVAL_HOLES
+    variable MAX_OVAL_AXIS_RATIO
+    variable OVAL_RADIAL_FIT_TOL
     variable MIN_HOLE_EDGE_NODES
     variable MAX_HOLE_EDGE_NODES
 
@@ -929,16 +1305,34 @@ proc ::RB2W::isValidHoleLoop {loopDict} {
     set rel [lindex $g 2]
     set minr [lindex $g 3]
     set maxr [lindex $g 4]
+    set shape [RB2W::loopShape $g]
+    set axisRatio [dict get $shape axisRatio]
     set dia [expr {2.0 * $r}]
     if {$dia < $MIN_HOLE_DIAMETER || $dia > $MAX_HOLE_DIAMETER} { return [list 0 [format "diameter %.3f out of range" $dia]] }
+    if {$rel <= $CIRCULARITY_TOL && $minr > 1.0e-12 && $axisRatio <= (1.0 + 3.0*$CIRCULARITY_TOL)} {
+        dict set shape kind circular
+        set g [lreplace $g 5 5 $shape]
+        return [list 1 $g]
+    }
+    if {$ALLOW_OVAL_HOLES && $minr > 1.0e-12 && $axisRatio <= $MAX_OVAL_AXIS_RATIO && $rel <= $OVAL_RADIAL_FIT_TOL} {
+        dict set shape kind oval
+        set g [lreplace $g 5 5 $shape]
+        return [list 1 $g]
+    }
+    if {$ALLOW_OVAL_HOLES} {
+        return [list 0 [format "not circular/oval rel=%.4f axisRatio=%.4f" $rel $axisRatio]]
+    }
     if {$rel > $CIRCULARITY_TOL} { return [list 0 [format "poor circularity %.4f" $rel]] }
-    if {$minr <= 1.0e-12 || ($maxr / $minr) > (1.0 + 3.0*$CIRCULARITY_TOL)} { return [list 0 [format "large radius ratio %.4f" [expr {$maxr / $minr}]]] }
+    if {$minr <= 1.0e-12 || $axisRatio > (1.0 + 3.0*$CIRCULARITY_TOL)} { return [list 0 [format "large radius ratio %.4f" $axisRatio]] }
     return [list 1 $g]
 }
 
 proc ::RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
     variable INNER_WASHER_NODE_LOOPS
     variable OUTER_RING_CIRCULARITY_TOL
+    variable MAX_OVAL_AXIS_RATIO
+    variable OUTER_OVAL_RADIAL_FIT_TOL
+    variable OUTER_OVAL_AXIS_RATIO_TOL
     variable CENTER_OFFSET_TOL
     variable MIN_WASHER_WIDTH_ABS
     variable MIN_WASHER_WIDTH_RATIO
@@ -952,6 +1346,15 @@ proc ::RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
     set edgeCount [llength [dict get $loopDict edges]]
     set center [lindex $geom 0]
     set innerR [lindex $geom 1]
+    set innerShape [RB2W::loopShape $geom]
+    if {[dict exists $innerShape kind]} {
+        set innerKind [dict get $innerShape kind]
+    } else {
+        set innerKind circular
+    }
+    set innerMinR [dict get $innerShape minR]
+    set innerMaxR [dict get $innerShape maxR]
+    set innerAxisRatio [dict get $innerShape axisRatio]
 
     if {$INNER_WASHER_NODE_LOOPS < 2} { return [list 0 "invalid parameter: INNER_WASHER_NODE_LOOPS < 2" {}] }
     if {[llength $seedElems] == 0} { return [list 0 "no adjacent shell elements" {}] }
@@ -971,12 +1374,34 @@ proc ::RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
     set outerCenter [lindex $og 0]
     set outerR [lindex $og 1]
     set outerRel [lindex $og 2]
+    set outerShape [RB2W::loopShape $og]
+    set outerMinR [dict get $outerShape minR]
+    set outerMaxR [dict get $outerShape maxR]
+    set outerAxisRatio [dict get $outerShape axisRatio]
     set centerDev [RB2W::distance3 $center $outerCenter]
     if {$outerR <= ($innerR + $MIN_WASHER_WIDTH_ABS) && $outerR <= ($innerR * (1.0 + $MIN_WASHER_WIDTH_RATIO))} { return [list 0 [format "washer width too small inner=%.3f outer=%.3f" $innerR $outerR] {}] }
-    if {$outerRel > $OUTER_RING_CIRCULARITY_TOL} { return [list 0 [format "outer ring not washer-like %.4f" $outerRel] {}] }
+    if {$innerKind eq "oval"} {
+        if {$outerMinR <= $innerMinR || $outerMaxR <= $innerMaxR} {
+            return [list 0 [format "oval washer not outside inner loop innerMinMax=%.3f/%.3f outerMinMax=%.3f/%.3f" $innerMinR $innerMaxR $outerMinR $outerMaxR] {}]
+        }
+        if {$outerRel > $OUTER_OVAL_RADIAL_FIT_TOL} {
+            return [list 0 [format "outer oval washer irregular rel=%.4f" $outerRel] {}]
+        }
+        if {$outerAxisRatio > ($MAX_OVAL_AXIS_RATIO * (1.0 + $OUTER_OVAL_AXIS_RATIO_TOL))} {
+            return [list 0 [format "outer oval axis ratio too large %.4f" $outerAxisRatio] {}]
+        }
+        if {$innerAxisRatio > 1.0e-12} {
+            set axisDev [expr {abs($outerAxisRatio - $innerAxisRatio) / $innerAxisRatio}]
+            if {$axisDev > $OUTER_OVAL_AXIS_RATIO_TOL} {
+                return [list 0 [format "outer oval axis ratio mismatch inner=%.4f outer=%.4f" $innerAxisRatio $outerAxisRatio] {}]
+            }
+        }
+    } elseif {$outerRel > $OUTER_RING_CIRCULARITY_TOL} {
+        return [list 0 [format "outer ring not washer-like %.4f" $outerRel] {}]
+    }
     if {$innerR > 1.0e-12 && ($centerDev / $innerR) > $CENTER_OFFSET_TOL} { return [list 0 [format "outer ring center offset %.4f" [expr {$centerDev / $innerR}]] {}] }
     if {[llength $depNodes] <= [llength $innerNodes]} { return [list 0 "only inner free-edge nodes" {}] }
-    set info [dict create depNodes $depNodes tieElems $tieElems outerNodes $outerNodes outerR $outerR outerRel $outerRel outerCount $outerCount]
+    set info [dict create depNodes $depNodes tieElems $tieElems outerNodes $outerNodes outerR $outerR outerRel $outerRel outerCount $outerCount outerAxisRatio $outerAxisRatio shape $innerKind]
     return [list 1 "ok" $info]
 }
 
@@ -1004,6 +1429,7 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
     set created 0; set skipped 0; set candidateHoles 0
     set createdRBE2Elems {}
     set outComp ""
+    set outCompReady 0
     set compName [RB2W::getComponentName $compId]
     set loopTotal [llength $loops]
     RB2W::log "Component $compId ($compName): elems=[llength $elems], freeEdgeLoops=$loopTotal, graphTime=${tGraph}ms"
@@ -1032,6 +1458,13 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
         set center [lindex $geom 0]
         set radius [lindex $geom 1]
         set rel [lindex $geom 2]
+        set innerShape [RB2W::loopShape $geom]
+        if {[dict exists $innerShape kind]} {
+            set shapeKind [dict get $innerShape kind]
+        } else {
+            set shapeKind circular
+        }
+        set innerAxisRatio [dict get $innerShape axisRatio]
         set seedElems [RB2W::seedElemsFromLoop [dict get $loop edges]]
         set washerInfo [RB2W::validateWasherAndGetDepNodes $loop $seedElems $geom]
         if {![lindex $washerInfo 0]} {
@@ -1045,11 +1478,32 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
         set outerR [dict get $wdict outerR]
         set outerRel [dict get $wdict outerRel]
         set outerCount [dict get $wdict outerCount]
+        set outerAxisRatio [dict get $wdict outerAxisRatio]
 
-        if {$outComp eq ""} { set outComp [RB2W::ensureOutputComponent $compId] }
+        if {$outComp eq ""} {
+            set outComp [RB2W::sanitizeNamePart [RB2W::sourceOutputBaseName $compId] "AUTO_RBE2"]
+            set indexed [RB2W::initExistingRBE2IndexForSource $compId $outComp]
+            if {$indexed > 0} {
+                RB2W::log "Component $compId: indexed existing RBE2 elements for object-level safety check: $indexed"
+            }
+        }
+        set existing [RB2W::existingRBE2ForDepNodes $depNodes]
+        if {[lindex $existing 0]} {
+            incr skipped
+            RB2W::bumpReason reasons "existing RBE2 for washer hole"
+            if {$LOG_EACH_SKIPPED} {
+                RB2W::log "Component $compId: skipped existing RBE2 element [lindex $existing 1] for candidate hole D=[format %.3f [expr {2.0*$radius}]]"
+            }
+            continue
+        }
+        if {!$outCompReady} {
+            set outComp [RB2W::ensureOutputComponent $compId]
+            set outCompReady 1
+        }
         if {[catch {
             set cnode [RB2W::createCenterNode $center $outComp]
             set rbeElems [RB2W::createRigidLink $cnode $depNodes $outComp]
+            RB2W::rememberRBE2ForDepNodes $depNodes $rbeElems
             if {$BATCH_ORGANIZE_RBE2} {
                 foreach re $rbeElems { lappend createdRBE2Elems $re }
             } else {
@@ -1069,7 +1523,7 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
 
         incr created
         if {$LOG_EACH_CREATED} {
-            RB2W::log "Component $compId: RBE2 #$created created in $outComp, centerNode=$cnode, rbeElems=$rbeElems, depNodes=[llength $depNodes], innerNodes=[llength [dict get $loop nodes]], outerNodes=$outerCount, innerD=[format %.3f [expr {2.0*$radius}]], outerD=[format %.3f [expr {2.0*$outerR}]], innerCirc=[format %.4f $rel], outerCirc=[format %.4f $outerRel]"
+            RB2W::log "Component $compId: RBE2 #$created created in $outComp, centerNode=$cnode, rbeElems=$rbeElems, depNodes=[llength $depNodes], innerNodes=[llength [dict get $loop nodes]], outerNodes=$outerCount, shape=$shapeKind, innerD=[format %.3f [expr {2.0*$radius}]], outerD=[format %.3f [expr {2.0*$outerR}]], innerRel=[format %.4f $rel], outerRel=[format %.4f $outerRel], innerAxisRatio=[format %.4f $innerAxisRatio], outerAxisRatio=[format %.4f $outerAxisRatio]"
         }
     }
 
@@ -1096,8 +1550,10 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
 proc ::RB2W::printParameterLog {} {
     variable VERSION
     variable MIN_HOLE_DIAMETER; variable MAX_HOLE_DIAMETER; variable CIRCULARITY_TOL
+    variable ALLOW_OVAL_HOLES; variable MAX_OVAL_AXIS_RATIO; variable OVAL_RADIAL_FIT_TOL
     variable MIN_HOLE_EDGE_NODES; variable MAX_HOLE_EDGE_NODES; variable INNER_WASHER_NODE_LOOPS
     variable OUTER_RING_CIRCULARITY_TOL; variable CENTER_OFFSET_TOL
+    variable OUTER_OVAL_RADIAL_FIT_TOL; variable OUTER_OVAL_AXIS_RATIO_TOL
     variable MIN_WASHER_WIDTH_ABS; variable MIN_WASHER_WIDTH_RATIO; variable WASHER_ELEM_COUNT_TOL
     variable RBE2_DOF; variable RBE2_COMPONENT_PREFIX
     variable BATCH_ORGANIZE_RBE2; variable ORGANIZE_BATCH_SIZE
@@ -1109,7 +1565,7 @@ proc ::RB2W::printParameterLog {} {
     variable LOG_EACH_CREATED; variable LOG_EACH_SKIPPED
 
     RB2W::log "Version=$VERSION"
-    RB2W::log "Parameters: diameter=${MIN_HOLE_DIAMETER}~${MAX_HOLE_DIAMETER}, innerCircTol=$CIRCULARITY_TOL, edgeNodes=${MIN_HOLE_EDGE_NODES}~${MAX_HOLE_EDGE_NODES}, innerWasherNodeLoops=$INNER_WASHER_NODE_LOOPS, outerCircTol=$OUTER_RING_CIRCULARITY_TOL, centerOffsetTol=$CENTER_OFFSET_TOL, minWasherWidthAbs=$MIN_WASHER_WIDTH_ABS, minWasherWidthRatio=$MIN_WASHER_WIDTH_RATIO, washerElemCountTol=$WASHER_ELEM_COUNT_TOL, dof=$RBE2_DOF, outputPrefix=$RBE2_COMPONENT_PREFIX, batchOrganizeRBE2=$BATCH_ORGANIZE_RBE2, organizeBatchSize=$ORGANIZE_BATCH_SIZE, showOutputComponents=$SHOW_OUTPUT_COMPONENTS, browserRefresh=$FORCE_BROWSER_REFRESH"
+    RB2W::log "Parameters: diameter=${MIN_HOLE_DIAMETER}~${MAX_HOLE_DIAMETER}, innerCircTol=$CIRCULARITY_TOL, allowOval=$ALLOW_OVAL_HOLES, maxOvalAxisRatio=$MAX_OVAL_AXIS_RATIO, ovalRadialFitTol=$OVAL_RADIAL_FIT_TOL, edgeNodes=${MIN_HOLE_EDGE_NODES}~${MAX_HOLE_EDGE_NODES}, innerWasherNodeLoops=$INNER_WASHER_NODE_LOOPS, outerCircTol=$OUTER_RING_CIRCULARITY_TOL, outerOvalRadialFitTol=$OUTER_OVAL_RADIAL_FIT_TOL, outerOvalAxisRatioTol=$OUTER_OVAL_AXIS_RATIO_TOL, centerOffsetTol=$CENTER_OFFSET_TOL, minWasherWidthAbs=$MIN_WASHER_WIDTH_ABS, minWasherWidthRatio=$MIN_WASHER_WIDTH_RATIO, washerElemCountTol=$WASHER_ELEM_COUNT_TOL, dof=$RBE2_DOF, outputPrefix=$RBE2_COMPONENT_PREFIX, batchOrganizeRBE2=$BATCH_ORGANIZE_RBE2, organizeBatchSize=$ORGANIZE_BATCH_SIZE, showOutputComponents=$SHOW_OUTPUT_COMPONENTS, browserRefresh=$FORCE_BROWSER_REFRESH"
     RB2W::log "Safety: skipIfExistingRBE2=$SKIP_COMPONENT_IF_EXISTING_RBE2, checkSource=$CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2, checkOutput=$CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2"
     RB2W::log "Performance: performanceMode=$PERFORMANCE_MODE, nodeXYZCache=$USE_NODE_XYZ_CACHE, statusProgress=$USE_STATUS_PROGRESS, progressStep=$PROGRESS_LOOP_STEP, uiUpdateStep=$UI_UPDATE_STEP, forceStatusUpdate=$FORCE_STATUS_UPDATE, statusPercentStep=$STATUS_PERCENT_STEP, statusMinIntervalMs=$STATUS_MIN_INTERVAL_MS, logEachCreated=$LOG_EACH_CREATED, logEachSkipped=$LOG_EACH_SKIPPED"
 }
@@ -1119,7 +1575,12 @@ proc ::RB2W::main {} {
     variable currentComponentName
     variable SKIP_COMPONENT_IF_EXISTING_RBE2
     variable PERFORMANCE_MODE
-    RB2W::loadState
+    variable ui
+
+    if {![::RB2W::showPanel]} {
+        return
+    }
+
     set currentComponentName ""
     catch {array unset outputCompBySource}
     array set outputCompBySource {}
@@ -1128,20 +1589,9 @@ proc ::RB2W::main {} {
     set runStart [clock milliseconds]
     RB2W::log [::HWFlow::txt "==== 壳单元垫圈孔 RBE2 创建开始 ====" "==== Shell washer-hole RBE2 creation started ===="]
     RB2W::printParameterLog
-    RB2W::log [::HWFlow::txt "请选择孔周已划分标准垫圈网格的壳单元组件。" "Select shell component(s) with standard washer mesh around bolt holes."]
+    RB2W::log [::HWFlow::txt "开始处理界面中选择的壳单元组件。" "Start processing shell components selected in the panel."]
 
-    catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择用于创建垫圈孔 RBE2 的壳单元组件" "Select shell component(s) for washer-hole RBE2 creation"]
-    set comps [hm_getmark comps 1]
-    catch {*clearmark comps 1}
-    if {[llength $comps] == 0} {
-        tk_messageBox -icon info -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "未选择组件。" "No component selected."]
-        RB2W::log [::HWFlow::txt "未选择组件，流程结束。" "No component selected. Finished."]
-        RB2W::saveState
-        return
-    }
-
-    set comps [RB2W::uniq $comps]
+    set comps [RB2W::uniq $ui(selectedComps)]
     RB2W::log "Selected components=[llength $comps]: $comps"
 
     set totalCreated 0; set totalSkipped 0; set totalCandidates 0; set totalOrganized 0

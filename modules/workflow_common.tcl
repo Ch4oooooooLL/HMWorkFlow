@@ -321,6 +321,73 @@ proc ::HWFlow::sanitizeToken {raw {fallback X}} {
     return $s
 }
 
+proc ::HWFlow::stableHash {text} {
+    set hash 2166136261
+    foreach ch [split $text ""] {
+        scan $ch %c code
+        set hash [expr {(($hash ^ $code) * 16777619) & 0xffffffff}]
+    }
+    return [format %08X $hash]
+}
+
+proc ::HWFlow::entityTagName {prefix key} {
+    set safePrefix [::HWFlow::sanitizeToken $prefix TAG]
+    return "${safePrefix}_[::HWFlow::stableHash $key]"
+}
+
+proc ::HWFlow::nodeSetKey {nodes} {
+    set clean {}
+    foreach n $nodes {
+        if {$n eq ""} {
+            continue
+        }
+        lappend clean [expr {int($n)}]
+    }
+    return [join [lsort -integer -unique $clean] "_"]
+}
+
+proc ::HWFlow::nodePairKey {n1 n2 {extra ""}} {
+    set a [expr {int($n1)}]
+    set b [expr {int($n2)}]
+    if {$a > $b} {
+        set tmp $a
+        set a $b
+        set b $tmp
+    }
+    if {$extra eq ""} {
+        return "${a}_${b}"
+    }
+    return "${a}_${b}|$extra"
+}
+
+proc ::HWFlow::coordKey {point {tol 0.001}} {
+    if {$tol <= 0.0} {
+        set tol 0.001
+    }
+    set out {}
+    foreach v [lrange $point 0 2] {
+        if {$v eq "" || ![string is double -strict $v]} {
+            lappend out 0
+        } else {
+            lappend out [expr {round(double($v) / double($tol))}]
+        }
+    }
+    while {[llength $out] < 3} {
+        lappend out 0
+    }
+    return [join $out ","]
+}
+
+proc ::HWFlow::coordListKey {coords {tol 0.001}} {
+    set out {}
+    foreach p $coords {
+        if {[llength $p] >= 3} {
+            lappend out [::HWFlow::coordKey $p $tol]
+        }
+    }
+    return [join $out ";"]
+}
+
 proc ::HWFlow::nameTokens {name} {
     set out {}
     foreach token [split [string trim $name] "_"] {
@@ -435,6 +502,18 @@ proc ::HWFlow::entityExistsByName {etype name} {
     return 0
 }
 
+proc ::HWFlow::entityIdByName {entityTypes name} {
+    foreach etype $entityTypes {
+        if {![catch {set id [hm_entityinfo id $etype $name -byname]}] && $id ne "" && $id != 0} {
+            return $id
+        }
+        if {![catch {set id [hm_getvalue $etype name=$name dataname=id]}] && $id ne "" && $id != 0} {
+            return $id
+        }
+    }
+    return ""
+}
+
 proc ::HWFlow::assemblyIdByName {name} {
     foreach etype {assemblies assems assembly} {
         if {![catch {set id [hm_entityinfo id $etype $name -byname]}] && $id ne "" && $id != 0} {
@@ -448,6 +527,9 @@ proc ::HWFlow::assemblyIdByName {name} {
 }
 
 proc ::HWFlow::createAssemblyWithMark {name markId {color 9}} {
+    if {[::HWFlow::assemblyIdByName $name] ne ""} {
+        return 1
+    }
     if {![catch {*assemblymodifyhierarchy $name $markId $color}]} {
         return 1
     }
@@ -555,6 +637,27 @@ proc ::HWFlow::renameComponent {oldName newName} {
         }
     }
     return $candidate
+}
+
+proc ::HWFlow::getCompEntityIds {compId dataname markEntityType {markId 2}} {
+    set ids {}
+    if {![catch {set ids [hm_getvalue comps id=$compId dataname=$dataname]}] && [llength $ids] > 0} {
+        return [lsort -integer -unique $ids]
+    }
+
+    catch {*clearmark $markEntityType $markId}
+    if {![catch {*createmark $markEntityType $markId "by comp id" $compId}]} {
+        catch {set ids [hm_getmark $markEntityType $markId]}
+    }
+    catch {*clearmark $markEntityType $markId}
+    if {[llength $ids] == 0} {
+        return {}
+    }
+    return [lsort -integer -unique $ids]
+}
+
+proc ::HWFlow::componentEntityCount {compId dataname markEntityType} {
+    return [llength [::HWFlow::getCompEntityIds $compId $dataname $markEntityType]]
 }
 
 proc ::HWFlow::displayComponent {compName state} {
