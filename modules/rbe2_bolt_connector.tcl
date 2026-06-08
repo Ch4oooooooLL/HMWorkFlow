@@ -62,6 +62,9 @@ namespace eval ::RB2Bolt {
 proc ::RB2Bolt::msg {txt} {
     catch {hm_usermessage $txt}
     catch {puts $txt}
+    if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
+        catch {::HWFlow::progressAppend "RB2Bolt: $txt"}
+    }
     catch {update}
 }
 
@@ -441,6 +444,13 @@ proc ::RB2Bolt::collectRBE2Records {elemIds} {
     set i 0
     foreach eid $elemIds {
         incr i
+        if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($i == 1 || $i == $total || [expr {$i % 200}] == 0)} {
+            set pct [expr {10.0 + 25.0 * ($i / double($total))}]
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "RBE2 螺栓连接生成正在执行" "RBE2 Bolt Connector running"] \
+                [::HWFlow::txt "正在读取 RBE2：$i / $total" "Reading RBE2: $i / $total"] \
+                [expr {$i == $total}]}
+        }
         if {[expr {$i % 200}] == 0} {
             msg [::HWFlow::txt "正在读取 RBE2：$i / $total" "Reading RBE2: $i / $total"]
         }
@@ -952,6 +962,13 @@ proc ::RB2Bolt::createBolts {groups} {
 
     foreach item $groups {
         incr gi
+        if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($gi == 1 || $gi == $groupCount || [expr {$gi % 20}] == 0)} {
+            set pct [expr {65.0 + 25.0 * ($gi / double($groupCount))}]
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "RBE2 螺栓连接生成正在执行" "RBE2 Bolt Connector running"] \
+                [::HWFlow::txt "正在创建螺栓分组：$gi / $groupCount" "Creating bolt groups: $gi / $groupCount"] \
+                [expr {$gi == $groupCount}]}
+        }
         set axis [lindex $item 0]
         set g [lindex $item 1]
         set pairs [pairGroupRecords $g $axis]
@@ -1021,17 +1038,36 @@ proc ::RB2Bolt::run {} {
     }
 
     msg [::HWFlow::txt "已选择单元数：[llength $elemIds]" "Selected elements: [llength $elemIds]"]
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] \
+            [::HWFlow::txt "准备读取 RBE2 单元..." "Preparing to read RBE2 elements..."] \
+            0]
+    }
     set records [collectRBE2Records $elemIds]
     if {[llength $records] < 2} {
         ::RB2Bolt::clearSelectionMarks
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "可用 RBE2 记录不足。" "Not enough usable RBE2 records."] 100.0}
+        }
         tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择集中可用 RBE2 单元少于 2 个。" "Fewer than 2 usable RBE2 elements were found in the selection."]
         return
     }
 
     msg [::HWFlow::txt "有效 RBE2 记录数：[llength $records]。正在建立分组..." "Valid RBE2 records: [llength $records]. Building groups..."]
+    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 45.0 \
+            [::HWFlow::txt "RBE2 螺栓连接生成正在执行" "RBE2 Bolt Connector running"] \
+            [::HWFlow::txt "正在建立分组..." "Building groups..."] \
+            1}
+    }
     set groups [buildGroups $records]
     if {[llength $groups] == 0} {
         ::RB2Bolt::clearSelectionMarks
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "没有匹配的 RBE2 分组。" "No matching RBE2 groups."] 100.0}
+        }
         tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "没有 RBE2 分组满足当前容差。可尝试增大轴向连接距离或横向中心偏移容差。" "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."]
         return
     }
@@ -1046,6 +1082,9 @@ proc ::RB2Bolt::run {} {
 
     set txt [::HWFlow::txt "RBE2 螺栓连接生成已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n已跳过既有 $P(elemType)：$skippedExisting\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped existing $P(elemType): $skippedExisting\nSkipped/failed: $skipped"]
     ::RB2Bolt::clearSelectionMarks
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "RBE2 螺栓连接生成已完成。" "RBE2 Bolt Connector finished."] 100.0}
+    }
     tk_messageBox -icon info -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message $txt
     msg $txt
 }

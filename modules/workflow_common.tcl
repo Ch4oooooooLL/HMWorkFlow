@@ -20,6 +20,8 @@ namespace eval ::HWFlow {
     variable progressWin ".hwflow_progress"
     variable progressMessage ""
     variable progressDetail ""
+    variable progressLastLog ""
+    variable progressLogMaxLines 220
     variable progressCancelRequested 0
 }
 
@@ -684,10 +686,12 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
     variable progressWin
     variable progressMessage
     variable progressDetail
+    variable progressLastLog
     variable progressCancelRequested
 
     set progressMessage $message
     set progressDetail ""
+    set progressLastLog ""
     set progressCancelRequested 0
 
     if {[llength [info commands toplevel]] == 0} {
@@ -705,16 +709,27 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         pack $w.main -fill both -expand 1
 
         label $w.main.title -text $title -font {Arial 10 bold} -anchor w
-        label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 430 -justify left
-        label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 430 -justify left
-        canvas $w.main.bar -width 430 -height 18 -highlightthickness 1 -highlightbackground #8a8a8a -background white
+        label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
+        label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
+        canvas $w.main.bar -width 520 -height 18 -highlightthickness 1 -highlightbackground #8a8a8a -background white
         $w.main.bar create rectangle 0 0 0 18 -tags fill -fill #2f74d0 -outline ""
-        $w.main.bar create text 215 9 -tags text -text "0.0%" -fill #222222 -font {Arial 8}
+        $w.main.bar create text 260 9 -tags text -text "0.0%" -fill #222222 -font {Arial 8}
+        labelframe $w.main.stream -text [::HWFlow::txt "命令流" "Command Stream"] -padx 6 -pady 6
+        text $w.main.stream.text -width 78 -height 11 -wrap word -font {Consolas 8} -state disabled -background #f8f8f8
+        scrollbar $w.main.stream.scroll -orient vertical -command "$w.main.stream.text yview"
+        $w.main.stream.text configure -yscrollcommand "$w.main.stream.scroll set"
+        grid $w.main.stream.text -row 0 -column 0 -sticky nsew
+        grid $w.main.stream.scroll -row 0 -column 1 -sticky ns
+        grid rowconfigure $w.main.stream 0 -weight 1
+        grid columnconfigure $w.main.stream 0 -weight 1
 
         grid $w.main.title -row 0 -column 0 -sticky ew -pady {0 6}
         grid $w.main.msg -row 1 -column 0 -sticky ew
         grid $w.main.detail -row 2 -column 0 -sticky ew -pady {2 8}
         grid $w.main.bar -row 3 -column 0 -sticky ew
+        grid $w.main.stream -row 4 -column 0 -sticky nsew -pady {8 0}
+        grid rowconfigure $w.main 4 -weight 1
+        grid columnconfigure $w.main 0 -weight 1
 
         if {$allowCancel} {
             frame $w.btn -padx 14 -pady {0 12}
@@ -777,11 +792,62 @@ proc ::HWFlow::progressUpdate {percent {message ""} {detail ""} {force 0}} {
         $bar itemconfigure text -text "[format %.1f $percent]%"
     }
 
+    set logText ""
+    if {$detail ne ""} {
+        set logText $detail
+    } elseif {$message ne ""} {
+        set logText $message
+    }
+    if {$logText ne ""} {
+        ::HWFlow::progressAppend $logText $force
+    }
+
     catch {update idletasks}
     if {$force} {
         catch {update}
     }
     return [::HWFlow::progressCancelled]
+}
+
+proc ::HWFlow::progressAppend {text {force 0}} {
+    variable progressWin
+    variable progressLastLog
+    variable progressLogMaxLines
+
+    set text [string trim $text]
+    if {$text eq ""} {
+        return
+    }
+    if {!$force && $text eq $progressLastLog} {
+        return
+    }
+    set progressLastLog $text
+
+    if {[llength [info commands winfo]] == 0} {
+        return
+    }
+    if {![winfo exists $progressWin]} {
+        return
+    }
+
+    set logWidget $progressWin.main.stream.text
+    if {![winfo exists $logWidget]} {
+        return
+    }
+
+    set stamp [clock format [clock seconds] -format {%H:%M:%S}]
+    set line "\[$stamp\] $text"
+    catch {
+        $logWidget configure -state normal
+        $logWidget insert end "$line\n"
+        set lineCount [expr {int([$logWidget index end])}]
+        if {$lineCount > $progressLogMaxLines} {
+            set deleteTo [expr {$lineCount - $progressLogMaxLines}]
+            $logWidget delete 1.0 "${deleteTo}.0"
+        }
+        $logWidget see end
+        $logWidget configure -state disabled
+    }
 }
 
 proc ::HWFlow::progressRequestCancel {} {
@@ -791,6 +857,7 @@ proc ::HWFlow::progressRequestCancel {} {
 
     set progressCancelRequested 1
     set progressMessage [::HWFlow::txt "正在请求取消，请等待当前步骤结束..." "Cancel requested. Waiting for the current step to finish..."]
+    catch {::HWFlow::progressAppend $progressMessage 1}
     catch {$progressWin.btn.cancel configure -state disabled}
     catch {update idletasks}
 }

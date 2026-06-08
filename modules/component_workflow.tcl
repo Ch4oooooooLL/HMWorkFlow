@@ -329,9 +329,26 @@ proc ::CompWorkflow::applyCategory {} {
 
     set renamed {}
     set ids {}
+    set total [llength $comps]
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "组件类型分类" "Component Type Classification"] \
+            [::HWFlow::txt "准备应用组件类型..." "Preparing component classification..."] \
+            0]
+    }
+    set index 0
     foreach compId $comps {
+        incr index
         set oldName [::HWFlow::componentName $compId]
         set newName [::HWFlow::replaceCategoryInName $oldName $category]
+        if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+            set pct [expr {10.0 + 75.0 * ($index / double($total))}]
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "组件类型分类正在执行" "Component classification running"] \
+                "$index/$total: $oldName -> $newName" \
+                [expr {$index == $total}]}
+        }
         set finalName [::HWFlow::renameComponent $oldName $newName]
         set finalId [::HWFlow::componentIdByName $finalName]
         if {$finalId eq ""} {
@@ -345,6 +362,9 @@ proc ::CompWorkflow::applyCategory {} {
     ::HWFlow::refreshBrowser
     ::CompWorkflow::saveState
     set ui(status) [::HWFlow::txt "已将 [llength $ids] 个组件分类为 $category。" "Classified [llength $ids] component(s) into $category."]
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "组件类型分类已完成。" "Component classification finished."] 100.0}
+    }
     tk_messageBox -icon info -title [::HWFlow::txt "组件类型分类" "Component Type Classification"] -message "[::HWFlow::txt "类型已应用：" "Category applied:"]\n[join [lrange $renamed 0 12] \n]"
 }
 
@@ -364,14 +384,38 @@ proc ::CompWorkflow::applyMaterial {} {
     array set byCategory {}
     set renamed {}
     set skipped {}
+    set total [llength $comps]
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "材料标识分配" "Material Assignment"] \
+            [::HWFlow::txt "准备应用材料标识..." "Preparing material assignment..."] \
+            0]
+    }
+    set index 0
     foreach compId $comps {
+        incr index
         set oldName [::HWFlow::componentName $compId]
         set category [::HWFlow::componentCategoryFromName $oldName]
         if {$category eq "" || $category in {SEAM CONNECTOR SOURCE_GEOM}} {
+            if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+                set pct [expr {10.0 + 70.0 * ($index / double($total))}]
+                catch {::HWFlow::progressUpdate $pct \
+                    [::HWFlow::txt "材料标识分配正在执行" "Material assignment running"] \
+                    "$index/$total: $oldName -> skipped" \
+                    [expr {$index == $total}]}
+            }
             lappend skipped [::HWFlow::txt "$oldName：未识别到受支持的类型前缀" "$oldName: no supported category prefix"]
             continue
         }
         set newName [::HWFlow::replaceMaterialInName $oldName $matKey]
+        if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+            set pct [expr {10.0 + 70.0 * ($index / double($total))}]
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "材料标识分配正在执行" "Material assignment running"] \
+                "$index/$total: $oldName -> $newName" \
+                [expr {$index == $total}]}
+        }
         set finalName [::HWFlow::renameComponent $oldName $newName]
         set finalId [::HWFlow::componentIdByName $finalName]
         if {$finalId eq ""} {
@@ -382,6 +426,9 @@ proc ::CompWorkflow::applyMaterial {} {
     }
 
     foreach category [array names byCategory] {
+        if {$progressOpened && [llength [info commands ::HWFlow::progressAppend]] > 0} {
+            catch {::HWFlow::progressAppend [::HWFlow::txt "组织材料装配：${category}_${matKey}" "Organizing material assembly: ${category}_${matKey}"]}
+        }
         set matAssembly "${category}_${matKey}"
         ::HWFlow::addComponentsToAssembly $matAssembly $byCategory($category) 10
         ::HWFlow::addAssemblyToAssembly $category $matAssembly 9
@@ -400,6 +447,9 @@ proc ::CompWorkflow::applyMaterial {} {
     }
     if {[llength $skipped] > 0} {
         append detail [::HWFlow::txt "\n\n已跳过：\n[join [lrange $skipped 0 8] \n]" "\n\nSkipped:\n[join [lrange $skipped 0 8] \n]"]
+    }
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "材料标识分配已完成。" "Material assignment finished."] 100.0}
     }
     tk_messageBox -icon info -title [::HWFlow::txt "材料标识分配" "Material Assignment"] -message $detail
 }

@@ -330,6 +330,9 @@ proc ::MidSurf::acceptThicknessPrompt {} {
 proc ::MidSurf::msg {txt} {
     catch {hm_usermessage $txt}
     catch {puts $txt}
+    if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
+        catch {::HWFlow::progressAppend "MidSurf: $txt"}
+    }
     catch {update}
 }
 
@@ -934,11 +937,27 @@ proc ::MidSurf::run {} {
     set failures {}
     set createdNames {}
     set existingNames {}
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "钣金中面抽取" "Midsurface Extraction"] \
+            [::HWFlow::txt "准备抽取中面..." "Preparing midsurface extraction..."] \
+            0]
+    }
 
     ::MidSurf::msg [::HWFlow::txt "中面抽取 v$VERSION 开始，组件数=[llength $comps]" "MidSurf v$VERSION started. Components=[llength $comps]"]
 
+    set compIndex 0
     foreach compId $comps {
+        incr compIndex
         set sourceName [::MidSurf::getComponentName $compId]
+        if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+            set pct [expr {5.0 + 85.0 * (($compIndex - 1) / double($stat(selected)))}]
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "钣金中面抽取正在执行" "Midsurface extraction running"] \
+                [::HWFlow::txt "组件 $compIndex/$stat(selected)：$sourceName" "Component $compIndex/$stat(selected): $sourceName"] \
+                1}
+        }
 
         if {[catch {set result [::MidSurf::processComponent $compId]} err]} {
             incr stat(skipped)
@@ -959,6 +978,12 @@ proc ::MidSurf::run {} {
     }
 
     ::MidSurf::clearMarks
+    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 95.0 \
+            [::HWFlow::txt "钣金中面抽取正在收尾" "Midsurface extraction finishing"] \
+            [::HWFlow::txt "正在刷新结果并生成汇总..." "Refreshing results and building summary..."] \
+            1}
+    }
 
     set msg [::HWFlow::txt "中面抽取 v$VERSION 已完成。\n\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n已跳过既有中面：$stat(existing)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped existing midsurfaces: $stat(existing)\nSkipped/failed: $stat(skipped)"]
 
@@ -985,6 +1010,9 @@ proc ::MidSurf::run {} {
         }
     }
 
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "中面抽取已完成。" "Midsurface extraction finished."] 100.0}
+    }
     catch {tk_messageBox -icon info -title "[::HWFlow::txt "钣金中面抽取" "MidSurf"] v$VERSION" -message $msg}
     ::MidSurf::msg $msg
 }

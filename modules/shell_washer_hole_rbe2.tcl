@@ -97,7 +97,11 @@ namespace eval ::RB2W {
 proc ::RB2W::log {msg} {
     variable VERBOSE
     if {$VERBOSE} {
-        puts "[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}] RB2W: $msg"
+        set line "[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}] RB2W: $msg"
+        puts $line
+        if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
+            catch {::HWFlow::progressAppend "RB2W: $msg"}
+        }
     }
 }
 

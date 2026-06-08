@@ -398,6 +398,9 @@ proc ::AutoHoleRBE2::log {level msg} {
 
     set line "[clock format [clock seconds] -format "%H:%M:%S"] $level $msg"
     puts $line
+    if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
+        catch {::HWFlow::progressAppend "AutoHoleRBE2 $level: $msg"}
+    }
 
     if {$cfg(logChan) ne ""} {
         puts $cfg(logChan) $line
@@ -1194,6 +1197,12 @@ proc ::AutoHoleRBE2::runCore {} {
     set comps $ui(selectedComps)
 
     ::AutoHoleRBE2::message [::HWFlow::txt "已选择 [llength $comps] 个组件。" "Selected [llength $comps] component(s)."]
+    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 5.0 \
+            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "正在读取所选组件..." "Reading selected components..."] \
+            1}
+    }
 
     ::AutoHoleRBE2::clearMarks
     eval *createmark comps 1 $comps
@@ -1219,6 +1228,12 @@ proc ::AutoHoleRBE2::runCore {} {
     }
 
     ::AutoHoleRBE2::message [::HWFlow::txt "正在生成自由面..." "Generating free faces..."]
+    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 18.0 \
+            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "正在生成自由面..." "Generating free faces..."] \
+            1}
+    }
     ::AutoHoleRBE2::clearMarks
     eval *createmark comps 1 $comps
     *findfaces components 1
@@ -1232,6 +1247,12 @@ proc ::AutoHoleRBE2::runCore {} {
     }
 
     ::AutoHoleRBE2::message [::HWFlow::txt "正在分析自由面..." "Analyzing free faces..."]
+    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 35.0 \
+            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "正在分析自由面，数量：$stat(freeFaces)" "Analyzing free faces: $stat(freeFaces)"] \
+            1}
+    }
     array set faceNodes {}
     array set faceNormals {}
     array set edgeFaces {}
@@ -1259,6 +1280,12 @@ proc ::AutoHoleRBE2::runCore {} {
     }
 
     ::AutoHoleRBE2::message [::HWFlow::txt "正在识别光顺面片..." "Detecting smooth patches..."]
+    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 52.0 \
+            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "正在识别光顺面片..." "Detecting smooth patches..."] \
+            1}
+    }
     set segments [::AutoHoleRBE2::segmentFaces $validFaces faceNodes faceNormals edgeFaces]
     set stat(segments) [llength $segments]
 
@@ -1269,7 +1296,22 @@ proc ::AutoHoleRBE2::runCore {} {
     set resultCompReady 0
 
     ::AutoHoleRBE2::message [::HWFlow::txt "正在识别孔并创建 RBE2 单元..." "Detecting holes and creating RBE2 elements..."]
+    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 65.0 \
+            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "正在处理光顺面片，数量：$stat(segments)" "Processing smooth patches: $stat(segments)"] \
+            1}
+    }
+    set segmentIndex 0
     foreach segment $segments {
+        incr segmentIndex
+        if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($segmentIndex == 1 || $segmentIndex == $stat(segments) || [expr {$segmentIndex % 50}] == 0)} {
+            set pct [expr {65.0 + 25.0 * ($segmentIndex / double($stat(segments)))}]
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+                [::HWFlow::txt "面片 $segmentIndex/$stat(segments) | 已创建=$stat(created) 已跳过既有=$stat(skippedExisting)" "Patch $segmentIndex/$stat(segments) | created=$stat(created) skippedExisting=$stat(skippedExisting)"] \
+                [expr {$segmentIndex == $stat(segments)}]}
+        }
         set result [::AutoHoleRBE2::evaluateHoleSegment $segment faceNodes faceNormals edgeFaces]
 
         if {[llength $result] == 0} {
@@ -1303,6 +1345,12 @@ proc ::AutoHoleRBE2::runCore {} {
     }
 
     if {$cfg(deleteTempFaces)} {
+        if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
+            catch {::HWFlow::progressUpdate 94.0 \
+                [::HWFlow::txt "实体贯通孔 RBE2 正在收尾" "AutoHoleRBE2 finishing"] \
+                [::HWFlow::txt "正在删除自由面临时组件..." "Deleting temporary free-face component..."] \
+                1}
+        }
         if {[::AutoHoleRBE2::deleteComponentByName $cfg(faceCompName)]} {
             ::AutoHoleRBE2::message [::HWFlow::txt "已删除自由面临时组件：$cfg(faceCompName)" "Deleted temporary free-face component: $cfg(faceCompName)"]
         }
@@ -1326,6 +1374,13 @@ proc ::AutoHoleRBE2::run {} {
     }
 
     ::AutoHoleRBE2::initLog
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] \
+            [::HWFlow::txt "准备识别实体贯通孔..." "Preparing through-hole detection..."] \
+            0]
+    }
     ::AutoHoleRBE2::message [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 开始。" "AutoHoleRBE2 v$VERSION started."]
 
     set failed 0
@@ -1351,6 +1406,9 @@ proc ::AutoHoleRBE2::run {} {
         }
 
         ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 RBE2 单元，跳过既有 $stat(skippedExisting) 个。" "Finished: created $stat(created) RBE2 element(s), skipped $stat(skippedExisting) existing."]
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "实体贯通孔 RBE2 已完成。" "AutoHoleRBE2 finished."] 100.0}
+        }
         catch {tk_messageBox -icon info -title "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION" -message $msg}
     } else {
         set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 执行失败：\n\n$errMsg" "AutoHoleRBE2 v$VERSION failed:\n\n$errMsg"]
@@ -1359,6 +1417,9 @@ proc ::AutoHoleRBE2::run {} {
             append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
         }
 
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "实体贯通孔 RBE2 执行失败。" "AutoHoleRBE2 failed."] 100.0}
+        }
         catch {tk_messageBox -icon warning -title "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION" -message $msg}
     }
 
