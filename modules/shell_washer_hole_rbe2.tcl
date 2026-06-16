@@ -947,33 +947,39 @@ proc ::RB2W::createComponentByName {compName} {
     variable PERFORMANCE_MODE
     if {[RB2W::componentExistsByName $compName]} {
         RB2W::setCurrentComponent $compName
+        catch {::HWFlow::activateAndShowComponent $compName 0}
         return
     }
 
-    if {!$PERFORMANCE_MODE} {
-        RB2W::enableInteractiveBrowserUpdates
-    }
-    set histName "Created Component $compName"
-    set histStarted 0
-    catch {*startnotehistorystate $histName}
-    set histStarted 1
-
-    set createCode [catch {*collectorcreateonly comps $compName "" 11} err1]
-    if {$createCode} {
-        set createCode [catch {*collectorcreateonly components $compName "" 11} err1]
-    }
-    if {$createCode} {
-        if {[catch {*createentity comps name=$compName} err2]} {
-            if {$histStarted} { catch {*endnotehistorystate $histName} }
-            if {!$PERFORMANCE_MODE} {
-                RB2W::resumePerformanceModeAfterBrowserUpdate
-            }
-            error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
+    if {[llength [info commands ::HWFlow::createComponent]] > 0} {
+        ::HWFlow::createComponent $compName 11
+    } else {
+        if {!$PERFORMANCE_MODE} {
+            RB2W::enableInteractiveBrowserUpdates
         }
+        set histName "Created Component $compName"
+        set histStarted 0
+        catch {*startnotehistorystate $histName}
+        set histStarted 1
+
+        set createCode [catch {*collectorcreateonly comps $compName "" 11} err1]
+        if {$createCode} {
+            set createCode [catch {*collectorcreateonly components $compName "" 11} err1]
+        }
+        if {$createCode} {
+            if {[catch {*createentity comps name=$compName} err2]} {
+                if {$histStarted} { catch {*endnotehistorystate $histName} }
+                if {!$PERFORMANCE_MODE} {
+                    RB2W::resumePerformanceModeAfterBrowserUpdate
+                }
+                error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
+            }
+        }
+        if {$histStarted} { catch {*endnotehistorystate $histName} }
     }
-    if {$histStarted} { catch {*endnotehistorystate $histName} }
 
     RB2W::setCurrentComponent $compName
+    catch {::HWFlow::activateAndShowComponent $compName 0}
     if {!$PERFORMANCE_MODE} {
         RB2W::showOutputComponent $compName 1
         RB2W::resumePerformanceModeAfterBrowserUpdate

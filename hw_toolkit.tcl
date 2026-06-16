@@ -312,7 +312,7 @@ proc ::HWToolkit::showHome {} {
 
 proc ::HWToolkit::manualRefreshBrowser {} {
     if {[llength [info commands ::HWFlow::refreshBrowser]] > 0} {
-        ::HWFlow::refreshBrowser 1
+        ::HWFlow::refreshBrowser 1 1
     }
 }
 

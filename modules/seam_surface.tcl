@@ -1603,30 +1603,36 @@ proc ::SeamSurf::ensureSeamComponent {thickness} {
     set compId [::HWFlow::componentIdByName $compName]
     if {$compId ne ""} {
         ::SeamSurf::setCurrentComponent $compName
+        catch {::HWFlow::activateAndShowComponent $compName 0}
         ::SeamSurf::refreshComponentBrowser $compName
         return [list $compName $compId]
     }
 
-    ::SeamSurf::enableInteractiveBrowserUpdates
-    set histName "Created Component $compName"
-    catch {*startnotehistorystate $histName}
-    set createCode [catch {*collectorcreateonly comps $compName "" 11} err1]
-    if {$createCode} {
-        set createCode [catch {*collectorcreateonly components $compName "" 11} err1]
-    }
-    if {$createCode} {
-        if {[catch {*createentity comps name=$compName} err2]} {
-            catch {*endnotehistorystate $histName}
-            error [::HWFlow::txt "无法创建焊缝组件 $compName：$err1 / $err2" "Cannot create seam component $compName: $err1 / $err2"]
+    if {[llength [info commands ::HWFlow::createComponent]] > 0} {
+        set compId [::HWFlow::createComponent $compName 11]
+    } else {
+        ::SeamSurf::enableInteractiveBrowserUpdates
+        set histName "Created Component $compName"
+        catch {*startnotehistorystate $histName}
+        set createCode [catch {*collectorcreateonly comps $compName "" 11} err1]
+        if {$createCode} {
+            set createCode [catch {*collectorcreateonly components $compName "" 11} err1]
         }
+        if {$createCode} {
+            if {[catch {*createentity comps name=$compName} err2]} {
+                catch {*endnotehistorystate $histName}
+                error [::HWFlow::txt "无法创建焊缝组件 $compName：$err1 / $err2" "Cannot create seam component $compName: $err1 / $err2"]
+            }
+        }
+        catch {*endnotehistorystate $histName}
+        set compId [::HWFlow::componentIdByName $compName]
     }
-    catch {*endnotehistorystate $histName}
 
     ::SeamSurf::setCurrentComponent $compName
-    set compId [::HWFlow::componentIdByName $compName]
     if {$compId ne ""} {
         ::HWFlow::addComponentsToAssembly SEAM [list $compId] 11
     }
+    catch {::HWFlow::activateAndShowComponent $compName 0}
     ::SeamSurf::refreshComponentBrowser $compName
     return [list $compName $compId]
 }

@@ -668,7 +668,11 @@ proc ::CastingTetMesh::check2DQuality {compIds} {
 proc ::CastingTetMesh::ensureComponent {name {color 3}} {
     set id [::HWFlow::componentIdByName $name]
     if {$id ne ""} {
+        catch {::HWFlow::activateAndShowComponent $name 0}
         return $id
+    }
+    if {[llength [info commands ::HWFlow::createComponent]] > 0} {
+        return [::HWFlow::createComponent $name $color]
     }
     if {[catch {*collectorcreateonly comps $name "" $color} err1]} {
         if {[catch {*collectorcreateonly components $name "" $color} err2]} {
@@ -677,6 +681,7 @@ proc ::CastingTetMesh::ensureComponent {name {color 3}} {
             }
         }
     }
+    catch {::HWFlow::activateAndShowComponent $name 1}
     return [::HWFlow::componentIdByName $name]
 }
 

@@ -836,6 +836,7 @@ proc ::MidSurf::renameMiddleSurface {sourceName thickness midCompId} {
 
     catch {*currentcollector component $outName}
     catch {*currentcollector components $outName}
+    catch {::HWFlow::activateAndShowComponent $outName 0}
     ::MidSurf::refreshComponentBrowser $outName
 
     return $outName

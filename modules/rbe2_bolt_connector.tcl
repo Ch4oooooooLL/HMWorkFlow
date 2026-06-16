@@ -842,27 +842,31 @@ proc ::RB2Bolt::ensureComponent {name} {
     set id ""
     if {![catch {hm_getvalue comps name=$name dataname=id} id] && $id ne "" && $id != 0} {
         catch {*currentcollector component $name}
+        catch {::HWFlow::activateAndShowComponent $name 0}
         ::RB2Bolt::refreshComponentBrowser $name
         return $id
     }
 
-    ::RB2Bolt::enableInteractiveBrowserUpdates
-    set histName "Created Component $name"
-    catch {*startnotehistorystate $histName}
-    set createCode [catch {*collectorcreateonly comps $name "" 11} err1]
-    if {$createCode} {
-        set createCode [catch {*collectorcreateonly components $name "" 11} err1]
-    }
-    if {$createCode} {
-        if {[catch {*createentity comps name=$name} err2]} {
-            catch {*endnotehistorystate $histName}
-            error [::HWFlow::txt "无法创建组件 $name：$err1 / $err2" "Cannot create component $name: $err1 / $err2"]
+    if {[llength [info commands ::HWFlow::createComponent]] > 0} {
+        set id [::HWFlow::createComponent $name 11]
+    } else {
+        ::RB2Bolt::enableInteractiveBrowserUpdates
+        set histName "Created Component $name"
+        catch {*startnotehistorystate $histName}
+        set createCode [catch {*collectorcreateonly comps $name "" 11} err1]
+        if {$createCode} {
+            set createCode [catch {*collectorcreateonly components $name "" 11} err1]
         }
+        if {$createCode} {
+            if {[catch {*createentity comps name=$name} err2]} {
+                catch {*endnotehistorystate $histName}
+                error [::HWFlow::txt "无法创建组件 $name：$err1 / $err2" "Cannot create component $name: $err1 / $err2"]
+            }
+        }
+        catch {*endnotehistorystate $histName}
+        set id 0
+        catch {set id [hm_getvalue comps name=$name dataname=id]}
     }
-    catch {*endnotehistorystate $histName}
-
-    set id 0
-    catch {set id [hm_getvalue comps name=$name dataname=id]}
     catch {*currentcollector component $name}
     ::RB2Bolt::refreshComponentBrowser $name
     return $id

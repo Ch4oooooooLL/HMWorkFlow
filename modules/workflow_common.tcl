@@ -26,6 +26,7 @@ namespace eval ::HWFlow {
     variable FONT_INITIALIZED 0
     variable UI_FONT_FAMILY ""
     variable UI_FIXED_FONT_FAMILY ""
+    variable touchedComponents {}
 }
 
 proc ::HWFlow::globalConfigFile {} {
@@ -574,6 +575,121 @@ proc ::HWFlow::componentIdByName {name} {
     return ""
 }
 
+proc ::HWFlow::rememberComponent {compName} {
+    variable touchedComponents
+    set compName [string trim $compName]
+    if {$compName eq ""} {
+        return
+    }
+    if {[lsearch -exact $touchedComponents $compName] < 0} {
+        lappend touchedComponents $compName
+    }
+}
+
+proc ::HWFlow::markComponentByName {compName markId} {
+    foreach etype {components comps} {
+        catch {*clearmark $etype $markId}
+        foreach selector {"by name only" "by name"} {
+            if {![catch {*createmark $etype $markId $selector $compName}]} {
+                if {![catch {set ids [hm_getmark $etype $markId]}] && [llength $ids] > 0} {
+                    return $etype
+                }
+            }
+        }
+    }
+
+    set compId [::HWFlow::componentIdByName $compName]
+    if {$compId ne ""} {
+        foreach etype {components comps} {
+            catch {*clearmark $etype $markId}
+            if {![catch {*createmark $etype $markId "by id only" $compId}]} {
+                if {![catch {set ids [hm_getmark $etype $markId]}] && [llength $ids] > 0} {
+                    return $etype
+                }
+            }
+        }
+    }
+    return ""
+}
+
+proc ::HWFlow::activateAndShowComponent {compName {refresh 0}} {
+    set compName [string trim $compName]
+    if {$compName eq ""} {
+        return 0
+    }
+    ::HWFlow::rememberComponent $compName
+
+    set markType [::HWFlow::markComponentByName $compName 2]
+    if {$markType ne ""} {
+        catch {*marksuppressactive $markType 2 0}
+        catch {*marksuppressoutput $markType 2 0}
+        catch {*displaycollectorsbymark $markType 2 on 1 1}
+        catch {*displaycollectorsbymark components 2 on 1 1}
+        catch {*displaycollectorsbymark comps 2 on 1 1}
+        catch {*displaycollectorsallbymark 2 on 1 1}
+        catch {*clearmark $markType 2}
+    }
+
+    catch {*displaycollector component on $compName 1 1}
+    catch {*displaycollector components on $compName 1 1}
+    catch {*displaycollectorwithfilter component on $compName 1 1}
+    catch {*displaycollectorwithfilter components on $compName 1 1}
+
+    set compId [::HWFlow::componentIdByName $compName]
+    if {$compId ne ""} {
+        catch {*showentity comps "by id" $compId}
+        catch {*showentity components "by id" $compId}
+    }
+    if {$refresh} {
+        ::HWFlow::refreshBrowser
+    }
+    return 1
+}
+
+proc ::HWFlow::createComponent {compName {color 11}} {
+    set compName [string trim $compName]
+    if {$compName eq ""} {
+        set compName COMPONENT
+    }
+    set compId [::HWFlow::componentIdByName $compName]
+    if {$compId ne ""} {
+        catch {*currentcollector component $compName}
+        catch {*currentcollector components $compName}
+        ::HWFlow::activateAndShowComponent $compName 1
+        return $compId
+    }
+
+    catch {hm_blockbrowserupdate 0}
+    catch {hmbr_signals buffer stop}
+    catch {hwbrowsermanager view flush true}
+    catch {*setoption block_redraw=0}
+    catch {*setoption block_messages=0}
+    catch {hm_blockredraw 0}
+    catch {hm_blockmessages 0}
+    catch {hm_blockerrormessages 0}
+    catch {hm_commandfilestate 1}
+
+    set histName "Created Component $compName"
+    catch {*startnotehistorystate $histName}
+    set createCode [catch {*collectorcreateonly comps $compName "" $color} err1]
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly components $compName "" $color} err1]
+    }
+    if {$createCode} {
+        if {[catch {*createentity comps name=$compName} err2]} {
+            catch {*endnotehistorystate $histName}
+            error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
+        }
+    }
+    catch {*endnotehistorystate $histName}
+
+    catch {*currentcollector component $compName}
+    catch {*currentcollector components $compName}
+    set compId [::HWFlow::componentIdByName $compName]
+    ::HWFlow::activateAndShowComponent $compName 1
+    return $compId
+}
+
 proc ::HWFlow::entityExistsByName {etype name} {
     if {![catch {set exists [hm_entityinfo exist $etype $name -byname]}]} {
         return $exists
@@ -718,6 +834,7 @@ proc ::HWFlow::renameComponent {oldName newName} {
             error [::HWFlow::txt "无法将组件 $oldName 重命名为 $candidate：$err1 / $err2" "Cannot rename component $oldName to $candidate: $err1 / $err2"]
         }
     }
+    ::HWFlow::activateAndShowComponent $candidate 0
     return $candidate
 }
 
@@ -750,7 +867,7 @@ proc ::HWFlow::displayComponent {compName state} {
     catch {update idletasks}
 }
 
-proc ::HWFlow::refreshBrowser {{notify 0}} {
+proc ::HWFlow::refreshBrowser {{notify 0} {activateInactive 0}} {
     # Reset the common redraw/browser throttles used by performance modes, then
     # force the Model Browser and graphics window to consume pending updates.
     foreach cmd {
@@ -769,6 +886,22 @@ proc ::HWFlow::refreshBrowser {{notify 0}} {
         {hm_redraw}
     } {
         catch {uplevel #0 $cmd}
+    }
+    variable touchedComponents
+    foreach compName $touchedComponents {
+        catch {::HWFlow::activateAndShowComponent $compName 0}
+    }
+    if {$activateInactive} {
+        foreach etype {components comps} {
+            catch {*clearmark $etype 2}
+            if {![catch {*createmark $etype 2 inactive}]} {
+                catch {*marksuppressactive $etype 2 0}
+                catch {*marksuppressoutput $etype 2 0}
+                catch {*displaycollectorsbymark $etype 2 on 1 1}
+                catch {*displaycollectorsallbymark 2 on 1 1}
+            }
+            catch {*clearmark $etype 2}
+        }
     }
     catch {update idletasks}
     catch {update}
