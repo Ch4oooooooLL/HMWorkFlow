@@ -324,6 +324,190 @@ proc ::RB2Bolt::clearSelectionMarks {} {
     catch {update idletasks}
 }
 
+proc ::RB2Bolt::uniqueIntegerIds {ids} {
+    set out {}
+    foreach id $ids {
+        if {$id eq ""} {continue}
+        lappend out $id
+    }
+    if {[llength $out] == 0} {return {}}
+    return [lsort -integer -unique $out]
+}
+
+proc ::RB2Bolt::intersectIntegerIds {a b} {
+    array unset keep
+    array set keep {}
+    foreach id $b {
+        if {$id eq ""} {continue}
+        set keep($id) 1
+    }
+
+    set out {}
+    foreach id $a {
+        if {[info exists keep($id)]} {
+            lappend out $id
+        }
+    }
+    return [::RB2Bolt::uniqueIntegerIds $out]
+}
+
+proc ::RB2Bolt::markElementCandidates {markId selectors} {
+    set sawSuccess 0
+    set firstSuccessfulSelector ""
+    foreach selector $selectors {
+        catch {*clearmark elems $markId}
+        catch {*clearmark elements $markId}
+        set cmd [concat [list *createmark elems $markId] $selector]
+        if {![catch {eval $cmd}]} {
+            set sawSuccess 1
+            if {$firstSuccessfulSelector eq ""} {
+                set firstSuccessfulSelector [join $selector " "]
+            }
+            set ids {}
+            catch {set ids [hm_getmark elems $markId]}
+            catch {*clearmark elems $markId}
+            catch {*clearmark elements $markId}
+            set ids [::RB2Bolt::uniqueIntegerIds $ids]
+            if {[llength $ids] > 0} {
+                return [list 1 $ids [join $selector " "]]
+            }
+        }
+    }
+    catch {*clearmark elems $markId}
+    catch {*clearmark elements $markId}
+    if {$sawSuccess} {
+        return [list 1 {} $firstSuccessfulSelector]
+    }
+    return [list 0 {} ""]
+}
+
+proc ::RB2Bolt::markRigidLinkCandidates {markId} {
+    return [::RB2Bolt::markElementCandidates $markId {
+        {"by config" 55}
+        {"by element config" 55}
+        {"by elem config" 55}
+        {"by configuration" 55}
+        {"by card image" RBE2}
+        {"by cardimage" RBE2}
+        {"by type" RBE2}
+    }]
+}
+
+proc ::RB2Bolt::markOneDElementCandidates {markId} {
+    return [::RB2Bolt::markElementCandidates $markId {
+        {"by dimension" 1}
+        {"by element dimension" 1}
+        {"by elem dimension" 1}
+    }]
+}
+
+proc ::RB2Bolt::rbe2CandidatesFromSelectedElements {selected} {
+    set selected [::RB2Bolt::uniqueIntegerIds $selected]
+    if {[llength $selected] == 0} {return {}}
+
+    set exact [::RB2Bolt::markRigidLinkCandidates 2]
+    if {[lindex $exact 0]} {
+        set out [::RB2Bolt::intersectIntegerIds $selected [lindex $exact 1]]
+        msg [::HWFlow::txt \
+            "RBE2 快速筛选：选中 [llength $selected] 个单元，按 [lindex $exact 2] 得到候选 [llength $out] 个。" \
+            "RBE2 fast filter: [llength $selected] selected elements, [llength $out] candidates by [lindex $exact 2]."]
+        return $out
+    }
+
+    set oneD [::RB2Bolt::markOneDElementCandidates 2]
+    if {[lindex $oneD 0]} {
+        set out [::RB2Bolt::intersectIntegerIds $selected [lindex $oneD 1]]
+        msg [::HWFlow::txt \
+            "RBE2 快速筛选：选中 [llength $selected] 个单元，按 [lindex $oneD 2] 缩小为 1D 候选 [llength $out] 个。" \
+            "RBE2 fast filter: [llength $selected] selected elements, narrowed to [llength $out] 1D candidates by [lindex $oneD 2]."]
+        return $out
+    }
+
+    msg [::HWFlow::txt \
+        "当前 HyperMesh 未接受 RBE2/1D mark 快速筛选，回退为扫描选中单元。" \
+        "HyperMesh did not accept the RBE2/1D mark fast filter; falling back to scanning selected elements."]
+    return $selected
+}
+
+proc ::RB2Bolt::elemComponentId {eid} {
+    foreach dn {component.id collector.id comp.id} {
+        if {![catch {set cid [hm_getvalue elems id=$eid dataname=$dn]}] && $cid ne "" && $cid != 0} {
+            return $cid
+        }
+    }
+    return ""
+}
+
+proc ::RB2Bolt::componentElementIdsSlow {compIds} {
+    set out {}
+    foreach cid $compIds {
+        catch {*clearmark elems 2}
+        catch {*clearmark elements 2}
+        if {![catch {*createmark elems 2 "by comp id" $cid}]} {
+            foreach e [hm_getmark elems 2] {lappend out $e}
+        }
+    }
+    catch {*clearmark elems 2}
+    catch {*clearmark elements 2}
+    return [::RB2Bolt::uniqueIntegerIds $out]
+}
+
+proc ::RB2Bolt::filterCandidatesByComponents {candidates compIds} {
+    array unset want
+    array set want {}
+    foreach cid $compIds {
+        if {$cid eq ""} {continue}
+        set want($cid) 1
+    }
+
+    set out {}
+    set known 0
+    foreach eid $candidates {
+        set cid [::RB2Bolt::elemComponentId $eid]
+        if {$cid eq ""} {continue}
+        set known 1
+        if {[info exists want($cid)]} {
+            lappend out $eid
+        }
+    }
+    return [list $known [::RB2Bolt::uniqueIntegerIds $out]]
+}
+
+proc ::RB2Bolt::rbe2CandidatesFromComponents {compIds} {
+    set compIds [::RB2Bolt::uniqueIntegerIds $compIds]
+    if {[llength $compIds] == 0} {return {}}
+
+    set exact [::RB2Bolt::markRigidLinkCandidates 2]
+    if {[lindex $exact 0]} {
+        set filtered [::RB2Bolt::filterCandidatesByComponents [lindex $exact 1] $compIds]
+        if {[lindex $filtered 0] || [llength [lindex $exact 1]] == 0} {
+            set out [lindex $filtered 1]
+            msg [::HWFlow::txt \
+                "RBE2 快速筛选：选中 [llength $compIds] 个组件，按 [lindex $exact 2] 得到候选 [llength $out] 个。" \
+                "RBE2 fast filter: [llength $compIds] selected components, [llength $out] candidates by [lindex $exact 2]."]
+            return $out
+        }
+    }
+
+    set oneD [::RB2Bolt::markOneDElementCandidates 2]
+    if {[lindex $oneD 0]} {
+        set filtered [::RB2Bolt::filterCandidatesByComponents [lindex $oneD 1] $compIds]
+        if {[lindex $filtered 0] || [llength [lindex $oneD 1]] == 0} {
+            set out [lindex $filtered 1]
+            msg [::HWFlow::txt \
+                "RBE2 快速筛选：选中 [llength $compIds] 个组件，按 [lindex $oneD 2] 缩小为 1D 候选 [llength $out] 个。" \
+                "RBE2 fast filter: [llength $compIds] selected components, narrowed to [llength $out] 1D candidates by [lindex $oneD 2]."]
+            return $out
+        }
+    }
+
+    set allElems [::RB2Bolt::componentElementIdsSlow $compIds]
+    msg [::HWFlow::txt \
+        "当前 HyperMesh 未接受 RBE2/1D mark 快速筛选，回退为扫描组件内单元：[llength $allElems] 个。" \
+        "HyperMesh did not accept the RBE2/1D mark fast filter; falling back to scanning component elements: [llength $allElems]."]
+    return $allElems
+}
+
 proc ::RB2Bolt::selectedElementIds {} {
     variable P
     set out {}
@@ -338,21 +522,14 @@ proc ::RB2Bolt::selectedElementIds {} {
             ::RB2Bolt::clearSelectionMarks
             return {}
         }
-        foreach cid $comps {
-            catch {*clearmark elems 2}
-            catch {*clearmark elements 2}
-            if {![catch {*createmark elems 2 "by comp id" $cid}]} {
-                foreach e [hm_getmark elems 2] {lappend out $e}
-            }
-        }
-        catch {*clearmark elems 2}
-        catch {*clearmark elements 2}
+        set out [::RB2Bolt::rbe2CandidatesFromComponents $comps]
     } else {
         *createmarkpanel elems 1 [::HWFlow::txt "选择 RBE2 单元" "Select RBE2 elements"]
-        foreach e [hm_getmark elems 1] {lappend out $e}
+        set selected [hm_getmark elems 1]
+        set out [::RB2Bolt::rbe2CandidatesFromSelectedElements $selected]
     }
     ::RB2Bolt::clearSelectionMarks
-    return [lsort -integer -unique $out]
+    return [::RB2Bolt::uniqueIntegerIds $out]
 }
 
 proc ::RB2Bolt::isRigidLink {eid} {
@@ -1033,11 +1210,11 @@ proc ::RB2Bolt::run {} {
     set elemIds [selectedElementIds]
     if {[llength $elemIds] == 0} {
         ::RB2Bolt::clearSelectionMarks
-        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "未选择任何单元。" "No elements were selected."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择范围内未找到 RBE2 候选单元。" "No RBE2 candidate elements were found in the selection scope."]
         return
     }
 
-    msg [::HWFlow::txt "已选择单元数：[llength $elemIds]" "Selected elements: [llength $elemIds]"]
+    msg [::HWFlow::txt "RBE2 候选单元数：[llength $elemIds]" "RBE2 candidate elements: [llength $elemIds]"]
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \

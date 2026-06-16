@@ -1,0 +1,51 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "**"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Package and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build package
+        id: package
+        shell: pwsh
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          $safeRef = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
+          $packageName = "HMWorkFlow-$safeRef-$shortSha.zip"
+          ./build_package.ps1 -OutputDir dist -PackageName $packageName
+          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
+          "package_name=$packageName" >> $env:GITHUB_OUTPUT
+          "package_path=dist/$packageName" >> $env:GITHUB_OUTPUT
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: auto-build-${{ github.sha }}
+          PACKAGE_PATH: ${{ steps.package.outputs.package_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title="Automated build ${GITHUB_REF_NAME} ${GITHUB_SHA::7}"
+          notes="Automated package for commit ${GITHUB_SHA} on ${GITHUB_REF_NAME}."
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$PACKAGE_PATH" --clobber
+            gh release edit "$TAG_NAME" --target "$GITHUB_SHA" --title "$title" --notes "$notes"
+          else
+            gh release create "$TAG_NAME" "$PACKAGE_PATH" --target "$GITHUB_SHA" --title "$title" --notes "$notes"
+          fi
