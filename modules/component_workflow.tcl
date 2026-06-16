@@ -79,7 +79,7 @@ proc ::CompWorkflow::showCategoryPanel {} {
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "组件类型分类" "Component Type Classification"] -font {Arial 11 bold}
+    label $w.main.title -text [::HWFlow::txt "组件类型分类" "Component Type Classification"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w -pady {0 8}
 
     labelframe $w.main.classify -text [::HWFlow::txt "组件分类" "Classify Components"] -padx 8 -pady 8
@@ -140,7 +140,7 @@ proc ::CompWorkflow::showMaterialPanel {} {
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "材料标识分配" "Material Assignment"] -font {Arial 11 bold}
+    label $w.main.title -text [::HWFlow::txt "材料标识分配" "Material Assignment"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w -pady {0 8}
 
     labelframe $w.main.mat -text [::HWFlow::txt "材料库" "Material Library"] -padx 8 -pady 8
@@ -254,7 +254,7 @@ proc ::CompWorkflow::showMaterialEditor {} {
 
     frame $w.main -padx 10 -pady 10
     pack $w.main -fill both -expand 1
-    text $w.main.txt -width 92 -height 18 -wrap none -font {Consolas 9}
+    text $w.main.txt -width 92 -height 18 -wrap none -font [::HWFlow::uiFont fixed]
     scrollbar $w.main.y -orient vertical -command "$w.main.txt yview"
     scrollbar $w.main.x -orient horizontal -command "$w.main.txt xview"
     $w.main.txt configure -yscrollcommand "$w.main.y set" -xscrollcommand "$w.main.x set"

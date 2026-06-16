@@ -38,6 +38,14 @@ namespace eval ::HWToolkit {
             desc_en  "Extract sheet-metal midsurfaces and name outputs as CATEGORY_NAME_Tx_MATERIAL."
             proc     "::MidSurf::run"
         }
+        geometry_cleanup {
+            group    "02. Geometry"
+            label_zh "几何清理：倒角/沉台"
+            label_en "Geometry Cleanup: Chamfer/Recess"
+            desc_zh  "选择一个倒角面或沉台底面，自动判断并执行倒角清除或沉台补平。"
+            desc_en  "Select one chamfer face or recessed floor face, then auto-detect and clean chamfers or fill recesses."
+            proc     "::GeomCleanup::run"
+        }
         seam_surface {
             group    "03. Seam"
             label_zh "焊缝面创建"
@@ -46,8 +54,24 @@ namespace eval ::HWToolkit {
             desc_en  "Create SEAM_Tx geometry surfaces with Line-Surface or Line-Line workflows."
             proc     "::SeamSurf::run"
         }
+        batch_mesh_washer {
+            group    "04. Mesh"
+            label_zh "钣金 BatchMesh + 自动 Washer"
+            label_en "Sheet BatchMesh + Auto Washer"
+            desc_zh  "对钣金中面/壳组件执行 BatchMesh，不修改几何，并按孔径标准忽略小孔或生成 washer。"
+            desc_en  "Run BatchMesh on sheet-metal midsurface/shell components without modifying geometry, then ignore small holes or create washers by rules."
+            proc     "::BatchMeshWasher::run"
+        }
+        casting_tetramesh {
+            group    "04. Mesh"
+            label_zh "铸件 CFD TetraMesh"
+            label_en "Casting CFD TetraMesh"
+            desc_zh  "对铸件执行删除 solid、surface 微小特征清理、三角面网格质量迭代和 CFD/TetraMesh 体填充。"
+            desc_en  "Run casting solid removal, surface defeaturing, tria quality iterations and CFD/TetraMesh volume fill."
+            proc     "::CastingTetMesh::run"
+        }
         shell_washer_hole_rbe2 {
-            group    "04. RBE2"
+            group    "05. RBE2"
             label_zh "壳单元垫圈孔 RBE2"
             label_en "Shell Washer-Hole RBE2"
             desc_zh  "识别壳单元标准垫圈孔，并自动创建 RBE2 连接。"
@@ -55,7 +79,7 @@ namespace eval ::HWToolkit {
             proc     "::RB2W::run"
         }
         auto_hole_rbe2 {
-            group    "04. RBE2"
+            group    "05. RBE2"
             label_zh "实体贯通孔 RBE2"
             label_en "Solid Through-Hole RBE2"
             desc_zh  "识别实体网格圆柱贯通孔，并自动创建 RBE2 连接。"
@@ -63,7 +87,7 @@ namespace eval ::HWToolkit {
             proc     "::AutoHoleRBE2::run"
         }
         rbe2_bolt_connector {
-            group    "05. Bolt"
+            group    "06. Bolt"
             label_zh "RBE2 螺栓连接生成"
             label_en "RBE2 Bolt Connector"
             desc_zh  "对 RBE2 中心节点分组，并生成 CBEAM/CBAR 螺栓段。"
@@ -155,11 +179,14 @@ proc ::HWToolkit::groupText {group} {
         "03. Seam" {
             return [::HWFlow::txt "03. 焊缝面" "03. Seam"]
         }
-        "04. RBE2" {
-            return [::HWFlow::txt "04. RBE2 连接" "04. RBE2"]
+        "04. Mesh" {
+            return [::HWFlow::txt "04. 网格划分" "04. Mesh"]
         }
-        "05. Bolt" {
-            return [::HWFlow::txt "05. 螺栓连接" "05. Bolt"]
+        "05. RBE2" {
+            return [::HWFlow::txt "05. RBE2 连接" "05. RBE2"]
+        }
+        "06. Bolt" {
+            return [::HWFlow::txt "06. 螺栓连接" "06. Bolt"]
         }
     }
     return $group
@@ -170,15 +197,20 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::MidSurf::savePanelState}
     catch {::AutoHoleRBE2::savePanelState}
     catch {::RB2W::savePanelState}
+    catch {::BatchMeshWasher::savePanelState}
+    catch {::CastingTetMesh::savePanelState}
     catch {::RB2Bolt::saveState}
     catch {::SeamSurf::savePanelState}
+    catch {::GeomCleanup::savePanelState}
 
     catch {set ::MidSurf::ui(ok) 0}
     catch {set ::MidSurf::ui(promptOk) -1}
     catch {set ::AutoHoleRBE2::ui(ok) 0}
     catch {set ::RB2W::ui(ok) 0}
+    catch {set ::CastingTetMesh::ui(ok) 0}
     catch {set ::RB2Bolt::done -1}
     catch {set ::SeamSurf::ui(ok) 0}
+    catch {set ::GeomCleanup::ui(ok) 0}
     catch {set ::SeamSurf::ui(promptOk) -1}
     catch {set ::SeamSurf::ui(pickOk) -1}
 
@@ -194,6 +226,9 @@ proc ::HWToolkit::clearExistingWindows {} {
         .rb2w_panel
         .rb2bolt_dlg
         .seam_surface
+        .geometry_cleanup
+        .batch_mesh_washer
+        .casting_tetramesh
         .seam_thickness
         .seam_pick
     } {
@@ -215,8 +250,8 @@ proc ::HWToolkit::showPanel {} {
 
     frame $w.header -padx 12 -pady 10
     pack $w.header -fill x
-    label $w.header.title -text [::HWFlow::txt "HyperMesh 前处理工作流工具集" "HyperMesh Preprocess Workflow Toolkit"] -font {Arial 14 bold}
-    label $w.header.subtitle -text [::HWFlow::txt "面向 HyperMesh 2019 的工程化前处理流程模块" "Workflow modules for HyperMesh 2019 preprocessing"] -font {Arial 9}
+    label $w.header.title -text [::HWFlow::txt "HyperMesh 前处理工作流工具集" "HyperMesh Preprocess Workflow Toolkit"] -font [::HWFlow::uiFont header]
+    label $w.header.subtitle -text [::HWFlow::txt "面向 HyperMesh 2019 的工程化前处理流程模块" "Workflow modules for HyperMesh 2019 preprocessing"] -font [::HWFlow::uiFont default]
     pack $w.header.title -anchor w
     pack $w.header.subtitle -anchor w
 
@@ -225,8 +260,8 @@ proc ::HWToolkit::showPanel {} {
 
     set row 0
     foreach group [::HWToolkit::moduleGroups] {
-        labelframe $w.body.g$row -text [::HWToolkit::groupText $group] -padx 8 -pady 8
-        grid $w.body.g$row -row $row -column 0 -sticky ew -pady 4
+        labelframe $w.body.g$row -text [::HWToolkit::groupText $group] -padx 8 -pady 6
+        grid $w.body.g$row -row $row -column 0 -sticky ew -pady 3
         grid columnconfigure $w.body.g$row 0 -weight 1
 
         set innerRow 0
@@ -235,14 +270,10 @@ proc ::HWToolkit::showPanel {} {
                 continue
             }
             set labelText [::HWToolkit::moduleText $info label]
-            set descText [::HWToolkit::moduleText $info desc]
-            label $w.body.g$row.l_$key -text $labelText -font {Arial 9 bold} -anchor w
-            message $w.body.g$row.d_$key -text $descText -width 430 -anchor w -font {Arial 9}
+            label $w.body.g$row.l_$key -text $labelText -font [::HWFlow::uiFont module] -anchor w
             button $w.body.g$row.b_$key -text [::HWFlow::txt "运行" "Run"] -width 10 -command [list ::HWToolkit::runModule $key]
-            grid $w.body.g$row.l_$key -row $innerRow -column 0 -sticky w -padx {0 8} -pady {2 0}
-            grid $w.body.g$row.b_$key -row $innerRow -column 1 -sticky e -pady {2 0}
-            incr innerRow
-            grid $w.body.g$row.d_$key -row $innerRow -column 0 -columnspan 2 -sticky w -padx {12 0} -pady {0 6}
+            grid $w.body.g$row.l_$key -row $innerRow -column 0 -sticky ew -padx {0 18} -pady 3
+            grid $w.body.g$row.b_$key -row $innerRow -column 1 -sticky e -pady 3
             incr innerRow
         }
         incr row

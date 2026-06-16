@@ -1,0 +1,30 @@
+# Casting surface cleanup + tria + CFD/tetra volume mesh defaults.
+# Values are read by modules/casting_tetramesh.tcl and can be changed in the UI.
+key|value|note
+elem_size|3.0|target tria shell element size
+min_elem_size|1.0|minimum element size used by cleanup and local repair
+feature_angle|35|feature angle used by cleanup/remeshing
+pinhole_diam|2.0|pinhole diameter below this value can be removed
+fillet_min_r|0.0|minimum line fillet radius to remove
+fillet_max_r|1.5|maximum line fillet radius to remove
+short_edge_len|1.0|feature line recognition short-edge threshold
+max_iter_2d|4|maximum surface mesh quality cleanup iterations
+tet_mode|1|1=fixed shell without boundary layer; 2/3 can be used for CFD BL workflows
+quality_allow_unknown|1|continue when the installed HyperMesh has no Tcl quality summary API
+cleanup_geometry|1|run geometry cleanup steps before surface mesh
+auto_topo_cleanup|0|run *autotopocleanup only when criteria/cleanup parameter files are provided
+remove_pinholes|1|remove small pinholes from selected surfaces
+remove_line_fillets|1|remove small line fillets from selected surfaces
+refeature_surfaces|1|rebuild/recognize surface features after cleanup
+delete_solids|1|delete selected solid CAD entities but keep boundary surfaces before meshing
+surface_mesh|1|run optimized tria surface mesh
+iterate_2d|1|attempt failed-element cleanup and remesh iterations
+run_tetmesh|1|fill the closed tria surface mesh with tetra elements
+run_shell_check|1|run tetmesh shell validation before volume fill
+organize_failed|0|move failed shell elements to AUTO_CASTING_FAILED_2D when quality APIs report them
+performance_mode|1|block redraw/browser updates while running
+criteria_file||optional HyperMesh quality criteria file; empty uses dummy/defaults
+cleanup_param_file||optional HyperMesh cleanup parameter file for *autotopocleanup
+tet_string|tet: 35 1.2 100 0.1 0.0|raw *tetmesh tet parameter string
+pars_string|pars: pre_cln=1 post_cln=1 shell_validation=1 shell_remesh=0 delauney nlayer_tet=2|raw *tetmesh pars parameter string
+tet_quality_criteria|tet_collapse 0.1 vol_skew 0.95 aspect_ratio 8|criteria string for hm_getelemchecksummary3d

@@ -13,7 +13,7 @@
   -> 输出日志和失败清单
 ```
 
-核心目标不是只调用一次 BatchMesh，而是让网格结果满足项目标准：全局网格尺寸、质量指标、孔周 washer 层数、孔周节点数、层宽、是否删除小孔等都能由规则控制。
+核心目标不是只调用一次 BatchMesh，而是让网格结果满足项目标准：全局网格尺寸、质量指标、孔周 washer 层数、孔周节点数、层宽、小孔是否忽略等都能由规则控制。
 
 ## 可行性判断
 
@@ -31,12 +31,12 @@
 
 ### 1. 基础 BatchMesh
 
-对选定 midsurface 或 shell surface 执行 BatchMesh。为了后续自己按规则生成 washer，建议第一版关闭 BatchMesh 默认 washer，同时避免小孔被自动删除：
+对选定 midsurface 或 shell surface 执行 BatchMesh。为了后续自己按规则生成 washer，建议第一版关闭 BatchMesh 默认 washer，并禁止几何清理/自动删孔：
 
 ```tcl
 *createmark surfs 1 $surfaceIds
 *createstringarray 2 \
-    "elem_size = 5.0 min_elem_size = 2.5 max_elem_size = 8.0 params_generate_mode = shell no_washer = 1 no_remove_holes = 1" \
+    "elem_size = 5.0 min_elem_size = 2.5 max_elem_size = 8.0 params_generate_mode = shell no_geomcleanup = 1 no_washer = 1 no_remove_holes = 1" \
     "batchtempfilesmode = 1"
 *hm_batchmesh2 surfs 1 1 2 "dummy" "dummy"
 ```
@@ -105,7 +105,7 @@ Element quality 命令通常需要在 `*elementqualitysetup` 和 `*elementqualit
 
 ```text
 hole_dia_min|hole_dia_max|action|elem_size|washer_layers|hole_density|width_mode|widths|note
-0|5|delete|4|0|0|none||small holes
+0|6|ignore|4|0|0|none||small holes ignored after meshing; geometry is not modified
 5|8|washer|4|2|8|ratio|0.35,0.45|small bolt holes
 8|12|washer|5|2|12|ratio|0.30,0.40|normal bolt holes
 12|20|washer|6|3|16|abs|2.0,2.5,3.0|large bolt holes
@@ -115,7 +115,7 @@ hole_dia_min|hole_dia_max|action|elem_size|washer_layers|hole_density|width_mode
 字段含义：
 
 - `hole_dia_min` / `hole_dia_max`：孔径范围。
-- `action`：`delete`、`washer`、`keep`、`review`。
+- `action`：`ignore`、`washer`、`keep`、`review`。
 - `elem_size`：该孔径范围推荐全局或局部网格尺寸。
 - `washer_layers`：washer 层数。
 - `hole_density`：孔周方向密度。
@@ -146,7 +146,7 @@ hole_dia_min|hole_dia_max|action|elem_size|washer_layers|hole_density|width_mode
 ### Washer 配置
 
 - 孔径分档。
-- 小孔删除阈值。
+- 小孔忽略阈值。
 - 是否保留无 washer 孔。
 - washer 层数。
 - 孔周密度。

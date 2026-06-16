@@ -64,6 +64,12 @@ try {
         Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
     }
 
+    $PackagedConfigDir = Join-Path $TempProjectRoot "config"
+    if (Test-Path -LiteralPath $PackagedConfigDir) {
+        Get-ChildItem -LiteralPath $PackagedConfigDir -Filter "*_state.txt" -File |
+            Remove-Item -Force
+    }
+
     Compress-Archive -Path $TempProjectRoot -DestinationPath $ZipPath -CompressionLevel Optimal -Force
     Write-Host "Package created: $ZipPath"
 } finally {

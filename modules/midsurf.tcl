@@ -96,7 +96,7 @@ proc ::MidSurf::showPanel {} {
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "钣金中面抽取" "Midsurface Extraction"] -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "钣金中面抽取" "Midsurface Extraction"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -273,7 +273,7 @@ proc ::MidSurf::askThickness {compName defaultValue reason} {
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "无法可靠读取厚度：" "Thickness could not be read reliably:"] -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "无法可靠读取厚度：" "Thickness could not be read reliably:"] -font [::HWFlow::uiFont heading]
     label $w.main.comp -text $compName -anchor w
     message $w.main.reason -text $reason -width 420 -anchor w
     label $w.main.lbl -text [::HWFlow::txt "输入用于命名的厚度 T：" "Enter thickness T for naming:"] -anchor w

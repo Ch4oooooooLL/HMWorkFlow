@@ -199,7 +199,7 @@ proc ::SeamSurf::showPanel {} {
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -font {Arial 11 bold}
+    label $w.main.title -text [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.mode -text [::HWFlow::txt "1. 焊缝类型" "1. Seam Type"] -padx 8 -pady 8

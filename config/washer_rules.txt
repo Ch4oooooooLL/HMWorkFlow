@@ -1,5 +1,8 @@
-# Hole/washer rules for midsurface cleanup. The first demo only stores rules.
-hole_dia_min|hole_dia_max|action|washer_layers|note
-0|5|delete|0|small holes
-5|12|keep_washer|2|normal bolt holes
-12|999|keep_washer|3|large bolt holes
+# Sheet-metal hole washer rules extracted from the provided standard image.
+hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|note
+0|6|ignore|0|0|abs||D < 6mm ignored after meshing; geometry is not modified
+6|9|washer|8|2|abs|4,6|6mm < D <= 9mm
+9|13|washer|10|2|abs|4,6|9mm < D <= 13mm
+13|20|washer|12|2|abs|6,8|13mm < D <= 20mm
+20|30|washer|16|2|abs|8,8|20mm < D <= 30mm
+30|999|keep|0|0|abs||D > 30mm no special handling

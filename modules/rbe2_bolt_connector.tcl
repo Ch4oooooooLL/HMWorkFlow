@@ -205,7 +205,7 @@ proc ::RB2Bolt::showDialog {} {
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 选择范围" "1. Selection Scope"] -padx 8 -pady 8

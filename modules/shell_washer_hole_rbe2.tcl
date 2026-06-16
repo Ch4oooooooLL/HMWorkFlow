@@ -211,7 +211,7 @@ proc ::RB2W::showPanel {} {
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "壳单元垫圈孔 RBE2 创建" "Shell Washer-Hole RBE2 Creation"] -font {Arial 10 bold}
+    label $w.main.title -text [::HWFlow::txt "壳单元垫圈孔 RBE2 创建" "Shell Washer-Hole RBE2 Creation"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8

@@ -23,6 +23,9 @@ namespace eval ::HWFlow {
     variable progressLastLog ""
     variable progressLogMaxLines 220
     variable progressCancelRequested 0
+    variable FONT_INITIALIZED 0
+    variable UI_FONT_FAMILY ""
+    variable UI_FIXED_FONT_FAMILY ""
 }
 
 proc ::HWFlow::globalConfigFile {} {
@@ -121,6 +124,79 @@ proc ::HWFlow::txt {zh en} {
         return $zh
     }
     return $en
+}
+
+proc ::HWFlow::firstAvailableFont {candidates fallback} {
+    if {[llength [info commands font]] == 0} {
+        return $fallback
+    }
+    set families [font families]
+    foreach candidate $candidates {
+        if {[lsearch -exact $families $candidate] >= 0} {
+            return $candidate
+        }
+    }
+    return $fallback
+}
+
+proc ::HWFlow::initFonts {} {
+    variable FONT_INITIALIZED
+    variable UI_FONT_FAMILY
+    variable UI_FIXED_FONT_FAMILY
+
+    if {$FONT_INITIALIZED} {
+        return
+    }
+
+    set UI_FONT_FAMILY "Arial"
+    set UI_FIXED_FONT_FAMILY "Consolas"
+    if {[llength [info commands font]] > 0} {
+        set UI_FONT_FAMILY [::HWFlow::firstAvailableFont [list "Microsoft YaHei UI" "Microsoft YaHei" "SimHei" "SimSun" "NSimSun" "Arial Unicode MS" "Arial"] "Arial"]
+        set UI_FIXED_FONT_FAMILY [::HWFlow::firstAvailableFont [list "NSimSun" "SimSun" "Microsoft YaHei UI" "Microsoft YaHei" "Consolas" "Courier New"] $UI_FONT_FAMILY]
+
+        catch {font configure TkDefaultFont -family $UI_FONT_FAMILY -size 9 -weight normal}
+        catch {font configure TkTextFont -family $UI_FONT_FAMILY -size 9 -weight normal}
+        catch {font configure TkMenuFont -family $UI_FONT_FAMILY -size 9 -weight normal}
+        catch {font configure TkCaptionFont -family $UI_FONT_FAMILY -size 9 -weight bold}
+        catch {font configure TkHeadingFont -family $UI_FONT_FAMILY -size 9 -weight bold}
+        catch {font configure TkFixedFont -family $UI_FIXED_FONT_FAMILY -size 9 -weight normal}
+        catch {option add *Font TkDefaultFont}
+    }
+
+    set FONT_INITIALIZED 1
+}
+
+proc ::HWFlow::uiFont {{role default}} {
+    variable UI_FONT_FAMILY
+    variable UI_FIXED_FONT_FAMILY
+
+    ::HWFlow::initFonts
+    switch -- $role {
+        header {
+            return [list $UI_FONT_FAMILY 14 bold]
+        }
+        title {
+            return [list $UI_FONT_FAMILY 11 bold]
+        }
+        heading {
+            return [list $UI_FONT_FAMILY 10 bold]
+        }
+        module {
+            return [list $UI_FONT_FAMILY 9 bold]
+        }
+        small {
+            return [list $UI_FONT_FAMILY 8 normal]
+        }
+        fixed {
+            return [list $UI_FIXED_FONT_FAMILY 9 normal]
+        }
+        fixedSmall {
+            return [list $UI_FIXED_FONT_FAMILY 8 normal]
+        }
+        default {
+            return [list $UI_FONT_FAMILY 9 normal]
+        }
+    }
 }
 
 proc ::HWFlow::configDir {} {
@@ -708,14 +784,14 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         frame $w.main -padx 14 -pady 12
         pack $w.main -fill both -expand 1
 
-        label $w.main.title -text $title -font {Arial 10 bold} -anchor w
+        label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
         label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
         label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
         canvas $w.main.bar -width 520 -height 18 -highlightthickness 1 -highlightbackground #8a8a8a -background white
         $w.main.bar create rectangle 0 0 0 18 -tags fill -fill #2f74d0 -outline ""
-        $w.main.bar create text 260 9 -tags text -text "0.0%" -fill #222222 -font {Arial 8}
+        $w.main.bar create text 260 9 -tags text -text "0.0%" -fill #222222 -font [::HWFlow::uiFont small]
         labelframe $w.main.stream -text [::HWFlow::txt "命令流" "Command Stream"] -padx 6 -pady 6
-        text $w.main.stream.text -width 78 -height 11 -wrap word -font {Consolas 8} -state disabled -background #f8f8f8
+        text $w.main.stream.text -width 78 -height 11 -wrap word -font [::HWFlow::uiFont fixedSmall] -state disabled -background #f8f8f8
         scrollbar $w.main.stream.scroll -orient vertical -command "$w.main.stream.text yview"
         $w.main.stream.text configure -yscrollcommand "$w.main.stream.scroll set"
         grid $w.main.stream.text -row 0 -column 0 -sticky nsew
@@ -747,13 +823,89 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         set ww [winfo reqwidth $w]
         set wh [winfo reqheight $w]
         wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
-        catch {raise $w}
+        ::HWFlow::progressForceVisible
+    } err]} {
+        catch {destroy $w}
+        if {$allowCancel} {
+            return [::HWFlow::progressOpen $title $message 0]
+        }
+        if {[::HWFlow::progressOpenMinimal $title $message]} {
+            return 1
+        }
+        catch {hm_usermessage [::HWFlow::txt "进度窗口创建失败。" "Progress window creation failed."]}
+        return 0
+    }
+
+    ::HWFlow::progressUpdate 0.0 $message "" 1
+    ::HWFlow::progressForceVisible
+    return 1
+}
+
+proc ::HWFlow::progressForceVisible {} {
+    variable progressWin
+    if {[llength [info commands winfo]] == 0} {
+        return 0
+    }
+    if {![winfo exists $progressWin]} {
+        return 0
+    }
+    # Intentionally do not raise, focus, or set topmost here. Progress updates
+    # must not steal foreground focus while the user is working elsewhere.
+    catch {update idletasks}
+    catch {update}
+    return 1
+}
+
+proc ::HWFlow::progressOpenMinimal {title {message ""}} {
+    variable progressWin
+    variable progressMessage
+    variable progressDetail
+    variable progressLastLog
+    variable progressCancelRequested
+
+    set progressMessage $message
+    set progressDetail ""
+    set progressLastLog ""
+    set progressCancelRequested 0
+
+    if {[llength [info commands toplevel]] == 0} {
+        return 0
+    }
+
+    set w $progressWin
+    catch {destroy $w}
+    if {[catch {
+        toplevel $w
+        wm title $w $title
+        wm resizable $w 0 0
+        frame $w.main -padx 14 -pady 12
+        pack $w.main -fill both -expand 1
+        label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
+        label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
+        label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
+        canvas $w.main.bar -width 520 -height 18 -highlightthickness 1 -highlightbackground #8a8a8a -background white
+        $w.main.bar create rectangle 0 0 0 18 -tags fill -fill #2f74d0 -outline ""
+        $w.main.bar create text 260 9 -tags text -text "0.0%" -fill #222222 -font [::HWFlow::uiFont small]
+        grid $w.main.title -row 0 -column 0 -sticky ew -pady {0 6}
+        grid $w.main.msg -row 1 -column 0 -sticky ew
+        grid $w.main.detail -row 2 -column 0 -sticky ew -pady {2 8}
+        grid $w.main.bar -row 3 -column 0 -sticky ew
+        grid columnconfigure $w.main 0 -weight 1
+        wm protocol $w WM_DELETE_WINDOW [list destroy $w]
+        update idletasks
+        set sw [winfo screenwidth $w]
+        set sh [winfo screenheight $w]
+        set ww [winfo reqwidth $w]
+        set wh [winfo reqheight $w]
+        wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
+        ::HWFlow::progressForceVisible
     }]} {
         catch {destroy $w}
         return 0
     }
 
     ::HWFlow::progressUpdate 0.0 $message "" 1
+    ::HWFlow::progressForceVisible
     return 1
 }
 
@@ -805,6 +957,7 @@ proc ::HWFlow::progressUpdate {percent {message ""} {detail ""} {force 0}} {
     catch {update idletasks}
     if {$force} {
         catch {update}
+        catch {::HWFlow::progressForceVisible}
     }
     return [::HWFlow::progressCancelled]
 }
