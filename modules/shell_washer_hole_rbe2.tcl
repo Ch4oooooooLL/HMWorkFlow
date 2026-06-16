@@ -209,6 +209,7 @@ proc ::RB2W::showPanel {} {
     }
 
     set ui(ok) 0
+    set ui(action) create
     set ui(selectedComps) ""
     set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
 
@@ -290,9 +291,13 @@ proc ::RB2W::showPanel {} {
     pack $w.btn -fill x
     button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; ::RB2W::backToHome .rb2w_panel"
     button $w.btn.save -text [::HWFlow::txt "保存配置" "Save Config"] -width 12 -command "::RB2W::savePanelState"
-    button $w.btn.start -text [::HWFlow::txt "开始创建 RBE2" "Start RBE2 Creation"] -width 18 -command "::RB2W::acceptPanel"
+    button $w.btn.merge -text [::HWFlow::txt "合并重复节点" "Merge Duplicate Nodes"] -width 16 -command "::RB2W::acceptPanel merge_nodes"
+    button $w.btn.rebuild -text [::HWFlow::txt "重建模式" "Rebuild Mode"] -width 12 -command "::RB2W::acceptPanel rebuild"
+    button $w.btn.start -text [::HWFlow::txt "开始创建 RBE2" "Start RBE2 Creation"] -width 18 -command "::RB2W::acceptPanel create"
     pack $w.btn.back  -side right -padx 4
     pack $w.btn.save  -side right -padx 4
+    pack $w.btn.merge -side right -padx 4
+    pack $w.btn.rebuild -side right -padx 4
     pack $w.btn.start -side right -padx 4
 
     bind $w <Escape> "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; destroy .rb2w_panel"
@@ -358,7 +363,7 @@ proc ::RB2W::applyPreset {mode} {
     }
 }
 
-proc ::RB2W::acceptPanel {} {
+proc ::RB2W::acceptPanel {{action create}} {
     variable ui
 
     if {[llength $ui(selectedComps)] == 0} {
@@ -419,6 +424,7 @@ proc ::RB2W::acceptPanel {} {
     }
 
     ::RB2W::savePanelState
+    set ui(action) $action
     set ui(ok) 1
     destroy .rb2w_panel
 }
@@ -854,6 +860,23 @@ proc ::RB2W::componentExistsByName {compName} {
     return 0
 }
 
+proc ::RB2W::deleteComponentByName {compName} {
+    foreach etype {components comps} {
+        catch {*clearmark $etype 2}
+        foreach selector {"by name only" "by name"} {
+            if {![catch {*createmark $etype 2 $selector $compName}]} {
+                if {![catch {set ids [hm_getmark $etype 2]}] && [llength $ids] > 0} {
+                    catch {*deletemark $etype 2}
+                    catch {*clearmark $etype 2}
+                    return 1
+                }
+            }
+        }
+        catch {*clearmark $etype 2}
+    }
+    return 0
+}
+
 proc ::RB2W::componentIdByName {compName} {
     foreach etype {components comps component} {
         if {![catch {set cid [hm_entityinfo id $etype $compName -byname]}] && $cid ne "" && $cid != 0} { return $cid }
@@ -1085,6 +1108,31 @@ proc ::RB2W::moveMarkToComponent {entityTypes markId compName} {
         if {![catch {*movemark $etype $markId $compName} err]} { return 1 }
     }
     return 0
+}
+
+proc ::RB2W::deleteEntitiesByIds {entityTypes ids {chunkSize 500}} {
+    set ids [RB2W::uniq $ids]
+    set total 0
+    if {[llength $ids] == 0} { return 0 }
+    foreach chunk [RB2W::listChunks $ids $chunkSize] {
+        set deleted 0
+        foreach etype $entityTypes {
+            catch {*clearmark $etype 1}
+            if {[catch {eval *createmark $etype 1 $chunk}]} { continue }
+            if {![catch {*deletemark $etype 1}]} {
+                set total [expr {$total + [llength $chunk]}]
+                set deleted 1
+                break
+            }
+        }
+        catch {*clearmark elems 1}
+        catch {*clearmark elements 1}
+        catch {*clearmark nodes 1}
+        if {!$deleted} {
+            RB2W::log "Warning: could not delete [llength $chunk] entity/entities: $chunk"
+        }
+    }
+    return $total
 }
 
 proc ::RB2W::listChunks {lst chunkSize} {
@@ -1378,6 +1426,22 @@ proc ::RB2W::rbe2DependentNodeKey {eid {knownRBE2 0}} {
     return [::HWFlow::nodeSetKey $depNodes]
 }
 
+proc ::RB2W::rbe2RecordForCleanup {eid {knownRBE2 0}} {
+    if {!$knownRBE2 && ![RB2W::elemLooksLikeRBE2 $eid]} { return "" }
+    if {[catch {set allNodes [hm_getvalue elems id=$eid dataname=nodes]}] || [llength $allNodes] == 0} {
+        return ""
+    }
+    set independent ""
+    catch {set independent [hm_getvalue elems id=$eid dataname=independentnode.id]}
+    set depNodes {}
+    foreach n $allNodes {
+        if {$independent ne "" && $n == $independent} { continue }
+        lappend depNodes $n
+    }
+    if {[llength $depNodes] == 0} { return "" }
+    return [dict create eid $eid key [::HWFlow::nodeSetKey $depNodes] independent $independent depNodes $depNodes]
+}
+
 proc ::RB2W::indexRBE2InComponent {compId} {
     variable existingRBE2ByDepNodes
     set count 0
@@ -1446,6 +1510,113 @@ proc ::RB2W::rememberRBE2ForDepNodes {depNodes elemIds} {
     set elemId [lindex $elemIds 0]
     if {$elemId eq ""} { return }
     set existingRBE2ByDepNodes([::HWFlow::nodeSetKey $depNodes]) $elemId
+}
+
+proc ::RB2W::cleanupDuplicateRBE2InOutputComponents {sourceCompId} {
+    set compNames [RB2W::outputComponentCandidatesForSource $sourceCompId]
+    if {[llength $compNames] == 0} {
+        return [dict create components 0 scanned 0 duplicateElems 0 duplicateNodes 0]
+    }
+
+    set compIds {}
+    foreach compName $compNames {
+        set cid [RB2W::componentIdByName $compName]
+        if {$cid ne ""} { lappend compIds $cid }
+    }
+    if {[llength $compIds] == 0} {
+        return [dict create components 0 scanned 0 duplicateElems 0 duplicateNodes 0]
+    }
+
+    RB2W::resetRBE2CandidateCache
+    set fast [RB2W::rbe2CandidatesFromComponents $compIds]
+    if {[lindex $fast 0]} {
+        set elems [lindex $fast 1]
+        set knownRBE2 1
+    } else {
+        set elems {}
+        foreach cid $compIds {
+            foreach eid [RB2W::getElemsByComp $cid] { lappend elems $eid }
+        }
+        set elems [RB2W::uniq $elems]
+        set knownRBE2 0
+    }
+
+    array set keptByKey {}
+    array set keptIndependentByKey {}
+    set duplicateElems {}
+    set duplicateNodes {}
+    set scanned 0
+    foreach eid $elems {
+        set rec [RB2W::rbe2RecordForCleanup $eid $knownRBE2]
+        if {$rec eq ""} { continue }
+        incr scanned
+        set key [dict get $rec key]
+        set independent [dict get $rec independent]
+        if {![info exists keptByKey($key)]} {
+            set keptByKey($key) $eid
+            set keptIndependentByKey($key) $independent
+            continue
+        }
+        lappend duplicateElems $eid
+        if {$independent ne "" && $independent != 0 && (![info exists keptIndependentByKey($key)] || $independent ne $keptIndependentByKey($key))} {
+            lappend duplicateNodes $independent
+        }
+    }
+
+    array set protectedNodes {}
+    foreach key [array names keptIndependentByKey] {
+        set n $keptIndependentByKey($key)
+        if {$n ne "" && $n != 0} { set protectedNodes($n) 1 }
+    }
+    set safeDuplicateNodes {}
+    foreach n $duplicateNodes {
+        if {![info exists protectedNodes($n)]} { lappend safeDuplicateNodes $n }
+    }
+    set duplicateNodes $safeDuplicateNodes
+
+    set deletedElems [RB2W::deleteEntitiesByIds {elems elements} $duplicateElems]
+    set deletedNodes 0
+    if {$deletedElems > 0 && [llength $duplicateNodes] > 0} {
+        set duplicateNodes [RB2W::uniq $duplicateNodes]
+        set deletedNodes [RB2W::deleteEntitiesByIds {nodes} $duplicateNodes]
+    }
+    RB2W::resetRBE2CandidateCache
+
+    return [dict create \
+        components [llength $compIds] \
+        scanned $scanned \
+        duplicateElems $deletedElems \
+        duplicateNodes $deletedNodes]
+}
+
+proc ::RB2W::mergeDuplicateRBE2ForSources {sourceCompIds} {
+    set totalComponents 0
+    set totalScanned 0
+    set totalElems 0
+    set totalNodes 0
+    foreach sourceCompId [RB2W::uniq $sourceCompIds] {
+        set stat [RB2W::cleanupDuplicateRBE2InOutputComponents $sourceCompId]
+        set totalComponents [expr {$totalComponents + [dict get $stat components]}]
+        set totalScanned [expr {$totalScanned + [dict get $stat scanned]}]
+        set totalElems [expr {$totalElems + [dict get $stat duplicateElems]}]
+        set totalNodes [expr {$totalNodes + [dict get $stat duplicateNodes]}]
+    }
+    return [dict create components $totalComponents scanned $totalScanned duplicateElems $totalElems duplicateNodes $totalNodes]
+}
+
+proc ::RB2W::runRebuildCleanup {sourceCompIds} {
+    set deleted 0
+    foreach sourceCompId [RB2W::uniq $sourceCompIds] {
+        foreach outName [RB2W::outputComponentCandidatesForSource $sourceCompId] {
+            if {[RB2W::deleteComponentByName $outName]} {
+                incr deleted
+                RB2W::log "Rebuild cleanup: deleted output component $outName"
+            }
+        }
+    }
+    RB2W::clearComponentElemCache
+    RB2W::resetRBE2CandidateCache
+    return $deleted
 }
 
 proc ::RB2W::createCenterNode {center outComp} {
@@ -1806,14 +1977,37 @@ proc ::RB2W::main {} {
     RB2W::resetRBE2CandidateCache
 
     set runStart [clock milliseconds]
-    RB2W::log [::HWFlow::txt "==== 壳单元垫圈孔 RBE2 创建开始 ====" "==== Shell washer-hole RBE2 creation started ===="]
+    if {![info exists ui(action)] || $ui(action) eq ""} { set ui(action) create }
+    set action $ui(action)
+    RB2W::log [::HWFlow::txt "==== 壳单元垫圈孔 RBE2 模块开始，动作=$action ====" "==== Shell washer-hole RBE2 started, action=$action ===="]
     RB2W::printParameterLog
     RB2W::log [::HWFlow::txt "开始处理界面中选择的壳单元组件。" "Start processing shell components selected in the panel."]
 
     set comps [RB2W::uniq $ui(selectedComps)]
     RB2W::log "Selected components=[llength $comps]: $comps"
 
+    if {$action eq "merge_nodes"} {
+        set procCode [catch {
+            RB2W::beginPerformanceMode
+            set mergeStat [RB2W::mergeDuplicateRBE2ForSources $comps]
+            RB2W::endPerformanceMode
+        } procErr procOpts]
+        if {$procCode} {
+            catch {RB2W::endPerformanceMode}
+            RB2W::log [::HWFlow::txt "合并重复节点失败：$procErr" "Merge duplicate nodes failed: $procErr"]
+            tk_messageBox -icon error -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "合并重复节点失败：\n$procErr" "Merge duplicate nodes failed:\n$procErr"]
+            return -options $procOpts $procErr
+        }
+        set runMs [expr {[clock milliseconds] - $runStart}]
+        set msg [::HWFlow::txt "合并重复节点完成。\n选择组件数：[llength $comps]\n扫描输出组件数：[dict get $mergeStat components]\n扫描 RBE2 数：[dict get $mergeStat scanned]\n删除重复 RBE2：[dict get $mergeStat duplicateElems]\n删除重复中心节点：[dict get $mergeStat duplicateNodes]\n运行时间：${runMs} ms" "Merge duplicate nodes finished.\nSelected components: [llength $comps]\nOutput components scanned: [dict get $mergeStat components]\nRBE2 scanned: [dict get $mergeStat scanned]\nDuplicate RBE2 deleted: [dict get $mergeStat duplicateElems]\nDuplicate center nodes deleted: [dict get $mergeStat duplicateNodes]\nRun time: ${runMs} ms"]
+        RB2W::log [::HWFlow::txt "==== 合并重复节点完成：删除重复 RBE2=[dict get $mergeStat duplicateElems]，删除重复中心节点=[dict get $mergeStat duplicateNodes]，运行时间=${runMs}ms ====" "==== Merge duplicate nodes finished: duplicate RBE2 deleted=[dict get $mergeStat duplicateElems], duplicate center nodes deleted=[dict get $mergeStat duplicateNodes], runtime=${runMs}ms ===="]
+        RB2W::saveState
+        tk_messageBox -icon info -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message $msg
+        return
+    }
+
     set totalCreated 0; set totalSkipped 0; set totalCandidates 0; set totalOrganized 0
+    set rebuildDeleted 0
     set safetySkipped 0
     set safetyMessages {}
     set progressOpened 0
@@ -1827,6 +2021,10 @@ proc ::RB2W::main {} {
     RB2W::beginPerformanceMode
     RB2W::resetOverallProgress
     set procCode [catch {
+        if {$action eq "rebuild"} {
+            set rebuildDeleted [RB2W::runRebuildCleanup $comps]
+            RB2W::log [::HWFlow::txt "重建模式：已删除 $rebuildDeleted 个既有输出组件。" "Rebuild mode: deleted $rebuildDeleted existing output component(s)."]
+        }
         set compTotal [llength $comps]
         set compIndex 0
         foreach c $comps {
@@ -1865,7 +2063,7 @@ proc ::RB2W::main {} {
     }
 
     set runMs [expr {[clock milliseconds] - $runStart}]
-    set msg [::HWFlow::txt "壳单元垫圈孔 RBE2 创建完成。\n选择组件数：[llength $comps]\n安全检查跳过组件数：$safetySkipped\n候选孔数量：$totalCandidates\n已创建 RBE2 数量：$totalCreated\n已归集 RBE2 单元数：$totalOrganized\n跳过的环线/候选数量：$totalSkipped\n运行时间：${runMs} ms" "Washer-hole RBE2 creation finished.\nSelected components: [llength $comps]\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"]
+    set msg [::HWFlow::txt "壳单元垫圈孔 RBE2 创建完成。\n模式：$action\n选择组件数：[llength $comps]\n重建删除输出组件数：$rebuildDeleted\n安全检查跳过组件数：$safetySkipped\n候选孔数量：$totalCandidates\n已创建 RBE2 数量：$totalCreated\n已归集 RBE2 单元数：$totalOrganized\n跳过的环线/候选数量：$totalSkipped\n运行时间：${runMs} ms" "Washer-hole RBE2 creation finished.\nMode: $action\nSelected components: [llength $comps]\nRebuild deleted output components: $rebuildDeleted\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"]
     set outSummary [RB2W::outputComponentSummary]
     if {$outSummary ne ""} {
         append msg [::HWFlow::txt "\n\n输出组件：\n$outSummary" "\n\nOutput components:\n$outSummary"]
@@ -1876,7 +2074,7 @@ proc ::RB2W::main {} {
         if {[llength $safetyMessages] > 5} { append msg "\n..." }
     }
     RB2W::status [::HWFlow::txt "RB2W 总进度 100.0% | 已完成 | 组件数=[llength $comps] | 已创建=$totalCreated 安全跳过=$safetySkipped 已跳过=$totalSkipped 候选=$totalCandidates" "RB2W overall 100.0% | finished | components=[llength $comps] | created=$totalCreated safetySkipped=$safetySkipped skipped=$totalSkipped candidates=$totalCandidates"] 1
-    RB2W::log [::HWFlow::txt "==== 完成：组件数=[llength $comps]，安全跳过=$safetySkipped，候选=$totalCandidates，已创建=$totalCreated，已归集=$totalOrganized，已跳过=$totalSkipped，运行时间=${runMs}ms ====" "==== Finished: components=[llength $comps], safetySkipped=$safetySkipped, candidates=$totalCandidates, created=$totalCreated, organized=$totalOrganized, skipped=$totalSkipped, runtime=${runMs}ms ===="]
+    RB2W::log [::HWFlow::txt "==== 完成：模式=$action，组件数=[llength $comps]，重建删除=$rebuildDeleted，安全跳过=$safetySkipped，候选=$totalCandidates，已创建=$totalCreated，已归集=$totalOrganized，已跳过=$totalSkipped，运行时间=${runMs}ms ====" "==== Finished: mode=$action, components=[llength $comps], rebuildDeleted=$rebuildDeleted, safetySkipped=$safetySkipped, candidates=$totalCandidates, created=$totalCreated, organized=$totalOrganized, skipped=$totalSkipped, runtime=${runMs}ms ===="]
     RB2W::saveState
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
         catch {::HWFlow::progressClose [::HWFlow::txt "RB2W 总进度 100.0% | 已完成" "RB2W overall 100.0% | finished"] 100.0}

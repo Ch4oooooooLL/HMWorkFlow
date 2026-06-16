@@ -750,12 +750,31 @@ proc ::HWFlow::displayComponent {compName state} {
     catch {update idletasks}
 }
 
-proc ::HWFlow::refreshBrowser {} {
-    catch {hmbr_signals buffer stop}
-    catch {hwbrowsermanager view flush true}
-    catch {hm_redraw}
+proc ::HWFlow::refreshBrowser {{notify 0}} {
+    # Reset the common redraw/browser throttles used by performance modes, then
+    # force the Model Browser and graphics window to consume pending updates.
+    foreach cmd {
+        {hm_blockbrowserupdate 0}
+        {*setoption block_browser_update=0}
+        {*setoption block_redraw=0}
+        {*setoption block_messages=0}
+        {hm_blockredraw 0}
+        {hm_blockmessages 0}
+        {hm_blockerrormessages 0}
+        {hm_commandfilestate 1}
+        {hmbr_signals buffer stop}
+        {hwbrowsermanager view flush true}
+        {hwbrowsermanager view flush 1}
+        {hwbrowsermanager view flush on}
+        {hm_redraw}
+    } {
+        catch {uplevel #0 $cmd}
+    }
     catch {update idletasks}
     catch {update}
+    if {$notify} {
+        catch {hm_usermessage [::HWFlow::txt "模型浏览器已刷新。" "Model Browser refreshed."]}
+    }
 }
 
 proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {

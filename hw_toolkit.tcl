@@ -282,8 +282,10 @@ proc ::HWToolkit::showPanel {} {
 
     frame $w.foot -padx 12 -pady 10
     pack $w.foot -fill x
+    button $w.foot.refresh -text [::HWFlow::txt "刷新浏览器" "Refresh Browser"] -width 14 -command "::HWToolkit::manualRefreshBrowser"
     button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command "destroy .hwtoolkit"
     pack $w.foot.close -side right
+    pack $w.foot.refresh -side right -padx {0 8}
     bind $w <Escape> "destroy .hwtoolkit"
 
     update idletasks
@@ -308,13 +310,21 @@ proc ::HWToolkit::showHome {} {
     ::HWToolkit::showPanel
 }
 
+proc ::HWToolkit::manualRefreshBrowser {} {
+    if {[llength [info commands ::HWFlow::refreshBrowser]] > 0} {
+        ::HWFlow::refreshBrowser 1
+    }
+}
+
 proc ::HWToolkit::runModule {key} {
     variable MODULES
     catch {destroy .hwtoolkit}
 
     set info [dict get $MODULES $key]
     set procName [dict get $info proc]
-    if {[catch {uplevel #0 [list $procName]} err]} {
+    set code [catch {uplevel #0 [list $procName]} err opts]
+    catch {::HWFlow::refreshBrowser}
+    if {$code} {
         tk_messageBox -icon error -title [::HWFlow::txt "HW 工作流" "HWToolkit"] -message [::HWFlow::txt "模块 $key 运行失败：\n$err" "Module $key error:\n$err"]
     }
 }
