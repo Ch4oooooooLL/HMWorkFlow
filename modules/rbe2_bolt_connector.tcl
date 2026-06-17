@@ -199,13 +199,13 @@ proc ::RB2Bolt::showDialog {} {
     catch {destroy .rb2bolt_dlg}
     set w .rb2bolt_dlg
     toplevel $w
-    wm title $w "[::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] v$VERSION"
+    wm title $w "[::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 选择范围" "1. Selection Scope"] -padx 8 -pady 8
@@ -292,18 +292,18 @@ proc ::RB2Bolt::validateParams {} {
     variable P
     foreach key {gapTol offsetTol minBeamLength planeAbsTol planeFlatRatio radialAbsTol radialRelTol} {
         if {[catch {expr {double($P($key))}} v]} {
-            tk_messageBox -icon error -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "参数 $key 不是有效数值。" "Parameter $key is not a valid number."]
+            tk_messageBox -icon error -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "参数 $key 不是有效数值。" "Parameter $key is not a valid number."]
             return 0
         }
         set P($key) $v
     }
     if {[catch {expr {int($P(minGroupSize))}} v]} {
-        tk_messageBox -icon error -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "每组最少 RBE2 数量必须为有效整数。" "Minimum RBE2 count per group is not a valid integer."]
+        tk_messageBox -icon error -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "每组最少 RBE2 数量必须为有效整数。" "Minimum RBE2 count per group is not a valid integer."]
         return 0
     }
     set P(minGroupSize) $v
     if {$P(gapTol) <= 0 || $P(offsetTol) <= 0 || $P(minGroupSize) < 2} {
-        tk_messageBox -icon error -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "轴向距离和横向容差必须大于 0；每组最少 RBE2 数量必须不小于 2。" "Axial distance and transverse tolerance must be > 0; minimum RBE2 count must be >= 2."]
+        tk_messageBox -icon error -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "轴向距离和横向容差必须大于 0；每组最少 RBE2 数量必须不小于 2。" "Axial distance and transverse tolerance must be > 0; minimum RBE2 count must be >= 2."]
         return 0
     }
     set P(compPrefix) [safeName $P(compPrefix)]
@@ -624,7 +624,7 @@ proc ::RB2Bolt::collectRBE2Records {elemIds} {
         if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($i == 1 || $i == $total || [expr {$i % 200}] == 0)} {
             set pct [expr {10.0 + 25.0 * ($i / double($total))}]
             catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "RBE2 螺栓连接生成正在执行" "RBE2 Bolt Connector running"] \
+                [::HWFlow::txt "RBE2 Bolt Connector 正在执行" "RBE2 Bolt Connector running"] \
                 [::HWFlow::txt "正在读取 RBE2：$i / $total" "Reading RBE2: $i / $total"] \
                 [expr {$i == $total}]}
         }
@@ -1146,7 +1146,7 @@ proc ::RB2Bolt::createBolts {groups} {
         if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($gi == 1 || $gi == $groupCount || [expr {$gi % 20}] == 0)} {
             set pct [expr {65.0 + 25.0 * ($gi / double($groupCount))}]
             catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "RBE2 螺栓连接生成正在执行" "RBE2 Bolt Connector running"] \
+                [::HWFlow::txt "RBE2 Bolt Connector 正在执行" "RBE2 Bolt Connector running"] \
                 [::HWFlow::txt "正在创建螺栓分组：$gi / $groupCount" "Creating bolt groups: $gi / $groupCount"] \
                 [expr {$gi == $groupCount}]}
         }
@@ -1203,18 +1203,18 @@ proc ::RB2Bolt::run {} {
     variable P
     variable beamSegmentIndex
     if {![showDialog]} {
-        msg [::HWFlow::txt "RBE2 螺栓连接生成已取消。" "RBE2 Bolt Connector cancelled."]
+        msg [::HWFlow::txt "RBE2 Bolt Connector 已取消。" "RBE2 Bolt Connector cancelled."]
         return
     }
     if {![validateParams]} {return}
     ::RB2Bolt::saveState
 
-    msg [::HWFlow::txt "RBE2 螺栓连接生成开始。若需要 CBEAM 输出，请确认 BAR2 单元类型已设置为 CBEAM。" "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."]
+    msg [::HWFlow::txt "RBE2 Bolt Connector 开始。若需要 CBEAM 输出，请确认 BAR2 单元类型已设置为 CBEAM。" "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."]
 
     set elemIds [selectedElementIds]
     if {[llength $elemIds] == 0} {
         ::RB2Bolt::clearSelectionMarks
-        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择范围内未找到 RBE2 候选单元。" "No RBE2 candidate elements were found in the selection scope."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择范围内未找到 RBE2 候选单元。" "No RBE2 candidate elements were found in the selection scope."]
         return
     }
 
@@ -1222,7 +1222,7 @@ proc ::RB2Bolt::run {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] \
+            [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] \
             [::HWFlow::txt "准备读取 RBE2 单元..." "Preparing to read RBE2 elements..."] \
             0]
     }
@@ -1232,14 +1232,14 @@ proc ::RB2Bolt::run {} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
             catch {::HWFlow::progressClose [::HWFlow::txt "可用 RBE2 记录不足。" "Not enough usable RBE2 records."] 100.0}
         }
-        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择集中可用 RBE2 单元少于 2 个。" "Fewer than 2 usable RBE2 elements were found in the selection."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择集中可用 RBE2 单元少于 2 个。" "Fewer than 2 usable RBE2 elements were found in the selection."]
         return
     }
 
     msg [::HWFlow::txt "有效 RBE2 记录数：[llength $records]。正在建立分组..." "Valid RBE2 records: [llength $records]. Building groups..."]
     if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 45.0 \
-            [::HWFlow::txt "RBE2 螺栓连接生成正在执行" "RBE2 Bolt Connector running"] \
+            [::HWFlow::txt "RBE2 Bolt Connector 正在执行" "RBE2 Bolt Connector running"] \
             [::HWFlow::txt "正在建立分组..." "Building groups..."] \
             1}
     }
@@ -1249,7 +1249,7 @@ proc ::RB2Bolt::run {} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
             catch {::HWFlow::progressClose [::HWFlow::txt "没有匹配的 RBE2 分组。" "No matching RBE2 groups."] 100.0}
         }
-        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message [::HWFlow::txt "没有 RBE2 分组满足当前容差。可尝试增大轴向连接距离或横向中心偏移容差。" "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "没有 RBE2 分组满足当前容差。可尝试增大轴向连接距离或横向中心偏移容差。" "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."]
         return
     }
 
@@ -1261,11 +1261,11 @@ proc ::RB2Bolt::run {} {
     set spatialOnlyGroups [lindex $result 3]
     set skippedExisting [lindex $result 4]
 
-    set txt [::HWFlow::txt "RBE2 螺栓连接生成已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n已跳过既有 $P(elemType)：$skippedExisting\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped existing $P(elemType): $skippedExisting\nSkipped/failed: $skipped"]
+    set txt [::HWFlow::txt "RBE2 Bolt Connector 已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n已跳过既有 $P(elemType)：$skippedExisting\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped existing $P(elemType): $skippedExisting\nSkipped/failed: $skipped"]
     ::RB2Bolt::clearSelectionMarks
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "RBE2 螺栓连接生成已完成。" "RBE2 Bolt Connector finished."] 100.0}
+        catch {::HWFlow::progressClose [::HWFlow::txt "RBE2 Bolt Connector 已完成。" "RBE2 Bolt Connector finished."] 100.0}
     }
-    tk_messageBox -icon info -title [::HWFlow::txt "RBE2 螺栓连接生成" "RBE2 Bolt Connector"] -message $txt
+    tk_messageBox -icon info -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message $txt
     msg $txt
 }

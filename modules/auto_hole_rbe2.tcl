@@ -108,13 +108,13 @@ proc ::AutoHoleRBE2::showPanel {} {
 
     set w .autoHoleRBE2
     toplevel $w
-    wm title $w "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Solid Through-Hole RBE2" "Solid Through-Hole RBE2"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "实体贯通孔 RBE2 创建" "Through-Hole RBE2 Creation"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Solid Through-Hole RBE2" "Solid Through-Hole RBE2"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8

@@ -19,6 +19,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install PDF dependencies
+        shell: bash
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pandoc wkhtmltopdf fonts-noto-cjk
+
+      - name: Build user guide PDF
+        shell: bash
+        run: |
+          printf '%s\n' \
+            'body {' \
+            '  font-family: "Noto Sans CJK SC", "Noto Sans CJK", sans-serif;' \
+            '  font-size: 11pt;' \
+            '  line-height: 1.55;' \
+            '}' \
+            'code, pre {' \
+            '  font-family: "Noto Sans Mono CJK SC", "Noto Sans Mono CJK", monospace;' \
+            '}' \
+            'table {' \
+            '  border-collapse: collapse;' \
+            '  width: 100%;' \
+            '}' \
+            'th, td {' \
+            '  border: 1px solid #d0d0d0;' \
+            '  padding: 4px 6px;' \
+            '}' \
+            > user-guide.css
+
+          pandoc README.md \
+            --standalone \
+            --metadata title="使用教程" \
+            --pdf-engine=wkhtmltopdf \
+            --css user-guide.css \
+            -o "使用教程.pdf"
+
       - name: Build package
         id: package
         shell: pwsh

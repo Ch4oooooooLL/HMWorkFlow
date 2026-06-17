@@ -203,13 +203,13 @@ proc ::GeomCleanup::showPanel {} {
     catch {destroy .geometry_cleanup}
     set w .geometry_cleanup
     toplevel $w
-    wm title $w "[::HWFlow::txt "几何清理" "Geometry Cleanup"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Geometry Cleanup" "Geometry Cleanup"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "几何清理：倒角/沉台一键入口" "Geometry Cleanup: Chamfer / Recess One-Face Entry"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Geometry Cleanup" "Geometry Cleanup"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.mode -text [::HWFlow::txt "1. 判断模式" "1. Detection Mode"] -padx 8 -pady 8

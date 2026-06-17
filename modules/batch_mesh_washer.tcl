@@ -289,7 +289,7 @@ proc ::BatchMeshWasher::pickComponents {} {
 proc ::BatchMeshWasher::showRules {} {
     set path [::BatchMeshWasher::ruleFile]
     set msg [::HWFlow::txt "当前 washer 规则文件：\n$path\n\n[::HWFlow::readTextFile $path]" "Current washer rule file:\n$path\n\n[::HWFlow::readTextFile $path]"]
-    tk_messageBox -icon info -title [::HWFlow::txt "钣金 BatchMesh + Washer 规则" "Sheet BatchMesh + Washer Rules"] -message $msg
+    tk_messageBox -icon info -title [::HWFlow::txt "Sheet BatchMesh + Washer 规则" "Sheet BatchMesh + Washer Rules"] -message $msg
 }
 
 proc ::BatchMeshWasher::showPanel {} {
@@ -303,13 +303,13 @@ proc ::BatchMeshWasher::showPanel {} {
     catch {destroy .batch_mesh_washer}
     set w .batch_mesh_washer
     toplevel $w
-    wm title $w "[::HWFlow::txt "钣金 BatchMesh + 自动 Washer" "Sheet BatchMesh + Auto Washer"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "钣金 BatchMesh + 自动 Washer" "Sheet-metal BatchMesh + Auto Washer"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -383,45 +383,45 @@ proc ::BatchMeshWasher::showPanel {} {
 proc ::BatchMeshWasher::acceptPanel {} {
     variable ui
     if {[llength $ui(selectedComps)] == 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
     foreach key {ELEM_SIZE MIN_ELEM_SIZE MAX_ELEM_SIZE FEATURE_ANGLE HOLE_MIN_DIA HOLE_MAX_DIA} {
         if {![string is double -strict $ui($key)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message "$key must be a number."
+            tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message "$key must be a number."
             return
         }
     }
     foreach key {SURFACE_BATCH_SIZE WASHER_PROGRESS_STEP WASHER_BATCH_SIZE} {
         if {![string is integer -strict $ui($key)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message "$key must be an integer."
+            tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message "$key must be an integer."
             return
         }
     }
     foreach key {BATCH_BY_COMPONENT WASHER_BATCH_MODE RIGID_SPIDER LOCAL_COORDINATE_SYSTEM VERBOSE} {
         if {![string is integer -strict $ui($key)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message "$key must be 0 or 1."
+            tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message "$key must be 0 or 1."
             return
         }
     }
     if {$ui(ELEM_SIZE) <= 0 || $ui(MIN_ELEM_SIZE) <= 0 || $ui(MAX_ELEM_SIZE) <= 0 || $ui(MIN_ELEM_SIZE) > $ui(MAX_ELEM_SIZE)} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message [::HWFlow::txt "网格尺寸参数无效。" "Invalid mesh size parameters."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message [::HWFlow::txt "网格尺寸参数无效。" "Invalid mesh size parameters."]
         return
     }
     if {$ui(HOLE_MIN_DIA) < 0 || $ui(HOLE_MAX_DIA) <= $ui(HOLE_MIN_DIA)} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message [::HWFlow::txt "孔径参数无效。" "Invalid hole diameter parameters."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message [::HWFlow::txt "孔径参数无效。" "Invalid hole diameter parameters."]
         return
     }
     if {$ui(WASHER_PROGRESS_STEP) < 1} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message [::HWFlow::txt "washer 进度步长必须大于 0。" "Washer progress step must be greater than 0."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message [::HWFlow::txt "washer 进度步长必须大于 0。" "Washer progress step must be greater than 0."]
         return
     }
     if {$ui(SURFACE_BATCH_SIZE) < 1} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message [::HWFlow::txt "surface 分块数量必须大于 0。" "Surface batch size must be greater than 0."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message [::HWFlow::txt "surface 分块数量必须大于 0。" "Surface batch size must be greater than 0."]
         return
     }
     if {$ui(WASHER_BATCH_SIZE) < 1} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message [::HWFlow::txt "washer 批量孔数必须大于 0。" "Washer batch size must be greater than 0."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message [::HWFlow::txt "washer 批量孔数必须大于 0。" "Washer batch size must be greater than 0."]
         return
     }
     ::BatchMeshWasher::saveState
@@ -976,7 +976,7 @@ proc ::BatchMeshWasher::main {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "钣金 BatchMesh + 自动 Washer" "Sheet BatchMesh + Auto Washer"] \
+            [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] \
             [::HWFlow::txt "准备执行钣金网格划分..." "Preparing sheet-metal meshing..."] \
             0]
     }
@@ -987,7 +987,7 @@ proc ::BatchMeshWasher::main {} {
     }
 
     set code [catch {
-        ::BatchMeshWasher::msg [::HWFlow::txt "==== 钣金 BatchMesh + 自动 Washer 开始 ====" "==== Sheet BatchMesh + Auto Washer started ===="]
+        ::BatchMeshWasher::msg [::HWFlow::txt "==== Sheet BatchMesh + Washer 开始 ====" "==== Sheet BatchMesh + Washer started ===="]
         if {$progressOpened} {
             catch {::HWFlow::progressUpdate 5.0 [::HWFlow::txt "正在准备网格任务" "Preparing mesh job"] [::HWFlow::txt "组件数量：[llength $comps]；不修改几何" "Components: [llength $comps]; geometry will not be modified"] 1}
             catch {::HWFlow::progressForceVisible}
@@ -1043,19 +1043,19 @@ proc ::BatchMeshWasher::main {} {
     set runMs [expr {[clock milliseconds] - $runStart}]
     if {$code} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "钣金 BatchMesh + Washer 执行失败。" "Sheet BatchMesh + Washer failed."] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::txt "Sheet BatchMesh + Washer 执行失败。" "Sheet BatchMesh + Washer failed."] 100.0}
         }
-        tk_messageBox -icon error -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message [::HWFlow::txt "执行失败：\n$err" "Run failed:\n$err"]
+        tk_messageBox -icon error -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message [::HWFlow::txt "执行失败：\n$err" "Run failed:\n$err"]
         return -options $opts $err
     }
 
-    set msg [::HWFlow::txt "钣金 BatchMesh + 自动 Washer 已完成。\n组件数：[llength $comps]\nBatchMesh 批次数：$stat(meshBatches)\nBatchMesh surfaces：$stat(meshSurfaces)\n识别孔数量：$stat(holes)\n匹配 washer 孔数量：$stat(washerHoles)\nwasher 创建数量：$stat(washerCreated)\nwasher 失败数量：$stat(washerFailed)\n忽略小孔数量：$stat(ignoredSmall)\n保留/跳过孔数量：$stat(kept)\n运行时间：${runMs} ms" "Sheet BatchMesh + Auto Washer finished.\nComponents: [llength $comps]\nBatchMesh batches: $stat(meshBatches)\nBatchMesh surfaces: $stat(meshSurfaces)\nDetected holes: $stat(holes)\nWasher-matched holes: $stat(washerHoles)\nWasher created: $stat(washerCreated)\nWasher failed: $stat(washerFailed)\nIgnored small holes: $stat(ignoredSmall)\nKept/skipped holes: $stat(kept)\nRun time: ${runMs} ms"]
+    set msg [::HWFlow::txt "Sheet BatchMesh + Washer 已完成。\n组件数：[llength $comps]\nBatchMesh 批次数：$stat(meshBatches)\nBatchMesh surfaces：$stat(meshSurfaces)\n识别孔数量：$stat(holes)\n匹配 washer 孔数量：$stat(washerHoles)\nwasher 创建数量：$stat(washerCreated)\nwasher 失败数量：$stat(washerFailed)\n忽略小孔数量：$stat(ignoredSmall)\n保留/跳过孔数量：$stat(kept)\n运行时间：${runMs} ms" "Sheet BatchMesh + Washer finished.\nComponents: [llength $comps]\nBatchMesh batches: $stat(meshBatches)\nBatchMesh surfaces: $stat(meshSurfaces)\nDetected holes: $stat(holes)\nWasher-matched holes: $stat(washerHoles)\nWasher created: $stat(washerCreated)\nWasher failed: $stat(washerFailed)\nIgnored small holes: $stat(ignoredSmall)\nKept/skipped holes: $stat(kept)\nRun time: ${runMs} ms"]
     ::BatchMeshWasher::msg [::HWFlow::txt "==== 完成：组件数=[llength $comps]，BatchMesh批次=$stat(meshBatches)，surfaces=$stat(meshSurfaces)，孔=$stat(holes)，washer孔=$stat(washerHoles)，已创建=$stat(washerCreated)，失败=$stat(washerFailed)，运行时间=${runMs}ms ====" "==== Finished: components=[llength $comps], meshBatches=$stat(meshBatches), surfaces=$stat(meshSurfaces), holes=$stat(holes), washerHoles=$stat(washerHoles), created=$stat(washerCreated), failed=$stat(washerFailed), runtime=${runMs}ms ===="]
     ::BatchMeshWasher::saveState
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "钣金 BatchMesh + Washer 已完成。" "Sheet BatchMesh + Washer finished."] 100.0}
+        catch {::HWFlow::progressClose [::HWFlow::txt "Sheet BatchMesh + Washer 已完成。" "Sheet BatchMesh + Washer finished."] 100.0}
     }
-    tk_messageBox -icon info -title [::HWFlow::txt "钣金 BatchMesh + Washer" "BatchMesh + Washer"] -message $msg
+    tk_messageBox -icon info -title [::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] -message $msg
 }
 
 proc ::BatchMeshWasher::run {} {

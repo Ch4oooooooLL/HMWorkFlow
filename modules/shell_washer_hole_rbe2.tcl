@@ -215,13 +215,13 @@ proc ::RB2W::showPanel {} {
 
     set w .rb2w_panel
     toplevel $w
-    wm title $w "[::HWFlow::txt "壳单元垫圈孔 RBE2" "Shell Washer-Hole RBE2"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Shell Washer Hole RBE2" "Shell Washer Hole RBE2"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "壳单元垫圈孔 RBE2 创建" "Shell Washer-Hole RBE2 Creation"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Shell Washer Hole RBE2" "Shell Washer Hole RBE2"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -2069,7 +2069,7 @@ proc ::RB2W::main {} {
     }
 
     set runMs [expr {[clock milliseconds] - $runStart}]
-    set msg [::HWFlow::txt "壳单元垫圈孔 RBE2 创建完成。\n模式：$action\n选择组件数：[llength $comps]\n重建删除输出组件数：$rebuildDeleted\n安全检查跳过组件数：$safetySkipped\n候选孔数量：$totalCandidates\n已创建 RBE2 数量：$totalCreated\n已归集 RBE2 单元数：$totalOrganized\n跳过的环线/候选数量：$totalSkipped\n运行时间：${runMs} ms" "Washer-hole RBE2 creation finished.\nMode: $action\nSelected components: [llength $comps]\nRebuild deleted output components: $rebuildDeleted\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"]
+    set msg [::HWFlow::txt "Shell Washer Hole RBE2 已完成。\n模式：$action\n选择组件数：[llength $comps]\n重建删除输出组件数：$rebuildDeleted\n安全检查跳过组件数：$safetySkipped\n候选孔数量：$totalCandidates\n已创建 RBE2 数量：$totalCreated\n已归集 RBE2 单元数：$totalOrganized\n跳过的环线/候选数量：$totalSkipped\n运行时间：${runMs} ms" "Shell Washer Hole RBE2 finished.\nMode: $action\nSelected components: [llength $comps]\nRebuild deleted output components: $rebuildDeleted\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"]
     set outSummary [RB2W::outputComponentSummary]
     if {$outSummary ne ""} {
         append msg [::HWFlow::txt "\n\n输出组件：\n$outSummary" "\n\nOutput components:\n$outSummary"]

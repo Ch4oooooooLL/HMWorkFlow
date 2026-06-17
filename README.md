@@ -1,166 +1,48 @@
-# HyperMesh 前处理工作流工具集 / HyperMesh Preprocess Workflow Toolkit
+# HyperMesh Toolkit
 
-面向 HyperMesh 2019 的 Tcl/Tk 前处理工作流工具集，覆盖组件分类、材料标识分配、中面抽取、几何倒角/沉台清理、焊缝面创建、钣金 BatchMesh + washer、孔位 RBE2 创建以及 RBE2 螺栓连接生成等流程。
-
-This repository contains Tcl/Tk workflow scripts for HyperMesh 2019 preprocessing, covering component classification, material tagging, midsurface extraction, chamfer/recess geometry cleanup, seam-surface creation, sheet-metal BatchMesh + washer creation, hole RBE2 creation, and RBE2 bolt connector generation.
+Tcl/Tk toolkit for HyperMesh 2019 preprocessing. The toolkit provides a single launcher for component setup, material tagging, midsurface extraction, geometry cleanup, seam-surface creation, sheet-metal meshing, washer generation, RBE2 creation, and bolt connector generation.
 
 默认界面语言为中文。可在项目根目录的 `config.yaml` 中将 `workflow.language` 切换为 `en_US`。
 
-The default UI language is Chinese. Change `workflow.language` in the root `config.yaml` to `en_US` to switch the workflow UI to English.
+## 启动方式
 
-## 中文
+在 HyperMesh 中运行：
 
-### 启动方式
+```text
+File > Run > Tcl/Tk Script > hw_toolkit.tcl
+```
 
-在 HyperMesh 中通过 `File > Run > Tcl/Tk Script` 运行项目根目录下的 `hw_toolkit.tcl`，进入统一工作流主面板。
+运行后打开 `HyperMesh Toolkit` 主面板。主面板中的 `刷新浏览器` 按钮用于强制恢复 Model Browser 更新、显示脚本创建的 component，并刷新图形窗口。
 
-### 全局配置
+## 配置
 
-项目根目录的 `config.yaml` 用于工作流级全局配置。当前仅启用语言配置：
+项目根目录的 `config.yaml` 保存全局配置：
 
 ```yaml
 workflow:
   language: zh_CN
 ```
 
-支持的语言值：
+支持值：
 
 | 值 | 说明 |
 | --- | --- |
-| `zh_CN` | 简体中文，默认值。 |
+| `zh_CN` | 简体中文界面。 |
 | `en_US` | 英文界面。 |
 
-语言配置会作用于主面板、模块窗口、选择提示、校验提示、执行结果弹窗和状态消息。当前配置保持轻量化，后续可继续扩展网格标准、RBE2 规则、washer 规则等全局参数。
+模块配置位于 `config/`：
 
-### 目录结构
-
-```text
-.
-|-- hw_toolkit.tcl
-|-- config.yaml
-|-- config/
-|   |-- casting_mesh_rules.txt
-|   |-- materials.txt
-|   |-- mesh_rules.txt
-|   |-- seam_rules.txt
-|   |-- *_state.txt
-|   `-- washer_rules.txt
-`-- modules/
-    |-- workflow_common.tcl
-    |-- component_workflow.tcl
-    |-- midsurf.tcl
-    |-- geometry_cleanup.tcl
-    |-- seam_surface.tcl
-    |-- batch_mesh_washer.tcl
-    |-- casting_tetramesh.tcl
-    |-- auto_hole_rbe2.tcl
-    |-- rbe2_bolt_connector.tcl
-    `-- shell_washer_hole_rbe2.tcl
-```
-
-### 工作流模块
-
-| 模块 | 入口 | 功能 |
-| --- | --- | --- |
-| `hw_toolkit.tcl` | `::HWToolkit::run` | 工作流主面板与模块调度入口。 |
-| `modules/workflow_common.tcl` | shared helpers | 全局配置、语言切换、材料库、命名规则、装配与浏览器辅助函数。 |
-| `modules/component_workflow.tcl` | `::CompWorkflow::runCategory` | 将组件分类为 `SHELL`、`SOLID`、`CASTING`，并按类型规则重命名和组织装配。 |
-| `modules/component_workflow.tcl` | `::CompWorkflow::runMaterial` | 从 `config/materials.txt` 读取材料库，对已分类组件分配材料标识并替换既有材料后缀。 |
-| `modules/midsurf.tcl` | `::MidSurf::run` | 抽取钣金中面，并按 `CATEGORY_NAME_Tx_MATERIAL` 规则命名输出组件。源几何默认保留并隐藏。 |
-| `modules/geometry_cleanup.tcl` | `::GeomCleanup::run` | 选择一个倒角面或沉台底面，自动判断并执行 solid 倒角清理或纯 surface 沉台补平。 |
-| `modules/seam_surface.tcl` | `::SeamSurf::run` | 基于线-面或线-线焊缝流程创建 `SEAM_Tx` 几何面，并按较薄相邻壳厚度命名。 |
-| `modules/batch_mesh_washer.tcl` | `::BatchMeshWasher::run` | 对钣金中面/壳组件执行 BatchMesh，不修改几何，并按孔径标准忽略小孔或生成 washer。 |
-| `modules/casting_tetramesh.tcl` | `::CastingTetMesh::run` | 对铸件执行删除 solid、surface 微小特征清理、三角面网格质量迭代和 CFD/TetraMesh 体填充。 |
-| `modules/auto_hole_rbe2.tcl` | `::AutoHoleRBE2::run` | 识别实体网格贯通圆孔并创建 RBE2。 |
-| `modules/shell_washer_hole_rbe2.tcl` | `::RB2W::run` | 针对壳单元 washer 孔创建 RBE2，并将结果归集到输出组件。 |
-| `modules/rbe2_bolt_connector.tcl` | `::RB2Bolt::run` | 对 RBE2 进行分组，并生成 CBEAM/CBAR 螺栓连接段。 |
-
-### 命名规则
-
-组件名称应携带完整流程信息：
-
-```text
-SHELL_PARTNAME_T2.0_Q235
-SOLID_PARTNAME_Q235
-CASTING_PARTNAME_QT500
-SEAM_T2.0
-```
-
-材料标识分配会识别并替换已在 `config/materials.txt` 中定义的既有材料后缀。
-
-### 模块配置
-
-`config/materials.txt` 为管道符分隔的材料库：
-
-```text
-key|display|density|E|nu|yield|ultimate|note
-Q235|Q235|7.85e-9|210000|0.30|235|370|steel
-```
-
-材料标识分配模块中的“编辑 TXT”会直接编辑该文件。
-
-`config/seam_rules.txt` 保存焊缝面创建默认参数，例如最大投影间隙、拓扑缝合容差和组件归集模式。
-
-`config/*_state.txt` 为自动生成的模块状态文件，用于记忆上一次运行的选项、文本框和数值字段。由于组件、单元、线和面的 ID 在不同模型间不稳定，模型实体选择不会被持久化。
-
-`config/mesh_rules.txt` 保存钣金 BatchMesh 默认参数，例如目标单元尺寸、最小/最大单元尺寸、`params_generate_mode`、`no_geomcleanup`、是否禁用 BatchMesh 默认 washer、surface 分块数量和 washer 孔识别范围等。默认不修改几何，保留 HyperMesh/Tk 消息刷新，按 surface 小批次执行 BatchMesh，并只识别 6-30mm 孔。
-
-`config/casting_mesh_rules.txt` 保存铸件网格默认参数，包括删除 solid 并保留边界 surface、微小孔/小圆角清理阈值、三角面网格尺寸、2D 质量迭代次数、`*tetmesh` 原始参数和 3D 质量摘要 criteria。默认流程为：删除选中组件内 solid 但保留其边界 surface、清理 surface 小特征、生成 tria 面网格、质量合格后执行 TetraMesh 体填充。
-
-`config/geometry_cleanup_rules.txt` 保存倒角/沉台几何清理默认参数。默认入口只要求选择一个面：自动模式优先通过 HyperMesh 圆角识别和相邻小面扩展尝试清除 solid 倒角/圆角，并在可形成闭合边界时尝试重建/补充 solid；若不匹配或失败，则按沉台底面处理，只做纯 surface 操作：删除底面与外圈竖直连接面，使用外圈顶面边界和内部边界线环创建补平 surface，并与保留的内部竖直面缝合。
-
-`config/washer_rules.txt` 保存钣金孔 washer 规则。当前默认规则来自用户提供的标准图片：
-
-```text
-D < 6mm       ignore after meshing; geometry is not modified
-6 < D <= 9    washer: hole_density=8,  layers=2, widths=4,6
-9 < D <= 13   washer: hole_density=10, layers=2, widths=4,6
-13 < D <= 20  washer: hole_density=12, layers=2, widths=6,8
-20 < D <= 30  washer: hole_density=16, layers=2, widths=8,8
-D > 30mm      keep
-```
-
-### 焊缝面流程
-
-`焊缝面创建` 位于中面抽取之后、网格划分/RBE2 创建之前。
-
-- `线-面`：选择一条源边线和一个目标中面，将源边线采样投影到目标面，并仅在源跨度与匹配投影跨度之间生成焊缝面。
-- `线-线`：选择两条边界线，仅在两者最近的重叠跨度内生成焊缝面，适用于 L 型焊缝和边-边桥接焊缝。
-- 闭合源线按环向序列采样，允许有效焊缝区间跨越 0/1 参数断点。
-- 输出组件命名为 `SEAM_Tx`，其中 `x` 来自相邻组件名中较薄的 `_T` 厚度值。
-- 若无法从 `_T` 读取厚度，流程会提示手动输入厚度。
-
-### 注意事项
-
-- 脚本面向 HyperMesh 2019 Tcl/Tk 环境编写。
-- 普通 Tcl 解释器可用于基础语法检查，但 HyperMesh 命令只能在 HyperMesh 内运行。
-- 模块窗口使用“返回主页”回到主面板；按 `Esc` 可关闭当前模块窗口。
-
-## English
-
-### Launch
-
-In HyperMesh, run `hw_toolkit.tcl` from the repository root through `File > Run > Tcl/Tk Script` to open the unified workflow launcher.
-
-### Global Configuration
-
-The root `config.yaml` stores workflow-level global settings. It currently contains only the UI language setting:
-
-```yaml
-workflow:
-  language: zh_CN
-```
-
-Supported values:
-
-| Value | Description |
+| 文件 | 用途 |
 | --- | --- |
-| `zh_CN` | Simplified Chinese, default. |
-| `en_US` | English UI. |
+| `materials.txt` | 材料标识库。 |
+| `mesh_rules.txt` | Sheet BatchMesh 默认参数。 |
+| `washer_rules.txt` | 孔径与 washer 规则。 |
+| `seam_rules.txt` | Seam Surface Creation 默认参数。 |
+| `geometry_cleanup_rules.txt` | Geometry Cleanup 默认参数。 |
+| `casting_mesh_rules.txt` | Casting TetraMesh 默认参数。 |
+| `*_state.txt` | 模块 UI 状态缓存，由脚本自动生成。 |
 
-The language setting applies to the launcher, module dialogs, selection prompts, validation messages, result dialogs, and status messages. The file is intentionally small for now and can later host global meshing standards, RBE2 rules, washer rules, and other workflow-level parameters.
-
-### Structure
+## 目录结构
 
 ```text
 .
@@ -168,10 +50,10 @@ The language setting applies to the launcher, module dialogs, selection prompts,
 |-- config.yaml
 |-- config/
 |   |-- casting_mesh_rules.txt
+|   |-- geometry_cleanup_rules.txt
 |   |-- materials.txt
 |   |-- mesh_rules.txt
 |   |-- seam_rules.txt
-|   |-- *_state.txt
 |   `-- washer_rules.txt
 `-- modules/
     |-- workflow_common.tcl
@@ -182,30 +64,197 @@ The language setting applies to the launcher, module dialogs, selection prompts,
     |-- batch_mesh_washer.tcl
     |-- casting_tetramesh.tcl
     |-- auto_hole_rbe2.tcl
-    |-- rbe2_bolt_connector.tcl
-    `-- shell_washer_hole_rbe2.tcl
+    |-- shell_washer_hole_rbe2.tcl
+    `-- rbe2_bolt_connector.tcl
 ```
 
-### Workflow Modules
+## 模块
 
-| Module | Entry | Purpose |
+| 主面板名称 | 入口 | 说明 |
 | --- | --- | --- |
-| `hw_toolkit.tcl` | `::HWToolkit::run` | Main workflow launcher and module dispatcher. |
-| `modules/workflow_common.tcl` | shared helpers | Global configuration, language switching, material library, naming rules, assembly helpers, and browser helpers. |
-| `modules/component_workflow.tcl` | `::CompWorkflow::runCategory` | Classify components into `SHELL`, `SOLID`, and `CASTING`, then rename and organize category assemblies. |
-| `modules/component_workflow.tcl` | `::CompWorkflow::runMaterial` | Assign material tags from `config/materials.txt`, replace existing material suffixes, and organize material assemblies. |
-| `modules/midsurf.tcl` | `::MidSurf::run` | Extract midsurfaces and name outputs as `CATEGORY_NAME_Tx_MATERIAL`. Source geometry is kept and hidden by default. |
-| `modules/geometry_cleanup.tcl` | `::GeomCleanup::run` | Select one chamfer face or recessed floor face, then auto-detect solid chamfer cleanup or surface-only recess filling. |
-| `modules/seam_surface.tcl` | `::SeamSurf::run` | Create `SEAM_Tx` geometry surfaces through Line-Surface or Line-Line workflows, using the thinner adjacent shell thickness. |
-| `modules/batch_mesh_washer.tcl` | `::BatchMeshWasher::run` | Run BatchMesh on sheet-metal midsurface/shell components without modifying geometry, then ignore small holes or create washers by hole diameter rules. |
-| `modules/casting_tetramesh.tcl` | `::CastingTetMesh::run` | Run casting solid removal, surface defeaturing, tria quality iterations, and CFD/TetraMesh volume fill. |
-| `modules/auto_hole_rbe2.tcl` | `::AutoHoleRBE2::run` | Detect cylindrical through-holes in solid meshes and create RBE2 elements. |
-| `modules/shell_washer_hole_rbe2.tcl` | `::RB2W::run` | Create RBE2 elements for shell washer holes and organize results into output components. |
-| `modules/rbe2_bolt_connector.tcl` | `::RB2Bolt::run` | Group RBE2 elements and create CBEAM/CBAR bolt segments. |
+| Component Type Classification | `::CompWorkflow::runCategory` | 将组件分类为 `SHELL`、`SOLID`、`CASTING`，并规范化名称。 |
+| Material Assignment | `::CompWorkflow::runMaterial` | 从 `materials.txt` 分配材料标识，并组织材料装配。 |
+| Midsurface Extraction | `::MidSurf::run` | 抽取钣金中面，并按 `CATEGORY_NAME_Tx_MATERIAL` 命名输出组件。 |
+| Geometry Cleanup | `::GeomCleanup::run` | 处理倒角、圆角和沉台补面等几何清理任务。 |
+| Seam Surface Creation | `::SeamSurf::run` | 通过线-面或线-线方式创建 `SEAM_Tx` 焊缝面。 |
+| Sheet BatchMesh + Washer | `::BatchMeshWasher::run` | 执行 Sheet BatchMesh，并按孔径规则生成 washer。 |
+| Casting TetraMesh | `::CastingTetMesh::run` | 执行铸件 surface 清理、三角面网格质量迭代和 TetraMesh。 |
+| Shell Washer Hole RBE2 | `::RB2W::run` | 识别壳单元 washer 孔并创建 RBE2。 |
+| Solid Through-Hole RBE2 | `::AutoHoleRBE2::run` | 识别实体网格圆柱贯通孔并创建 RBE2。 |
+| RBE2 Bolt Connector | `::RB2Bolt::run` | 对 RBE2 中心节点分组，并创建 CBEAM/CBAR 螺栓连接段。 |
 
-### Naming Rules
+## 使用教程
 
-Component names should carry complete workflow information:
+### Component Type Classification
+
+用于建立组件类型前缀，并将组件归入对应装配。
+
+1. 在主面板中运行 `Component Type Classification`。
+2. 在 `Category` 中选择 `SHELL`、`SOLID` 或 `CASTING`。
+3. 点击 `选择组件`，在 HyperMesh 中选择需要分类的 component。
+4. 点击 `应用类型`。
+
+输出结果：
+
+- 组件名称会被替换为对应类型前缀，例如 `SHELL_PARTNAME`。
+- 组件会加入对应类型装配。
+
+### Material Assignment
+
+用于给已分类组件追加或替换材料标识。
+
+1. 在主面板中运行 `Material Assignment`。
+2. 从材料列表中选择材料 key。
+3. 点击 `选择组件`，选择已经带有 `SHELL`、`SOLID` 或 `CASTING` 前缀的 component。
+4. 点击 `应用材料标识`。
+
+输出结果：
+
+- 组件名称会追加或替换材料后缀，例如 `SHELL_PART_T2.0_Q235`。
+- 组件会加入材料装配，例如 `SHELL_Q235`。
+- 材料库来自 `config/materials.txt`，可通过模块中的 `编辑 TXT` 修改。
+
+### Midsurface Extraction
+
+用于从钣金几何中抽取中面。
+
+1. 在主面板中运行 `Midsurface Extraction`。
+2. 点击 `选择/重选组件`，选择需要抽中面的几何 component。
+3. 检查抽取参数，例如厚度读取、对齐步数和中面位置。
+4. 点击开始执行。
+5. 如果无法可靠读取厚度，按提示输入厚度值。
+
+输出结果：
+
+- 生成新的 midsurface component。
+- 输出 component 按 `CATEGORY_NAME_Tx_MATERIAL` 命名。
+- 源几何默认保留并隐藏。
+
+### Geometry Cleanup
+
+用于处理倒角、圆角和沉台补面。
+
+1. 在主面板中运行 `Geometry Cleanup`。
+2. 按提示选择一个倒角面、圆角面或沉台底面。
+3. 检查清理参数，例如圆角半径范围、缝合容差和邻接扩展层数。
+4. 点击开始执行。
+
+输出结果：
+
+- 对匹配的 solid 倒角/圆角执行清理。
+- 对沉台底面执行 surface-only 补面和缝合。
+- 清理完成后刷新 Model Browser 和图形窗口。
+
+### Seam Surface Creation
+
+用于创建焊缝几何面。
+
+1. 在主面板中运行 `Seam Surface Creation`。
+2. 选择模式：
+   - `Line-Surface`：源线投影到目标中面。
+   - `Line-Line`：两条边界线之间创建焊缝面。
+3. 按模块提示选择线、面或所属中面。
+4. 检查投影间隙、采样分段和拓扑缝合参数。
+5. 点击开始执行。
+
+输出结果：
+
+- 生成 `SEAM_Tx` component。
+- `x` 优先取相邻 component 名称中较薄的 `_T` 厚度。
+- 若厚度无法读取，会提示手动输入。
+
+### Sheet BatchMesh + Washer
+
+用于对钣金中面或壳组件执行 BatchMesh，并按孔径规则生成 washer。
+
+1. 在主面板中运行 `Sheet BatchMesh + Washer`。
+2. 点击 `选择/重选组件`，选择钣金中面或壳网格 component。
+3. 检查网格尺寸、孔径识别范围和 washer 批量参数。
+4. 确认 `config/washer_rules.txt` 中的孔径规则符合当前项目标准。
+5. 点击开始执行。
+
+输出结果：
+
+- 对选中 component 执行 BatchMesh。
+- 识别指定孔径范围内的孔。
+- 按规则忽略小孔、保留大孔或生成 washer。
+- 生成运行统计，包括孔数量、washer 创建数量和失败数量。
+
+### Casting TetraMesh
+
+用于铸件几何的 surface 清理、三角面网格和 TetraMesh。
+
+1. 在主面板中运行 `Casting TetraMesh`。
+2. 点击 `选择/重选组件`，选择铸件几何 component。
+3. 检查删除 solid、surface 清理、三角面网格和 TetraMesh 选项。
+4. 检查质量 criteria、cleanup 参数和 `*tetmesh` 参数。
+5. 点击开始执行。
+
+输出结果：
+
+- 可删除 solid 并保留边界 surface。
+- 可清理小孔、小圆角等微小特征。
+- 创建三角面网格并进行 2D 质量迭代。
+- 质量通过后执行 TetraMesh 体网格填充。
+
+### Shell Washer Hole RBE2
+
+用于在壳单元 washer 孔位置创建 RBE2。
+
+1. 在主面板中运行 `Shell Washer Hole RBE2`。
+2. 点击 `选择/重选组件`，选择已经带有标准 washer 网格的壳 component。
+3. 检查孔径范围、圆度/椭圆容差、washer 节点圈数和 RBE2 自由度。
+4. 选择执行模式：
+   - `开始创建 RBE2`：只对未创建过 RBE2 的孔创建。
+   - `重建模式`：先删除已有输出 component，再重新创建。
+   - `合并重复节点`：清理输出 component 中重复 RBE2 的中心节点和重复单元。
+5. 点击对应按钮执行。
+
+输出结果：
+
+- 每个源 component 对应一个 `AUTO_RBE2_<source>` 输出 component。
+- RBE2 只移动到输出 component，不移动源节点。
+- 模块会检查已有 RBE2，避免重复创建。
+
+### Solid Through-Hole RBE2
+
+用于识别实体网格圆柱贯通孔并创建 RBE2。
+
+1. 在主面板中运行 `Solid Through-Hole RBE2`。
+2. 点击 `选择/重选组件`，选择实体网格 component。
+3. 检查光顺面片角度、圆柱拟合容差、端部环容差和孔半径范围。
+4. 设置结果 component 名称。
+5. 点击开始执行。
+
+输出结果：
+
+- 模块会生成临时自由面 component，识别孔壁面片。
+- 对有效贯通孔创建中心节点和 RBE2。
+- 输出到指定结果 component。
+- 运行结束后可自动删除临时自由面 component。
+
+### RBE2 Bolt Connector
+
+用于根据 RBE2 中心节点创建 CBEAM/CBAR 螺栓连接段。
+
+1. 在主面板中运行 `RBE2 Bolt Connector`。
+2. 选择 RBE2 来源：
+   - `elements`：直接选择 RBE2 单元。
+   - `components`：选择包含 RBE2 的 component。
+3. 设置搜索轴向、最大轴向连接距离、横向中心偏移容差和最小分组数量。
+4. 选择输出类型 `CBEAM` 或 `CBAR`。
+5. 可先勾选预览模式检查分组，再取消预览创建连接段。
+6. 点击确定执行。
+
+输出结果：
+
+- 对符合条件的 RBE2 中心节点分组。
+- 沿识别轴向连接相邻 RBE2。
+- 输出 component 按孔径和单元类型命名，例如 `BOLT_D12_CBEAM`。
+
+## 命名约定
+
+组件名称建议保留流程信息：
 
 ```text
 SHELL_PARTNAME_T2.0_Q235
@@ -214,52 +263,44 @@ CASTING_PARTNAME_QT500
 SEAM_T2.0
 ```
 
-Material assignment replaces an existing material suffix when it matches a key from `config/materials.txt`.
+材料标识模块会识别 `materials.txt` 中定义的材料 key，并替换组件名称中已有的材料后缀。
 
-### Module Configuration
+## Washer 规则
 
-`config/materials.txt` is a pipe-delimited material library:
-
-```text
-key|display|density|E|nu|yield|ultimate|note
-Q235|Q235|7.85e-9|210000|0.30|235|370|steel
-```
-
-The `Edit TXT` command in Material Assignment edits this file directly.
-
-`config/seam_rules.txt` stores seam defaults such as maximum projection gap, topology stitch tolerance, and component grouping mode.
-
-`config/*_state.txt` files are generated automatically. They remember workflow UI settings such as selected options, text fields, and numeric fields for the next run. Model-specific entity selections are not stored because component, element, line, and surface IDs are not stable between models.
-
-`config/mesh_rules.txt` stores default sheet-metal BatchMesh parameters, such as target/min/max element size, `params_generate_mode`, `no_geomcleanup`, whether BatchMesh's default washer handling is disabled, surface batch size, and washer hole detection range. Geometry is not modified by default, HyperMesh/Tk message updates are kept enabled, BatchMesh runs in small surface batches, and only 6-30mm holes are detected.
-
-`config/casting_mesh_rules.txt` stores casting mesh defaults, including solid deletion while keeping boundary surfaces, small pinhole/fillet cleanup thresholds, tria surface mesh size, 2D quality iteration count, raw `*tetmesh` strings, and 3D quality summary criteria. The default flow deletes selected solid CAD entities while keeping their boundary surfaces, cleans small surface features, creates a tria shell mesh, and runs TetraMesh volume fill after the shell quality gate.
-
-`config/geometry_cleanup_rules.txt` stores chamfer/recess cleanup defaults. The default entry needs one selected face: Auto mode first tries HyperMesh fillet recognition and adjacent small-face chaining for solid chamfer/fillet cleanup, then attempts solid recreation from closed bounds when possible. When that does not match or fails, it treats the face as a recessed pocket floor and performs surface-only cleanup: remove the floor and outer wall faces, create a fill surface from the upper outer boundary plus inner boundary loops, and stitch it back to retained inner wall surfaces.
-
-`config/washer_rules.txt` stores sheet-metal hole washer rules. The current defaults are extracted from the provided standard image:
+默认 washer 规则位于 `config/washer_rules.txt`：
 
 ```text
-D < 6mm       ignore after meshing; geometry is not modified
-6 < D <= 9    washer: hole_density=8,  layers=2, widths=4,6
-9 < D <= 13   washer: hole_density=10, layers=2, widths=4,6
-13 < D <= 20  washer: hole_density=12, layers=2, widths=6,8
-20 < D <= 30  washer: hole_density=16, layers=2, widths=8,8
-D > 30mm      keep
+hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|note
+0|6|ignore|0|0|abs||D < 6mm ignored after meshing; geometry is not modified
+6|9|washer|8|2|abs|4,6|6mm < D <= 9mm
+9|13|washer|10|2|abs|4,6|9mm < D <= 13mm
+13|20|washer|12|2|abs|6,8|13mm < D <= 20mm
+20|30|washer|16|2|abs|8,8|20mm < D <= 30mm
+30|999|keep|0|0|abs||D > 30mm no special handling
 ```
 
-### Seam Workflow
+## Seam Surface Creation
 
-`Seam Surface Creation` runs after midsurface extraction and before meshing/RBE2 creation.
+Seam Surface Creation 位于中面抽取之后、网格划分和 RBE2 创建之前。
 
-- `Line-Surface`: selects one source line and one target midsurface. The source line is sampled and projected to the selected surface, and the seam is created only between the source span and its matching projected span.
-- `Line-Line`: selects two boundary lines and creates the seam only over their nearest overlapping span. This is the normal mode for L-type welds and direct edge-to-edge bridge welds.
-- Closed-loop source lines are sampled as circular sequences, so a valid seam span may cross the 0/1 parameter break without being split.
-- The output component is `SEAM_Tx`, where `x` is the thinner `_T` value read from the two adjacent component names.
-- If thickness cannot be read from `_T`, the module asks for a manual value.
+- `Line-Surface`：选择一条源线和一个目标中面，将源线投影到目标面并创建焊缝面。
+- `Line-Line`：选择两条边界线，在最近重叠区间内创建焊缝面。
+- 输出组件命名为 `SEAM_Tx`，其中 `x` 来自相邻组件名中较薄的 `_T` 厚度值。
+- 若无法读取厚度，模块会提示手动输入。
 
-### Notes
+## Model Browser 刷新
 
-- The scripts target HyperMesh 2019 Tcl/Tk.
-- Normal Tcl interpreters can source the files for syntax checks, but HyperMesh commands only run inside HyperMesh.
-- Workflow module windows use `Back to Home` to return to the main launcher. Press `Esc` to close the current module window.
+脚本创建 component 后会调用统一刷新逻辑：
+
+- 恢复 browser/redraw/message block。
+- 停止 browser signal buffer。
+- 激活并显示脚本创建或重命名的 component。
+- 刷新 Model Browser 和图形窗口。
+
+如果左侧 Model Browser 没有立即显示新 component，可点击主面板中的 `刷新浏览器`。
+
+## Notes
+
+- Target environment: HyperMesh 2019 Tcl/Tk.
+- Normal Tcl interpreters can be used for basic syntax checks only. HyperMesh commands must run inside HyperMesh.
+- Module windows use `返回主页 / Back to Home` to return to the launcher. Press `Esc` to close the current module window.

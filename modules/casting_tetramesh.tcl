@@ -326,7 +326,7 @@ proc ::CastingTetMesh::showRules {} {
     variable RULE_FILE
     ::CastingTetMesh::ensureConfigFiles
     set msg [::HWFlow::txt "当前铸件网格参数文件：\n$RULE_FILE\n\n[::HWFlow::readTextFile $RULE_FILE]" "Current casting mesh rule file:\n$RULE_FILE\n\n[::HWFlow::readTextFile $RULE_FILE]"]
-    tk_messageBox -icon info -title [::HWFlow::txt "铸件 CFD TetraMesh 参数" "Casting CFD TetraMesh Rules"] -message $msg
+    tk_messageBox -icon info -title [::HWFlow::txt "Casting TetraMesh 参数" "Casting TetraMesh Rules"] -message $msg
 }
 
 proc ::CastingTetMesh::browseFile {target title} {
@@ -353,13 +353,13 @@ proc ::CastingTetMesh::showPanel {} {
     catch {destroy .casting_tetramesh}
     set w .casting_tetramesh
     toplevel $w
-    wm title $w "[::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "铸件表面清理 + 三角面网格 + CFD TetraMesh" "Casting Cleanup + Tria Surface Mesh + CFD TetraMesh"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -471,12 +471,12 @@ proc ::CastingTetMesh::showPanel {} {
 proc ::CastingTetMesh::acceptPanel {} {
     variable ui
     if {[llength $ui(selectedComps)] == 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message [::HWFlow::txt "请先选择铸件组件。" "Pick casting components first."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message [::HWFlow::txt "请先选择铸件组件。" "Pick casting components first."]
         return
     }
     foreach key {ELEM_SIZE MIN_ELEM_SIZE FEATURE_ANGLE PINHOLE_DIAM FILLET_MIN_R FILLET_MAX_R SHORT_EDGE_LEN MAX_ITER_2D TET_MODE} {
         if {![string is double -strict $ui($key)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message "$key must be a number."
+            tk_messageBox -icon warning -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message "$key must be a number."
             return
         }
     }
@@ -486,24 +486,24 @@ proc ::CastingTetMesh::acceptPanel {} {
         RUN_TETMESH RUN_SHELL_CHECK ORGANIZE_FAILED PERFORMANCE_MODE VERBOSE
     } {
         if {![string is integer -strict $ui($key)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message "$key must be 0 or 1."
+            tk_messageBox -icon warning -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message "$key must be 0 or 1."
             return
         }
     }
     if {$ui(ELEM_SIZE) <= 0 || $ui(MIN_ELEM_SIZE) <= 0 || $ui(MAX_ITER_2D) < 1} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message [::HWFlow::txt "网格尺寸和迭代参数无效。" "Invalid mesh size or iteration parameters."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message [::HWFlow::txt "网格尺寸和迭代参数无效。" "Invalid mesh size or iteration parameters."]
         return
     }
     if {$ui(FILLET_MAX_R) < $ui(FILLET_MIN_R)} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message [::HWFlow::txt "圆角半径范围无效。" "Invalid fillet radius range."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message [::HWFlow::txt "圆角半径范围无效。" "Invalid fillet radius range."]
         return
     }
     if {$ui(CRITERIA_FILE) ne "" && ![file exists $ui(CRITERIA_FILE)]} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message [::HWFlow::txt "质量 criteria 文件不存在。" "Quality criteria file does not exist."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message [::HWFlow::txt "质量 criteria 文件不存在。" "Quality criteria file does not exist."]
         return
     }
     if {$ui(AUTO_TOPO_CLEANUP) && ($ui(CLEANUP_PARAM_FILE) eq "" || ![file exists $ui(CLEANUP_PARAM_FILE)])} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message [::HWFlow::txt "启用 autotopocleanup 时必须提供清理参数文件。" "autotopocleanup requires a cleanup parameter file."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message [::HWFlow::txt "启用 autotopocleanup 时必须提供清理参数文件。" "autotopocleanup requires a cleanup parameter file."]
         return
     }
     ::CastingTetMesh::saveState
@@ -871,7 +871,7 @@ proc ::CastingTetMesh::main {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] \
+            [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] \
             [::HWFlow::txt "准备执行铸件网格流程..." "Preparing casting mesh workflow..."] \
             0]
     }
@@ -882,7 +882,7 @@ proc ::CastingTetMesh::main {} {
     }
 
     set code [catch {
-        ::CastingTetMesh::msg [::HWFlow::txt "==== 铸件 CFD TetraMesh 开始 ====" "==== Casting CFD TetraMesh started ===="]
+        ::CastingTetMesh::msg [::HWFlow::txt "==== Casting TetraMesh 开始 ====" "==== Casting TetraMesh started ===="]
         if {$progressOpened} {
             catch {::HWFlow::progressUpdate 5.0 [::HWFlow::txt "正在准备铸件组件" "Preparing casting components"] [::HWFlow::txt "组件数量：[llength $comps]" "Components: [llength $comps]"] 1}
             catch {::HWFlow::progressForceVisible}
@@ -941,21 +941,21 @@ proc ::CastingTetMesh::main {} {
     set runMs [expr {[clock milliseconds] - $runStart}]
     if {$code} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "铸件 CFD TetraMesh 执行失败。" "Casting CFD TetraMesh failed."] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::txt "Casting TetraMesh 执行失败。" "Casting TetraMesh failed."] 100.0}
         }
-        tk_messageBox -icon error -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message [::HWFlow::txt "执行失败：\n$err" "Run failed:\n$err"]
+        tk_messageBox -icon error -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message [::HWFlow::txt "执行失败：\n$err" "Run failed:\n$err"]
         return -options $opts $err
     }
 
     set q2d $stat(last2DQuality)
     set q3d $stat(quality3D)
-    set msg [::HWFlow::txt "铸件 CFD TetraMesh 已完成。\n组件数：[llength $comps]\n删除 solid：$stat(deletedSolids)\nSurface 数：$stat(surfaces)\n三角面网格次数：$stat(surfaceMeshRuns)\n2D 质量状态：$q2d\nTetraMesh 次数：$stat(tetmeshRuns)\n3D 质量摘要：$q3d\n运行时间：${runMs} ms" "Casting CFD TetraMesh finished.\nComponents: [llength $comps]\nDeleted solids: $stat(deletedSolids)\nSurfaces: $stat(surfaces)\nTria mesh runs: $stat(surfaceMeshRuns)\n2D quality: $q2d\nTetraMesh runs: $stat(tetmeshRuns)\n3D quality summary: $q3d\nRun time: ${runMs} ms"]
+    set msg [::HWFlow::txt "Casting TetraMesh 已完成。\n组件数：[llength $comps]\n删除 solid：$stat(deletedSolids)\nSurface 数：$stat(surfaces)\n三角面网格次数：$stat(surfaceMeshRuns)\n2D 质量状态：$q2d\nTetraMesh 次数：$stat(tetmeshRuns)\n3D 质量摘要：$q3d\n运行时间：${runMs} ms" "Casting TetraMesh finished.\nComponents: [llength $comps]\nDeleted solids: $stat(deletedSolids)\nSurfaces: $stat(surfaces)\nTria mesh runs: $stat(surfaceMeshRuns)\n2D quality: $q2d\nTetraMesh runs: $stat(tetmeshRuns)\n3D quality summary: $q3d\nRun time: ${runMs} ms"]
     ::CastingTetMesh::msg [::HWFlow::txt "==== 完成：组件数=[llength $comps]，三角网格次数=$stat(surfaceMeshRuns)，tet次数=$stat(tetmeshRuns)，运行时间=${runMs}ms ====" "==== Finished: components=[llength $comps], triaRuns=$stat(surfaceMeshRuns), tetRuns=$stat(tetmeshRuns), runtime=${runMs}ms ===="]
     ::CastingTetMesh::saveState
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "铸件 CFD TetraMesh 已完成。" "Casting CFD TetraMesh finished."] 100.0}
+        catch {::HWFlow::progressClose [::HWFlow::txt "Casting TetraMesh 已完成。" "Casting TetraMesh finished."] 100.0}
     }
-    tk_messageBox -icon info -title [::HWFlow::txt "铸件 CFD TetraMesh" "Casting CFD TetraMesh"] -message $msg
+    tk_messageBox -icon info -title [::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] -message $msg
 }
 
 proc ::CastingTetMesh::run {} {

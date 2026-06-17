@@ -36,7 +36,7 @@ proc ::HWFlow::globalConfigFile {} {
 
 proc ::HWFlow::defaultGlobalConfigText {} {
     return [join {
-        {# HyperMesh 前处理工作流全局配置 / HyperMesh Preprocess Workflow global configuration}
+        {# HyperMesh Toolkit global configuration}
         {workflow:}
         {  # 界面语言 / UI language: zh_CN or en_US}
         {  language: zh_CN}

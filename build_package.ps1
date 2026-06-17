@@ -38,6 +38,7 @@ $IncludeItems = @(
     ".editorconfig",
     ".gitignore",
     "README.md",
+    "使用教程.pdf",
     "config.yaml",
     "hw_toolkit.tcl",
     "build_package.ps1",

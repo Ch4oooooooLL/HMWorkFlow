@@ -193,13 +193,13 @@ proc ::SeamSurf::showPanel {} {
     catch {destroy .seam_surface}
     set w .seam_surface
     toplevel $w
-    wm title $w "[::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -font [::HWFlow::uiFont title]
+    label $w.main.title -text [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.mode -text [::HWFlow::txt "1. 焊缝类型" "1. Seam Type"] -padx 8 -pady 8
@@ -275,21 +275,21 @@ proc ::SeamSurf::acceptPanel {} {
 
     foreach key {max_gap_tol stitch_tolerance} {
         if {![string is double -strict $ui($key)] || $ui($key) < 0} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "$key 必须为非负数值。" "$key must be a non-negative number."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -message [::HWFlow::txt "$key 必须为非负数值。" "$key must be a non-negative number."]
             return
         }
     }
     if {![string is integer -strict $ui(line_sync_divisions)] || $ui(line_sync_divisions) < 1} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "line_sync_divisions 必须为正整数。" "line_sync_divisions must be a positive integer."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -message [::HWFlow::txt "line_sync_divisions 必须为正整数。" "line_sync_divisions must be a positive integer."]
         return
     }
     if {$ui(component_mode) ni {by_thickness per_seam}} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "component_mode 必须为 by_thickness 或 per_seam。" "component_mode must be by_thickness or per_seam."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -message [::HWFlow::txt "component_mode 必须为 by_thickness 或 per_seam。" "component_mode must be by_thickness or per_seam."]
         return
     }
     set ui(mode) [::SeamSurf::normalizeMode $ui(mode)]
     if {[string trim $ui(thickness_format)] eq ""} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "thickness_format 不能为空。" "thickness_format cannot be empty."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -message [::HWFlow::txt "thickness_format 不能为空。" "thickness_format cannot be empty."]
         return
     }
 
@@ -655,7 +655,7 @@ proc ::SeamSurf::resolveLineOwnerSurface {lineId label {avoidSurf ""}} {
         return [lindex $surfs 0]
     }
 
-    tk_messageBox -icon info -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message [::HWFlow::txt "$label 线 $lineId 没有可读取的所属曲面。请手动选择所属中面。" "$label line $lineId has no readable owner surface. Select the owner midsurface now."]
+    tk_messageBox -icon info -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -message [::HWFlow::txt "$label 线 $lineId 没有可读取的所属曲面。请手动选择所属中面。" "$label line $lineId has no readable owner surface. Select the owner midsurface now."]
     return [::SeamSurf::selectOneSurface [::HWFlow::txt "选择 $label 线 $lineId 的所属中面" "Select owner midsurface for $label line $lineId"]]
 }
 
@@ -2022,7 +2022,7 @@ proc ::SeamSurf::run {} {
     variable seamKeyIndex
 
     if {![::SeamSurf::showPanel]} {
-        catch {hm_usermessage [::HWFlow::txt "焊缝面创建已取消。" "Seam Surface Creation cancelled."]}
+        catch {hm_usermessage [::HWFlow::txt "Seam Surface Creation 已取消。" "Seam Surface Creation cancelled."]}
         return
     }
 
@@ -2040,15 +2040,15 @@ proc ::SeamSurf::run {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] \
+            [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] \
             [::HWFlow::txt "准备创建焊缝面..." "Preparing seam surface creation..."] \
             0]
     }
-    ::SeamSurf::msg [::HWFlow::txt "焊缝面创建 v$::SeamSurf::VERSION 开始。" "Seam Surface Creation v$::SeamSurf::VERSION started."]
+    ::SeamSurf::msg [::HWFlow::txt "Seam Surface Creation v$::SeamSurf::VERSION 开始。" "Seam Surface Creation v$::SeamSurf::VERSION started."]
     set ui(mode) [::SeamSurf::normalizeMode $ui(mode)]
     if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 20.0 \
-            [::HWFlow::txt "焊缝面创建正在执行" "Seam surface creation running"] \
+            [::HWFlow::txt "Seam Surface Creation 正在执行" "Seam surface creation running"] \
             [::HWFlow::txt "模式：$ui(mode)" "Mode: $ui(mode)"] \
             1}
     }
@@ -2058,7 +2058,7 @@ proc ::SeamSurf::run {} {
             LINE_SURFACE {
                 if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
                     catch {::HWFlow::progressUpdate 45.0 \
-                        [::HWFlow::txt "焊缝面创建正在执行" "Seam surface creation running"] \
+                        [::HWFlow::txt "Seam Surface Creation 正在执行" "Seam surface creation running"] \
                         [::HWFlow::txt "正在执行线-面焊缝流程..." "Running line-surface seam workflow..."] \
                         1}
                 }
@@ -2067,7 +2067,7 @@ proc ::SeamSurf::run {} {
             LINE_LINE {
                 if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
                     catch {::HWFlow::progressUpdate 45.0 \
-                        [::HWFlow::txt "焊缝面创建正在执行" "Seam surface creation running"] \
+                        [::HWFlow::txt "Seam Surface Creation 正在执行" "Seam surface creation running"] \
                         [::HWFlow::txt "正在执行线-线焊缝流程..." "Running line-line seam workflow..."] \
                         1}
                 }
@@ -2081,29 +2081,29 @@ proc ::SeamSurf::run {} {
 
     if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 90.0 \
-            [::HWFlow::txt "焊缝面创建正在刷新结果" "Seam surface creation refreshing results"] \
+            [::HWFlow::txt "Seam Surface Creation 正在刷新结果" "Seam surface creation refreshing results"] \
             [::HWFlow::txt "正在刷新浏览器和图形窗口..." "Refreshing browser and graphics..."] \
             1}
     }
     ::HWFlow::refreshBrowser
     if {$code} {
         incr stat(failed)
-        set msg [::HWFlow::txt "焊缝面创建失败：\n$err" "Seam Surface Creation failed:\n$err"]
+        set msg [::HWFlow::txt "Seam Surface Creation 失败：\n$err" "Seam Surface Creation failed:\n$err"]
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "焊缝面创建失败。" "Seam surface creation failed."] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::txt "Seam Surface Creation 失败。" "Seam surface creation failed."] 100.0}
         }
-        catch {tk_messageBox -icon error -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message $msg}
+        catch {tk_messageBox -icon error -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -message $msg}
         ::SeamSurf::msg $msg
         return
     }
 
-    set msg [::HWFlow::txt "焊缝面创建已完成。\n\n已创建焊缝面：$stat(created)\n已跳过既有焊缝面：$stat(skippedExisting)\n已完成拓扑缝合：$stat(stitched)" "Seam Surface Creation finished.\n\nCreated seam surfaces: $stat(created)\nSkipped existing seam surfaces: $stat(skippedExisting)\nTopology stitched: $stat(stitched)"]
+    set msg [::HWFlow::txt "Seam Surface Creation 已完成。\n\n已创建焊缝面：$stat(created)\n已跳过既有焊缝面：$stat(skippedExisting)\n已完成拓扑缝合：$stat(stitched)" "Seam Surface Creation finished.\n\nCreated seam surfaces: $stat(created)\nSkipped existing seam surfaces: $stat(skippedExisting)\nTopology stitched: $stat(stitched)"]
     if {[llength $stat(details)] > 0} {
         append msg "\n\n[join $stat(details) \n]"
     }
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "焊缝面创建已完成。" "Seam surface creation finished."] 100.0}
+        catch {::HWFlow::progressClose [::HWFlow::txt "Seam Surface Creation 已完成。" "Seam surface creation finished."] 100.0}
     }
-    catch {tk_messageBox -icon info -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -message $msg}
+    catch {tk_messageBox -icon info -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -message $msg}
     ::SeamSurf::msg $msg
 }

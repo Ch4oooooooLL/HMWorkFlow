@@ -1,5 +1,5 @@
 # ======================================================================
-# HyperMesh Preprocess Workflow Toolkit - Main Entry
+# HyperMesh Toolkit - Main Entry
 # HyperMesh 2019 Tcl/Tk
 #
 # Main launcher with a workflow-oriented Tk GUI.
@@ -13,84 +13,84 @@ namespace eval ::HWToolkit {
 
     set MODULES {
         component_category {
-            group    "01. Organize"
+            group    "01. Setup"
             file     "component_workflow"
-            label_zh "组件类型分类"
+            label_zh "组件分类"
             label_en "Component Type Classification"
-            desc_zh  "将组件分类为 SHELL、SOLID 或 CASTING，并按类型前缀规范化命名。"
-            desc_en  "Classify components into SHELL, SOLID or CASTING and rename them with the category prefix."
+            desc_zh  "按 SHELL、SOLID、CASTING 分类组件，并规范化组件名称。"
+            desc_en  "Classify components as SHELL, SOLID, or CASTING and normalize component names."
             proc     "::CompWorkflow::runCategory"
         }
         material_assignment {
-            group    "01. Organize"
+            group    "01. Setup"
             file     "component_workflow"
-            label_zh "材料标识分配"
+            label_zh "材料标识"
             label_en "Material Assignment"
-            desc_zh  "从 TXT 材料库选择材料标识，重命名组件并按材料装配归类。"
-            desc_en  "Assign material keys from the TXT library, rename components and organize material assemblies."
+            desc_zh  "从材料库分配材料标识，并按材料装配归类。"
+            desc_en  "Assign material keys from the material library and organize material assemblies."
             proc     "::CompWorkflow::runMaterial"
         }
         midsurf {
             group    "02. Geometry"
-            label_zh "钣金中面抽取"
+            label_zh "Midsurface Extraction"
             label_en "Midsurface Extraction"
-            desc_zh  "批量抽取钣金中面，并按 CATEGORY_NAME_Tx_MATERIAL 规则命名输出组件。"
+            desc_zh  "抽取钣金中面，并按 CATEGORY_NAME_Tx_MATERIAL 规则命名输出组件。"
             desc_en  "Extract sheet-metal midsurfaces and name outputs as CATEGORY_NAME_Tx_MATERIAL."
             proc     "::MidSurf::run"
         }
         geometry_cleanup {
             group    "02. Geometry"
-            label_zh "几何清理：倒角/沉台"
+            label_zh "Geometry Cleanup"
             label_en "Geometry Cleanup: Chamfer/Recess"
-            desc_zh  "选择一个倒角面或沉台底面，自动判断并执行倒角清除或沉台补平。"
-            desc_en  "Select one chamfer face or recessed floor face, then auto-detect and clean chamfers or fill recesses."
+            desc_zh  "处理倒角、圆角和沉台补面等几何清理任务。"
+            desc_en  "Clean chamfers, fillets, and recessed pocket surfaces."
             proc     "::GeomCleanup::run"
         }
         seam_surface {
             group    "03. Seam"
-            label_zh "焊缝面创建"
+            label_zh "Seam Surface Creation"
             label_en "Seam Surface Creation"
-            desc_zh  "通过线-面或线-线流程创建 SEAM_Tx 焊缝几何面。"
+            desc_zh  "通过线-面或线-线方式创建 SEAM_Tx 焊缝面。"
             desc_en  "Create SEAM_Tx geometry surfaces with Line-Surface or Line-Line workflows."
             proc     "::SeamSurf::run"
         }
         batch_mesh_washer {
             group    "04. Mesh"
-            label_zh "钣金 BatchMesh + 自动 Washer"
-            label_en "Sheet BatchMesh + Auto Washer"
+            label_zh "Sheet BatchMesh + Washer"
+            label_en "Sheet BatchMesh + Washer"
             desc_zh  "对钣金中面/壳组件执行 BatchMesh，不修改几何，并按孔径标准忽略小孔或生成 washer。"
-            desc_en  "Run BatchMesh on sheet-metal midsurface/shell components without modifying geometry, then ignore small holes or create washers by rules."
+            desc_en  "Run BatchMesh on sheet-metal midsurface/shell components and create washers by hole rules."
             proc     "::BatchMeshWasher::run"
         }
         casting_tetramesh {
             group    "04. Mesh"
-            label_zh "铸件 CFD TetraMesh"
+            label_zh "Casting TetraMesh"
             label_en "Casting CFD TetraMesh"
-            desc_zh  "对铸件执行删除 solid、surface 微小特征清理、三角面网格质量迭代和 CFD/TetraMesh 体填充。"
-            desc_en  "Run casting solid removal, surface defeaturing, tria quality iterations and CFD/TetraMesh volume fill."
+            desc_zh  "执行铸件 surface 清理、三角面网格质量迭代和 TetraMesh 体网格。"
+            desc_en  "Run casting surface cleanup, tria quality iterations, and TetraMesh volume meshing."
             proc     "::CastingTetMesh::run"
         }
         shell_washer_hole_rbe2 {
             group    "05. RBE2"
-            label_zh "壳单元垫圈孔 RBE2"
+            label_zh "Shell Washer Hole RBE2"
             label_en "Shell Washer-Hole RBE2"
-            desc_zh  "识别壳单元标准垫圈孔，并自动创建 RBE2 连接。"
+            desc_zh  "识别壳单元 washer 孔，并创建 RBE2。"
             desc_en  "Create RBE2 elements for shell washer holes."
             proc     "::RB2W::run"
         }
         auto_hole_rbe2 {
             group    "05. RBE2"
-            label_zh "实体贯通孔 RBE2"
+            label_zh "Solid Through-Hole RBE2"
             label_en "Solid Through-Hole RBE2"
-            desc_zh  "识别实体网格圆柱贯通孔，并自动创建 RBE2 连接。"
+            desc_zh  "识别实体网格圆柱贯通孔，并创建 RBE2。"
             desc_en  "Create RBE2 elements for cylindrical through-holes in solid meshes."
             proc     "::AutoHoleRBE2::run"
         }
         rbe2_bolt_connector {
             group    "06. Bolt"
-            label_zh "RBE2 螺栓连接生成"
+            label_zh "RBE2 Bolt Connector"
             label_en "RBE2 Bolt Connector"
-            desc_zh  "对 RBE2 中心节点分组，并生成 CBEAM/CBAR 螺栓段。"
+            desc_zh  "对 RBE2 中心节点分组，并生成 CBEAM/CBAR 螺栓连接段。"
             desc_en  "Group RBE2 elements and create CBEAM/CBAR bolt segments."
             proc     "::RB2Bolt::run"
         }
@@ -170,8 +170,8 @@ proc ::HWToolkit::moduleGroups {} {
 
 proc ::HWToolkit::groupText {group} {
     switch -- $group {
-        "01. Organize" {
-            return [::HWFlow::txt "01. 组织与标识" "01. Organize"]
+        "01. Setup" {
+            return [::HWFlow::txt "01. Model Setup" "01. Model Setup"]
         }
         "02. Geometry" {
             return [::HWFlow::txt "02. 几何处理" "02. Geometry"]
@@ -245,13 +245,13 @@ proc ::HWToolkit::showPanel {} {
     catch {destroy .hwtoolkit}
     set w .hwtoolkit
     toplevel $w
-    wm title $w [::HWFlow::txt "HyperMesh 前处理工作流工具集" "HyperMesh Preprocess Workflow Toolkit"]
+    wm title $w "HyperMesh Toolkit"
     wm resizable $w 0 0
 
     frame $w.header -padx 12 -pady 10
     pack $w.header -fill x
-    label $w.header.title -text [::HWFlow::txt "HyperMesh 前处理工作流工具集" "HyperMesh Preprocess Workflow Toolkit"] -font [::HWFlow::uiFont header]
-    label $w.header.subtitle -text [::HWFlow::txt "面向 HyperMesh 2019 的工程化前处理流程模块" "Workflow modules for HyperMesh 2019 preprocessing"] -font [::HWFlow::uiFont default]
+    label $w.header.title -text "HyperMesh Toolkit" -font [::HWFlow::uiFont header]
+    label $w.header.subtitle -text "Preprocessing Utilities" -font [::HWFlow::uiFont default]
     pack $w.header.title -anchor w
     pack $w.header.subtitle -anchor w
 

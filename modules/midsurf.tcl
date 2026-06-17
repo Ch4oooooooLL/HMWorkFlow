@@ -90,13 +90,13 @@ proc ::MidSurf::showPanel {} {
 
     set w .midsurf_dlg
     toplevel $w
-    wm title $w "[::HWFlow::txt "钣金中面抽取" "MidSurf"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "钣金中面抽取" "Midsurface Extraction"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -205,42 +205,42 @@ proc ::MidSurf::acceptPanel {} {
     variable ui
 
     if {[llength $ui(selectedComps)] == 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
 
     foreach k {alignSteps extractByComp rerunType stitchTolMode surfaceNormals requireCleanMiddle keepTransparency hideSourceComponent} {
         if {![string is integer -strict $ui($k)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
             return
         }
     }
 
     foreach k {midPosition maxRTtRatio maxThicknessRatio fallbackThickness variableThicknessTol} {
         if {![string is double -strict $ui($k)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
             return
         }
     }
 
     if {$ui(alignSteps) < 0 || $ui(alignSteps) > 5} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "alignSteps 必须在 0 到 5 之间。" "alignSteps must be between 0 and 5."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "alignSteps 必须在 0 到 5 之间。" "alignSteps must be between 0 and 5."]
         return
     }
     if {$ui(midPosition) < 0.0 || $ui(midPosition) > 1.0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "midPosition 必须在 0 到 1 之间。" "midPosition must be between 0 and 1."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "midPosition 必须在 0 到 1 之间。" "midPosition must be between 0 and 1."]
         return
     }
     if {$ui(maxRTtRatio) <= 0.0 || $ui(maxThicknessRatio) <= 1.0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "maxRTtRatio 必须大于 0，maxThicknessRatio 必须大于 1。" "maxRTtRatio must be > 0 and maxThicknessRatio must be > 1."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "maxRTtRatio 必须大于 0，maxThicknessRatio 必须大于 1。" "maxRTtRatio must be > 0 and maxThicknessRatio must be > 1."]
         return
     }
     if {$ui(variableThicknessTol) < 0.0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "variableThicknessTol 不能为负值。" "variableThicknessTol cannot be negative."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "variableThicknessTol 不能为负值。" "variableThicknessTol cannot be negative."]
         return
     }
     if {[string trim $ui(thicknessFormat)] eq ""} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "thicknessFormat 不能为空。" "thicknessFormat cannot be empty."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "thicknessFormat 不能为空。" "thicknessFormat cannot be empty."]
         return
     }
 
@@ -314,7 +314,7 @@ proc ::MidSurf::acceptThicknessPrompt {} {
 
     set v [string trim $ui(promptValue)]
     if {![string is double -strict $v] || $v <= 0.0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "中面抽取" "MidSurf"] -message [::HWFlow::txt "厚度必须为大于 0 的数值。" "Thickness must be a number greater than 0."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "厚度必须为大于 0 的数值。" "Thickness must be a number greater than 0."]
         return
     }
 
@@ -941,7 +941,7 @@ proc ::MidSurf::run {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "钣金中面抽取" "Midsurface Extraction"] \
+            [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] \
             [::HWFlow::txt "准备抽取中面..." "Preparing midsurface extraction..."] \
             0]
     }
@@ -955,7 +955,7 @@ proc ::MidSurf::run {} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
             set pct [expr {5.0 + 85.0 * (($compIndex - 1) / double($stat(selected)))}]
             catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "钣金中面抽取正在执行" "Midsurface extraction running"] \
+                [::HWFlow::txt "Midsurface Extraction 正在执行" "Midsurface extraction running"] \
                 [::HWFlow::txt "组件 $compIndex/$stat(selected)：$sourceName" "Component $compIndex/$stat(selected): $sourceName"] \
                 1}
         }
@@ -981,7 +981,7 @@ proc ::MidSurf::run {} {
     ::MidSurf::clearMarks
     if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 95.0 \
-            [::HWFlow::txt "钣金中面抽取正在收尾" "Midsurface extraction finishing"] \
+            [::HWFlow::txt "Midsurface Extraction 正在收尾" "Midsurface extraction finishing"] \
             [::HWFlow::txt "正在刷新结果并生成汇总..." "Refreshing results and building summary..."] \
             1}
     }
@@ -1014,6 +1014,6 @@ proc ::MidSurf::run {} {
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
         catch {::HWFlow::progressClose [::HWFlow::txt "中面抽取已完成。" "Midsurface extraction finished."] 100.0}
     }
-    catch {tk_messageBox -icon info -title "[::HWFlow::txt "钣金中面抽取" "MidSurf"] v$VERSION" -message $msg}
+    catch {tk_messageBox -icon info -title "[::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] v$VERSION" -message $msg}
     ::MidSurf::msg $msg
 }
