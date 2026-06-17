@@ -575,6 +575,38 @@ proc ::HWFlow::componentIdByName {name} {
     return ""
 }
 
+proc ::HWFlow::componentSnapshot {{markId 2}} {
+    set ids {}
+    set markType ""
+    foreach etype {comps components} {
+        catch {*clearmark $etype $markId}
+        foreach selector {all displayed inactive} {
+            if {![catch {*createmark $etype $markId $selector}]} {
+                if {![catch {set gotIds [hm_getmark $etype $markId]}] && [llength $gotIds] > 0} {
+                    set ids $gotIds
+                    set markType $etype
+                    break
+                }
+            }
+        }
+        if {[llength $ids] > 0} {
+            break
+        }
+    }
+
+    set names {}
+    foreach compId $ids {
+        set name [::HWFlow::componentName $compId]
+        if {$name ne ""} {
+            lappend names $name
+        }
+    }
+    if {$markType ne ""} {
+        catch {*clearmark $markType $markId}
+    }
+    return [dict create ids $ids names $names count [llength $ids] markType $markType]
+}
+
 proc ::HWFlow::rememberComponent {compName} {
     variable touchedComponents
     set compName [string trim $compName]
@@ -906,6 +938,7 @@ proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
     # existing Model Browser tree unchanged while the database is already valid.
     ::HWFlow::resetBrowserBlocks
     variable touchedComponents
+    set modelSnapshot [::HWFlow::componentSnapshot 2]
     set trackedComponents [list {*}$touchedComponents]
     foreach compName $trackedComponents {
         catch {::HWFlow::activateAndShowComponent $compName 0}
@@ -913,6 +946,14 @@ proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
     if {$activateInactive} {
         foreach etype {components comps} {
             catch {*clearmark $etype 2}
+            if {![catch {*createmark $etype 2 all}]} {
+                catch {*marksuppressactive $etype 2 0}
+                catch {*marksuppressoutput $etype 2 0}
+                catch {*displaycollectorsbymark $etype 2 on 1 1}
+                catch {*displaycollectorsallbymark 2 on 1 1}
+            }
+            catch {*clearmark $etype 2}
+
             if {![catch {*createmark $etype 2 inactive}]} {
                 catch {*marksuppressactive $etype 2 0}
                 catch {*marksuppressoutput $etype 2 0}
@@ -929,6 +970,8 @@ proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
     return [dict create \
         touchedComponents $trackedComponents \
         touchedCount [llength $trackedComponents] \
+        modelComponents [dict get $modelSnapshot names] \
+        modelCount [dict get $modelSnapshot count] \
         activateInactive $activateInactive]
 }
 
@@ -954,6 +997,8 @@ proc ::HWFlow::refreshBrowser {{notify 0} {activateInactive 0}} {
 proc ::HWFlow::refreshBrowserSummaryText {summary} {
     set touchedCount 0
     set touchedComponents {}
+    set modelCount 0
+    set modelComponents {}
     set activateInactive 0
 
     if {[dict exists $summary touchedCount]} {
@@ -962,16 +1007,29 @@ proc ::HWFlow::refreshBrowserSummaryText {summary} {
     if {[dict exists $summary touchedComponents]} {
         set touchedComponents [dict get $summary touchedComponents]
     }
+    if {[dict exists $summary modelCount]} {
+        set modelCount [dict get $summary modelCount]
+    }
+    if {[dict exists $summary modelComponents]} {
+        set modelComponents [dict get $summary modelComponents]
+    }
     if {[dict exists $summary activateInactive]} {
         set activateInactive [dict get $summary activateInactive]
     }
 
     set message [::HWFlow::txt "模型浏览器已刷新。" "Model Browser refreshed."]
-    append message [::HWFlow::txt "\n已处理 [expr {$touchedCount}] 个已记录 component。" "\nProcessed [expr {$touchedCount}] tracked component(s)."]
+    append message [::HWFlow::txt "\n当前模型 component：$modelCount 个。" "\nModel components: $modelCount."]
+    append message [::HWFlow::txt "\n脚本记录 component：$touchedCount 个。" "\nTracked components: $touchedCount."]
     if {$touchedCount > 0} {
         set preview [lrange $touchedComponents 0 12]
-        append message [::HWFlow::txt "\n已记录组件：\n[join $preview \n]" "\nTracked components:\n[join $preview \n]"]
+        append message [::HWFlow::txt "\n脚本记录组件：\n[join $preview \n]" "\nTracked components:\n[join $preview \n]"]
         if {$touchedCount > [llength $preview]} {
+            append message [::HWFlow::txt "\n..." "\n..."]
+        }
+    } elseif {$modelCount > 0} {
+        set preview [lrange $modelComponents 0 12]
+        append message [::HWFlow::txt "\n模型组件预览：\n[join $preview \n]" "\nModel component preview:\n[join $preview \n]"]
+        if {$modelCount > [llength $preview]} {
             append message [::HWFlow::txt "\n..." "\n..."]
         }
     }

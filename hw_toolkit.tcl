@@ -334,23 +334,37 @@ proc ::HWToolkit::manualRefreshBrowser {} {
             if {[dict exists $summary touchedCount]} {
                 set touchedCount [dict get $summary touchedCount]
             }
+            set modelCount 0
+            if {[dict exists $summary modelCount]} {
+                set modelCount [dict get $summary modelCount]
+            }
             set preview {}
+            set previewTotal $modelCount
+            set previewSource [::HWFlow::txt "模型 component" "Model components"]
             if {[dict exists $summary touchedComponents]} {
                 set preview [lrange [dict get $summary touchedComponents] 0 12]
             }
-            set detail [::HWFlow::txt "已记录 component：$touchedCount 个" "Tracked components: $touchedCount"]
-            if {$touchedCount > 0} {
+            if {$touchedCount == 0 && [dict exists $summary modelComponents]} {
+                set preview [lrange [dict get $summary modelComponents] 0 12]
+                set previewTotal $modelCount
+            } elseif {$touchedCount > 0} {
+                set previewSource [::HWFlow::txt "脚本记录 component" "Tracked components"]
+                set previewTotal $touchedCount
+            }
+            set detail [::HWFlow::txt "当前模型 component：$modelCount 个；脚本记录 component：$touchedCount 个" "Model components: $modelCount; tracked components: $touchedCount"]
+            if {[llength $preview] > 0} {
+                append detail "\n${previewSource}:"
                 append detail [::HWFlow::txt "\n[join $preview \n]" "\n[join $preview \n]"]
                 if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
                     foreach compName $preview {
                         catch {::HWFlow::progressAppend $compName 1}
                     }
                 }
-                if {$touchedCount > [llength $preview]} {
+                if {$previewTotal > [llength $preview]} {
                     append detail [::HWFlow::txt "\n..." "\n..."]
                 }
             } elseif {[llength [info commands ::HWFlow::progressAppend]] > 0} {
-                catch {::HWFlow::progressAppend [::HWFlow::txt "未记录组件快照。" "No tracked component snapshot."] 1}
+                catch {::HWFlow::progressAppend [::HWFlow::txt "未扫描到模型 component。" "No model components found."] 1}
             }
             catch {::HWFlow::progressUpdate 80.0 \
                 [::HWFlow::txt "正在整理刷新结果" "Finalizing browser refresh"] \
