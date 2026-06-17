@@ -323,11 +323,11 @@ proc ::HWToolkit::manualRefreshBrowser {} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
             catch {::HWFlow::progressUpdate 10.0 \
                 [::HWFlow::txt "正在准备刷新" "Preparing refresh"] \
-                [::HWFlow::txt "重置浏览器节流并恢复已记录组件。" "Resetting browser throttles and restoring tracked components."] \
+                [::HWFlow::txt "解除浏览器缓冲并刷新 Model Browser，不改变组件显示/隐藏状态。" "Resetting browser buffers and refreshing Model Browser without changing component visibility."] \
                 1}
         }
 
-        set summary [::HWFlow::refreshBrowser 0 1]
+        set summary [::HWFlow::refreshBrowser 0 0]
 
         if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
             set touchedCount 0

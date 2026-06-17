@@ -12,7 +12,7 @@ Tcl/Tk toolkit for HyperMesh 2019 preprocessing. The toolkit provides a single l
 File > Run > Tcl/Tk Script > hw_toolkit.tcl
 ```
 
-运行后打开 `HyperMesh Toolkit` 主面板。主面板中的 `刷新浏览器` 按钮用于强制恢复 Model Browser 更新、显示脚本创建的 component，并刷新图形窗口。
+运行后打开 `HyperMesh Toolkit` 主面板。主面板中的 `刷新浏览器` 按钮用于强制恢复 Model Browser 更新并刷新图形窗口，不改变已有 component 的显示/隐藏状态。
 
 ## 配置
 
@@ -294,7 +294,7 @@ Seam Surface Creation 位于中面抽取之后、网格划分和 RBE2 创建之�
 
 - 恢复 browser/redraw/message block。
 - 停止 browser signal buffer。
-- 激活并显示脚本创建或重命名的 component。
+- 保持已有 component 的显示/隐藏状态。
 - 刷新 Model Browser 和图形窗口。
 
 如果左侧 Model Browser 没有立即显示新 component，可点击主面板中的 `刷新浏览器`。

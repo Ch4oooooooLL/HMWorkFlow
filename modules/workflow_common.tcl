@@ -920,12 +920,12 @@ proc ::HWFlow::resetBrowserBlocks {} {
 
 proc ::HWFlow::browserFlushPulse {} {
     foreach cmd {
-        {hwbrowsermanager view flush false}
-        {hmbr_signals buffer start}
+        {hm_blockbrowserupdate 0}
         {hmbr_signals buffer stop}
         {hwbrowsermanager view flush true}
         {hwbrowsermanager view flush 1}
         {hwbrowsermanager view flush on}
+        {hm_blockbrowserupdate 0}
         {hm_redraw}
     } {
         catch {uplevel #0 $cmd}
@@ -940,29 +940,6 @@ proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
     variable touchedComponents
     set modelSnapshot [::HWFlow::componentSnapshot 2]
     set trackedComponents [list {*}$touchedComponents]
-    foreach compName $trackedComponents {
-        catch {::HWFlow::activateAndShowComponent $compName 0}
-    }
-    if {$activateInactive} {
-        foreach etype {components comps} {
-            catch {*clearmark $etype 2}
-            if {![catch {*createmark $etype 2 all}]} {
-                catch {*marksuppressactive $etype 2 0}
-                catch {*marksuppressoutput $etype 2 0}
-                catch {*displaycollectorsbymark $etype 2 on 1 1}
-                catch {*displaycollectorsallbymark 2 on 1 1}
-            }
-            catch {*clearmark $etype 2}
-
-            if {![catch {*createmark $etype 2 inactive}]} {
-                catch {*marksuppressactive $etype 2 0}
-                catch {*marksuppressoutput $etype 2 0}
-                catch {*displaycollectorsbymark $etype 2 on 1 1}
-                catch {*displaycollectorsallbymark 2 on 1 1}
-            }
-            catch {*clearmark $etype 2}
-        }
-    }
     catch {::HWFlow::browserFlushPulse}
     catch {update idletasks}
     catch {update}
@@ -972,7 +949,8 @@ proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
         touchedCount [llength $trackedComponents] \
         modelComponents [dict get $modelSnapshot names] \
         modelCount [dict get $modelSnapshot count] \
-        activateInactive $activateInactive]
+        activateInactive 0 \
+        preserveVisibility 1]
 }
 
 proc ::HWFlow::scheduleBrowserRefresh {{activateInactive 0}} {
@@ -1020,6 +998,7 @@ proc ::HWFlow::refreshBrowserSummaryText {summary} {
     set message [::HWFlow::txt "模型浏览器已刷新。" "Model Browser refreshed."]
     append message [::HWFlow::txt "\n当前模型 component：$modelCount 个。" "\nModel components: $modelCount."]
     append message [::HWFlow::txt "\n脚本记录 component：$touchedCount 个。" "\nTracked components: $touchedCount."]
+    append message [::HWFlow::txt "\n未改变 component 的显示/隐藏状态。" "\nComponent visibility was not changed."]
     if {$touchedCount > 0} {
         set preview [lrange $touchedComponents 0 12]
         append message [::HWFlow::txt "\n脚本记录组件：\n[join $preview \n]" "\nTracked components:\n[join $preview \n]"]
