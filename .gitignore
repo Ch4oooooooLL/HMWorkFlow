@@ -3,6 +3,9 @@
 AutoHoleRBE2_v*.log
 config/*_state.txt
 
+# Local Codex/project memory
+AGENTS.md
+
 # Packaged workflow archives
 dist/
 
