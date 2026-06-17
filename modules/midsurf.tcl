@@ -485,6 +485,11 @@ proc ::MidSurf::enableInteractiveBrowserUpdates {} {
 }
 
 proc ::MidSurf::refreshComponentBrowser {compName} {
+    if {[llength [info commands ::HWFlow::activateAndShowComponent]] > 0} {
+        catch {::HWFlow::activateAndShowComponent $compName 0}
+        catch {::HWFlow::refreshBrowser}
+        return
+    }
     set markType [::MidSurf::markComponentByName $compName 2]
     if {$markType ne ""} {
         catch {*marksuppressactive $markType 2 0}

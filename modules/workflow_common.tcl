@@ -659,33 +659,34 @@ proc ::HWFlow::createComponent {compName {color 11}} {
         return $compId
     }
 
-    catch {hm_blockbrowserupdate 0}
-    catch {hmbr_signals buffer stop}
-    catch {hwbrowsermanager view flush true}
-    catch {*setoption block_redraw=0}
-    catch {*setoption block_messages=0}
-    catch {hm_blockredraw 0}
-    catch {hm_blockmessages 0}
-    catch {hm_blockerrormessages 0}
-    catch {hm_commandfilestate 1}
+    ::HWFlow::resetBrowserBlocks
 
     set histName "Created Component $compName"
     catch {*startnotehistorystate $histName}
-    set createCode [catch {*collectorcreateonly comps $compName "" $color} err1]
+    set createCode [catch {*createentity comps name=$compName} err1]
     if {$createCode} {
-        set createCode [catch {*collectorcreateonly components $compName "" $color} err1]
+        set createCode [catch {*createentity components name=$compName} err1]
     }
     if {$createCode} {
-        if {[catch {*createentity comps name=$compName} err2]} {
-            catch {*endnotehistorystate $histName}
-            error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
+        set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
+    }
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
+    }
+    if {$createCode} {
+        catch {*endnotehistorystate $histName}
+        error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
+    }
+    set compId [::HWFlow::componentIdByName $compName]
+    if {$compId ne ""} {
+        foreach etype {comps components} {
+            catch {*setvalue $etype id=$compId color=$color}
         }
     }
     catch {*endnotehistorystate $histName}
 
     catch {*currentcollector component $compName}
     catch {*currentcollector components $compName}
-    set compId [::HWFlow::componentIdByName $compName]
     ::HWFlow::activateAndShowComponent $compName 1
     return $compId
 }
@@ -834,6 +835,7 @@ proc ::HWFlow::renameComponent {oldName newName} {
             error [::HWFlow::txt "无法将组件 $oldName 重命名为 $candidate：$err1 / $err2" "Cannot rename component $oldName to $candidate: $err1 / $err2"]
         }
     }
+    ::HWFlow::rememberComponent $candidate
     ::HWFlow::activateAndShowComponent $candidate 0
     return $candidate
 }
@@ -862,23 +864,32 @@ proc ::HWFlow::componentEntityCount {compId dataname markEntityType} {
 proc ::HWFlow::displayComponent {compName state} {
     catch {*displaycollector component $state $compName 1 1}
     catch {*displaycollector components $state $compName 1 1}
-    catch {hwbrowsermanager view flush true}
+    catch {::HWFlow::browserFlushPulse}
     catch {hm_redraw}
     catch {update idletasks}
 }
 
-proc ::HWFlow::refreshBrowser {{notify 0} {activateInactive 0}} {
-    # Reset the common redraw/browser throttles used by performance modes, then
-    # force the Model Browser and graphics window to consume pending updates.
+proc ::HWFlow::resetBrowserBlocks {} {
     foreach cmd {
         {hm_blockbrowserupdate 0}
         {*setoption block_browser_update=0}
         {*setoption block_redraw=0}
         {*setoption block_messages=0}
+        {*setoption command_file_state=1}
         {hm_blockredraw 0}
         {hm_blockmessages 0}
         {hm_blockerrormessages 0}
         {hm_commandfilestate 1}
+        {hmbr_signals buffer stop}
+    } {
+        catch {uplevel #0 $cmd}
+    }
+}
+
+proc ::HWFlow::browserFlushPulse {} {
+    foreach cmd {
+        {hwbrowsermanager view flush false}
+        {hmbr_signals buffer start}
         {hmbr_signals buffer stop}
         {hwbrowsermanager view flush true}
         {hwbrowsermanager view flush 1}
@@ -887,6 +898,13 @@ proc ::HWFlow::refreshBrowser {{notify 0} {activateInactive 0}} {
     } {
         catch {uplevel #0 $cmd}
     }
+}
+
+proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
+    # Reset redraw/browser throttles, then force a false->true browser flush.
+    # The pulse matters on HM2019 because a no-op "true" flush can leave the
+    # existing Model Browser tree unchanged while the database is already valid.
+    ::HWFlow::resetBrowserBlocks
     variable touchedComponents
     foreach compName $touchedComponents {
         catch {::HWFlow::activateAndShowComponent $compName 0}
@@ -903,8 +921,24 @@ proc ::HWFlow::refreshBrowser {{notify 0} {activateInactive 0}} {
             catch {*clearmark $etype 2}
         }
     }
+    catch {::HWFlow::browserFlushPulse}
     catch {update idletasks}
     catch {update}
+}
+
+proc ::HWFlow::scheduleBrowserRefresh {{activateInactive 0}} {
+    if {[llength [info commands after]] == 0} {
+        return
+    }
+    catch {after idle [list catch [list ::HWFlow::refreshBrowserNow $activateInactive]]}
+    foreach delay {150 600} {
+        catch {after $delay [list catch [list ::HWFlow::refreshBrowserNow $activateInactive]]}
+    }
+}
+
+proc ::HWFlow::refreshBrowser {{notify 0} {activateInactive 0}} {
+    ::HWFlow::refreshBrowserNow $activateInactive
+    ::HWFlow::scheduleBrowserRefresh $activateInactive
     if {$notify} {
         catch {hm_usermessage [::HWFlow::txt "模型浏览器已刷新。" "Model Browser refreshed."]}
     }

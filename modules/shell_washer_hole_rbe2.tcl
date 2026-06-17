@@ -962,18 +962,22 @@ proc ::RB2W::createComponentByName {compName} {
         catch {*startnotehistorystate $histName}
         set histStarted 1
 
-        set createCode [catch {*collectorcreateonly comps $compName "" 11} err1]
+        set createCode [catch {*createentity comps name=$compName} err1]
         if {$createCode} {
-            set createCode [catch {*collectorcreateonly components $compName "" 11} err1]
+            set createCode [catch {*createentity components name=$compName} err1]
         }
         if {$createCode} {
-            if {[catch {*createentity comps name=$compName} err2]} {
-                if {$histStarted} { catch {*endnotehistorystate $histName} }
-                if {!$PERFORMANCE_MODE} {
-                    RB2W::resumePerformanceModeAfterBrowserUpdate
-                }
-                error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
+            set createCode [catch {*collectorcreateonly comps $compName "" 11} err2]
+        }
+        if {$createCode} {
+            set createCode [catch {*collectorcreateonly components $compName "" 11} err2]
+        }
+        if {$createCode} {
+            if {$histStarted} { catch {*endnotehistorystate $histName} }
+            if {!$PERFORMANCE_MODE} {
+                RB2W::resumePerformanceModeAfterBrowserUpdate
             }
+            error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
         }
         if {$histStarted} { catch {*endnotehistorystate $histName} }
     }
@@ -1059,6 +1063,10 @@ proc ::RB2W::showAllOutputComponents {} {
 proc ::RB2W::refreshBrowsersAndGraphics {{force 0}} {
     variable FORCE_BROWSER_REFRESH
     if {!$FORCE_BROWSER_REFRESH && !$force} { return }
+    if {[llength [info commands ::HWFlow::refreshBrowser]] > 0} {
+        catch {::HWFlow::refreshBrowser}
+        return
+    }
     catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {hm_redraw}

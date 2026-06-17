@@ -990,15 +990,19 @@ proc ::AutoHoleRBE2::ensureComponent {compName} {
             ::AutoHoleRBE2::enableInteractiveBrowserUpdates
             set histName "Created Component $compName"
             catch {*startnotehistorystate $histName}
-            set createCode [catch {*collectorcreateonly comps $compName "" 11} err1]
+            set createCode [catch {*createentity comps name=$compName} err1]
             if {$createCode} {
-                set createCode [catch {*collectorcreateonly components $compName "" 11} err1]
+                set createCode [catch {*createentity components name=$compName} err1]
             }
             if {$createCode} {
-                if {[catch {*createentity comps name=$compName} err2]} {
-                    catch {*endnotehistorystate $histName}
-                    error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
-                }
+                set createCode [catch {*collectorcreateonly comps $compName "" 11} err2]
+            }
+            if {$createCode} {
+                set createCode [catch {*collectorcreateonly components $compName "" 11} err2]
+            }
+            if {$createCode} {
+                catch {*endnotehistorystate $histName}
+                error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
             }
             catch {*endnotehistorystate $histName}
         }
@@ -1025,6 +1029,11 @@ proc ::AutoHoleRBE2::markComponentByName {compName markId} {
 }
 
 proc ::AutoHoleRBE2::refreshComponentBrowser {compName} {
+    if {[llength [info commands ::HWFlow::activateAndShowComponent]] > 0} {
+        catch {::HWFlow::activateAndShowComponent $compName 0}
+        catch {::HWFlow::refreshBrowser}
+        return
+    }
     set markType [::AutoHoleRBE2::markComponentByName $compName 2]
     if {$markType ne ""} {
         catch {*marksuppressactive $markType 2 0}

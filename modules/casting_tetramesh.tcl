@@ -674,12 +674,18 @@ proc ::CastingTetMesh::ensureComponent {name {color 3}} {
     if {[llength [info commands ::HWFlow::createComponent]] > 0} {
         return [::HWFlow::createComponent $name $color]
     }
-    if {[catch {*collectorcreateonly comps $name "" $color} err1]} {
-        if {[catch {*collectorcreateonly components $name "" $color} err2]} {
-            if {[catch {*createentity comps name=$name} err3]} {
-                error [::HWFlow::txt "无法创建组件 $name：$err1 / $err2 / $err3" "Cannot create component $name: $err1 / $err2 / $err3"]
-            }
-        }
+    set createCode [catch {*createentity comps name=$name} err1]
+    if {$createCode} {
+        set createCode [catch {*createentity components name=$name} err1]
+    }
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly comps $name "" $color} err2]
+    }
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly components $name "" $color} err2]
+    }
+    if {$createCode} {
+        error [::HWFlow::txt "无法创建组件 $name：$err1 / $err2" "Cannot create component $name: $err1 / $err2"]
     }
     catch {::HWFlow::activateAndShowComponent $name 1}
     return [::HWFlow::componentIdByName $name]
