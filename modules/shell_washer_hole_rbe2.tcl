@@ -962,9 +962,9 @@ proc ::RB2W::createComponentByName {compName} {
         catch {*startnotehistorystate $histName}
         set histStarted 1
 
-        set createCode [catch {*createentity comps name=$compName} err1]
+        set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
         if {$createCode} {
-            set createCode [catch {*createentity components name=$compName} err1]
+            set createCode [catch {*createentity components includeid=0 name=$compName} err1]
         }
         if {$createCode} {
             set createCode [catch {*collectorcreateonly comps $compName "" 11} err2]

@@ -294,6 +294,7 @@ Seam Surface Creation 位于中面抽取之后、网格划分和 RBE2 创建之�
 
 - 恢复 browser/redraw/message block。
 - 停止 browser signal buffer。
+- 新 component 使用 `*createentity comps includeid=0 name=...` 创建，与 HyperMesh 2019 手动创建 component 的命令一致。
 - 保持已有 component 的显示/隐藏状态。
 - 刷新 Model Browser 和图形窗口。
 

@@ -695,9 +695,9 @@ proc ::HWFlow::createComponent {compName {color 11}} {
 
     set histName "Created Component $compName"
     catch {*startnotehistorystate $histName}
-    set createCode [catch {*createentity comps name=$compName} err1]
+    set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
     if {$createCode} {
-        set createCode [catch {*createentity components name=$compName} err1]
+        set createCode [catch {*createentity components includeid=0 name=$compName} err1]
     }
     if {$createCode} {
         set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
@@ -717,6 +717,8 @@ proc ::HWFlow::createComponent {compName {color 11}} {
     }
     catch {*endnotehistorystate $histName}
 
+    catch {*createmark components 1 $compName}
+    catch {*clearmark components 1}
     catch {*currentcollector component $compName}
     catch {*currentcollector components $compName}
     ::HWFlow::activateAndShowComponent $compName 1

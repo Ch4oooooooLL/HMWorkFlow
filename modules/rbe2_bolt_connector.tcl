@@ -853,9 +853,9 @@ proc ::RB2Bolt::ensureComponent {name} {
         ::RB2Bolt::enableInteractiveBrowserUpdates
         set histName "Created Component $name"
         catch {*startnotehistorystate $histName}
-        set createCode [catch {*createentity comps name=$name} err1]
+        set createCode [catch {*createentity comps includeid=0 name=$name} err1]
         if {$createCode} {
-            set createCode [catch {*createentity components name=$name} err1]
+            set createCode [catch {*createentity components includeid=0 name=$name} err1]
         }
         if {$createCode} {
             set createCode [catch {*collectorcreateonly comps $name "" 11} err2]
