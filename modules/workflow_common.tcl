@@ -906,7 +906,8 @@ proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
     # existing Model Browser tree unchanged while the database is already valid.
     ::HWFlow::resetBrowserBlocks
     variable touchedComponents
-    foreach compName $touchedComponents {
+    set trackedComponents [list {*}$touchedComponents]
+    foreach compName $trackedComponents {
         catch {::HWFlow::activateAndShowComponent $compName 0}
     }
     if {$activateInactive} {
@@ -924,6 +925,11 @@ proc ::HWFlow::refreshBrowserNow {{activateInactive 0}} {
     catch {::HWFlow::browserFlushPulse}
     catch {update idletasks}
     catch {update}
+
+    return [dict create \
+        touchedComponents $trackedComponents \
+        touchedCount [llength $trackedComponents] \
+        activateInactive $activateInactive]
 }
 
 proc ::HWFlow::scheduleBrowserRefresh {{activateInactive 0}} {
@@ -937,11 +943,42 @@ proc ::HWFlow::scheduleBrowserRefresh {{activateInactive 0}} {
 }
 
 proc ::HWFlow::refreshBrowser {{notify 0} {activateInactive 0}} {
-    ::HWFlow::refreshBrowserNow $activateInactive
+    set summary [::HWFlow::refreshBrowserNow $activateInactive]
     ::HWFlow::scheduleBrowserRefresh $activateInactive
     if {$notify} {
-        catch {hm_usermessage [::HWFlow::txt "模型浏览器已刷新。" "Model Browser refreshed."]}
+        catch {hm_usermessage [::HWFlow::refreshBrowserSummaryText $summary]}
     }
+    return $summary
+}
+
+proc ::HWFlow::refreshBrowserSummaryText {summary} {
+    set touchedCount 0
+    set touchedComponents {}
+    set activateInactive 0
+
+    if {[dict exists $summary touchedCount]} {
+        set touchedCount [dict get $summary touchedCount]
+    }
+    if {[dict exists $summary touchedComponents]} {
+        set touchedComponents [dict get $summary touchedComponents]
+    }
+    if {[dict exists $summary activateInactive]} {
+        set activateInactive [dict get $summary activateInactive]
+    }
+
+    set message [::HWFlow::txt "模型浏览器已刷新。" "Model Browser refreshed."]
+    append message [::HWFlow::txt "\n已处理 [expr {$touchedCount}] 个已记录 component。" "\nProcessed [expr {$touchedCount}] tracked component(s)."]
+    if {$touchedCount > 0} {
+        set preview [lrange $touchedComponents 0 12]
+        append message [::HWFlow::txt "\n已记录组件：\n[join $preview \n]" "\nTracked components:\n[join $preview \n]"]
+        if {$touchedCount > [llength $preview]} {
+            append message [::HWFlow::txt "\n..." "\n..."]
+        }
+    }
+    if {$activateInactive} {
+        append message [::HWFlow::txt "\n已请求同时显示 inactive component。" "\nInactive components were also requested for display."]
+    }
+    return $message
 }
 
 proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {

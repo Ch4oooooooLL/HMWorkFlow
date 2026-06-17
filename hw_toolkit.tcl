@@ -312,7 +312,61 @@ proc ::HWToolkit::showHome {} {
 
 proc ::HWToolkit::manualRefreshBrowser {} {
     if {[llength [info commands ::HWFlow::refreshBrowser]] > 0} {
-        ::HWFlow::refreshBrowser 1 1
+        set progressOpened 0
+        if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+            set progressOpened [::HWFlow::progressOpen \
+                [::HWFlow::txt "刷新浏览器" "Refresh Browser"] \
+                [::HWFlow::txt "正在刷新 Model Browser..." "Refreshing Model Browser..."] \
+                0]
+        }
+
+        if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+            catch {::HWFlow::progressUpdate 10.0 \
+                [::HWFlow::txt "正在准备刷新" "Preparing refresh"] \
+                [::HWFlow::txt "重置浏览器节流并恢复已记录组件。" "Resetting browser throttles and restoring tracked components."] \
+                1}
+        }
+
+        set summary [::HWFlow::refreshBrowser 0 1]
+
+        if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+            set touchedCount 0
+            if {[dict exists $summary touchedCount]} {
+                set touchedCount [dict get $summary touchedCount]
+            }
+            set preview {}
+            if {[dict exists $summary touchedComponents]} {
+                set preview [lrange [dict get $summary touchedComponents] 0 12]
+            }
+            set detail [::HWFlow::txt "已记录 component：$touchedCount 个" "Tracked components: $touchedCount"]
+            if {$touchedCount > 0} {
+                append detail [::HWFlow::txt "\n[join $preview \n]" "\n[join $preview \n]"]
+                if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
+                    foreach compName $preview {
+                        catch {::HWFlow::progressAppend $compName 1}
+                    }
+                }
+                if {$touchedCount > [llength $preview]} {
+                    append detail [::HWFlow::txt "\n..." "\n..."]
+                }
+            } elseif {[llength [info commands ::HWFlow::progressAppend]] > 0} {
+                catch {::HWFlow::progressAppend [::HWFlow::txt "未记录组件快照。" "No tracked component snapshot."] 1}
+            }
+            catch {::HWFlow::progressUpdate 80.0 \
+                [::HWFlow::txt "正在整理刷新结果" "Finalizing browser refresh"] \
+                $detail \
+                1}
+        }
+
+        set message [::HWFlow::refreshBrowserSummaryText $summary]
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "浏览器刷新已完成。" "Browser refresh completed."] 100.0}
+        }
+        if {[llength [info commands tk_messageBox]] > 0} {
+            tk_messageBox -icon info -title [::HWFlow::txt "刷新浏览器" "Refresh Browser"] -message $message
+        } elseif {[llength [info commands hm_usermessage]] > 0} {
+            catch {hm_usermessage $message}
+        }
     }
 }
 
