@@ -13,6 +13,7 @@ if {![namespace exists ::HWFlow]} {
 
 namespace eval ::MidSurf {
     variable VERSION "0.1"
+    variable outputAssemblyName "midsurf"
 
     variable cfg
     array set cfg {
@@ -25,12 +26,10 @@ namespace eval ::MidSurf {
         maxRTtRatio           2.0
         maxThicknessRatio     10.0
         surfaceNormals        -1
-        fallbackThickness     0.0
         thicknessFormat       "%.3g"
         variableThicknessTol  0.05
         requireCleanMiddle    1
         keepTransparency      0
-        hideSourceComponent   1
     }
 
     variable ui
@@ -38,8 +37,6 @@ namespace eval ::MidSurf {
         ok 0
         selectedComps ""
         selectedText "No components selected"
-        promptOk 0
-        promptValue ""
     }
 
     variable stat
@@ -126,7 +123,6 @@ proc ::MidSurf::showPanel {} {
         {maxThicknessRatio     "最大厚度比" "Max thickness ratio"}
         {surfaceNormals        "曲面法向" "Surface normals"}
         {variableThicknessTol  "变厚容差" "Variable thickness tolerance"}
-        {fallbackThickness     "备用厚度" "Fallback thickness"}
         {thicknessFormat       "厚度格式" "Thickness format"}
     }
 
@@ -143,7 +139,7 @@ proc ::MidSurf::showPanel {} {
         grid $w.main.param.e_$key -row $row -column [expr {$col + 1}] -sticky w -padx {0 18} -pady 2
         incr i
     }
-    set r [expr {$r + 4}]
+    set r [expr {$r + 3}]
 
     labelframe $w.main.opt -text [::HWFlow::txt "3. 选项" "3. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
@@ -152,11 +148,8 @@ proc ::MidSurf::showPanel {} {
         -variable ::MidSurf::ui(requireCleanMiddle)
     checkbutton $w.main.opt.trans -text [::HWFlow::txt "保留输入几何透明状态" "Keep input geometry transparency"] \
         -variable ::MidSurf::ui(keepTransparency)
-    checkbutton $w.main.opt.hide -text [::HWFlow::txt "抽取后隐藏源几何组件" "Hide source geometry component after extraction"] \
-        -variable ::MidSurf::ui(hideSourceComponent)
     grid $w.main.opt.clean -row 0 -column 0 -sticky w -pady 2
     grid $w.main.opt.trans -row 1 -column 0 -sticky w -pady 2
-    grid $w.main.opt.hide -row 2 -column 0 -sticky w -pady 2
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
@@ -209,14 +202,14 @@ proc ::MidSurf::acceptPanel {} {
         return
     }
 
-    foreach k {alignSteps extractByComp rerunType stitchTolMode surfaceNormals requireCleanMiddle keepTransparency hideSourceComponent} {
+    foreach k {alignSteps extractByComp rerunType stitchTolMode surfaceNormals requireCleanMiddle keepTransparency} {
         if {![string is integer -strict $ui($k)]} {
             tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
             return
         }
     }
 
-    foreach k {midPosition maxRTtRatio maxThicknessRatio fallbackThickness variableThicknessTol} {
+    foreach k {midPosition maxRTtRatio maxThicknessRatio variableThicknessTol} {
         if {![string is double -strict $ui($k)]} {
             tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
             return
@@ -251,76 +244,6 @@ proc ::MidSurf::acceptPanel {} {
 
     set ui(ok) 1
     destroy .midsurf_dlg
-}
-
-proc ::MidSurf::askThickness {compName defaultValue reason} {
-    variable ui
-
-    catch {destroy .midsurf_thick}
-
-    set ui(promptOk) 0
-    if {$defaultValue ne "" && $defaultValue > 0.0} {
-        set ui(promptValue) $defaultValue
-    } else {
-        set ui(promptValue) ""
-    }
-
-    set w .midsurf_thick
-    toplevel $w
-    wm title $w [::HWFlow::txt "输入厚度" "Input Thickness"]
-    wm resizable $w 0 0
-
-    frame $w.main -padx 12 -pady 10
-    pack $w.main -fill both -expand 1
-
-    label $w.main.title -text [::HWFlow::txt "无法可靠读取厚度：" "Thickness could not be read reliably:"] -font [::HWFlow::uiFont heading]
-    label $w.main.comp -text $compName -anchor w
-    message $w.main.reason -text $reason -width 420 -anchor w
-    label $w.main.lbl -text [::HWFlow::txt "输入用于命名的厚度 T：" "Enter thickness T for naming:"] -anchor w
-    entry $w.main.entry -textvariable ::MidSurf::ui(promptValue) -width 20
-
-    grid $w.main.title -row 0 -column 0 -columnspan 2 -sticky w -pady {0 4}
-    grid $w.main.comp -row 1 -column 0 -columnspan 2 -sticky w -pady {0 4}
-    grid $w.main.reason -row 2 -column 0 -columnspan 2 -sticky w -pady {0 8}
-    grid $w.main.lbl -row 3 -column 0 -sticky w -padx {0 8}
-    grid $w.main.entry -row 3 -column 1 -sticky w
-
-    frame $w.btn -padx 12 -pady 10
-    pack $w.btn -fill x
-    button $w.btn.cancel -text [::HWFlow::txt "使用 UNKNOWN" "Use UNKNOWN"] -width 14 -command "set ::MidSurf::ui(promptOk) -1; destroy .midsurf_thick"
-    button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command "::MidSurf::acceptThicknessPrompt"
-    pack $w.btn.cancel -side right -padx 4
-    pack $w.btn.ok -side right -padx 4
-
-    bind $w <Return> "::MidSurf::acceptThicknessPrompt"
-    bind $w <Escape> "set ::MidSurf::ui(promptOk) -1; destroy .midsurf_thick"
-
-    update idletasks
-    set sw [winfo screenwidth $w]
-    set sh [winfo screenheight $w]
-    set ww [winfo reqwidth $w]
-    set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
-
-    tkwait window $w
-    if {$ui(promptOk) == 1} {
-        return $ui(promptValue)
-    }
-    return ""
-}
-
-proc ::MidSurf::acceptThicknessPrompt {} {
-    variable ui
-
-    set v [string trim $ui(promptValue)]
-    if {![string is double -strict $v] || $v <= 0.0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "厚度必须为大于 0 的数值。" "Thickness must be a number greater than 0."]
-        return
-    }
-
-    set ui(promptValue) $v
-    set ui(promptOk) 1
-    destroy .midsurf_thick
 }
 
 # ----------------------------------------------------------------------
@@ -589,6 +512,14 @@ proc ::MidSurf::clearMarks {} {
 # Thickness helpers
 # ----------------------------------------------------------------------
 
+proc ::MidSurf::readThicknessFromComponentName {name} {
+    if {[regexp -nocase {(^|_)T([0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?)(_|$)} $name -> prefix value decimal exponent suffix] &&
+        [string is double -strict $value] && $value > 0.0} {
+        return $value
+    }
+    return ""
+}
+
 proc ::MidSurf::readComponentThickness {compId} {
     set vals {}
 
@@ -669,45 +600,46 @@ proc ::MidSurf::readMiddleSurfaceThickness {midCompId} {
 proc ::MidSurf::chooseThickness {sourceCompId sourceName midCompId} {
     variable cfg
 
+    set nameThickness [::MidSurf::readThicknessFromComponentName $sourceName]
+    if {$nameThickness ne ""} {
+        return $nameThickness
+    }
+
     set vals [::MidSurf::readMiddleSurfaceThickness $midCompId]
     if {[llength $vals] == 0} {
-        set vals [::MidSurf::readComponentThickness $sourceCompId]
-    }
-    if {[llength $vals] == 0 && $cfg(fallbackThickness) > 0.0} {
-        return $cfg(fallbackThickness)
+        set vals [::MidSurf::sourceThicknessValues $sourceCompId]
     }
 
     set t [::MidSurf::median $vals]
     if {$t eq ""} {
-        return [::MidSurf::askThickness $sourceName $cfg(fallbackThickness) "No readable thickness data was found in the midsurface result."]
+        return ""
     }
 
     set spread [::MidSurf::valueSpreadRatio $vals $t]
     if {$spread > $cfg(variableThicknessTol)} {
-        set reason [format "Variable thickness appears high. Median thickness is %.6g and relative spread is about %.3f." $t $spread]
-        set userT [::MidSurf::askThickness $sourceName $t $reason]
-        if {$userT ne ""} {
-            return $userT
-        }
+        ::MidSurf::msg [::HWFlow::txt \
+            [format "中面抽取：%s 自动测得的厚度变化较大，使用中位数 %.6g（相对离散度约 %.3f）。" $sourceName $t $spread] \
+            [format "MidSurf: measured thickness varies for %s; using median %.6g (relative spread about %.3f)." $sourceName $t $spread]]
     }
 
     return $t
 }
 
-proc ::MidSurf::sourceThicknessCandidate {sourceCompId} {
-    variable cfg
-
+proc ::MidSurf::sourceThicknessValues {sourceCompId} {
     set vals [::MidSurf::readComponentThickness $sourceCompId]
     foreach surf [::MidSurf::getCompEntityIds $sourceCompId surfaces surfs] {
         set vals [concat $vals [::MidSurf::readThicknessFromSurface $surf]]
     }
     set vals [concat $vals [::MidSurf::readThicknessFromPoints $sourceCompId]]
+    return $vals
+}
 
-    set t [::MidSurf::median $vals]
-    if {$t eq "" && $cfg(fallbackThickness) > 0.0} {
-        return $cfg(fallbackThickness)
+proc ::MidSurf::sourceThicknessCandidate {sourceCompId sourceName} {
+    set nameThickness [::MidSurf::readThicknessFromComponentName $sourceName]
+    if {$nameThickness ne ""} {
+        return $nameThickness
     }
-    return $t
+    return [::MidSurf::median [::MidSurf::sourceThicknessValues $sourceCompId]]
 }
 
 proc ::MidSurf::outputNameForSource {sourceName thickness} {
@@ -720,7 +652,7 @@ proc ::MidSurf::outputNameForSource {sourceName thickness} {
 
 proc ::MidSurf::existingOutputForSource {sourceCompId sourceName {thickness ""}} {
     if {$thickness eq ""} {
-        set thickness [::MidSurf::sourceThicknessCandidate $sourceCompId]
+        set thickness [::MidSurf::sourceThicknessCandidate $sourceCompId $sourceName]
     }
     if {$thickness eq ""} {
         return {}
@@ -848,10 +780,6 @@ proc ::MidSurf::renameMiddleSurface {sourceName thickness midCompId} {
 }
 
 proc ::MidSurf::hideSourceComponent {sourceName} {
-    variable cfg
-    if {!$cfg(hideSourceComponent)} {
-        return
-    }
     if {[namespace exists ::HWFlow]} {
         ::HWFlow::displayComponent $sourceName off
     } else {
@@ -859,6 +787,20 @@ proc ::MidSurf::hideSourceComponent {sourceName} {
         catch {*displaycollector components off $sourceName 1 1}
         catch {hm_redraw}
     }
+}
+
+proc ::MidSurf::organizeOutputComponent {compName} {
+    variable outputAssemblyName
+
+    set compId [::MidSurf::componentIdByName $compName]
+    if {$compId eq ""} {
+        error [::HWFlow::txt "无法读取中面组件 $compName 的 ID，不能加入 $outputAssemblyName assembly。" "Cannot read the ID of midsurface component $compName; it cannot be added to the $outputAssemblyName assembly."]
+    }
+    set assemblyId [::HWFlow::addComponentsToAssembly $outputAssemblyName [list $compId]]
+    if {$assemblyId eq ""} {
+        error [::HWFlow::txt "无法创建或更新 $outputAssemblyName assembly。" "Cannot create or update the $outputAssemblyName assembly."]
+    }
+    return $assemblyId
 }
 
 proc ::MidSurf::processComponent {compId} {
@@ -871,6 +813,8 @@ proc ::MidSurf::processComponent {compId} {
     if {[llength $existing] > 0} {
         set outName [lindex $existing 0]
         set surfCount [lindex $existing 1]
+        ::MidSurf::organizeOutputComponent $outName
+        ::MidSurf::hideSourceComponent $sourceName
         ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName 对应的 $outName 已存在，跳过创建。" "MidSurf: $sourceName already has $outName, skipped creation."]
         return [list $outName $surfCount [lindex $existing 2] existing]
     }
@@ -905,11 +849,14 @@ proc ::MidSurf::processComponent {compId} {
         ::MidSurf::deleteComponentByName $cfg(middleSurfaceName)
         set outName [lindex $existing 0]
         set surfCount [lindex $existing 1]
+        ::MidSurf::organizeOutputComponent $outName
+        ::MidSurf::hideSourceComponent $sourceName
         ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName 对应的 $outName 已存在，已清理本轮临时中面并跳过创建。" "MidSurf: $sourceName already has $outName; cleaned this run's temporary midsurface and skipped creation."]
         return [list $outName $surfCount [lindex $existing 2] existing]
     }
 
     set outName [::MidSurf::renameMiddleSurface $sourceName $thickness $midCompId]
+    ::MidSurf::organizeOutputComponent $outName
     ::MidSurf::hideSourceComponent $sourceName
 
     ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName -> $outName，曲面数=[llength $newSurfs]" "MidSurf: $sourceName -> $outName, surfaces=[llength $newSurfs]"]
@@ -921,6 +868,7 @@ proc ::MidSurf::processComponent {compId} {
 # ----------------------------------------------------------------------
 
 proc ::MidSurf::run {} {
+    variable outputAssemblyName
     variable ui
     variable stat
     variable VERSION
@@ -991,7 +939,7 @@ proc ::MidSurf::run {} {
             1}
     }
 
-    set msg [::HWFlow::txt "中面抽取 v$VERSION 已完成。\n\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n已跳过既有中面：$stat(existing)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped existing midsurfaces: $stat(existing)\nSkipped/failed: $stat(skipped)"]
+    set msg [::HWFlow::txt "中面抽取 v$VERSION 已完成。\n\n输出 assembly：$outputAssemblyName\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n已跳过既有中面：$stat(existing)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nOutput assembly: $outputAssemblyName\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped existing midsurfaces: $stat(existing)\nSkipped/failed: $stat(skipped)"]
 
     if {[llength $createdNames] > 0} {
         append msg [::HWFlow::txt "\n\n已创建：\n" "\n\nCreated:\n"]

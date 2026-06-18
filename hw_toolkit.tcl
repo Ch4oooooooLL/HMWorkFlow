@@ -204,7 +204,6 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::GeomCleanup::savePanelState}
 
     catch {set ::MidSurf::ui(ok) 0}
-    catch {set ::MidSurf::ui(promptOk) -1}
     catch {set ::AutoHoleRBE2::ui(ok) 0}
     catch {set ::RB2W::ui(ok) 0}
     catch {set ::CastingTetMesh::ui(ok) 0}
@@ -221,7 +220,6 @@ proc ::HWToolkit::clearExistingWindows {} {
         .material_assign
         .material_editor
         .midsurf_dlg
-        .midsurf_thick
         .autoHoleRBE2
         .rb2w_panel
         .rb2bolt_dlg

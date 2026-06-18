@@ -120,15 +120,16 @@ workflow:
 
 1. 在主面板中运行 `Midsurface Extraction`。
 2. 点击 `选择/重选组件`，选择需要抽中面的几何 component。
-3. 检查抽取参数，例如厚度读取、对齐步数和中面位置。
+3. 检查抽取参数，例如对齐步数和中面位置。
 4. 点击开始执行。
-5. 如果无法可靠读取厚度，按提示输入厚度值。
 
 输出结果：
 
 - 生成新的 midsurface component。
 - 输出 component 按 `CATEGORY_NAME_Tx_MATERIAL` 命名。
-- 源几何默认保留并隐藏。
+- 命名厚度优先读取源 component 名称中的 `_Tx`；名称中没有厚度时自动从几何/中面结果测量，不要求用户输入。
+- 所有输出 component 统一放入名为 `midsurf` 的 assembly，并隐藏对应的源实体 component。
+- 源几何保留并隐藏。
 
 ### Geometry Cleanup
 
