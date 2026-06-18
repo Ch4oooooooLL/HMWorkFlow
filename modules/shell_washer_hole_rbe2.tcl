@@ -482,6 +482,7 @@ proc ::RB2W::enableInteractiveBrowserUpdates {} {
     catch {hm_commandfilestate 1}
     catch {hm_setmouse 1}
     catch {update idletasks}
+    catch {update}
 }
 
 proc ::RB2W::resumePerformanceModeAfterBrowserUpdate {} {
@@ -498,6 +499,8 @@ proc ::RB2W::resumePerformanceModeAfterBrowserUpdate {} {
     }
     catch {*setoption block_redraw=1}
     catch {hm_blockredraw 1}
+    catch {hwbrowsermanager view flush false}
+    catch {hmbr_signals buffer start}
 }
 
 proc ::RB2W::endPerformanceMode {} {
@@ -951,42 +954,48 @@ proc ::RB2W::createComponentByName {compName} {
         return
     }
 
-    if {[llength [info commands ::HWFlow::createComponent]] > 0} {
-        ::HWFlow::createComponent $compName 11
-    } else {
-        if {!$PERFORMANCE_MODE} {
-            RB2W::enableInteractiveBrowserUpdates
-        }
-        set histName "Created Component $compName"
-        set histStarted 0
-        catch {*startnotehistorystate $histName}
-        set histStarted 1
-
-        set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
-        if {$createCode} {
-            set createCode [catch {*createentity components includeid=0 name=$compName} err1]
-        }
-        if {$createCode} {
-            set createCode [catch {*collectorcreateonly comps $compName "" 11} err2]
-        }
-        if {$createCode} {
-            set createCode [catch {*collectorcreateonly components $compName "" 11} err2]
-        }
-        if {$createCode} {
-            if {$histStarted} { catch {*endnotehistorystate $histName} }
-            if {!$PERFORMANCE_MODE} {
-                RB2W::resumePerformanceModeAfterBrowserUpdate
-            }
-            error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
-        }
-        if {$histStarted} { catch {*endnotehistorystate $histName} }
+    if {$PERFORMANCE_MODE} {
+        RB2W::enableInteractiveBrowserUpdates
     }
 
-    RB2W::setCurrentComponent $compName
-    catch {::HWFlow::activateAndShowComponent $compName 0}
-    if {!$PERFORMANCE_MODE} {
+    set code [catch {
+        if {[llength [info commands ::HWFlow::createComponent]] > 0} {
+            ::HWFlow::createComponent $compName 11
+        } else {
+            set histName "Created Component $compName"
+            set histStarted 0
+            catch {*startnotehistorystate $histName}
+            set histStarted 1
+
+            set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
+            if {$createCode} {
+                set createCode [catch {*createentity components includeid=0 name=$compName} err1]
+            }
+            if {$createCode} {
+                set createCode [catch {*collectorcreateonly comps $compName "" 11} err2]
+            }
+            if {$createCode} {
+                set createCode [catch {*collectorcreateonly components $compName "" 11} err2]
+            }
+            if {$createCode} {
+                if {$histStarted} { catch {*endnotehistorystate $histName} }
+                error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
+            }
+            if {$histStarted} { catch {*endnotehistorystate $histName} }
+        }
+
+        RB2W::setCurrentComponent $compName
+        catch {::HWFlow::activateAndShowComponent $compName 0}
         RB2W::showOutputComponent $compName 1
+        catch {update idletasks}
+        catch {update}
+    } err opts]
+
+    if {$PERFORMANCE_MODE} {
         RB2W::resumePerformanceModeAfterBrowserUpdate
+    }
+    if {$code} {
+        return -options $opts $err
     }
 }
 

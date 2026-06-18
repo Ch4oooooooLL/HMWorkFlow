@@ -295,6 +295,7 @@ Seam Surface Creation 位于中面抽取之后、网格划分和 RBE2 创建之�
 - 恢复 browser/redraw/message block。
 - 停止 browser signal buffer。
 - HyperMesh 2019 中优先通过 `hmbr::operation perform hmbr::createonly` 创建新 component，使 Model Browser 同步登记；内部 Browser API 不可用时回退到 `*createentity comps includeid=0 name=...`。
+- Shell Washer Hole RBE2 在性能模式下创建输出 component 时会临时恢复 Browser 更新，登记完成后再继续缓冲后续批处理。
 - 保持已有 component 的显示/隐藏状态。
 - 刷新 Model Browser 和图形窗口。
 
