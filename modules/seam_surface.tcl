@@ -615,51 +615,6 @@ proc ::SeamSurf::deleteNodes {nodeIds} {
     catch {*clearmark nodes 2}
 }
 
-proc ::SeamSurf::createLineFromCoords {coords {surfaceId ""}} {
-    set clean {}
-    foreach point $coords {
-        if {[llength $clean] == 0 || [::SeamSurf::distance [lindex $clean end] $point] > 1.0e-8} {
-            lappend clean $point
-        }
-    }
-    if {[llength $clean] < 2} {
-        error [::HWFlow::txt "构造线至少需要两个不同坐标点。" "A construction line requires at least two distinct coordinates."]
-    }
-
-    set before [::SeamSurf::allEntityIds lines 2]
-    set nodes {}
-    foreach point $clean {
-        lappend nodes [::SeamSurf::createTempNode $point]
-    }
-    set code [catch {
-        eval *createlist nodes 1 $nodes
-        if {$surfaceId eq ""} {
-            *linecreatefromnodes 1 0 150 5 179
-        } else {
-            set created 0
-            foreach option {1 0} {
-                if {![catch {*linecreatefromnodesonsurface surfs $surfaceId nodes 1 0 $option}]} {
-                    set created 1
-                    break
-                }
-            }
-            if {!$created} {
-                error [::HWFlow::txt "无法在曲面 $surfaceId 上创建投影线。" "Cannot create a projected line on surface $surfaceId."]
-            }
-        }
-    } err opts]
-    ::SeamSurf::deleteNodes $nodes
-    if {$code} {
-        return -options $opts $err
-    }
-
-    set created [::SeamSurf::newIds $before [::SeamSurf::allEntityIds lines 2]]
-    if {[llength $created] == 0} {
-        error [::HWFlow::txt "HyperMesh 未返回新建构造线。" "HyperMesh did not return the new construction line."]
-    }
-    return [lindex $created end]
-}
-
 proc ::SeamSurf::projectedCoords {projectedSamples} {
     set coords {}
     foreach item $projectedSamples {
@@ -668,13 +623,33 @@ proc ::SeamSurf::projectedCoords {projectedSamples} {
     return $coords
 }
 
-proc ::SeamSurf::trimSurfaceWithProjectedLine {targetSurf projectedCoords} {
-    set trimLine [::SeamSurf::createLineFromCoords $projectedCoords $targetSurf]
+proc ::SeamSurf::surfaceEdgeSet {surfIds} {
+    set edges {}
+    foreach surfId $surfIds {
+        set edges [concat $edges [::SeamSurf::surfaceEdges $surfId]]
+    }
+    return [::SeamSurf::unique $edges]
+}
+
+proc ::SeamSurf::projectedEdgeChain {candidateEdges projectedCoords} {
+    if {[llength $candidateEdges] == 0} {
+        error [::HWFlow::txt "trim 后没有可用于 ruled 的目标边。" "No target edge is available after trim."]
+    }
+    set selected {}
+    foreach point $projectedCoords {
+        lappend selected [::SeamSurf::closestLineToPoint $candidateEdges $point]
+    }
+    set selected [::SeamSurf::unique $selected]
+    return [::SeamSurf::orderLineChain $selected [lindex $projectedCoords 0]]
+}
+
+proc ::SeamSurf::trimSurfaceWithSourceLine {targetSurf sourceLine projectedCoords} {
+    set beforeEdges [::SeamSurf::surfaceEdgeSet [list $targetSurf]]
     set beforeSurfs [::SeamSurf::allEntityIds surfs 2]
     catch {*clearmark surfs 1}
     catch {*clearmark lines 2}
     *createmark surfs 1 $targetSurf
-    *createmark lines 2 $trimLine
+    *createmark lines 2 $sourceLine
     *createvector 1 0.0 0.0 1.0
     set code [catch {
         # Bit0 sweeps through the whole surface and Bit2 projects normal.
@@ -687,7 +662,41 @@ proc ::SeamSurf::trimSurfaceWithProjectedLine {targetSurf projectedCoords} {
         return -options $opts $err
     }
     set newSurfs [::SeamSurf::newIds $beforeSurfs [::SeamSurf::allEntityIds surfs 2]]
-    return [list $trimLine [::SeamSurf::unique [concat [list $targetSurf] $newSurfs]]]
+    set targetSurfs [::SeamSurf::unique [concat [list $targetSurf] $newSurfs]]
+    set afterEdges [::SeamSurf::surfaceEdgeSet $targetSurfs]
+    set newEdges [::SeamSurf::newIds $beforeEdges $afterEdges]
+    if {[llength $newEdges] == 0} {
+        set newEdges $afterEdges
+    }
+    set targetEdgeChain [::SeamSurf::projectedEdgeChain $newEdges $projectedCoords]
+    return [list $targetSurfs $targetEdgeChain]
+}
+
+proc ::SeamSurf::augmentPairsFromTargetEdges {sourceLine targetEdgeChain pairs} {
+    set records {}
+    foreach pair $pairs {
+        set source [lindex $pair 0]
+        set nearest [::SeamSurf::nearestLinePoint $sourceLine $source]
+        lappend records [list [lindex $nearest 1] $source [lindex $pair 1]]
+    }
+    foreach targetLine $targetEdgeChain {
+        foreach target [::SeamSurf::lineEndCoords $targetLine] {
+            set nearest [::SeamSurf::nearestLinePoint $sourceLine $target]
+            lappend records [list [lindex $nearest 1] [lindex $nearest 0] $target]
+        }
+    }
+    set records [lsort -real -index 0 $records]
+    set out {}
+    set lastParam ""
+    foreach record $records {
+        set param [lindex $record 0]
+        if {$lastParam ne "" && abs($param - $lastParam) <= 1.0e-6} {
+            continue
+        }
+        lappend out [list [lindex $record 1] [lindex $record 2]]
+        set lastParam $param
+    }
+    return $out
 }
 
 proc ::SeamSurf::createRuledSurfaceBetweenSegments {lineA lineB} {
@@ -775,10 +784,19 @@ proc ::SeamSurf::orderLineChain {lineIds startPoint} {
     return $ordered
 }
 
-proc ::SeamSurf::splitLineAtCoords {lineId splitCoords startPoint} {
-    set candidates [list $lineId]
+proc ::SeamSurf::pointAtLineEnd {lineId point} {
+    set ends [::SeamSurf::lineEndCoords $lineId]
+    expr {[::SeamSurf::distance $point [lindex $ends 0]] <= 1.0e-6 ||
+          [::SeamSurf::distance $point [lindex $ends 1]] <= 1.0e-6}
+}
+
+proc ::SeamSurf::splitLineSetAtCoords {lineIds splitCoords startPoint} {
+    set candidates [::SeamSurf::unique $lineIds]
     foreach point $splitCoords {
         set splitLine [::SeamSurf::closestLineToPoint $candidates $point]
+        if {[::SeamSurf::pointAtLineEnd $splitLine $point]} {
+            continue
+        }
         set before [::SeamSurf::allEntityIds lines 2]
         set nodeId [::SeamSurf::createTempNode $point]
         set code [catch {*linesplitatpoint $splitLine $nodeId} err opts]
@@ -804,20 +822,20 @@ proc ::SeamSurf::splitLineAtCoords {lineId splitCoords startPoint} {
     return [::SeamSurf::orderLineChain $candidates $startPoint]
 }
 
-proc ::SeamSurf::createSegmentedRuledFromCurves {coordsA coordsB featurePairs} {
+proc ::SeamSurf::createSegmentedRuledFromLines {linesA linesB featurePairs} {
     if {[llength $featurePairs] < 2} {
         error [::HWFlow::txt "至少需要两组对应点。" "At least two correspondence pairs are required."]
     }
-    set fullLineA [::SeamSurf::createLineFromCoords $coordsA]
-    set fullLineB [::SeamSurf::createLineFromCoords $coordsB]
     set splitA {}
     set splitB {}
     foreach pair [lrange $featurePairs 1 end-1] {
         lappend splitA [lindex $pair 0]
         lappend splitB [lindex $pair 1]
     }
-    set segmentsA [::SeamSurf::splitLineAtCoords $fullLineA $splitA [lindex $coordsA 0]]
-    set segmentsB [::SeamSurf::splitLineAtCoords $fullLineB $splitB [lindex $coordsB 0]]
+    set startA [lindex [lindex $featurePairs 0] 0]
+    set startB [lindex [lindex $featurePairs 0] 1]
+    set segmentsA [::SeamSurf::splitLineSetAtCoords $linesA $splitA $startA]
+    set segmentsB [::SeamSurf::splitLineSetAtCoords $linesB $splitB $startB]
     if {[llength $segmentsA] != [llength $segmentsB]} {
         error [::HWFlow::txt \
             "两侧曲线切分数量不一致：A=[llength $segmentsA]，B=[llength $segmentsB]。" \
@@ -828,7 +846,7 @@ proc ::SeamSurf::createSegmentedRuledFromCurves {coordsA coordsB featurePairs} {
         lappend seamSurfs [::SeamSurf::createRuledSurfaceBetweenSegments \
             [lindex $segmentsA $i] [lindex $segmentsB $i]]
     }
-    return [list $seamSurfs [concat $segmentsA $segmentsB]]
+    return $seamSurfs
 }
 
 proc ::SeamSurf::surfaceEdges {surfId} {
@@ -1087,18 +1105,6 @@ proc ::SeamSurf::resolveOwnerSurface {lineId label {avoidSurf ""}} {
     return $surf
 }
 
-proc ::SeamSurf::deleteLines {lineIds} {
-    set lineIds [::SeamSurf::unique $lineIds]
-    if {[llength $lineIds] == 0} {
-        return
-    }
-    catch {*clearmark lines 1}
-    if {![catch {eval *createmark lines 1 $lineIds}]} {
-        catch {*deletemark lines 1}
-    }
-    catch {*clearmark lines 1}
-}
-
 proc ::SeamSurf::performLineSurface {sourceLine targetSurf sourceSurf thickness} {
     variable stat
 
@@ -1106,26 +1112,20 @@ proc ::SeamSurf::performLineSurface {sourceLine targetSurf sourceSurf thickness}
     set pairs [lindex $featureData 0]
     set projectedSamples [lindex $featureData 1]
     set maxGap [lindex $featureData 2]
-    set sourceCoords {}
     set projectedCoords [::SeamSurf::projectedCoords $projectedSamples]
-    foreach sample $projectedSamples {
-        lappend sourceCoords [lindex $sample 1]
-    }
 
     set component [::SeamSurf::ensureSeamComponent $thickness]
     set compName [lindex $component 0]
-    set trimInfo [::SeamSurf::trimSurfaceWithProjectedLine $targetSurf $projectedCoords]
-    set trimLine [lindex $trimInfo 0]
-    set targetSurfs [lindex $trimInfo 1]
+    set trimInfo [::SeamSurf::trimSurfaceWithSourceLine $targetSurf $sourceLine $projectedCoords]
+    set targetSurfs [lindex $trimInfo 0]
+    set targetEdgeChain [lindex $trimInfo 1]
+    set pairs [::SeamSurf::augmentPairsFromTargetEdges $sourceLine $targetEdgeChain $pairs]
 
-    # Build each side as one complete smooth curve, split both curves at the
-    # corresponding feature points, then ruled each resulting curve pair.
-    set ruledResult [::SeamSurf::createSegmentedRuledFromCurves \
-        $sourceCoords $projectedCoords $pairs]
-    set seamSurfs [lindex $ruledResult 0]
-    set constructionLines [lindex $ruledResult 1]
+    # Split the selected source edge and the actual trim-edge chain only at
+    # corresponding feature locations, then ruled every real curve pair.
+    set seamSurfs [::SeamSurf::createSegmentedRuledFromLines \
+        [list $sourceLine] $targetEdgeChain $pairs]
     set connectedSides [::SeamSurf::equivalence $seamSurfs [list $sourceSurf] $targetSurfs]
-    ::SeamSurf::deleteLines [concat [list $trimLine] $constructionLines]
     catch {::HWFlow::activateAndShowComponent $compName 0}
 
     incr stat(createdOperations)
@@ -1139,31 +1139,16 @@ proc ::SeamSurf::performLineSurface {sourceLine targetSurf sourceSurf thickness}
 
 proc ::SeamSurf::performLineLine {lineA lineB surfA surfB thickness} {
     variable stat
-    variable cfg
 
     set featureData [::SeamSurf::lineLineFeaturePairs $lineA $lineB]
     set pairs [lindex $featureData 0]
     set maxGap [lindex $featureData 1]
     set reverseB [lindex $featureData 2]
-    set coordsA {}
-    set coordsB {}
-    foreach sample [::SeamSurf::lineSamples $lineA $cfg(line_sync_divisions)] {
-        lappend coordsA [lindex $sample 1]
-    }
-    set samplesB [::SeamSurf::lineSamples $lineB $cfg(line_sync_divisions)]
-    if {$reverseB} {
-        set samplesB [lreverse $samplesB]
-    }
-    foreach sample $samplesB {
-        lappend coordsB [lindex $sample 1]
-    }
     set component [::SeamSurf::ensureSeamComponent $thickness]
     set compName [lindex $component 0]
-    set ruledResult [::SeamSurf::createSegmentedRuledFromCurves $coordsA $coordsB $pairs]
-    set seamSurfs [lindex $ruledResult 0]
-    set constructionLines [lindex $ruledResult 1]
+    set seamSurfs [::SeamSurf::createSegmentedRuledFromLines \
+        [list $lineA] [list $lineB] $pairs]
     set connectedSides [::SeamSurf::equivalence $seamSurfs [list $surfA] [list $surfB]]
-    ::SeamSurf::deleteLines $constructionLines
     catch {::HWFlow::activateAndShowComponent $compName 0}
 
     incr stat(createdOperations)
