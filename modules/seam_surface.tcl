@@ -728,6 +728,68 @@ proc ::SeamSurf::createRuledSurfaceBetweenSegments {lineA lineB} {
     return [lindex $created end]
 }
 
+proc ::SeamSurf::copyLineOrEdgeForRuled {lineId {required 0}} {
+    set before [::SeamSurf::allEntityIds lines 2]
+    catch {*clearmark lines 1}
+    if {[catch {*createmark lines 1 $lineId} errMark]} {
+        catch {*clearmark lines 1}
+        if {$required} {
+            error [::HWFlow::txt \
+                "无法标记 ruled 输入曲线 $lineId：$errMark" \
+                "Cannot mark ruled input curve $lineId: $errMark"]
+        }
+        return $lineId
+    }
+
+    set created {}
+    foreach command {
+        {*linefromsurfedgecomp lines 1 1}
+        {*linefromsurfedge lines 1}
+        {*linefromsurfedge 1}
+    } {
+        if {![catch {eval $command}]} {
+            set created [::SeamSurf::newIds $before [::SeamSurf::allEntityIds lines 2]]
+            if {[llength $created] > 0} {
+                break
+            }
+        }
+    }
+    catch {*clearmark lines 1}
+    if {[llength $created] > 0} {
+        return [lindex $created end]
+    }
+    if {$required} {
+        error [::HWFlow::txt \
+            "无法将复杂曲面拓扑边 $lineId 复制为 ruled 自由曲线。" \
+            "Cannot copy topology edge $lineId to a free ruled curve."]
+    }
+    return $lineId
+}
+
+proc ::SeamSurf::deleteLines {lineIds} {
+    set lineIds [::SeamSurf::unique $lineIds]
+    if {[llength $lineIds] == 0} {
+        return
+    }
+    catch {*clearmark lines 1}
+    if {![catch {eval *createmark lines 1 $lineIds}]} {
+        catch {*deletemark lines 1}
+    }
+    catch {*clearmark lines 1}
+}
+
+proc ::SeamSurf::orientFreeLineFromPoint {lineId startPoint} {
+    set ends [::SeamSurf::lineEndCoords $lineId]
+    if {[::SeamSurf::distance $startPoint [lindex $ends 1]] <
+        [::SeamSurf::distance $startPoint [lindex $ends 0]]} {
+        if {[catch {*linereverse $lineId} err]} {
+            error [::HWFlow::txt \
+                "无法调整 ruled 自由曲线 $lineId 的方向：$err" \
+                "Cannot orient free ruled curve $lineId: $err"]
+        }
+    }
+}
+
 proc ::SeamSurf::lineEndCoords {lineId} {
     return [list [::SeamSurf::linePoint $lineId 0.0] [::SeamSurf::linePoint $lineId 1.0]]
 }
@@ -842,11 +904,25 @@ proc ::SeamSurf::createSegmentedRuledFromLines {linesA linesB featurePairs} {
             "The split counts differ: A=[llength $segmentsA], B=[llength $segmentsB]."]
     }
     set seamSurfs {}
+    set ruledCopies {}
     for {set i 0} {$i < [llength $segmentsA]} {incr i} {
-        lappend seamSurfs [::SeamSurf::createRuledSurfaceBetweenSegments \
-            [lindex $segmentsA $i] [lindex $segmentsB $i]]
+        set sourceSegment [lindex $segmentsA $i]
+        set targetSegment [lindex $segmentsB $i]
+        set sourceRequired [expr {[llength [::SeamSurf::lineOwnerSurfaces $sourceSegment]] > 0}]
+        set sourceCopy [::SeamSurf::copyLineOrEdgeForRuled $sourceSegment $sourceRequired]
+        set targetRequired [expr {[llength [::SeamSurf::lineOwnerSurfaces $targetSegment]] > 0}]
+        set targetCopy [::SeamSurf::copyLineOrEdgeForRuled $targetSegment $targetRequired]
+        if {$sourceCopy != $sourceSegment} {
+            lappend ruledCopies $sourceCopy
+            ::SeamSurf::orientFreeLineFromPoint $sourceCopy [lindex [lindex $featurePairs $i] 0]
+        }
+        if {$targetCopy != $targetSegment} {
+            lappend ruledCopies $targetCopy
+            ::SeamSurf::orientFreeLineFromPoint $targetCopy [lindex [lindex $featurePairs $i] 1]
+        }
+        lappend seamSurfs [::SeamSurf::createRuledSurfaceBetweenSegments $sourceCopy $targetCopy]
     }
-    return $seamSurfs
+    return [list $seamSurfs $ruledCopies]
 }
 
 proc ::SeamSurf::surfaceEdges {surfId} {
@@ -1123,9 +1199,12 @@ proc ::SeamSurf::performLineSurface {sourceLine targetSurf sourceSurf thickness}
 
     # Split the selected source edge and the actual trim-edge chain only at
     # corresponding feature locations, then ruled every real curve pair.
-    set seamSurfs [::SeamSurf::createSegmentedRuledFromLines \
+    set ruledResult [::SeamSurf::createSegmentedRuledFromLines \
         [list $sourceLine] $targetEdgeChain $pairs]
+    set seamSurfs [lindex $ruledResult 0]
+    set ruledCopies [lindex $ruledResult 1]
     set connectedSides [::SeamSurf::equivalence $seamSurfs [list $sourceSurf] $targetSurfs]
+    ::SeamSurf::deleteLines $ruledCopies
     catch {::HWFlow::activateAndShowComponent $compName 0}
 
     incr stat(createdOperations)
@@ -1146,9 +1225,12 @@ proc ::SeamSurf::performLineLine {lineA lineB surfA surfB thickness} {
     set reverseB [lindex $featureData 2]
     set component [::SeamSurf::ensureSeamComponent $thickness]
     set compName [lindex $component 0]
-    set seamSurfs [::SeamSurf::createSegmentedRuledFromLines \
+    set ruledResult [::SeamSurf::createSegmentedRuledFromLines \
         [list $lineA] [list $lineB] $pairs]
+    set seamSurfs [lindex $ruledResult 0]
+    set ruledCopies [lindex $ruledResult 1]
     set connectedSides [::SeamSurf::equivalence $seamSurfs [list $surfA] [list $surfB]]
+    ::SeamSurf::deleteLines $ruledCopies
     catch {::HWFlow::activateAndShowComponent $compName 0}
 
     incr stat(createdOperations)
