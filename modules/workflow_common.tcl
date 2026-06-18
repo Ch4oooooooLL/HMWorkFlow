@@ -607,6 +607,70 @@ proc ::HWFlow::componentSnapshot {{markId 2}} {
     return [dict create ids $ids names $names count [llength $ids] markType $markType]
 }
 
+proc ::HWFlow::componentIds {{markId 2}} {
+    set ids {}
+    foreach etype {components comps} {
+        catch {*clearmark $etype $markId}
+        if {![catch {*createmark $etype $markId all}]} {
+            catch {set ids [hm_getmark $etype $markId]}
+        }
+        catch {*clearmark $etype $markId}
+        if {[llength $ids] > 0} {
+            break
+        }
+    }
+    return [lsort -integer -unique $ids]
+}
+
+proc ::HWFlow::newIds {beforeIds afterIds} {
+    array set seen {}
+    foreach id $beforeIds {
+        set seen($id) 1
+    }
+    set added {}
+    foreach id $afterIds {
+        if {![info exists seen($id)]} {
+            lappend added $id
+        }
+    }
+    return [lsort -integer -unique $added]
+}
+
+proc ::HWFlow::createComponentThroughBrowser {compName} {
+    if {[llength [info commands ::hmbr::operation]] == 0} {
+        return ""
+    }
+
+    set beforeIds [::HWFlow::componentIds 2]
+    if {[catch {
+        ::hmbr::operation perform hmbr::createonly [list [list Components {}]]
+    } err]} {
+        return ""
+    }
+
+    set addedIds [::HWFlow::newIds $beforeIds [::HWFlow::componentIds 2]]
+    if {[llength $addedIds] == 0} {
+        return ""
+    }
+    set compId [lindex $addedIds end]
+    set createdName [::HWFlow::componentName $compId]
+    if {$createdName ne $compName} {
+        if {[catch {*renamecollector component $createdName $compName} err1]} {
+            if {[catch {*renamecollector components $createdName $compName} err2]} {
+                error [::HWFlow::txt \
+                    "Model Browser 已创建组件 $createdName，但无法重命名为 $compName：$err1 / $err2" \
+                    "Model Browser created component $createdName, but it could not be renamed to $compName: $err1 / $err2"]
+            }
+        }
+    }
+
+    set renamedId [::HWFlow::componentIdByName $compName]
+    if {$renamedId ne ""} {
+        return $renamedId
+    }
+    return $compId
+}
+
 proc ::HWFlow::rememberComponent {compName} {
     variable touchedComponents
     set compName [string trim $compName]
@@ -693,29 +757,33 @@ proc ::HWFlow::createComponent {compName {color 11}} {
 
     ::HWFlow::resetBrowserBlocks
 
-    set histName "Created Component $compName"
-    catch {*startnotehistorystate $histName}
-    set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
-    if {$createCode} {
-        set createCode [catch {*createentity components includeid=0 name=$compName} err1]
-    }
-    if {$createCode} {
-        set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
-    }
-    if {$createCode} {
-        set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
-    }
-    if {$createCode} {
+    set compId [::HWFlow::createComponentThroughBrowser $compName]
+    if {$compId eq ""} {
+        set histName "Created Component $compName"
+        catch {*startnotehistorystate $histName}
+        set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
+        if {$createCode} {
+            set createCode [catch {*createentity components includeid=0 name=$compName} err1]
+        }
+        if {$createCode} {
+            set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
+        }
+        if {$createCode} {
+            set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
+        }
+        if {$createCode} {
+            catch {*endnotehistorystate $histName}
+            error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
+        }
         catch {*endnotehistorystate $histName}
-        error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
+        set compId [::HWFlow::componentIdByName $compName]
     }
-    set compId [::HWFlow::componentIdByName $compName]
+
     if {$compId ne ""} {
         foreach etype {comps components} {
             catch {*setvalue $etype id=$compId color=$color}
         }
     }
-    catch {*endnotehistorystate $histName}
 
     catch {*createmark components 1 $compName}
     catch {*clearmark components 1}
