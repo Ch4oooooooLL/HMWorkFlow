@@ -75,7 +75,7 @@ workflow:
 | Component Type Classification | `::CompWorkflow::runCategory` | 将组件分类为 `SHELL`、`SOLID`、`CASTING`，并规范化名称。 |
 | Material Assignment | `::CompWorkflow::runMaterial` | 从 `materials.txt` 分配材料标识，并组织材料装配。 |
 | Midsurface Extraction | `::MidSurf::run` | 抽取钣金中面，并按 `CATEGORY_NAME_Tx_MATERIAL` 命名输出组件。 |
-| Geometry Cleanup | `::GeomCleanup::run` | 处理倒角、圆角和沉台补面等几何清理任务。 |
+| Geometry Cleanup | `::GeomCleanup::run` | 处理倒角、圆角和沉台连接等几何清理任务。 |
 | Seam Surface Creation | `::SeamSurf::run` | 通过线-面或线-线方式创建 `SEAM_Tx` 焊缝面。 |
 | Sheet BatchMesh + Washer | `::BatchMeshWasher::run` | 执行 Sheet BatchMesh，并按孔径规则生成 washer。 |
 | Casting TetraMesh | `::CastingTetMesh::run` | 执行铸件 surface 清理、三角面网格质量迭代和 TetraMesh。 |
@@ -132,7 +132,7 @@ workflow:
 
 ### Geometry Cleanup
 
-用于处理倒角、圆角和沉台补面。
+用于处理倒角、圆角和沉台清理。
 
 1. 在主面板中运行 `Geometry Cleanup`。
 2. 检查清理参数，例如圆角半径范围、缝合容差和邻接扩展层数。
@@ -143,8 +143,9 @@ workflow:
 输出结果：
 
 - 对匹配的 solid 倒角/圆角执行清理。
-- 对沉台底面执行 surface-only 补面；保留贯通孔时切除内圈、延伸孔内壁并完成无自由边缝合。
-- 沉台贯通孔按“补上表面 → 原内壁延伸到补面 → 内壁切割补面 → 删除孔内小面 → 整体缝合”执行；中途失败时撤销本次几何修改。
+- 对沉台面识别一个内边和一个外边，沿外边找到小竖直面及其与基准平面相连的基准边。
+- 删除沉台面和小竖直面后，直接在内边与基准边之间创建连接面，并与孔壁、基准平面缝合。
+- 沉台处理任一步失败时撤销本次几何修改。
 - 连续处理期间不显示独立进度条，也不会因单次处理完成或失败而退出工具。
 - 清理完成后刷新 Model Browser 和图形窗口。
 

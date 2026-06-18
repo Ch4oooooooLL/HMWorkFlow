@@ -4,7 +4,7 @@
 #
 # One-face entry for local CAD cleanup:
 #   - remove chamfer / small fillet faces by extending adjacent surfaces
-#   - fill a small recessed pocket back to surrounding face height using surfaces only
+#   - remove a recessed pocket by connecting its inner loop directly to datum edges
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -26,8 +26,6 @@ namespace eval ::GeomCleanup {
         MAX_CHAIN_DEPTH 6
         AREA_GROWTH_RATIO 2.5
         STITCH_TOLERANCE 0.2
-        POCKET_FILL_METHOD SPLINE
-        POCKET_KEEP_INNER_LOOPS 1
         CREATE_SOLID_FROM_CHAMFER_BOUNDS 1
         PERFORMANCE_MODE 1
         VERBOSE 1
@@ -42,7 +40,7 @@ namespace eval ::GeomCleanup {
 proc ::GeomCleanup::defaultRulesText {} {
     return [join {
         {# Geometry cleanup defaults.}
-        {# MODE: AUTO, CHAMFER, or POCKET. AUTO tries chamfer/fillet first, then recessed pocket fill.}
+        {# MODE: AUTO, CHAMFER, or POCKET. AUTO tries chamfer/fillet first, then simplified pocket cleanup.}
         {key|value|note}
         {mode|AUTO|AUTO CHAMFER POCKET}
         {fillet_min_r|0.0|min radius used by HyperMesh fillet-face query}
@@ -52,8 +50,6 @@ proc ::GeomCleanup::defaultRulesText {} {
         {max_chain_depth|6|max adjacency depth when growing a chamfer/pocket side chain}
         {area_growth_ratio|2.5|neighbor face area <= selected area * this ratio can join fallback chain}
         {stitch_tolerance|0.2|topology stitch tolerance after cleanup}
-        {pocket_fill_method|SPLINE|SPLINE first, then pinhole fallback}
-        {pocket_keep_inner_loops|1|trim the fill at inner loops and extend inner walls to form continuous through holes}
         {create_solid_from_chamfer_bounds|1|attempt *solids_create_from_surfaces only after chamfer cleanup}
         {performance_mode|1|block redraw/browser updates while running}
         {verbose|1|write status lines to Tcl console and HM status bar}
@@ -63,8 +59,8 @@ proc ::GeomCleanup::defaultRulesText {} {
 proc ::GeomCleanup::stateKeys {} {
     return {
         MODE FILLET_MIN_R FILLET_MAX_R CHAIN_BY_FILLET CHAIN_BY_SMALL_AREA
-        MAX_CHAIN_DEPTH AREA_GROWTH_RATIO STITCH_TOLERANCE POCKET_FILL_METHOD
-        POCKET_KEEP_INNER_LOOPS CREATE_SOLID_FROM_CHAMFER_BOUNDS PERFORMANCE_MODE VERBOSE
+        MAX_CHAIN_DEPTH AREA_GROWTH_RATIO STITCH_TOLERANCE
+        CREATE_SOLID_FROM_CHAMFER_BOUNDS PERFORMANCE_MODE VERBOSE
     }
 }
 
@@ -92,18 +88,6 @@ proc ::GeomCleanup::normalizeMode {value} {
     }
 }
 
-proc ::GeomCleanup::normalizeFillMethod {value} {
-    set v [string toupper [string trim $value]]
-    switch -- $v {
-        PINHOLE {
-            return PINHOLE
-        }
-        default {
-            return SPLINE
-        }
-    }
-}
-
 proc ::GeomCleanup::loadRuleFile {} {
     variable RULE_FILE
     variable ui
@@ -126,8 +110,6 @@ proc ::GeomCleanup::loadRuleFile {} {
             max_chain_depth { set ui(MAX_CHAIN_DEPTH) $val }
             area_growth_ratio { set ui(AREA_GROWTH_RATIO) $val }
             stitch_tolerance { set ui(STITCH_TOLERANCE) $val }
-            pocket_fill_method { set ui(POCKET_FILL_METHOD) [::GeomCleanup::normalizeFillMethod $val] }
-            pocket_keep_inner_loops { set ui(POCKET_KEEP_INNER_LOOPS) $val }
             create_solid_from_bounds { set ui(CREATE_SOLID_FROM_CHAMFER_BOUNDS) $val }
             create_solid_from_chamfer_bounds { set ui(CREATE_SOLID_FROM_CHAMFER_BOUNDS) $val }
             performance_mode { set ui(PERFORMANCE_MODE) $val }
@@ -151,7 +133,6 @@ proc ::GeomCleanup::loadState {} {
         }
     }
     set ui(MODE) [::GeomCleanup::normalizeMode $ui(MODE)]
-    set ui(POCKET_FILL_METHOD) [::GeomCleanup::normalizeFillMethod $ui(POCKET_FILL_METHOD)]
 }
 
 proc ::GeomCleanup::saveState {} {
@@ -242,23 +223,16 @@ proc ::GeomCleanup::showPanel {} {
         grid $w.main.param.e_$key -row $r -column [expr {$c + 1}] -sticky w -padx {0 18} -pady 2
         incr i
     }
-    label $w.main.param.l_fill -text [::HWFlow::txt "沉台补面" "Pocket fill"] -anchor w
-    tk_optionMenu $w.main.param.fill ::GeomCleanup::ui(POCKET_FILL_METHOD) SPLINE PINHOLE
-    grid $w.main.param.l_fill -row 3 -column 0 -sticky w -padx {0 6} -pady 2
-    grid $w.main.param.fill -row 3 -column 1 -sticky w -pady 2
-
     labelframe $w.main.opt -text [::HWFlow::txt "3. 选项" "3. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
     checkbutton $w.main.opt.filchain -text [::HWFlow::txt "用 HyperMesh 圆角识别扩展倒角/圆角链" "Grow chamfer/fillet chain by HyperMesh fillet query"] -variable ::GeomCleanup::ui(CHAIN_BY_FILLET)
     checkbutton $w.main.opt.areachain -text [::HWFlow::txt "圆角识别失败时，按相邻小面继续扩展" "Fallback grow chain through adjacent small faces"] -variable ::GeomCleanup::ui(CHAIN_BY_SMALL_AREA)
-    checkbutton $w.main.opt.inner -text [::HWFlow::txt "延伸沉台内壁并保留贯通孔" "Extend inner walls and preserve through holes"] -variable ::GeomCleanup::ui(POCKET_KEEP_INNER_LOOPS)
     checkbutton $w.main.opt.solid -text [::HWFlow::txt "倒角清理后尝试从封闭 surface 重建/补充 solid" "After chamfer cleanup, try creating solids from closed surface bounds"] -variable ::GeomCleanup::ui(CREATE_SOLID_FROM_CHAMFER_BOUNDS)
     checkbutton $w.main.opt.perf -text [::HWFlow::txt "执行时减少刷新以提升速度" "Reduce redraw/browser refresh while running"] -variable ::GeomCleanup::ui(PERFORMANCE_MODE)
     grid $w.main.opt.filchain -row 0 -column 0 -sticky w -pady 2
     grid $w.main.opt.areachain -row 1 -column 0 -sticky w -pady 2
-    grid $w.main.opt.inner -row 2 -column 0 -sticky w -pady 2
-    grid $w.main.opt.solid -row 3 -column 0 -sticky w -pady 2
-    grid $w.main.opt.perf -row 4 -column 0 -sticky w -pady 2
+    grid $w.main.opt.solid -row 2 -column 0 -sticky w -pady 2
+    grid $w.main.opt.perf -row 3 -column 0 -sticky w -pady 2
 
     label $w.main.status -textvariable ::GeomCleanup::ui(status) -width 78 -anchor w
     grid $w.main.status -row 4 -column 0 -columnspan 4 -sticky ew -pady {0 8}
@@ -282,7 +256,6 @@ proc ::GeomCleanup::showPanel {} {
 proc ::GeomCleanup::acceptPanel {} {
     variable ui
     set ui(MODE) [::GeomCleanup::normalizeMode $ui(MODE)]
-    set ui(POCKET_FILL_METHOD) [::GeomCleanup::normalizeFillMethod $ui(POCKET_FILL_METHOD)]
     foreach key {FILLET_MIN_R FILLET_MAX_R AREA_GROWTH_RATIO STITCH_TOLERANCE} {
         if {![string is double -strict $ui($key)] || $ui($key) < 0} {
             tk_messageBox -icon warning -title [::HWFlow::txt "几何清理" "Geometry Cleanup"] -message [::HWFlow::txt "$key 必须为非负数值。" "$key must be a non-negative number."]
@@ -351,6 +324,19 @@ proc ::GeomCleanup::uniq {lst} {
     }
     if {[catch {set out [lsort -integer $out]}]} {
         set out [lsort $out]
+    }
+    return $out
+}
+
+proc ::GeomCleanup::orderedUnique {lst} {
+    set out {}
+    array set seen {}
+    foreach value $lst {
+        if {$value eq "" || [info exists seen($value)]} {
+            continue
+        }
+        set seen($value) 1
+        lappend out $value
     }
     return $out
 }
@@ -699,7 +685,7 @@ proc ::GeomCleanup::copyLineOrEdgeToSourceComponent {lineId} {
 proc ::GeomCleanup::copyLinesOrEdgesToSourceComponent {lineIds label} {
     set out {}
     set failed {}
-    foreach lineId [::GeomCleanup::uniq $lineIds] {
+    foreach lineId [::GeomCleanup::orderedUnique $lineIds] {
         set copied [::GeomCleanup::copyLineOrEdgeToSourceComponent $lineId]
         if {$copied eq ""} {
             lappend failed $lineId
@@ -714,9 +700,9 @@ proc ::GeomCleanup::copyLinesOrEdgesToSourceComponent {lineIds label} {
         error [::HWFlow::txt "$label 边界线复制失败：$failed。未删除任何沉台 surface。" "$label boundary copy failed: $failed. No pocket surfaces were deleted."]
     }
     if {[llength $out] == 0} {
-        error [::HWFlow::txt "$label 未生成可用于补面的独立构造线。未删除任何沉台 surface。" "$label did not produce independent construction lines for filling. No pocket surfaces were deleted."]
+        error [::HWFlow::txt "$label 未生成可用于连接的独立构造线。未删除任何沉台 surface。" "$label did not produce independent construction lines for connection. No pocket surfaces were deleted."]
     }
-    return [::GeomCleanup::uniq $out]
+    return [::GeomCleanup::orderedUnique $out]
 }
 
 proc ::GeomCleanup::organizeSurfacesToComponent {surfs compId} {
@@ -725,16 +711,16 @@ proc ::GeomCleanup::organizeSurfacesToComponent {surfs compId} {
         return 0
     }
     if {$compId eq ""} {
-        error [::HWFlow::txt "无法读取沉台所属 component，不能归集新补面。" "Could not determine the pocket component, so the new fill surface cannot be organized."]
+        error [::HWFlow::txt "无法读取沉台所属 component，不能归集新连接面。" "Could not determine the pocket component, so the new connecting surface cannot be organized."]
     }
     set compName [::HWFlow::componentName $compId]
     set markType [::GeomCleanup::markList {surfs surfaces} 1 $surfs]
     if {$markType eq ""} {
-        error [::HWFlow::txt "无法标记新建沉台补面。" "Could not mark the newly created pocket fill surfaces."]
+        error [::HWFlow::txt "无法标记新建沉台连接面。" "Could not mark the newly created pocket connecting surfaces."]
     }
     if {[catch {*movemark $markType 1 $compName} err]} {
         catch {*clearmark $markType 1}
-        error [::HWFlow::txt "无法将新建沉台补面归集到 component $compName：$err" "Could not organize the new pocket fill surfaces into component $compName: $err"]
+        error [::HWFlow::txt "无法将新建沉台连接面归集到 component $compName：$err" "Could not organize the new pocket connecting surfaces into component $compName: $err"]
     }
     catch {*clearmark $markType 1}
     return [llength $surfs]
@@ -869,7 +855,7 @@ proc ::GeomCleanup::topEdgesFromWallFaces {floorEdges wallFaces deletedFaces} {
             }
         }
     }
-    return [::GeomCleanup::uniq $out]
+    return [::GeomCleanup::orderedUnique $out]
 }
 
 proc ::GeomCleanup::outsideSurfacesFromEdges {edges excludedFaces} {
@@ -885,208 +871,6 @@ proc ::GeomCleanup::outsideSurfacesFromEdges {edges excludedFaces} {
     return [::GeomCleanup::uniq $out]
 }
 
-proc ::GeomCleanup::existingSurfaces {surfs} {
-    set out {}
-    foreach surf [::GeomCleanup::uniq $surfs] {
-        if {[::GeomCleanup::entityExistsById surfs $surf] || [::GeomCleanup::entityExistsById surfaces $surf]} {
-            lappend out $surf
-        }
-    }
-    return [::GeomCleanup::uniq $out]
-}
-
-proc ::GeomCleanup::pointDistanceToSurfaces {point surfs} {
-    foreach {x y z} $point {}
-    set best ""
-    foreach surf [::GeomCleanup::uniq $surfs] {
-        set distance ""
-        if {![catch {set vals [hm_findclosestpointonsurface $x $y $z $surf]}] && [llength $vals] >= 4} {
-            set distance [lindex $vals 3]
-        } elseif {![catch {set vals [hm_getcoordinatesfromnearestsurface $x $y $z [list $surf]]}] && [llength $vals] >= 3} {
-            set distance [::GeomCleanup::dist3 $point [lrange $vals 0 2]]
-        }
-        if {$distance ne "" && ($best eq "" || $distance < $best)} {
-            set best $distance
-        }
-    }
-    return $best
-}
-
-proc ::GeomCleanup::loopMaxDistanceToSurfaces {loop surfs} {
-    set maximum ""
-    foreach edge [::GeomCleanup::uniq $loop] {
-        if {[catch {set coords [hm_getcoordinatesofpointsonline $edge {0.0 0.25 0.5 0.75 1.0}]}]} {
-            set coords [::GeomCleanup::edgeEndPoints $edge]
-        }
-        foreach point $coords {
-            if {[llength $point] < 3} { continue }
-            set distance [::GeomCleanup::pointDistanceToSurfaces [lrange $point 0 2] $surfs]
-            if {$distance ne "" && ($maximum eq "" || $distance > $maximum)} {
-                set maximum $distance
-            }
-        }
-    }
-    if {$maximum eq ""} {
-        error [::HWFlow::txt "无法计算沉台内圈到补面的距离。" "Could not calculate the distance from the pocket inner loop to the fill surface."]
-    }
-    return $maximum
-}
-
-proc ::GeomCleanup::loopCenter {loop} {
-    set mins {}
-    set maxs {}
-    foreach edge [::GeomCleanup::uniq $loop] {
-        if {[catch {set coords [hm_getcoordinatesofpointsonline $edge {0.0 0.125 0.25 0.375 0.5 0.625 0.75 0.875}]}]} {
-            set coords [::GeomCleanup::edgeEndPoints $edge]
-        }
-        foreach point $coords {
-            if {[llength $point] < 3} { continue }
-            if {[llength $mins] == 0} {
-                set mins [lrange $point 0 2]
-                set maxs [lrange $point 0 2]
-                continue
-            }
-            for {set axis 0} {$axis < 3} {incr axis} {
-                set value [lindex $point $axis]
-                if {$value < [lindex $mins $axis]} {
-                    lset mins $axis $value
-                }
-                if {$value > [lindex $maxs $axis]} {
-                    lset maxs $axis $value
-                }
-            }
-        }
-    }
-    if {[llength $mins] == 0} {
-        error [::HWFlow::txt "无法计算沉台内圈中心。" "Could not calculate the pocket inner-loop center."]
-    }
-    set center {}
-    for {set axis 0} {$axis < 3} {incr axis} {
-        lappend center [expr {([lindex $mins $axis] + [lindex $maxs $axis]) * 0.5}]
-    }
-    return $center
-}
-
-proc ::GeomCleanup::extendInnerWallsToFill {innerWalls innerLoop fillSurfs} {
-    variable ui
-    set innerWalls [::GeomCleanup::uniq $innerWalls]
-    set innerLoop [::GeomCleanup::uniq $innerLoop]
-    set fillSurfs [::GeomCleanup::uniq $fillSurfs]
-    if {[llength $innerWalls] == 0 || [llength $innerLoop] == 0 || [llength $fillSurfs] == 0} {
-        error [::HWFlow::txt "沉台贯通孔延伸缺少内壁、内圈或目标补面。" "Pocket through-hole extension is missing inner walls, inner-loop edges, or target fill surfaces."]
-    }
-    set gap [::GeomCleanup::loopMaxDistanceToSurfaces $innerLoop $fillSurfs]
-    set maxExtend [expr {max(1.0, $gap * 2.0, $ui(STITCH_TOLERANCE) * 10.0)}]
-    ::GeomCleanup::msg [::HWFlow::txt "贯通孔内壁延伸：内壁=$innerWalls，内圈=$innerLoop，目标补面=$fillSurfs，间距=$gap，最大延伸=$maxExtend" "Through-hole wall extension: walls=$innerWalls, inner loop=$innerLoop, target fill=$fillSurfs, gap=$gap, max extension=$maxExtend"]
-
-    catch {*clearmark lines 2}
-    catch {*clearmark line 2}
-    set sourceType [::GeomCleanup::markList {surfs surfaces} 1 $innerWalls]
-    set targetType [::GeomCleanup::markList {surfs surfaces} 2 $fillSurfs]
-    set edgeType [::GeomCleanup::markList {lines line} 1 $innerLoop]
-    if {$sourceType eq "" || $targetType eq "" || $edgeType eq ""} {
-        error [::HWFlow::txt "无法标记沉台内壁延伸所需的内壁、补面或内圈边。" "Could not mark the inner walls, fill surfaces, or inner-loop edges for pocket extension."]
-    }
-
-    # Extend mode 3 extends only over the explicitly marked inner-loop edges
-    # until the target fill surface is reached. Trim mode 1 trims the extended
-    # source walls at the target. Advanced option 0 modifies the original walls
-    # and keeps them in their original component.
-    set before [::GeomCleanup::latestId {surfs surfaces}]
-    set code [catch {
-        *connect_surfaces_11 1 2 3 1 0.0 0.1 179.9 1 0 2 $maxExtend 0 0
-    } err]
-    catch {*clearmark $sourceType 1}
-    catch {*clearmark $targetType 2}
-    catch {*clearmark $edgeType 1}
-    if {$code} {
-        error [::HWFlow::txt "沉台内壁延伸到补面失败：$err" "Failed to extend the pocket inner walls to the fill surface: $err"]
-    }
-    set after [::GeomCleanup::latestId {surfs surfaces}]
-    set created [::GeomCleanup::idsCreatedAfter {surfs surfaces} $before $after]
-    set result [::GeomCleanup::existingSurfaces [concat $innerWalls $created]]
-    if {[llength $result] == 0} {
-        error [::HWFlow::txt "内壁延伸命令完成，但无法捕获延伸后的 surface。" "The inner-wall extension completed, but no resulting surfaces could be captured."]
-    }
-    return $result
-}
-
-proc ::GeomCleanup::trimFillWithInnerWalls {fillSurfs innerWalls innerCenter} {
-    set fillSurfs [::GeomCleanup::uniq $fillSurfs]
-    set innerWalls [::GeomCleanup::uniq $innerWalls]
-    set initialCount [llength [::GeomCleanup::existingSurfaces $fillSurfs]]
-    set before [::GeomCleanup::latestId {surfs surfaces}]
-    set fillType [::GeomCleanup::markList {surfs surfaces} 1 $fillSurfs]
-    set wallType [::GeomCleanup::markList {surfs surfaces} 2 $innerWalls]
-    if {$fillType eq "" || $wallType eq ""} {
-        error [::HWFlow::txt "无法标记贯通孔切割所需的补面或延伸内壁。" "Could not mark the fill surfaces or extended inner walls for through-hole trimming."]
-    }
-    set code [catch {*surfmark_trim_by_surfmark 1 2 0} err]
-    catch {*clearmark $fillType 1}
-    catch {*clearmark $wallType 2}
-    if {$code} {
-        error [::HWFlow::txt "使用延伸内壁切割补面失败：$err" "Failed to trim the fill surfaces with the extended inner walls: $err"]
-    }
-
-    set after [::GeomCleanup::latestId {surfs surfaces}]
-    set created [::GeomCleanup::idsCreatedAfter {surfs surfaces} $before $after]
-    set candidates {}
-    foreach surf [::GeomCleanup::uniq [concat $fillSurfs $created]] {
-        set candidates [concat $candidates [::GeomCleanup::existingSurfaces [list $surf]]]
-    }
-    set candidates [::GeomCleanup::uniq $candidates]
-    if {[llength $candidates] <= $initialCount} {
-        error [::HWFlow::txt "延伸内壁没有把补面分成孔内小面和外部保留面。" "The extended inner walls did not split the fill into an inner patch and an outer retained surface."]
-    }
-
-    set holePatch ""
-    set holeDistance ""
-    set holeArea ""
-    foreach surf $candidates {
-        set distance [::GeomCleanup::pointDistanceToSurfaces $innerCenter [list $surf]]
-        set area [::GeomCleanup::surfaceArea $surf]
-        if {$distance eq "" || $area <= 0.0} {
-            continue
-        }
-        if {$holePatch eq "" || $distance < $holeDistance - 1.0e-8 || \
-                (abs($distance - $holeDistance) <= 1.0e-8 && $area < $holeArea)} {
-            set holePatch $surf
-            set holeDistance $distance
-            set holeArea $area
-        }
-    }
-    if {$holePatch eq ""} {
-        error [::HWFlow::txt "切割后无法识别需要删除的孔内小面。" "Could not identify the inner patch to delete after trimming the fill surface."]
-    }
-    ::GeomCleanup::deleteSurfaces [list $holePatch]
-    set candidates [lsearch -all -inline -not -exact $candidates $holePatch]
-    if {[llength $candidates] == 0} {
-        error [::HWFlow::txt "删除孔内小面后没有剩余补面。" "No retained fill surface remained after deleting the inner patch."]
-    }
-    ::GeomCleanup::msg [::HWFlow::txt "贯通孔补面切割：删除孔内小面=$holePatch，保留补面=$candidates" "Through-hole fill trim: deleted inner patch=$holePatch, retained fill surfaces=$candidates"]
-    return [::GeomCleanup::uniq $candidates]
-}
-
-proc ::GeomCleanup::assertNoFreeEdges {surfs label} {
-    set surfs [::GeomCleanup::existingSurfaces $surfs]
-    if {[llength $surfs] == 0} {
-        error [::HWFlow::txt "$label 在缝合后没有可验证的有效 surface。" "$label has no valid surfaces available for verification after stitching."]
-    }
-    set freeEdges {}
-    foreach surf $surfs {
-        foreach edge [::GeomCleanup::surfaceEdges $surf] {
-            if {[llength [::GeomCleanup::edgeOwnerSurfaces $edge]] < 2} {
-                lappend freeEdges $edge
-            }
-        }
-    }
-    set freeEdges [::GeomCleanup::uniq $freeEdges]
-    if {[llength $freeEdges] > 0} {
-        error [::HWFlow::txt "$label 仍存在自由边：$freeEdges" "$label still contains free edges: $freeEdges"]
-    }
-    return 1
-}
-
 proc ::GeomCleanup::wallsFromLoop {loop seed} {
     set walls {}
     foreach edge $loop {
@@ -1099,43 +883,33 @@ proc ::GeomCleanup::wallsFromLoop {loop seed} {
     return [::GeomCleanup::uniq $walls]
 }
 
-proc ::GeomCleanup::createFillSurfaceFromLines {lineIds} {
-    variable ui
-    set lineIds [::GeomCleanup::uniq $lineIds]
-    if {[llength $lineIds] == 0} {
-        error [::HWFlow::txt "未找到可用于补面的边界线。" "No boundary lines found for fill surface."]
+proc ::GeomCleanup::createSurfaceBetweenLoops {innerLines baseLines} {
+    set innerLines [::GeomCleanup::orderedUnique $innerLines]
+    set baseLines [::GeomCleanup::orderedUnique $baseLines]
+    if {[llength $innerLines] == 0 || [llength $baseLines] == 0} {
+        error [::HWFlow::txt "内边或基准边为空，无法创建连接面。" "The inner loop or datum loop is empty, so the connecting surface cannot be created."]
     }
     set before [::GeomCleanup::latestId {surfs surfaces}]
-    set markType [::GeomCleanup::markList {lines line} 1 $lineIds]
-    if {$markType eq ""} {
-        error [::HWFlow::txt "无法标记补面边界线。" "Could not mark fill boundary lines."]
+    catch {*surfacemode 4}
+    catch {*createlist lines 1}
+    set ruledLines [concat $innerLines $baseLines]
+    if {[catch {eval *createlist lines 1 $ruledLines} errList]} {
+        error [::HWFlow::txt "无法创建内边/基准边线列表：$errList" "Could not create the inner/datum loop line list: $errList"]
     }
-
-    set errSpline ""
-    set errPatch ""
-    set errPinhole ""
-    if {$ui(POCKET_FILL_METHOD) eq "SPLINE"} {
-        catch {*surfacemode 4}
-        catch {*createplane 1 0.0 0.0 1.0 0.0 0.0 0.0}
-        if {[catch {*splinesurface lines 1 0 1 1} errSpline]} {
-            if {[catch {*surface_patch line_mark=1 tangency=best_fit stitch=1 solid_stitch=1 dest_component=original} errPatch]} {
-                if {[catch {*linemarkremovepinholes 1 1} errPinhole]} {
-                    catch {*clearmark $markType 1}
-                    error [::HWFlow::txt "沉台补面失败：spline=$errSpline；patch=$errPatch；pinhole=$errPinhole" "Pocket fill failed: spline=$errSpline; patch=$errPatch; pinhole=$errPinhole"]
-                }
-            }
+    set errRuled ""
+    if {[catch {*surfacecreateruled 1 1 0 2 1 0 0} errRuled]} {
+        set allLines [::GeomCleanup::orderedUnique $ruledLines]
+        set markType [::GeomCleanup::markList {lines line} 1 $allLines]
+        if {$markType eq ""} {
+            error [::HWFlow::txt "ruled 连接失败且无法标记回退边界：$errRuled" "Ruled connection failed and the fallback boundaries could not be marked: $errRuled"]
         }
-    } else {
-        if {[catch {*linemarkremovepinholes 1 1} errPinhole]} {
-            catch {*surfacemode 4}
-            catch {*createplane 1 0.0 0.0 1.0 0.0 0.0 0.0}
-            if {[catch {*splinesurface lines 1 0 1 1} errSpline]} {
-                catch {*clearmark $markType 1}
-                error [::HWFlow::txt "沉台补面失败：pinhole=$errPinhole；spline=$errSpline" "Pocket fill failed: pinhole=$errPinhole; spline=$errSpline"]
-            }
+        set errPatch ""
+        if {[catch {*surface_patch line_mark=1 tangency=best_fit stitch=1 solid_stitch=1 dest_component=original} errPatch]} {
+            catch {*clearmark $markType 1}
+            error [::HWFlow::txt "内边与基准边连接失败：ruled=$errRuled；patch=$errPatch" "Failed to connect the inner and datum loops: ruled=$errRuled; patch=$errPatch"]
         }
+        catch {*clearmark $markType 1}
     }
-    catch {*clearmark $markType 1}
 
     set after [::GeomCleanup::latestId {surfs surfaces}]
     set newSurfs [::GeomCleanup::idsCreatedAfter {surfs surfaces} $before $after]
@@ -1143,13 +917,12 @@ proc ::GeomCleanup::createFillSurfaceFromLines {lineIds} {
         set newSurfs [list $after]
     }
     if {[llength $newSurfs] == 0} {
-        error [::HWFlow::txt "补面命令未返回新建 surface。" "The fill operation did not produce a new surface."]
+        error [::HWFlow::txt "内边与基准边连接命令未返回新建 surface。" "Connecting the inner and datum loops did not produce a new surface."]
     }
     return $newSurfs
 }
 
 proc ::GeomCleanup::removePocket {seed} {
-    variable ui
     variable stat
     set compId [::GeomCleanup::surfaceComponentId $seed]
     if {$compId eq ""} {
@@ -1159,99 +932,67 @@ proc ::GeomCleanup::removePocket {seed} {
     if {[llength $loops] == 0} {
         error [::HWFlow::txt "所选沉台面没有可读取的边界线。" "Selected pocket face has no readable boundary edges."]
     }
-    set outerLoop [lindex $loops 0]
-    set innerLoops [lrange $loops 1 end]
-    if {!$ui(POCKET_KEEP_INNER_LOOPS)} {
-        set innerLoops {}
+    if {[llength $loops] != 2} {
+        error [::HWFlow::txt "简化沉台流程要求所选面恰好包含一个外边和一个内边；当前边界环数量：[llength $loops]。" "The simplified pocket workflow requires exactly one outer loop and one inner loop; found [llength $loops]."]
     }
+    set outerLoop [lindex $loops 0]
+    set innerLoop [lindex $loops 1]
 
     set outerWalls [::GeomCleanup::wallsFromLoop $outerLoop $seed]
     if {[llength $outerWalls] == 0} {
         error [::HWFlow::txt "未找到沉台底面与周围正常面的竖直连接面。" "Could not find wall surfaces between pocket floor and surrounding face."]
     }
 
-    set floorEdges $outerLoop
     set deleteFaces [::GeomCleanup::uniq [concat [list $seed] $outerWalls]]
-    set fillLines [::GeomCleanup::topEdgesFromWallFaces $floorEdges $outerWalls $deleteFaces]
-
-    set keptInnerWalls {}
-    set innerWallGroups {}
-    foreach loop $innerLoops {
-        set innerWalls [::GeomCleanup::wallsFromLoop $loop $seed]
-        if {[llength $innerWalls] == 0} {
-            error [::HWFlow::txt "未找到沉台内圈对应的贯通孔内壁。" "Could not find the through-hole inner walls attached to a pocket inner loop."]
-        }
-        lappend innerWallGroups $innerWalls
-        set keptInnerWalls [concat $keptInnerWalls $innerWalls]
+    set baseEdges [::GeomCleanup::topEdgesFromWallFaces $outerLoop $outerWalls $deleteFaces]
+    if {[llength $baseEdges] == 0} {
+        error [::HWFlow::txt "未找到小竖直面与基准平面相连的基准边。" "Could not find the datum edges where the small vertical walls meet the datum plane."]
     }
-    set keptInnerWalls [::GeomCleanup::uniq $keptInnerWalls]
-    set fillLines [::GeomCleanup::uniq $fillLines]
-    if {[llength $fillLines] == 0} {
-        error [::HWFlow::txt "未找到沉台顶面补平边界线。" "Could not find top boundary lines for pocket fill."]
+    set innerWalls [::GeomCleanup::wallsFromLoop $innerLoop $seed]
+    if {[llength $innerWalls] == 0} {
+        error [::HWFlow::txt "未找到与沉台内边相连的孔壁。" "Could not find the hole wall connected to the pocket inner loop."]
     }
-    set surroundingSurfs [::GeomCleanup::outsideSurfacesFromEdges $fillLines $deleteFaces]
+    set surroundingSurfs [::GeomCleanup::outsideSurfacesFromEdges $baseEdges $deleteFaces]
     if {[llength $surroundingSurfs] == 0} {
-        error [::HWFlow::txt "未找到与沉台顶边相邻的周围承接面。" "Could not find surrounding surfaces adjacent to the pocket top boundary."]
+        error [::HWFlow::txt "未找到与基准边相邻的基准平面。" "Could not find the datum surface adjacent to the datum edges."]
     }
 
     set stat(mode) POCKET
     set stat(targetSurfs) $deleteFaces
-    set constructionLines [::GeomCleanup::copyLinesOrEdgesToSourceComponent $fillLines [::HWFlow::txt "沉台补面" "Pocket fill"]]
-    ::GeomCleanup::msg [::HWFlow::txt "沉台底面：$seed；删除外圈竖直面：$outerWalls；待延伸内部竖直面：$keptInnerWalls；补面边界：$fillLines；周围承接面：$surroundingSurfs；构造线：$constructionLines" "Pocket floor: $seed; deleting outer walls: $outerWalls; inner walls to extend: $keptInnerWalls; fill edges: $fillLines; surrounding surfaces: $surroundingSurfs; construction lines: $constructionLines"]
+    set innerConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $innerLoop [::HWFlow::txt "沉台内边" "Pocket inner loop"]]
+    set baseConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $baseEdges [::HWFlow::txt "沉台基准边" "Pocket datum loop"]]
+    ::GeomCleanup::msg [::HWFlow::txt "沉台面=$seed；小竖直面=$outerWalls；内边=$innerLoop；基准边=$baseEdges；孔壁=$innerWalls；基准平面=$surroundingSurfs" "Pocket face=$seed; small vertical walls=$outerWalls; inner loop=$innerLoop; datum edges=$baseEdges; hole walls=$innerWalls; datum surfaces=$surroundingSurfs"]
 
     set newSurfs {}
-    set cleanupLines 1
     set code [catch {
         ::GeomCleanup::deleteSurfaces $deleteFaces
-        set newSurfs [::GeomCleanup::createFillSurfaceFromLines $constructionLines]
+        set newSurfs [::GeomCleanup::createSurfaceBetweenLoops $innerConstruction $baseConstruction]
         ::GeomCleanup::organizeSurfacesToComponent $newSurfs $compId
     } err opts]
-    if {$cleanupLines} {
-        catch {::GeomCleanup::deleteConstructionLines $constructionLines}
-    }
+    catch {::GeomCleanup::deleteConstructionLines $innerConstruction}
+    catch {::GeomCleanup::deleteConstructionLines $baseConstruction}
     if {$code} {
         return -options $opts $err
     }
-    set extendedInnerWalls {}
-    for {set i 0} {$i < [llength $innerLoops]} {incr i} {
-        set loop [lindex $innerLoops $i]
-        set loopWalls [lindex $innerWallGroups $i]
-        set loopWalls [::GeomCleanup::existingSurfaces $loopWalls]
-        if {[llength $loopWalls] == 0} {
-            error [::HWFlow::txt "删除沉台后，贯通孔内壁 surface 已失效。" "The through-hole inner-wall surfaces became invalid after deleting the pocket."]
-        }
-        set innerCenter [::GeomCleanup::loopCenter $loop]
-        set loopWalls [::GeomCleanup::extendInnerWallsToFill $loopWalls $loop $newSurfs]
-        if {[llength $loopWalls] == 0} {
-            error [::HWFlow::txt "沉台内壁延伸后没有保留有效 surface。" "No valid inner-wall surfaces remained after pocket extension."]
-        }
-        set newSurfs [::GeomCleanup::trimFillWithInnerWalls $newSurfs $loopWalls $innerCenter]
-        set extendedInnerWalls [concat $extendedInnerWalls $loopWalls]
-    }
-    set extendedInnerWalls [::GeomCleanup::uniq $extendedInnerWalls]
-    ::GeomCleanup::organizeSurfacesToComponent $newSurfs $compId
-    set stitchSet [::GeomCleanup::uniq [concat $newSurfs $surroundingSurfs $keptInnerWalls $extendedInnerWalls]]
+    set stitchSet [::GeomCleanup::uniq [concat $newSurfs $surroundingSurfs $innerWalls]]
     if {![::GeomCleanup::stitchSurfaces $stitchSet]} {
-        error [::HWFlow::txt "沉台贯通孔最终缝合失败。" "Final stitching of the repaired pocket through-hole failed."]
+        error [::HWFlow::txt "沉台内边与基准边最终缝合失败。" "Final stitching between the pocket inner loop and datum loop failed."]
     }
-    if {[llength $extendedInnerWalls] > 0} {
-        ::GeomCleanup::assertNoFreeEdges $extendedInnerWalls [::HWFlow::txt "沉台贯通孔内壁" "Pocket through-hole wall"]
-    }
-    ::GeomCleanup::msg [::HWFlow::txt "贯通孔修复：原内壁已延伸到补面并切除孔内小面；延伸内壁=$extendedInnerWalls，最终缝合集合=$stitchSet" "Through-hole repair: original inner walls were extended to the fill and the inner patches were removed; extended inner walls=$extendedInnerWalls, final stitch set=$stitchSet"]
+    ::GeomCleanup::msg [::HWFlow::txt "沉台清理完成：已删除沉台面和小竖直面，并将内边与基准边直接连接、缝合。新面=$newSurfs" "Pocket cleanup finished: the pocket face and small vertical walls were deleted, and the inner loop was directly connected and stitched to the datum loop. New surfaces=$newSurfs"]
     set newSolids {}
     set stat(newSurfs) $newSurfs
     set stat(newSolids) $newSolids
-    return [dict create mode POCKET deleted_surfs $deleteFaces fill_lines $fillLines new_surfs $stat(newSurfs) new_solids $newSolids]
+    return [dict create mode POCKET deleted_surfs $deleteFaces inner_edges $innerLoop datum_edges $baseEdges new_surfs $stat(newSurfs) new_solids $newSolids]
 }
 
 proc ::GeomCleanup::autoModeHint {seed} {
+    set loops [::GeomCleanup::surfaceLoops $seed]
+    if {[llength $loops] == 2} {
+        return POCKET
+    }
     set fillets [::GeomCleanup::filletCandidatesForSelected $seed]
     if {[::GeomCleanup::contains $fillets $seed]} {
         return CHAMFER
-    }
-    set loops [::GeomCleanup::surfaceLoops $seed]
-    if {[llength $loops] >= 2} {
-        return POCKET
     }
     return CHAMFER
 }
@@ -1288,7 +1029,7 @@ proc ::GeomCleanup::processSurface {seed} {
             if {$mode eq "CHAMFER"} {
                 set errChamfer ""
                 if {[catch {set result [::GeomCleanup::removeChamfer $seed]} errChamfer]} {
-                    ::GeomCleanup::msg [::HWFlow::txt "自动倒角清理未成功：$errChamfer；改用沉台补平流程。" "Auto chamfer cleanup did not succeed: $errChamfer; trying pocket fill."]
+                    ::GeomCleanup::msg [::HWFlow::txt "自动倒角清理未成功：$errChamfer；改用简化沉台清理流程。" "Auto chamfer cleanup did not succeed: $errChamfer; trying simplified pocket cleanup."]
                     set result [::GeomCleanup::removePocket $seed]
                 }
             } else {
