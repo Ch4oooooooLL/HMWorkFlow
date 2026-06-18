@@ -1,6 +1,5 @@
 # Seam surface workflow defaults.
 key|value|note
-max_gap_tol|5.0|maximum allowed distance between corresponding seam points
 stitch_tolerance|0.2|surface equivalence tolerance
 default_mode|LINE_SURFACE|LINE_SURFACE or LINE_LINE
 component_mode|by_thickness|by_thickness or per_seam
