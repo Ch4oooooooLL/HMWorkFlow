@@ -156,17 +156,21 @@ workflow:
 
 1. 在主面板中运行 `Seam Surface Creation`。
 2. 选择模式：
-   - `Line-Surface`：源线投影到目标中面。
-   - `Line-Line`：两条边界线之间创建焊缝面。
-3. 按模块提示选择线、面或所属中面。
-4. 检查投影间隙、采样分段和拓扑缝合参数。
-5. 点击开始执行。
+   - `Line-Surface`：先选择源线，再选择投影目标面。
+   - `Line-Line`：依次选择两条焊缝边界线。
+3. 检查最大对应间隙、特征转角、基础采样分段数和 equivalence 容差。
+4. 点击“进入连续创建”。
+5. 每次创建完成后继续选择下一条线或下一组线；在任一选择面板按 `ESC` 退出。
 
 输出结果：
 
 - 生成 `SEAM_Tx` component。
 - `x` 优先取相邻 component 名称中较薄的 `_T` 厚度。
 - 若厚度无法读取，会提示手动输入。
+- 线-面模式先生成贴合目标面的投影线并 trim 目标面，再以原始线和投影线创建 ruled 焊缝。
+- 两种模式都会识别两侧端点和曲率特征点，建立一一对应的 linking coordinates，并按特征连接线分段生成焊缝面。
+- 每次完成后对焊缝面及两侧接触面强制执行 equivalence；失败时撤销本次几何修改并继续等待下一次选择。
+- 连续创建期间不显示进度条，也不会在单次完成或失败后退出。
 
 ### Sheet BatchMesh + Washer
 
@@ -288,8 +292,11 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 
 Seam Surface Creation 位于中面抽取之后、网格划分和 RBE2 创建之前。
 
-- `Line-Surface`：选择一条源线和一个目标中面，将源线投影到目标面并创建焊缝面。
-- `Line-Line`：选择两条边界线，在最近重叠区间内创建焊缝面。
+- `Line-Surface`：先选择一条源线，再选择目标中面；源线投影并 trim 目标面后，与投影线创建 ruled 焊缝。
+- `Line-Line`：依次选择两条边界线，按两侧特征点的一一对应关系创建 ruled 焊缝。
+- ruled 使用显式 linking coordinates 在端点和曲率特征点处分段，避免曲线与曲面投影组合时发生扭转。
+- 每次创建后对焊缝面和两侧接触面执行跨 component equivalence。
+- 工具会连续等待下一次选择，直到用户在选择面板按 `ESC`。
 - 输出组件命名为 `SEAM_Tx`，其中 `x` 来自相邻组件名中较薄的 `_T` 厚度值。
 - 若无法读取厚度，模块会提示手动输入。
 

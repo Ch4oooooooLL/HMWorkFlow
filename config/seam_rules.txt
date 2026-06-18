@@ -1,11 +1,9 @@
 # Seam surface workflow defaults.
 key|value|note
-max_gap_tol|5|max allowed projection or stitching gap
-stitch_tolerance|0.2|topology stitch tolerance after seam surface creation
+max_gap_tol|5.0|maximum allowed distance between corresponding seam points
+stitch_tolerance|0.2|surface equivalence tolerance
 default_mode|LINE_SURFACE|LINE_SURFACE or LINE_LINE
 component_mode|by_thickness|by_thickness or per_seam
-topology_connect|1|stitch seam surfaces to adjacent midsurfaces
-prompt_candidates|0|ask only when automatic seam detection cannot continue
-delete_construction_lines|1|delete copied source/projected construction lines after surface creation
-line_sync_divisions|8|minimum synchronized divisions used when building seam construction lines
+line_sync_divisions|24|base sampling divisions for feature detection and projection
+feature_angle|12.0|minimum direction change in degrees treated as a feature point
 thickness_format|%.3g|T value format used in SEAM_Tx component names
