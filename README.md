@@ -142,7 +142,7 @@ workflow:
 输出结果：
 
 - 对匹配的 solid 倒角/圆角执行清理。
-- 对沉台底面执行 surface-only 补面和缝合。
+- 对沉台底面执行 surface-only 补面；保留贯通孔时切除内圈、延伸孔内壁并完成无自由边缝合。
 - 清理完成后刷新 Model Browser 和图形窗口。
 
 ### Seam Surface Creation

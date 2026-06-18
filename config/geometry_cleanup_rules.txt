@@ -10,7 +10,7 @@ max_chain_depth|6|max adjacency depth when growing a chamfer/pocket side chain
 area_growth_ratio|2.5|neighbor face area <= selected area * this ratio can join fallback chain
 stitch_tolerance|0.2|topology stitch tolerance after cleanup
 pocket_fill_method|SPLINE|SPLINE first, then pinhole fallback
-pocket_keep_inner_loops|1|keep inner wall surfaces, but never use their opposite-side edges for filling or stitching
+pocket_keep_inner_loops|1|trim the fill at inner loops and extend inner walls to form continuous through holes
 create_solid_from_chamfer_bounds|1|attempt *solids_create_from_surfaces only after chamfer cleanup
 performance_mode|1|block redraw/browser updates while running
 verbose|1|write status lines to Tcl console and HM status bar
