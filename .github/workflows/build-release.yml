@@ -59,11 +59,10 @@ jobs:
         id: package
         shell: pwsh
         run: |
-          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
           $safeRef = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
-          $packageName = "HMWorkFlow-$safeRef-$shortSha.zip"
+          $packageName = "HMWorkFlow-$safeRef-$timestamp.zip"
           ./build_package.ps1 -OutputDir dist -PackageName $packageName
-          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
           "package_name=$packageName" >> $env:GITHUB_OUTPUT
           "package_path=dist/$packageName" >> $env:GITHUB_OUTPUT
 
