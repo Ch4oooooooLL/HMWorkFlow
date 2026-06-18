@@ -534,55 +534,64 @@ proc ::MidSurf::readComponentThickness {compId} {
     return $vals
 }
 
-proc ::MidSurf::readThicknessFromSurface {surfId} {
+proc ::MidSurf::thicknessValuesFromRaw {raw {surfaceId ""}} {
     set vals {}
-
-    foreach etype {surfs surfaces} {
-        if {![catch {set t [hm_getvalue $etype id=$surfId dataname=thickness]}] &&
-            $t ne "" && [string is double -strict $t] && $t > 0.0} {
+    foreach item $raw {
+        if {[llength $item] >= 3} {
+            set itemSurface [lindex $item 0]
+            set t [lindex $item 1]
+            if {$surfaceId ne "" && $itemSurface ne $surfaceId} {
+                continue
+            }
+        } elseif {[llength $item] >= 2} {
+            set t [lindex $item 1]
+        } else {
+            set t $item
+        }
+        if {[string is double -strict $t] && $t > 0.0} {
             lappend vals $t
         }
     }
-
-    foreach etype {surfs surfaces} {
-        if {![catch {set raw [hm_getsurfacethicknessvalues $etype $surfId]}] && [llength $raw] > 0} {
-            foreach item $raw {
-                if {[llength $item] >= 2} {
-                    set t [lindex $item 1]
-                } else {
-                    set t $item
-                }
-                if {[string is double -strict $t] && $t > 0.0} {
-                    lappend vals $t
-                }
-            }
-        }
-    }
-
     return $vals
 }
 
-proc ::MidSurf::readThicknessFromPoints {compId} {
+proc ::MidSurf::readThicknessFromPoint {pointId {surfaceId ""}} {
+    if {[catch {set raw [hm_getsurfacethicknessvalues points $pointId]}]} {
+        return {}
+    }
+    return [::MidSurf::thicknessValuesFromRaw $raw $surfaceId]
+}
+
+proc ::MidSurf::surfacePointIds {surfId} {
+    set points {}
+    if {[catch {set loops [hm_getsurfaceedges $surfId]}]} {
+        return {}
+    }
+    foreach loop $loops {
+        foreach edgeId $loop {
+            if {![catch {set edgePoints [hm_getverticesfromedge $edgeId]}]} {
+                set points [concat $points $edgePoints]
+            }
+        }
+    }
+    return [::MidSurf::uniq $points]
+}
+
+proc ::MidSurf::readThicknessFromSurface {surfId} {
+    set vals {}
+    foreach pointId [::MidSurf::surfacePointIds $surfId] {
+        set vals [concat $vals [::MidSurf::readThicknessFromPoint $pointId $surfId]]
+    }
+    return $vals
+}
+
+proc ::MidSurf::readThicknessFromComponentPoints {compId} {
     set vals {}
     set pts [::MidSurf::getCompEntityIds $compId points points]
 
     foreach pt $pts {
-        if {[catch {set raw [hm_getsurfacethicknessvalues points $pt]}]} {
-            continue
-        }
-
-        foreach item $raw {
-            if {[llength $item] >= 2} {
-                set t [lindex $item 1]
-            } else {
-                set t $item
-            }
-            if {[string is double -strict $t] && $t > 0.0} {
-                lappend vals $t
-            }
-        }
+        set vals [concat $vals [::MidSurf::readThicknessFromPoint $pt]]
     }
-
     return $vals
 }
 
@@ -593,8 +602,48 @@ proc ::MidSurf::readMiddleSurfaceThickness {midCompId} {
         set vals [concat $vals [::MidSurf::readThicknessFromSurface $surf]]
     }
 
-    set vals [concat $vals [::MidSurf::readThicknessFromPoints $midCompId]]
+    if {[llength $vals] == 0} {
+        set vals [concat $vals [::MidSurf::readThicknessFromComponentPoints $midCompId]]
+    }
     return $vals
+}
+
+proc ::MidSurf::measureThicknessByVolumeArea {sourceCompId midCompId} {
+    set totalVolume 0.0
+    set volumeCount 0
+    foreach solidId [::MidSurf::getCompEntityIds $sourceCompId solids solids] {
+        if {![catch {set volume [hm_getvolumeofsolid solids $solidId]}] &&
+            [string is double -strict $volume] && $volume > 0.0} {
+            set totalVolume [expr {$totalVolume + $volume}]
+            incr volumeCount
+        }
+    }
+    if {$volumeCount == 0 || $totalVolume <= 0.0} {
+        return ""
+    }
+
+    set totalArea 0.0
+    set areaCount 0
+    foreach surfId [::MidSurf::getCompEntityIds $midCompId surfaces surfs] {
+        set area ""
+        foreach cmd [list \
+            [list hm_getareaofsurface surfs $surfId] \
+            [list hm_getvalue surfs id=$surfId dataname=area]] {
+            if {![catch {set candidate [uplevel #0 $cmd]}] &&
+                [string is double -strict $candidate] && $candidate > 0.0} {
+                set area $candidate
+                break
+            }
+        }
+        if {$area ne ""} {
+            set totalArea [expr {$totalArea + $area}]
+            incr areaCount
+        }
+    }
+    if {$areaCount == 0 || $totalArea <= 0.0} {
+        return ""
+    }
+    return [expr {$totalVolume / $totalArea}]
 }
 
 proc ::MidSurf::chooseThickness {sourceCompId sourceName midCompId} {
@@ -612,7 +661,13 @@ proc ::MidSurf::chooseThickness {sourceCompId sourceName midCompId} {
 
     set t [::MidSurf::median $vals]
     if {$t eq ""} {
-        return ""
+        set t [::MidSurf::measureThicknessByVolumeArea $sourceCompId $midCompId]
+        if {$t ne ""} {
+            ::MidSurf::msg [::HWFlow::txt \
+                [format "中面抽取：%s 未读取到厚度属性，已按实体体积/中面面积自动测得厚度 %.6g。" $sourceName $t] \
+                [format "MidSurf: no thickness metadata was available for %s; measured thickness %.6g from solid volume / midsurface area." $sourceName $t]]
+        }
+        return $t
     }
 
     set spread [::MidSurf::valueSpreadRatio $vals $t]
@@ -630,7 +685,7 @@ proc ::MidSurf::sourceThicknessValues {sourceCompId} {
     foreach surf [::MidSurf::getCompEntityIds $sourceCompId surfaces surfs] {
         set vals [concat $vals [::MidSurf::readThicknessFromSurface $surf]]
     }
-    set vals [concat $vals [::MidSurf::readThicknessFromPoints $sourceCompId]]
+    set vals [concat $vals [::MidSurf::readThicknessFromComponentPoints $sourceCompId]]
     return $vals
 }
 

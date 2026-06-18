@@ -127,7 +127,7 @@ workflow:
 
 - 生成新的 midsurface component。
 - 输出 component 按 `CATEGORY_NAME_Tx_MATERIAL` 命名。
-- 命名厚度优先读取源 component 名称中的 `_Tx`；名称中没有厚度时自动从几何/中面结果测量，不要求用户输入。
+- 命名厚度优先读取源 component 名称中的 `_Tx`；名称中没有厚度时先读取中面拓扑点的厚度数据，仍不可用时按实体体积/中面面积自动测量，不要求用户输入。
 - 所有输出 component 统一放入名为 `midsurf` 的 assembly，并隐藏对应的源实体 component。
 - 源几何保留并隐藏。
 
