@@ -267,7 +267,7 @@ proc ::GeomCleanup::showPanel {} {
     pack $w.btn -fill x
     button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::GeomCleanup::savePanelState; set ::GeomCleanup::ui(ok) 0; ::GeomCleanup::backToHome .geometry_cleanup"
     button $w.btn.rules -text [::HWFlow::txt "查看参数" "Show Rules"] -width 12 -command "::GeomCleanup::showRules"
-    button $w.btn.start -text [::HWFlow::txt "开始" "Start"] -width 10 -command "::GeomCleanup::acceptPanel"
+    button $w.btn.start -text [::HWFlow::txt "进入连续清洗" "Start Continuous Cleanup"] -width 16 -command "::GeomCleanup::acceptPanel"
     pack $w.btn.back -side right -padx 4
     pack $w.btn.start -side right -padx 4
     pack $w.btn.rules -side right -padx 4
@@ -309,9 +309,6 @@ proc ::GeomCleanup::msg {text} {
         puts $line
     }
     catch {hm_usermessage $text}
-    if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
-        catch {::HWFlow::progressAppend "GeomCleanup: $text"}
-    }
 }
 
 proc ::GeomCleanup::beginPerformanceMode {} {
@@ -381,9 +378,12 @@ proc ::GeomCleanup::markList {entityTypes markId ids} {
 
 proc ::GeomCleanup::selectedSurface {} {
     catch {*clearmark surfs 1}
-    *createmarkpanel surfs 1 [::HWFlow::txt "请选择一个需要清理的面（倒角面或沉台底面）" "Select one face to clean (chamfer face or recessed pocket floor)"]
+    *createmarkpanel surfs 1 [::HWFlow::txt "选择一个待清理面，中键执行；取消选择退出连续清洗" "Select one face and middle-click to execute; cancel to exit continuous cleanup"]
     set ids [hm_getmark surfs 1]
     catch {*clearmark surfs 1}
+    if {[llength $ids] == 0} {
+        return ""
+    }
     if {[llength $ids] != 1} {
         error [::HWFlow::txt "需要且仅需要选择一个面，当前选择数量：[llength $ids]。" "Exactly one surface is required. Selected: [llength $ids]."]
     }
@@ -1228,33 +1228,17 @@ proc ::GeomCleanup::resetStats {} {
     }
 }
 
-proc ::GeomCleanup::main {} {
+proc ::GeomCleanup::processSurface {seed} {
     variable ui
     variable stat
-    if {![::GeomCleanup::showPanel]} {
-        catch {hm_usermessage [::HWFlow::txt "几何清理已取消。" "Geometry Cleanup cancelled."]}
-        return
-    }
     ::GeomCleanup::resetStats
-
-    set progressOpened 0
-    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
-        set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "几何清理" "Geometry Cleanup"] \
-            [::HWFlow::txt "准备选择待清理面..." "Preparing face selection..."] \
-            0]
-    }
-
     set code [catch {
-        set seed [::GeomCleanup::selectedSurface]
         ::GeomCleanup::beginPerformanceMode
         set mode $ui(MODE)
         if {$mode eq "AUTO"} {
             set mode [::GeomCleanup::autoModeHint $seed]
         }
-        if {$progressOpened} {
-            catch {::HWFlow::progressUpdate 25.0 [::HWFlow::txt "正在执行几何清理" "Running geometry cleanup"] [::HWFlow::txt "所选面：$seed；模式：$mode" "Selected surface: $seed; mode: $mode"] 1}
-        }
+        ::GeomCleanup::msg [::HWFlow::txt "开始处理面 $seed，模式：$mode。" "Processing surface $seed in $mode mode."]
 
         if {$ui(MODE) eq "AUTO"} {
             if {$mode eq "CHAMFER"} {
@@ -1271,29 +1255,57 @@ proc ::GeomCleanup::main {} {
         } else {
             set result [::GeomCleanup::removePocket $seed]
         }
-
-        if {$progressOpened} {
-            catch {::HWFlow::progressUpdate 90.0 [::HWFlow::txt "正在刷新结果" "Refreshing result"] "" 1}
-        }
         ::HWFlow::refreshBrowser
     } err opts]
 
     ::GeomCleanup::endPerformanceMode
     if {$code} {
-        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "几何清理失败。" "Geometry cleanup failed."] 100.0}
-        }
-        tk_messageBox -icon error -title [::HWFlow::txt "几何清理" "Geometry Cleanup"] -message [::HWFlow::txt "执行失败：\n$err" "Run failed:\n$err"]
         return -options $opts $err
     }
 
-    set msg [::HWFlow::txt "几何清理已完成。\n模式：$stat(mode)\n处理面：$stat(targetSurfs)\n新建/补充 surface：$stat(newSurfs)\n新建/补充 solid：$stat(newSolids)" "Geometry cleanup finished.\nMode: $stat(mode)\nTarget surfaces: $stat(targetSurfs)\nNew/repaired surfaces: $stat(newSurfs)\nNew/repaired solids: $stat(newSolids)"]
-    ::GeomCleanup::saveState
-    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "几何清理已完成。" "Geometry cleanup finished."] 100.0}
-    }
-    tk_messageBox -icon info -title [::HWFlow::txt "几何清理" "Geometry Cleanup"] -message $msg
+    set msg [::HWFlow::txt "面 $seed 清理完成：模式=$stat(mode)，处理面=$stat(targetSurfs)，新建/补充 surface=$stat(newSurfs)，新建/补充 solid=$stat(newSolids)。请继续选择下一个面。" "Surface $seed cleaned: mode=$stat(mode), target surfaces=$stat(targetSurfs), new/repaired surfaces=$stat(newSurfs), new/repaired solids=$stat(newSolids). Select the next face."]
     ::GeomCleanup::msg $msg
+    return $result
+}
+
+proc ::GeomCleanup::continuousCleanup {} {
+    variable ui
+    set completed 0
+    set failed 0
+    catch {hm_usermessage [::HWFlow::txt "连续几何清洗已启动：选择一个面并按中键执行；取消选择即可退出。" "Continuous geometry cleanup started: select one face and middle-click; cancel selection to exit."]}
+
+    while {1} {
+        set selectCode [catch {set seed [::GeomCleanup::selectedSurface]} selectErr]
+        if {$selectCode} {
+            incr failed
+            ::GeomCleanup::msg [::HWFlow::txt "选择无效：$selectErr；请重新选择一个面。" "Invalid selection: $selectErr; select one face again."]
+            continue
+        }
+        if {$seed eq ""} {
+            break
+        }
+
+        set runCode [catch {::GeomCleanup::processSurface $seed} runErr]
+        if {$runCode} {
+            incr failed
+            ::GeomCleanup::msg [::HWFlow::txt "面 $seed 执行失败：$runErr；已继续等待下一次选面。" "Surface $seed failed: $runErr; waiting for the next selection."]
+        } else {
+            incr completed
+        }
+    }
+
+    ::GeomCleanup::saveState
+    ::HWFlow::refreshBrowser
+    catch {hm_usermessage [::HWFlow::txt "连续几何清洗已退出：完成 $completed 次，失败 $failed 次。" "Continuous geometry cleanup exited: $completed completed, $failed failed."]}
+    ::GeomCleanup::msg [::HWFlow::txt "连续清洗退出：完成=$completed，失败=$failed。" "Continuous cleanup exited: completed=$completed, failed=$failed."]
+}
+
+proc ::GeomCleanup::main {} {
+    if {![::GeomCleanup::showPanel]} {
+        catch {hm_usermessage [::HWFlow::txt "几何清理已取消。" "Geometry Cleanup cancelled."]}
+        return
+    }
+    ::GeomCleanup::continuousCleanup
 }
 
 proc ::GeomCleanup::run {} {
