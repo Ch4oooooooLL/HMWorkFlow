@@ -396,6 +396,34 @@ proc ::SeamSurf::directionChange {a b c} {
     return [expr {acos($cosine) * 180.0 / acos(-1.0)}]
 }
 
+proc ::SeamSurf::vectorBetween {a b} {
+    return [list \
+        [expr {[lindex $b 0] - [lindex $a 0]}] \
+        [expr {[lindex $b 1] - [lindex $a 1]}] \
+        [expr {[lindex $b 2] - [lindex $a 2]}]]
+}
+
+proc ::SeamSurf::vectorAngle {u v} {
+    set ux [lindex $u 0]
+    set uy [lindex $u 1]
+    set uz [lindex $u 2]
+    set vx [lindex $v 0]
+    set vy [lindex $v 1]
+    set vz [lindex $v 2]
+    set un [expr {sqrt($ux*$ux + $uy*$uy + $uz*$uz)}]
+    set vn [expr {sqrt($vx*$vx + $vy*$vy + $vz*$vz)}]
+    if {$un <= 1.0e-12 || $vn <= 1.0e-12} {
+        return 0.0
+    }
+    set cosine [expr {($ux*$vx + $uy*$vy + $uz*$vz) / ($un*$vn)}]
+    if {$cosine > 1.0} {
+        set cosine 1.0
+    } elseif {$cosine < -1.0} {
+        set cosine -1.0
+    }
+    return [expr {acos($cosine) * 180.0 / acos(-1.0)}]
+}
+
 proc ::SeamSurf::featureParametersFromSamples {samples} {
     variable cfg
 
@@ -404,17 +432,16 @@ proc ::SeamSurf::featureParametersFromSamples {samples} {
         error [::HWFlow::txt "线采样点不足，无法识别几何特征。" "Insufficient line samples for feature detection."]
     }
     set params [list [lindex [lindex $samples 0] 0]]
-    set regularStride [expr {int(ceil(($count - 1) / 8.0))}]
-    if {$regularStride < 1} {
-        set regularStride 1
-    }
+    set referenceDirection [::SeamSurf::vectorBetween \
+        [lindex [lindex $samples 0] 1] \
+        [lindex [lindex $samples 1] 1]]
     for {set i 1} {$i < $count - 1} {incr i} {
-        set a [lindex [lindex $samples [expr {$i - 1}]] 1]
-        set b [lindex [lindex $samples $i] 1]
-        set c [lindex [lindex $samples [expr {$i + 1}]] 1]
-        if {$i % $regularStride == 0 ||
-            [::SeamSurf::directionChange $a $b $c] >= $cfg(feature_angle)} {
+        set currentDirection [::SeamSurf::vectorBetween \
+            [lindex [lindex $samples $i] 1] \
+            [lindex [lindex $samples [expr {$i + 1}]] 1]]
+        if {[::SeamSurf::vectorAngle $referenceDirection $currentDirection] >= $cfg(feature_angle)} {
             lappend params [lindex [lindex $samples $i] 0]
+            set referenceDirection $currentDirection
         }
     }
     lappend params [lindex [lindex $samples end] 0]
@@ -678,6 +705,14 @@ proc ::SeamSurf::projectedCoords {projectedSamples} {
     return $coords
 }
 
+proc ::SeamSurf::sourceCoords {projectedSamples} {
+    set coords {}
+    foreach item $projectedSamples {
+        lappend coords [lindex $item 1]
+    }
+    return $coords
+}
+
 proc ::SeamSurf::trimSurfaceWithProjectedLine {targetSurf projectedCoords} {
     variable cfg
 
@@ -714,26 +749,52 @@ proc ::SeamSurf::flattenFeaturePairs {pairs} {
     return $values
 }
 
+proc ::SeamSurf::internalFeaturePairs {pairs} {
+    if {[llength $pairs] <= 2} {
+        return {}
+    }
+    return [lrange $pairs 1 end-1]
+}
+
 proc ::SeamSurf::createRuledSurfaces {lineA lineB featurePairs} {
     if {[llength $featurePairs] < 2} {
         error [::HWFlow::txt "至少需要两组对应特征点才能创建焊缝。" "At least two feature pairs are required to create a seam."]
     }
 
-    set linkValues [::SeamSurf::flattenFeaturePairs $featurePairs]
+    # The two end pairs are already represented by the line boundaries. Passing
+    # them as linking coordinates creates degenerate links in HyperMesh,
+    # especially for a simple pair of straight lines.
+    set internalPairs [::SeamSurf::internalFeaturePairs $featurePairs]
+    set linkValues [::SeamSurf::flattenFeaturePairs $internalPairs]
     set before [::SeamSurf::allEntityIds surfs 2]
-    eval *createdoublearray [llength $linkValues] $linkValues
+    set beforeLatest [::SeamSurf::latestEntityId {surfs surfaces}]
+    if {[llength $linkValues] > 0} {
+        eval *createdoublearray [llength $linkValues] $linkValues
+    }
+    catch {*surfacemode 4}
+    catch {*createlist lines 1}
     *createlist lines 1 $lineA $lineB
     catch {*clearmark lines 2}
     set code [catch {
-        # Linear ruled interpolation with explicit link pairs. Each link becomes
-        # a surface edge, forcing one-to-one segmentation at geometric features.
-        *surfacecreateruled 1 1 [llength $linkValues] 2 1 1 0
+        if {[llength $linkValues] == 0} {
+            # Official standard form for two simple boundaries.
+            *surfacecreateruled 1 1 0 2 1 0 0
+        } else {
+            # Internal feature links become separating edges in the result.
+            *surfacecreateruled 1 1 [llength $linkValues] 2 1 1 0
+        }
     } err opts]
     catch {*clearmark lines 2}
     if {$code} {
         return -options $opts $err
     }
     set created [::SeamSurf::newIds $before [::SeamSurf::allEntityIds surfs 2]]
+    if {[llength $created] == 0} {
+        set afterLatest [::SeamSurf::latestEntityId {surfs surfaces}]
+        if {$afterLatest ne "" && $afterLatest != 0 && $afterLatest != $beforeLatest} {
+            set created [list $afterLatest]
+        }
+    }
     if {[llength $created] == 0} {
         error [::HWFlow::txt "ruled 命令未创建焊缝面。" "The ruled command did not create seam surfaces."]
     }
@@ -977,22 +1038,22 @@ proc ::SeamSurf::performLineSurface {sourceLine targetSurf sourceSurf thickness}
     set pairs [lindex $featureData 0]
     set projectedSamples [lindex $featureData 1]
     set maxGap [lindex $featureData 2]
+    set sourceCoords [::SeamSurf::sourceCoords $projectedSamples]
     set projectedCoords [::SeamSurf::projectedCoords $projectedSamples]
 
     set component [::SeamSurf::ensureSeamComponent $thickness]
     set compName [lindex $component 0]
-    # Build the ruled boundary while the original target surface ID is still
-    # valid. The actual ruled operation still runs only after trim completes.
-    set ruledTargetLine [::SeamSurf::createLineFromCoords $projectedCoords $targetSurf]
     set trimInfo [::SeamSurf::trimSurfaceWithProjectedLine $targetSurf $projectedCoords]
     set trimLine [lindex $trimInfo 0]
     set targetSurfs [lindex $trimInfo 1]
 
-    # The ruled boundary is separate but geometrically identical to the trim
-    # line because some HyperMesh builds consume the marked line during trim.
-    set seamSurfs [::SeamSurf::createRuledSurfaces $sourceLine $ruledTargetLine $pairs]
+    # Use independent free construction lines after trim. This prevents the
+    # topology operation from consuming or splitting the ruled boundary.
+    set ruledSourceLine [::SeamSurf::createLineFromCoords $sourceCoords]
+    set ruledTargetLine [::SeamSurf::createLineFromCoords $projectedCoords]
+    set seamSurfs [::SeamSurf::createRuledSurfaces $ruledSourceLine $ruledTargetLine $pairs]
     ::SeamSurf::equivalence $seamSurfs [list $sourceSurf] $targetSurfs
-    ::SeamSurf::deleteLines [list $trimLine $ruledTargetLine]
+    ::SeamSurf::deleteLines [list $trimLine $ruledSourceLine $ruledTargetLine]
     catch {::HWFlow::activateAndShowComponent $compName 0}
 
     incr stat(createdOperations)
@@ -1006,6 +1067,7 @@ proc ::SeamSurf::performLineSurface {sourceLine targetSurf sourceSurf thickness}
 
 proc ::SeamSurf::performLineLine {lineA lineB surfA surfB thickness} {
     variable stat
+    variable cfg
 
     set featureData [::SeamSurf::lineLineFeaturePairs $lineA $lineB]
     set pairs [lindex $featureData 0]
@@ -1013,8 +1075,23 @@ proc ::SeamSurf::performLineLine {lineA lineB surfA surfB thickness} {
     set reverseB [lindex $featureData 2]
     set component [::SeamSurf::ensureSeamComponent $thickness]
     set compName [lindex $component 0]
-    set seamSurfs [::SeamSurf::createRuledSurfaces $lineA $lineB $pairs]
+    set coordsA {}
+    set coordsB {}
+    foreach sample [::SeamSurf::lineSamples $lineA $cfg(line_sync_divisions)] {
+        lappend coordsA [lindex $sample 1]
+    }
+    set samplesB [::SeamSurf::lineSamples $lineB $cfg(line_sync_divisions)]
+    if {$reverseB} {
+        set samplesB [lreverse $samplesB]
+    }
+    foreach sample $samplesB {
+        lappend coordsB [lindex $sample 1]
+    }
+    set ruledLineA [::SeamSurf::createLineFromCoords $coordsA]
+    set ruledLineB [::SeamSurf::createLineFromCoords $coordsB]
+    set seamSurfs [::SeamSurf::createRuledSurfaces $ruledLineA $ruledLineB $pairs]
     ::SeamSurf::equivalence $seamSurfs [list $surfA] [list $surfB]
+    ::SeamSurf::deleteLines [list $ruledLineA $ruledLineB]
     catch {::HWFlow::activateAndShowComponent $compName 0}
 
     incr stat(createdOperations)
