@@ -72,7 +72,7 @@ proc ::CompWorkflow::showCategoryPanel {} {
 
     catch {destroy .comp_category}
     set w .comp_category
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "组件分类" "Component Type Classification"] v$VERSION"
     wm resizable $w 0 0
 
@@ -133,7 +133,7 @@ proc ::CompWorkflow::showMaterialPanel {} {
 
     catch {destroy .material_assign}
     set w .material_assign
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "材料标识" "Material Assignment"] v$VERSION"
     wm resizable $w 0 0
 
@@ -248,7 +248,7 @@ proc ::CompWorkflow::showMaterialEditor {} {
     set path [::HWFlow::materialFile]
     catch {destroy .material_editor}
     set w .material_editor
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w [::HWFlow::txt "编辑材料库" "Edit Material Library"]
     wm resizable $w 1 1
 

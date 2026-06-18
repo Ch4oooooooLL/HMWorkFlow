@@ -200,6 +200,21 @@ proc ::HWFlow::uiFont {{role default}} {
     }
 }
 
+proc ::HWFlow::keepWindowTopmost {w} {
+    if {[llength [info commands winfo]] == 0 || ![winfo exists $w]} {
+        return
+    }
+    catch {wm attributes $w -topmost 1}
+}
+
+proc ::HWFlow::createTopLevel {w} {
+    toplevel $w
+    ::HWFlow::keepWindowTopmost $w
+    bind $w <Map> [list ::HWFlow::keepWindowTopmost $w]
+    after idle [list ::HWFlow::keepWindowTopmost $w]
+    return $w
+}
+
 proc ::HWFlow::configDir {} {
     variable CONFIG_DIR
     if {![file isdirectory $CONFIG_DIR]} {
@@ -1107,7 +1122,7 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
     set w $progressWin
     catch {destroy $w}
     if {[catch {
-        toplevel $w
+        ::HWFlow::createTopLevel $w
         wm title $w $title
         wm resizable $w 0 0
 
@@ -1179,8 +1194,8 @@ proc ::HWFlow::progressForceVisible {} {
     if {![winfo exists $progressWin]} {
         return 0
     }
-    # Intentionally do not raise, focus, or set topmost here. Progress updates
-    # must not steal foreground focus while the user is working elsewhere.
+    # Intentionally do not raise or focus here. The window's persistent topmost
+    # state is configured when the toplevel is created.
     catch {update idletasks}
     catch {update}
     return 1
@@ -1205,7 +1220,7 @@ proc ::HWFlow::progressOpenMinimal {title {message ""}} {
     set w $progressWin
     catch {destroy $w}
     if {[catch {
-        toplevel $w
+        ::HWFlow::createTopLevel $w
         wm title $w $title
         wm resizable $w 0 0
         frame $w.main -padx 14 -pady 12

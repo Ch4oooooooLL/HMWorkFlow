@@ -352,7 +352,7 @@ proc ::CastingTetMesh::showPanel {} {
 
     catch {destroy .casting_tetramesh}
     set w .casting_tetramesh
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Casting TetraMesh" "Casting TetraMesh"] v$VERSION"
     wm resizable $w 0 0
 

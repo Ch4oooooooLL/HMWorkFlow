@@ -86,7 +86,7 @@ proc ::MidSurf::showPanel {} {
     set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
 
     set w .midsurf_dlg
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] v$VERSION"
     wm resizable $w 0 0
 

@@ -214,7 +214,7 @@ proc ::RB2W::showPanel {} {
     set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
 
     set w .rb2w_panel
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Shell Washer Hole RBE2" "Shell Washer Hole RBE2"] v$VERSION"
     wm resizable $w 0 0
 

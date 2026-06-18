@@ -183,7 +183,7 @@ proc ::GeomCleanup::showPanel {} {
 
     catch {destroy .geometry_cleanup}
     set w .geometry_cleanup
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Geometry Cleanup" "Geometry Cleanup"] v$VERSION"
     wm resizable $w 0 0
 

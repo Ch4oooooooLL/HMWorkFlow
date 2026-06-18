@@ -192,7 +192,7 @@ proc ::SeamSurf::showPanel {} {
 
     catch {destroy .seam_surface}
     set w .seam_surface
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] v$VERSION"
     wm resizable $w 0 0
 
@@ -451,7 +451,7 @@ proc ::SeamSurf::askThickness {label defaultValue reason} {
     }
 
     set w .seam_thickness
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w [::HWFlow::txt "输入厚度" "Input Thickness"]
     wm resizable $w 0 0
 
@@ -581,7 +581,7 @@ proc ::SeamSurf::chooseFromList {title items labels} {
     set ui(pickValue) [lindex $items 0]
 
     set w .seam_pick
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w $title
     wm resizable $w 0 0
 

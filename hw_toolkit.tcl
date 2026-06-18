@@ -242,7 +242,7 @@ proc ::HWToolkit::showPanel {} {
 
     catch {destroy .hwtoolkit}
     set w .hwtoolkit
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "HyperMesh Toolkit"
     wm resizable $w 0 0
 
@@ -295,8 +295,6 @@ proc ::HWToolkit::showPanel {} {
     catch {wm deiconify $w}
     catch {raise $w}
     catch {focus -force $w}
-    catch {wm attributes $w -topmost 1}
-    catch {after 250 [list catch [list wm attributes $w -topmost 0]]}
     tkwait window $w
 }
 

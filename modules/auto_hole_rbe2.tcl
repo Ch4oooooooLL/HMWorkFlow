@@ -107,7 +107,7 @@ proc ::AutoHoleRBE2::showPanel {} {
     set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
 
     set w .autoHoleRBE2
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Solid Through-Hole RBE2" "Solid Through-Hole RBE2"] v$VERSION"
     wm resizable $w 0 0
 

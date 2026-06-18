@@ -302,7 +302,7 @@ proc ::BatchMeshWasher::showPanel {} {
 
     catch {destroy .batch_mesh_washer}
     set w .batch_mesh_washer
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Sheet BatchMesh + Washer" "Sheet BatchMesh + Washer"] v$VERSION"
     wm resizable $w 0 0
 

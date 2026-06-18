@@ -198,7 +198,7 @@ proc ::RB2Bolt::showDialog {} {
 
     catch {destroy .rb2bolt_dlg}
     set w .rb2bolt_dlg
-    toplevel $w
+    ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] v$VERSION"
     wm resizable $w 0 0
 
