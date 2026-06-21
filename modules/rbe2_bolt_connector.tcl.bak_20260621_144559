@@ -56,23 +56,16 @@ namespace eval ::RB2Bolt {
     variable done 0
     variable _sortAxis 2
     variable beamSegmentIndex
-    variable compIdCache
-    variable currentOutputComp ""
-    variable bulkCreateMode 0
-    variable bulkTouchedOutputComps {}
 }
 
 # ------------------------- small utilities ---------------------------------
 proc ::RB2Bolt::msg {txt} {
-    variable bulkCreateMode
     catch {hm_usermessage $txt}
     catch {puts $txt}
     if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
         catch {::HWFlow::progressAppend "RB2Bolt: $txt"}
     }
-    if {!$bulkCreateMode} {
-        catch {update}
-    }
+    catch {update}
 }
 
 proc ::RB2Bolt::backToHome {w} {
@@ -269,11 +262,9 @@ proc ::RB2Bolt::showDialog {} {
     pack $w.btn -fill x
 
     button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command {set ::RB2Bolt::done -2}
-    button $w.btn.unused -text [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -width 22 -command {set ::RB2Bolt::done 2}
     button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command {set ::RB2Bolt::done 1}
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
-    pack $w.btn.unused -side right -padx 4
 
     bind $w <Return> {set ::RB2Bolt::done 1}
     bind $w <Escape> {set ::RB2Bolt::done -1}
@@ -292,11 +283,9 @@ proc ::RB2Bolt::showDialog {} {
     catch {destroy $w}
     if {$goHome} {
         ::RB2Bolt::backToHome ""
-        return ""
+        return 0
     }
-    if {$done == 1} {return "create"}
-    if {$done == 2} {return "findUnusedShellRBE2"}
-    return ""
+    return [expr {$done == 1}]
 }
 
 proc ::RB2Bolt::validateParams {} {
@@ -849,133 +838,6 @@ proc ::RB2Bolt::enableInteractiveBrowserUpdates {} {
     catch {update idletasks}
 }
 
-proc ::RB2Bolt::rememberBulkTouchedComp {compName} {
-    variable bulkTouchedOutputComps
-    if {$compName eq ""} {return}
-    if {[lsearch -exact $bulkTouchedOutputComps $compName] < 0} {
-        lappend bulkTouchedOutputComps $compName
-    }
-}
-
-proc ::RB2Bolt::beginBulkCreate {} {
-    variable currentOutputComp
-    variable bulkCreateMode
-    variable bulkTouchedOutputComps
-
-    set bulkCreateMode 1
-    set currentOutputComp ""
-    set bulkTouchedOutputComps {}
-
-    catch {hm_blockbrowserupdate 1}
-    catch {*setoption block_browser_update=1}
-    catch {*setoption block_redraw=1}
-    catch {*setoption block_messages=1}
-    catch {hm_blockredraw 1}
-    catch {hm_blockmessages 1}
-    catch {hm_blockerrormessages 1}
-    catch {hm_commandfilestate 0}
-}
-
-proc ::RB2Bolt::endBulkCreate {} {
-    variable bulkCreateMode
-    variable currentOutputComp
-    variable bulkTouchedOutputComps
-
-    catch {hm_commandfilestate 1}
-    catch {hm_blockerrormessages 0}
-    catch {hm_blockmessages 0}
-    catch {hm_blockredraw 0}
-    catch {*setoption block_messages=0}
-    catch {*setoption block_redraw=0}
-    catch {*setoption block_browser_update=0}
-    catch {hm_blockbrowserupdate 0}
-
-    set touched [::RB2Bolt::uniqList $bulkTouchedOutputComps]
-    if {[llength $touched] > 0} {
-        if {[llength [info commands ::HWFlow::activateAndShowComponent]] > 0} {
-            foreach compName $touched {
-                catch {::HWFlow::activateAndShowComponent $compName 0}
-            }
-            if {[llength [info commands ::HWFlow::refreshBrowser]] > 0} {
-                catch {::HWFlow::refreshBrowser}
-            }
-        } else {
-            foreach compName $touched {
-                catch {::RB2Bolt::refreshComponentBrowser $compName}
-            }
-        }
-    }
-
-    catch {hm_redraw}
-    catch {update idletasks}
-    catch {update}
-
-    set currentOutputComp ""
-    set bulkTouchedOutputComps {}
-    set bulkCreateMode 0
-}
-
-proc ::RB2Bolt::ensureComponentFast {name} {
-    variable compIdCache
-
-    if {![array exists compIdCache]} {
-        catch {unset compIdCache}
-        array set compIdCache {}
-    }
-    ::RB2Bolt::rememberBulkTouchedComp $name
-
-    if {[info exists compIdCache($name)] && $compIdCache($name) ne "" && $compIdCache($name) != 0} {
-        return $compIdCache($name)
-    }
-
-    set id ""
-    if {![catch {hm_getvalue comps name=$name dataname=id} id] && $id ne "" && $id != 0} {
-        set compIdCache($name) $id
-        return $id
-    }
-
-    set err1 ""
-    set err2 ""
-    set color [expr {1 + int(rand() * 63)}]
-    if {$color >= 11} {incr color}
-    if {[llength [info commands ::HWFlow::randomComponentColor]] > 0} {
-        set color [::HWFlow::randomComponentColor]
-    }
-    set createCode [catch {*createentity comps includeid=0 name=$name} err1]
-    if {$createCode} {
-        set createCode [catch {*createentity components includeid=0 name=$name} err1]
-    }
-    if {$createCode} {
-        set createCode [catch {*collectorcreateonly comps $name "" $color} err2]
-    }
-    if {$createCode} {
-        set createCode [catch {*collectorcreateonly components $name "" $color} err2]
-    }
-    if {$createCode} {
-        error [::HWFlow::txt "无法创建组件 $name：$err1 / $err2" "Cannot create component $name: $err1 / $err2"]
-    }
-
-    set id 0
-    catch {set id [hm_getvalue comps name=$name dataname=id]}
-    if {$id ne "" && $id != 0} {
-        foreach etype {comps components} {
-            catch {*setvalue $etype id=$id color=$color}
-        }
-    }
-    set compIdCache($name) $id
-    return $id
-}
-
-proc ::RB2Bolt::setCurrentOutputComponentFast {compName} {
-    variable currentOutputComp
-
-    if {$currentOutputComp eq $compName} {return}
-    ::RB2Bolt::ensureComponentFast $compName
-    catch {*currentcollector component $compName}
-    catch {*currentcollector components $compName}
-    set currentOutputComp $compName
-}
-
 proc ::RB2Bolt::ensureComponent {name} {
     set id ""
     if {![catch {hm_getvalue comps name=$name dataname=id} id] && $id ne "" && $id != 0} {
@@ -986,13 +848,8 @@ proc ::RB2Bolt::ensureComponent {name} {
     }
 
     if {[llength [info commands ::HWFlow::createComponent]] > 0} {
-        set id [::HWFlow::createComponent $name]
+        set id [::HWFlow::createComponent $name 11]
     } else {
-        set color [expr {1 + int(rand() * 63)}]
-        if {$color >= 11} {incr color}
-        if {[llength [info commands ::HWFlow::randomComponentColor]] > 0} {
-            set color [::HWFlow::randomComponentColor]
-        }
         ::RB2Bolt::enableInteractiveBrowserUpdates
         set histName "Created Component $name"
         catch {*startnotehistorystate $histName}
@@ -1001,10 +858,10 @@ proc ::RB2Bolt::ensureComponent {name} {
             set createCode [catch {*createentity components includeid=0 name=$name} err1]
         }
         if {$createCode} {
-            set createCode [catch {*collectorcreateonly comps $name "" $color} err2]
+            set createCode [catch {*collectorcreateonly comps $name "" 11} err2]
         }
         if {$createCode} {
-            set createCode [catch {*collectorcreateonly components $name "" $color} err2]
+            set createCode [catch {*collectorcreateonly components $name "" 11} err2]
         }
         if {$createCode} {
             catch {*endnotehistorystate $histName}
@@ -1013,11 +870,6 @@ proc ::RB2Bolt::ensureComponent {name} {
         catch {*endnotehistorystate $histName}
         set id 0
         catch {set id [hm_getvalue comps name=$name dataname=id]}
-        if {$id ne "" && $id != 0} {
-            foreach etype {comps components} {
-                catch {*setvalue $etype id=$id color=$color}
-            }
-        }
     }
     catch {*currentcollector component $name}
     ::RB2Bolt::refreshComponentBrowser $name
@@ -1269,87 +1121,6 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
     return 1
 }
 
-proc ::RB2Bolt::createBeamBetweenRecords {r1 r2 elemType compName} {
-    variable P
-
-    set n1 [lindex $r1 1]
-    set n2 [lindex $r2 1]
-    set x1 [lindex $r1 2]
-    set y1 [lindex $r1 3]
-    set z1 [lindex $r1 4]
-    set x2 [lindex $r2 2]
-    set y2 [lindex $r2 3]
-    set z2 [lindex $r2 4]
-
-    set dx [expr {$x2 - $x1}]
-    set dy [expr {$y2 - $y1}]
-    set dz [expr {$z2 - $z1}]
-    set len [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
-    if {$len <= $P(minBeamLength)} {return 0}
-
-    set existing [::RB2Bolt::existingBeamSegment $n1 $n2 $elemType $compName]
-    if {[lindex $existing 0]} {
-        return -1
-    }
-
-    ::RB2Bolt::setCurrentOutputComponentFast $compName
-
-    set uz [expr {abs($dz / $len)}]
-    if {$uz < 0.90} {
-        set ov {0.0 0.0 1.0}
-    } else {
-        set ov {0.0 1.0 0.0}
-    }
-    if {[catch {*createvector 1 [lindex $ov 0] [lindex $ov 1] [lindex $ov 2]}]} {
-        return 0
-    }
-
-    if {$P(propName) ne ""} {
-        set propCandidates [list $P(propName)]
-    } else {
-        set propCandidates [list 0 ""]
-    }
-
-    foreach prop $propCandidates {
-        set beforeElem ""
-        catch {set beforeElem [hm_latestentityid elems]}
-        if {![catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop 0 0 0 0 0 0 0 0}]} {
-            set elemId ""
-            catch {set elemId [hm_latestentityid elems]}
-            if {$elemId eq $beforeElem} { set elemId "" }
-            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
-            return 1
-        }
-
-        set beforeElem ""
-        catch {set beforeElem [hm_latestentityid elems]}
-        if {![catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop}]} {
-            set elemId ""
-            catch {set elemId [hm_latestentityid elems]}
-            if {$elemId eq $beforeElem} { set elemId "" }
-            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
-            return 1
-        }
-    }
-
-    catch {*createlist nodes 1}
-    if {[catch {*createlist nodes 1 $n1 $n2}]} {
-        return 0
-    }
-    set cmd [list *createelements1d nodes list=1 elemsize=$len elemtype=$elemType useshell=0 breakangle=0 elemdensity=1 useelemdensity=0 biasdensity=0 biasstyle=0]
-    if {$P(propName) ne ""} {lappend cmd property=$P(propName)}
-    set beforeElem ""
-    catch {set beforeElem [hm_latestentityid elems]}
-    if {[catch {eval $cmd}]} {
-        return 0
-    }
-    set elemId ""
-    catch {set elemId [hm_latestentityid elems]}
-    if {$elemId eq $beforeElem} { set elemId "" }
-    ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
-    return 1
-}
-
 proc ::RB2Bolt::pairGroupRecords {g axis} {
     # Build adjacent pairs after sorting along the bolt axis.
     # For sorted RBE2 centers 1,2,3,4, this creates 1-2, 2-3, 3-4.
@@ -1436,395 +1207,16 @@ proc ::RB2Bolt::createBolts {groups} {
     return [list $created $skipped $pairTotal $spatialOnlyGroups $skippedExisting]
 }
 
-proc ::RB2Bolt::buildBoltPairList {groups} {
-    variable P
-    set boltPairs {}
-    set pairTotal 0
-    set skipped 0
-    set spatialOnlyGroups 0
-    set outputComps {}
-    set groupCount [llength $groups]
-    set gi 0
-
-    foreach item $groups {
-        incr gi
-        if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($gi == 1 || $gi == $groupCount || [expr {$gi % 100}] == 0)} {
-            set pct [expr {55.0 + 10.0 * ($gi / double($groupCount))}]
-            catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "RBE2 Bolt Connector 正在执行" "RBE2 Bolt Connector running"] \
-                [::HWFlow::txt "正在生成螺栓连接段：$gi / $groupCount" "Building bolt pair list: $gi / $groupCount"] \
-                [expr {$gi == $groupCount}]}
-        }
-
-        set axis [lindex $item 0]
-        set g [lindex $item 1]
-        set pairs [pairGroupRecords $g $axis]
-        incr pairTotal [llength $pairs]
-        set unpaired [expr {([llength $g] > 1 ? ([llength $g] - 1) : 0) - [llength $pairs]}]
-
-        if {![groupHasPlanar $g]} {
-            incr spatialOnlyGroups
-            incr skipped [expr {[llength $pairs] + $unpaired}]
-            continue
-        }
-
-        set dia [groupDiameter $g]
-        if {$dia <= 0} {set dia UNKNOWN}
-        set compName [safeName [format "%s_D%s_%s" $P(compPrefix) $dia $P(elemType)]]
-
-        if {[llength $pairs] > 0} {
-            lappend outputComps $compName
-        }
-        foreach pr $pairs {
-            lappend boltPairs [list $compName $axis $gi [lindex $pr 0] [lindex $pr 1]]
-        }
-        incr skipped $unpaired
-    }
-
-    return [dict create \
-        boltPairs $boltPairs \
-        pairTotal $pairTotal \
-        skipped $skipped \
-        spatialOnlyGroups $spatialOnlyGroups \
-        outputComps [::RB2Bolt::uniqList $outputComps]]
-}
-
-proc ::RB2Bolt::createBoltsFast {groups} {
-    variable P
-    variable compIdCache
-
-    catch {unset compIdCache}
-    array set compIdCache {}
-
-    set tPair0 [clock milliseconds]
-    set pairInfo [::RB2Bolt::buildBoltPairList $groups]
-    set tPair1 [clock milliseconds]
-    set boltPairs [dict get $pairInfo boltPairs]
-    set pairTotal [dict get $pairInfo pairTotal]
-    set skipped [dict get $pairInfo skipped]
-    set spatialOnlyGroups [dict get $pairInfo spatialOnlyGroups]
-    set outputComps [dict get $pairInfo outputComps]
-    set pairMs [expr {$tPair1 - $tPair0}]
-
-    if {$P(dryRun)} {
-        msg [::HWFlow::txt "boltPairs 生成耗时：$pairMs ms；dryRun=1，未创建 $P(elemType)。" "Bolt pair generation time: $pairMs ms; dryRun=1, no $P(elemType) created."]
-        msg [::HWFlow::txt "创建统计：created=0，skippedExisting=0，skipped=$skipped，pairTotal=$pairTotal" "Creation stats: created=0, skippedExisting=0, skipped=$skipped, pairTotal=$pairTotal"]
-        return [list 0 $skipped $pairTotal $spatialOnlyGroups 0]
-    }
-
-    set boltPairs [lsort -index 0 $boltPairs]
-    foreach compName $outputComps {
-        ::RB2Bolt::ensureComponentFast $compName
-    }
-
-    set created 0
-    set skippedExisting 0
-    set pairCount [llength $boltPairs]
-    set tCreate0 [clock milliseconds]
-    ::RB2Bolt::beginBulkCreate
-    set createCode [catch {
-        set pi 0
-        foreach boltPair $boltPairs {
-            incr pi
-            if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($pi == 1 || $pi == $pairCount || [expr {$pi % 200}] == 0)} {
-                set pct [expr {$pairCount > 0 ? 70.0 + 25.0 * ($pi / double($pairCount)) : 95.0}]
-                catch {::HWFlow::progressUpdate $pct \
-                    [::HWFlow::txt "RBE2 Bolt Connector 正在执行" "RBE2 Bolt Connector running"] \
-                    [::HWFlow::txt "正在创建 $P(elemType)：$pi / $pairCount" "Creating $P(elemType): $pi / $pairCount"] \
-                    [expr {$pi == $pairCount}]}
-            }
-
-            set compName [lindex $boltPair 0]
-            set r1 [lindex $boltPair 3]
-            set r2 [lindex $boltPair 4]
-            set createResult [::RB2Bolt::createBeamBetweenRecords $r1 $r2 $P(elemType) $compName]
-            if {$createResult > 0} {
-                incr created
-            } elseif {$createResult < 0} {
-                incr skippedExisting
-            } else {
-                incr skipped
-            }
-        }
-    } createErr createOpts]
-    set endCode [catch {::RB2Bolt::endBulkCreate} endErr endOpts]
-    set tCreate1 [clock milliseconds]
-
-    if {$createCode} {
-        return -options $createOpts $createErr
-    }
-    if {$endCode} {
-        return -options $endOpts $endErr
-    }
-
-    set createMs [expr {$tCreate1 - $tCreate0}]
-    msg [::HWFlow::txt "boltPairs 生成耗时：$pairMs ms；$P(elemType) 创建耗时：$createMs ms。" "Bolt pair generation time: $pairMs ms; $P(elemType) creation time: $createMs ms."]
-    msg [::HWFlow::txt "创建统计：created=$created，skippedExisting=$skippedExisting，skipped=$skipped，pairTotal=$pairTotal" "Creation stats: created=$created, skippedExisting=$skippedExisting, skipped=$skipped, pairTotal=$pairTotal"]
-
-    return [list $created $skipped $pairTotal $spatialOnlyGroups $skippedExisting]
-}
-
-# ------------------------- unused shell RBE2 cleanup aid -------------------
-proc ::RB2Bolt::usedRBE2ElementIdsFromGroups {groups} {
-    array unset used
-    array set used {}
-
-    foreach item $groups {
-        set axis [lindex $item 0]
-        set g [lindex $item 1]
-        if {![::RB2Bolt::groupHasPlanar $g]} {
-            continue
-        }
-
-        foreach pr [::RB2Bolt::pairGroupRecords $g $axis] {
-            set r1 [lindex $pr 0]
-            set r2 [lindex $pr 1]
-            set used([lindex $r1 0]) 1
-            set used([lindex $r2 0]) 1
-        }
-    }
-
-    set out {}
-    foreach eid [array names used] {
-        lappend out $eid
-    }
-    return [::RB2Bolt::uniqueIntegerIds $out]
-}
-
-proc ::RB2Bolt::unusedShellRBE2Records {records groups} {
-    array unset used
-    array set used {}
-    foreach eid [::RB2Bolt::usedRBE2ElementIdsFromGroups $groups] {
-        set used($eid) 1
-    }
-
-    set out {}
-    foreach rec $records {
-        set eid [lindex $rec 0]
-        if {![::RB2Bolt::recIsPlanar $rec]} {
-            continue
-        }
-        if {![info exists used($eid)]} {
-            lappend out $rec
-        }
-    }
-    return $out
-}
-
-proc ::RB2Bolt::rbe2ElementIdsFromRecords {records} {
-    set out {}
-    foreach rec $records {
-        lappend out [lindex $rec 0]
-    }
-    return [::RB2Bolt::uniqueIntegerIds $out]
-}
-
-proc ::RB2Bolt::deleteComponentByName {compName} {
-    set markType [::RB2Bolt::markComponentByName $compName 2]
-    if {$markType eq ""} {
-        return 0
-    }
-    if {[catch {*deletemark $markType 2}]} {
-        catch {*clearmark $markType 2}
-        return 0
-    }
-    catch {*clearmark $markType 2}
-    return 1
-}
-
-proc ::RB2Bolt::createMarkerPointOrNode {x y z} {
-    set beforePoint ""
-    catch {set beforePoint [hm_latestentityid points]}
-    if {![catch {*createpoint $x $y $z 0}]} {
-        set pointId ""
-        catch {set pointId [hm_latestentityid points]}
-        if {$pointId ne "" && $pointId != 0 && $pointId ne $beforePoint} {
-            return [list point $pointId]
-        }
-        return [list point ""]
-    }
-
-    set beforeNode ""
-    catch {set beforeNode [hm_latestentityid nodes]}
-    if {![catch {*createnode $x $y $z 0 0 0}]} {
-        set nodeId ""
-        catch {set nodeId [hm_latestentityid nodes]}
-        if {$nodeId ne "" && $nodeId != 0 && $nodeId ne $beforeNode} {
-            return [list node $nodeId]
-        }
-        return [list node ""]
-    }
-
-    return [list "" ""]
-}
-
-proc ::RB2Bolt::createUnusedShellRBE2Markers {records} {
-    set compName "UNUSED_SHELL_RBE2_MARKERS"
-    ::RB2Bolt::deleteComponentByName $compName
-    ::RB2Bolt::ensureComponent $compName
-    catch {*currentcollector component $compName}
-    catch {*currentcollector components $compName}
-
-    set pointCount 0
-    set nodeCount 0
-    set failed 0
-    foreach rec $records {
-        set made [::RB2Bolt::createMarkerPointOrNode [lindex $rec 2] [lindex $rec 3] [lindex $rec 4]]
-        switch -- [lindex $made 0] {
-            point {incr pointCount}
-            node {incr nodeCount}
-            default {incr failed}
-        }
-    }
-
-    catch {*setvalue comps name=$compName color=2}
-    catch {*setvalue components name=$compName color=2}
-    ::RB2Bolt::refreshComponentBrowser $compName
-    return [dict create component $compName points $pointCount nodes $nodeCount failed $failed]
-}
-
-proc ::RB2Bolt::markElementsForManualDelete {elemIds} {
-    set elemIds [::RB2Bolt::uniqueIntegerIds $elemIds]
-    if {[llength $elemIds] == 0} {
-        return ""
-    }
-
-    foreach etype {elems elements} {
-        catch {*clearmark $etype 1}
-        catch {*clearmark $etype 2}
-    }
-
-    foreach etype {elems elements} {
-        if {![catch {eval [concat [list *createmark $etype 1 "by id only"] $elemIds]}]} {
-            set got {}
-            catch {set got [hm_getmark $etype 1]}
-            if {[llength $got] > 0} {
-                catch {*marktousermark $etype 1}
-                return $etype
-            }
-        }
-
-        catch {*clearmark $etype 1}
-        if {![catch {eval [concat [list *createmark $etype 1] $elemIds]}]} {
-            set got {}
-            catch {set got [hm_getmark $etype 1]}
-            if {[llength $got] > 0} {
-                catch {*marktousermark $etype 1}
-                return $etype
-            }
-        }
-    }
-    return ""
-}
-
-proc ::RB2Bolt::enterElementDeleteMode {elemIds} {
-    set markType [::RB2Bolt::markElementsForManualDelete $elemIds]
-    if {$markType eq ""} {
-        return 0
-    }
-
-    catch {hm_usermessage [::HWFlow::txt \
-        "未用 Shell RBE2 已自动选入 Delete 面板；请手动确认需要删除的单元。" \
-        "Unused shell RBE2 elements were preselected for the Delete panel; manually confirm which elements to delete."]}
-
-    foreach panelName {delete Delete} {
-        if {![catch {hm_callpanel $panelName}]} {
-            return 1
-        }
-        if {![catch {hm_pushpanel $panelName}]} {
-            return 1
-        }
-        if {![catch {hm_setpanelproc [list hm_callpanel $panelName]}]} {
-            return 1
-        }
-    }
-    return 0
-}
-
-proc ::RB2Bolt::runFindUnusedShellRBE2 {} {
-    variable P
-
-    msg [::HWFlow::txt "开始检测未用 Shell RBE2。" "Started finding unused shell RBE2 elements."]
-    set elemIds [selectedElementIds]
-    if {[llength $elemIds] == 0} {
-        ::RB2Bolt::clearSelectionMarks
-        tk_messageBox -icon warning -title [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -message [::HWFlow::txt "选择范围内未找到 RBE2 候选单元。" "No RBE2 candidate elements were found in the selection scope."]
-        return
-    }
-
-    set progressOpened 0
-    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
-        set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] \
-            [::HWFlow::txt "准备读取 RBE2 单元..." "Preparing to read RBE2 elements..."] \
-            0]
-    }
-
-    set records [collectRBE2Records $elemIds]
-    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
-        catch {::HWFlow::progressUpdate 55.0 \
-            [::HWFlow::txt "检测未用 Shell RBE2 正在执行" "Find Unused Shell RBE2 running"] \
-            [::HWFlow::txt "正在建立分组..." "Building groups..."] \
-            1}
-    }
-
-    set groups {}
-    if {[llength $records] >= 2} {
-        set groups [buildGroups $records]
-    }
-    set unused [::RB2Bolt::unusedShellRBE2Records $records $groups]
-    set unusedEids [::RB2Bolt::rbe2ElementIdsFromRecords $unused]
-
-    if {[llength $unused] == 0} {
-        ::RB2Bolt::clearSelectionMarks
-        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "未发现未用 Shell RBE2。" "No unused shell RBE2 found."] 100.0}
-        }
-        tk_messageBox -icon info -title [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -message [::HWFlow::txt "未发现没有被当前连接规则用上的 Shell RBE2。" "No shell RBE2 elements were left unused by the current connector rules."]
-        return
-    }
-
-    if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
-        catch {::HWFlow::progressUpdate 80.0 \
-            [::HWFlow::txt "检测未用 Shell RBE2 正在执行" "Find Unused Shell RBE2 running"] \
-            [::HWFlow::txt "正在创建中心标记点..." "Creating center markers..."] \
-            1}
-    }
-
-    set markerStat [::RB2Bolt::createUnusedShellRBE2Markers $unused]
-    set enteredDelete [::RB2Bolt::enterElementDeleteMode $unusedEids]
-
-    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "检测未用 Shell RBE2 已完成。" "Find Unused Shell RBE2 finished."] 100.0}
-    }
-
-    set txt [::HWFlow::txt \
-        "检测未用 Shell RBE2 完成：候选 RBE2=[llength $elemIds]，有效记录=[llength $records]，未用 Shell RBE2=[llength $unused]，标记组件=[dict get $markerStat component]，点标记=[dict get $markerStat points]，节点标记=[dict get $markerStat nodes]，标记失败=[dict get $markerStat failed]。" \
-        "Find unused shell RBE2 finished: candidate RBE2=[llength $elemIds], usable records=[llength $records], unused shell RBE2=[llength $unused], marker component=[dict get $markerStat component], point markers=[dict get $markerStat points], node markers=[dict get $markerStat nodes], marker failures=[dict get $markerStat failed]."]
-    msg $txt
-
-    if {!$enteredDelete} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -message [::HWFlow::txt \
-            "$txt\n\n已生成标记点，但当前 HyperMesh 未能自动进入 Delete 面板。未用 RBE2 单元已保留在元素 mark 1 / user mark 中，请手动打开 Delete 面板并取回选择。" \
-            "$txt\n\nMarkers were created, but HyperMesh did not enter the Delete panel automatically. The unused RBE2 elements remain on element mark 1 / user mark; open the Delete panel manually and retrieve the selection."]
-    }
-}
-
 # ------------------------- entry point -------------------------------------
 proc ::RB2Bolt::run {} {
     variable P
     variable beamSegmentIndex
-    set action [showDialog]
-    if {$action eq ""} {
+    if {![showDialog]} {
         msg [::HWFlow::txt "RBE2 Bolt Connector 已取消。" "RBE2 Bolt Connector cancelled."]
         return
     }
     if {![validateParams]} {return}
     ::RB2Bolt::saveState
-    if {$action eq "findUnusedShellRBE2"} {
-        ::RB2Bolt::runFindUnusedShellRBE2
-        return
-    }
 
     msg [::HWFlow::txt "RBE2 Bolt Connector 开始。若需要 CBEAM 输出，请确认 BAR2 单元类型已设置为 CBEAM。" "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."]
 
@@ -1843,9 +1235,7 @@ proc ::RB2Bolt::run {} {
             [::HWFlow::txt "准备读取 RBE2 单元..." "Preparing to read RBE2 elements..."] \
             0]
     }
-    set tRecords0 [clock milliseconds]
     set records [collectRBE2Records $elemIds]
-    set tRecords1 [clock milliseconds]
     if {[llength $records] < 2} {
         ::RB2Bolt::clearSelectionMarks
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
@@ -1862,9 +1252,7 @@ proc ::RB2Bolt::run {} {
             [::HWFlow::txt "正在建立分组..." "Building groups..."] \
             1}
     }
-    set tGroups0 [clock milliseconds]
     set groups [buildGroups $records]
-    set tGroups1 [clock milliseconds]
     if {[llength $groups] == 0} {
         ::RB2Bolt::clearSelectionMarks
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
@@ -1876,14 +1264,11 @@ proc ::RB2Bolt::run {} {
 
     catch {array unset beamSegmentIndex}
     array set beamSegmentIndex {}
-    set result [createBoltsFast $groups]
+    set result [createBolts $groups]
     set created [lindex $result 0]
     set skipped [lindex $result 1]
     set spatialOnlyGroups [lindex $result 3]
     set skippedExisting [lindex $result 4]
-    set recordsMs [expr {$tRecords1 - $tRecords0}]
-    set groupsMs [expr {$tGroups1 - $tGroups0}]
-    msg [::HWFlow::txt "RBE2 records 读取耗时：$recordsMs ms；groups 建立耗时：$groupsMs ms。" "RBE2 records read time: $recordsMs ms; groups build time: $groupsMs ms."]
 
     set txt [::HWFlow::txt "RBE2 Bolt Connector 已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n已跳过既有 $P(elemType)：$skippedExisting\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped existing $P(elemType): $skippedExisting\nSkipped/failed: $skipped"]
     ::RB2Bolt::clearSelectionMarks

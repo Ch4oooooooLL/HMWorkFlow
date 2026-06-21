@@ -23,6 +23,16 @@ namespace eval ::HWFlow {
     variable progressLastLog ""
     variable progressLogMaxLines 220
     variable progressCancelRequested 0
+    variable progressLastEventPumpMs 0
+    variable progressEventPumpActive 0
+    variable componentColorSeeded 0
+    variable componentColorPalette {
+        2 3 4 5 6 8 10 12 13 14 15 16
+        17 18 19 20 21 22 23 24 25 26 27 28
+        29 30 31 32 33 34 35 36 37 38 39 40
+        41 42 43 44 45 46 47 48 49 50 51 52
+        53 54 55 56 57 58 59 60 61 62 63 64
+    }
     variable FONT_INITIALIZED 0
     variable UI_FONT_FAMILY ""
     variable UI_FIXED_FONT_FAMILY ""
@@ -211,6 +221,8 @@ proc ::HWFlow::createTopLevel {w} {
     toplevel $w
     ::HWFlow::keepWindowTopmost $w
     bind $w <Map> [list ::HWFlow::keepWindowTopmost $w]
+    bind $w <Visibility> [list ::HWFlow::progressPumpEvents 1]
+    bind $w <Configure> [list ::HWFlow::progressPumpEvents 0]
     after idle [list ::HWFlow::keepWindowTopmost $w]
     return $w
 }
@@ -686,6 +698,30 @@ proc ::HWFlow::createComponentThroughBrowser {compName} {
     return $compId
 }
 
+proc ::HWFlow::randomComponentColor {} {
+    variable componentColorSeeded
+    variable componentColorPalette
+
+    if {!$componentColorSeeded} {
+        set seed [clock clicks]
+        catch {set seed [expr {$seed + [pid]}]}
+        expr {srand($seed)}
+        set componentColorSeeded 1
+    }
+    if {[llength $componentColorPalette] == 0} {
+        return 3
+    }
+    return [lindex $componentColorPalette [expr {int(rand() * [llength $componentColorPalette])}]]
+}
+
+proc ::HWFlow::resolveComponentColor {{color ""}} {
+    set color [string trim $color]
+    if {$color eq "" || $color eq "random" || $color eq "auto"} {
+        return [::HWFlow::randomComponentColor]
+    }
+    return $color
+}
+
 proc ::HWFlow::rememberComponent {compName} {
     variable touchedComponents
     set compName [string trim $compName]
@@ -752,12 +788,25 @@ proc ::HWFlow::activateAndShowComponent {compName {refresh 0}} {
         catch {*showentity components "by id" $compId}
     }
     if {$refresh} {
-        ::HWFlow::refreshBrowser
+        ::HWFlow::syncComponentInBrowser $compName
     }
     return 1
 }
 
-proc ::HWFlow::createComponent {compName {color 11}} {
+proc ::HWFlow::syncComponentInBrowser {compName {activateInactive 0}} {
+    set compName [string trim $compName]
+    if {$compName eq ""} {
+        return 0
+    }
+    ::HWFlow::rememberComponent $compName
+    ::HWFlow::resetBrowserBlocks
+    ::HWFlow::activateAndShowComponent $compName 0
+    set summary [::HWFlow::refreshBrowserNow $activateInactive]
+    ::HWFlow::scheduleBrowserRefresh $activateInactive
+    return $summary
+}
+
+proc ::HWFlow::createComponent {compName {color ""}} {
     set compName [string trim $compName]
     if {$compName eq ""} {
         set compName COMPONENT
@@ -766,9 +815,10 @@ proc ::HWFlow::createComponent {compName {color 11}} {
     if {$compId ne ""} {
         catch {*currentcollector component $compName}
         catch {*currentcollector components $compName}
-        ::HWFlow::activateAndShowComponent $compName 1
+        ::HWFlow::syncComponentInBrowser $compName
         return $compId
     }
+    set color [::HWFlow::resolveComponentColor $color]
 
     ::HWFlow::resetBrowserBlocks
 
@@ -804,7 +854,7 @@ proc ::HWFlow::createComponent {compName {color 11}} {
     catch {*clearmark components 1}
     catch {*currentcollector component $compName}
     catch {*currentcollector components $compName}
-    ::HWFlow::activateAndShowComponent $compName 1
+    ::HWFlow::syncComponentInBrowser $compName
     return $compId
 }
 
@@ -1186,6 +1236,33 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
     return 1
 }
 
+proc ::HWFlow::progressPumpEvents {{force 0}} {
+    variable progressLastEventPumpMs
+    variable progressEventPumpActive
+
+    if {$progressEventPumpActive} {
+        return
+    }
+    set progressEventPumpActive 1
+
+    catch {update idletasks}
+
+    set shouldUpdate $force
+    if {!$shouldUpdate} {
+        if {[catch {clock milliseconds} now]} {
+            set shouldUpdate 1
+        } elseif {$progressLastEventPumpMs == 0 || ($now - $progressLastEventPumpMs) >= 250} {
+            set shouldUpdate 1
+        }
+    }
+    if {$shouldUpdate} {
+        catch {update}
+        catch {set progressLastEventPumpMs [clock milliseconds]}
+    }
+
+    set progressEventPumpActive 0
+}
+
 proc ::HWFlow::progressForceVisible {} {
     variable progressWin
     if {[llength [info commands winfo]] == 0} {
@@ -1196,8 +1273,7 @@ proc ::HWFlow::progressForceVisible {} {
     }
     # Intentionally do not raise or focus here. The window's persistent topmost
     # state is configured when the toplevel is created.
-    catch {update idletasks}
-    catch {update}
+    ::HWFlow::progressPumpEvents 1
     return 1
 }
 
@@ -1299,9 +1375,8 @@ proc ::HWFlow::progressUpdate {percent {message ""} {detail ""} {force 0}} {
         ::HWFlow::progressAppend $logText $force
     }
 
-    catch {update idletasks}
+    ::HWFlow::progressPumpEvents $force
     if {$force} {
-        catch {update}
         catch {::HWFlow::progressForceVisible}
     }
     return [::HWFlow::progressCancelled]

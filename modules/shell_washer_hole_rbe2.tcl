@@ -472,14 +472,20 @@ proc ::RB2W::beginPerformanceMode {} {
 }
 
 proc ::RB2W::enableInteractiveBrowserUpdates {} {
-    catch {hmbr_signals buffer stop}
+    if {[llength [info commands ::HWFlow::resetBrowserBlocks]] > 0} {
+        catch {::HWFlow::resetBrowserBlocks}
+    } else {
+        catch {hm_blockbrowserupdate 0}
+        catch {*setoption block_browser_update=0}
+        catch {hmbr_signals buffer stop}
+        catch {*setoption block_redraw=0}
+        catch {*setoption block_messages=0}
+        catch {hm_blockredraw 0}
+        catch {hm_blockmessages 0}
+        catch {hm_blockerrormessages 0}
+        catch {hm_commandfilestate 1}
+    }
     catch {hwbrowsermanager view flush true}
-    catch {*setoption block_redraw=0}
-    catch {*setoption block_messages=0}
-    catch {hm_blockredraw 0}
-    catch {hm_blockmessages 0}
-    catch {hm_blockerrormessages 0}
-    catch {hm_commandfilestate 1}
     catch {hm_setmouse 1}
     catch {update idletasks}
     catch {update}
@@ -950,7 +956,7 @@ proc ::RB2W::createComponentByName {compName} {
     variable PERFORMANCE_MODE
     if {[RB2W::componentExistsByName $compName]} {
         RB2W::setCurrentComponent $compName
-        catch {::HWFlow::activateAndShowComponent $compName 0}
+        catch {::HWFlow::syncComponentInBrowser $compName}
         return
     }
 
@@ -960,8 +966,13 @@ proc ::RB2W::createComponentByName {compName} {
 
     set code [catch {
         if {[llength [info commands ::HWFlow::createComponent]] > 0} {
-            ::HWFlow::createComponent $compName 11
+            ::HWFlow::createComponent $compName
         } else {
+            set color [expr {1 + int(rand() * 63)}]
+            if {$color >= 11} {incr color}
+            if {[llength [info commands ::HWFlow::randomComponentColor]] > 0} {
+                set color [::HWFlow::randomComponentColor]
+            }
             set histName "Created Component $compName"
             set histStarted 0
             catch {*startnotehistorystate $histName}
@@ -972,21 +983,35 @@ proc ::RB2W::createComponentByName {compName} {
                 set createCode [catch {*createentity components includeid=0 name=$compName} err1]
             }
             if {$createCode} {
-                set createCode [catch {*collectorcreateonly comps $compName "" 11} err2]
+                set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
             }
             if {$createCode} {
-                set createCode [catch {*collectorcreateonly components $compName "" 11} err2]
+                set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
             }
             if {$createCode} {
                 if {$histStarted} { catch {*endnotehistorystate $histName} }
                 error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
             }
             if {$histStarted} { catch {*endnotehistorystate $histName} }
+            set compId ""
+            catch {set compId [hm_getvalue comps name=$compName dataname=id]}
+            if {$compId ne "" && $compId != 0} {
+                foreach etype {comps components} {
+                    catch {*setvalue $etype id=$compId color=$color}
+                }
+            }
         }
 
         RB2W::setCurrentComponent $compName
-        catch {::HWFlow::activateAndShowComponent $compName 0}
-        RB2W::showOutputComponent $compName 1
+        if {[llength [info commands ::HWFlow::syncComponentInBrowser]] > 0} {
+            ::HWFlow::syncComponentInBrowser $compName
+        } else {
+            catch {::HWFlow::activateAndShowComponent $compName 0}
+            RB2W::showOutputComponent $compName 1
+        }
+        if {![RB2W::componentExistsByName $compName]} {
+            error [::HWFlow::txt "输出组件 $compName 已创建但无法在模型中重新定位。" "Output component $compName was created but cannot be resolved in the model."]
+        }
         catch {update idletasks}
         catch {update}
     } err opts]

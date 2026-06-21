@@ -985,8 +985,13 @@ proc ::AutoHoleRBE2::ensureComponent {compName} {
 
     if {[llength $ids] == 0} {
         if {[llength [info commands ::HWFlow::createComponent]] > 0} {
-            ::HWFlow::createComponent $compName 11
+            ::HWFlow::createComponent $compName
         } else {
+            set color [expr {1 + int(rand() * 63)}]
+            if {$color >= 11} {incr color}
+            if {[llength [info commands ::HWFlow::randomComponentColor]] > 0} {
+                set color [::HWFlow::randomComponentColor]
+            }
             ::AutoHoleRBE2::enableInteractiveBrowserUpdates
             set histName "Created Component $compName"
             catch {*startnotehistorystate $histName}
@@ -995,16 +1000,23 @@ proc ::AutoHoleRBE2::ensureComponent {compName} {
                 set createCode [catch {*createentity components includeid=0 name=$compName} err1]
             }
             if {$createCode} {
-                set createCode [catch {*collectorcreateonly comps $compName "" 11} err2]
+                set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
             }
             if {$createCode} {
-                set createCode [catch {*collectorcreateonly components $compName "" 11} err2]
+                set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
             }
             if {$createCode} {
                 catch {*endnotehistorystate $histName}
                 error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
             }
             catch {*endnotehistorystate $histName}
+            set compId ""
+            catch {set compId [hm_getvalue comps name=$compName dataname=id]}
+            if {$compId ne "" && $compId != 0} {
+                foreach etype {comps components} {
+                    catch {*setvalue $etype id=$compId color=$color}
+                }
+            }
         }
     }
 

@@ -94,6 +94,14 @@ namespace eval ::HWToolkit {
             desc_en  "Group RBE2 elements and create CBEAM/CBAR bolt segments."
             proc     "::RB2Bolt::run"
         }
+        contact_setup {
+            group    "07. Contact"
+            label_zh "接触设置"
+            label_en "Contact Setup"
+            desc_zh  "选择两个 component，自动识别方向并创建可修剪的接触面。"
+            desc_en  "Pick two components, detect their facing direction, and create trimmable contact surfaces."
+            proc     "::ContactSetup::run"
+        }
     }
 }
 
@@ -188,6 +196,9 @@ proc ::HWToolkit::groupText {group} {
         "06. Bolt" {
             return [::HWFlow::txt "06. 螺栓连接" "06. Bolt"]
         }
+        "07. Contact" {
+            return [::HWFlow::txt "07. 接触设置" "07. Contact"]
+        }
     }
     return $group
 }
@@ -202,6 +213,7 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::RB2Bolt::saveState}
     catch {::SeamSurf::savePanelState}
     catch {::GeomCleanup::savePanelState}
+    catch {::ContactSetup::savePanelState}
 
     catch {set ::MidSurf::ui(ok) 0}
     catch {set ::AutoHoleRBE2::ui(ok) 0}
@@ -210,6 +222,7 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {set ::RB2Bolt::done -1}
     catch {set ::SeamSurf::ui(ok) 0}
     catch {set ::GeomCleanup::ui(ok) 0}
+    catch {set ::ContactSetup::ui(ok) 0}
     catch {set ::SeamSurf::ui(promptOk) -1}
     catch {set ::SeamSurf::ui(pickOk) -1}
 
@@ -225,6 +238,7 @@ proc ::HWToolkit::clearExistingWindows {} {
         .rb2bolt_dlg
         .seam_surface
         .geometry_cleanup
+        .contact_setup
         .batch_mesh_washer
         .casting_tetramesh
         .seam_thickness
