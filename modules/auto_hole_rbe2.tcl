@@ -36,6 +36,7 @@ namespace eval ::AutoHoleRBE2 {
         minLoopNodes         4
         minRadius            0.0
         maxRadius            0.0
+        rigidType            RBE2
         dof                  123456
         requireInnerNormal   0
         innerNormalMaxDot   -0.05
@@ -108,13 +109,13 @@ proc ::AutoHoleRBE2::showPanel {} {
 
     set w .autoHoleRBE2
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "Solid Through-Hole RBE2" "Solid Through-Hole RBE2"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "Solid Through-Hole RBE2" "Solid Through-Hole RBE2"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -149,7 +150,7 @@ proc ::AutoHoleRBE2::showPanel {} {
         {minLoopNodes     "最少开口节点数" "Minimum opening nodes"}
         {minRadius        "最小孔半径" "Minimum hole radius"}
         {maxRadius        "最大孔半径" "Maximum hole radius"}
-        {dof              "RBE2 自由度" "RBE2 DOF"}
+        {dof              "刚性自由度" "Rigid DOF"}
         {resultCompName   "结果组件" "Result component"}
     }
 
@@ -169,6 +170,13 @@ proc ::AutoHoleRBE2::showPanel {} {
 
         incr i
     }
+
+    set r [expr {$i / 2}]
+    set c [expr {($i % 2) * 2}]
+    label $w.main.param.l_rigidType -text [::HWFlow::txt "刚性类型" "Rigid type"] -anchor w
+    tk_optionMenu $w.main.param.m_rigidType ::AutoHoleRBE2::ui(rigidType) RBE2 RBE3
+    grid $w.main.param.l_rigidType -row $r -column $c -sticky w -padx {0 6} -pady 2
+    grid $w.main.param.m_rigidType -row $r -column [expr {$c+1}] -sticky w -padx {0 18} -pady 2
 
     labelframe $w.main.opt -text [::HWFlow::txt "4. 选项" "4. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 4 -column 0 -columnspan 4 -sticky ew -pady {0 8}
@@ -191,7 +199,7 @@ proc ::AutoHoleRBE2::showPanel {} {
     pack $w.btn -fill x
 
     button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::AutoHoleRBE2::savePanelState; set ::AutoHoleRBE2::ui(ok) 0; ::AutoHoleRBE2::backToHome .autoHoleRBE2"
-    button $w.btn.start  -text [::HWFlow::txt "开始创建 RBE2" "Start RBE2 Creation"] -width 18 -command "::AutoHoleRBE2::acceptPanel"
+    button $w.btn.start  -text [::HWFlow::txt "开始创建" "Start Creation"] -width 18 -command "::AutoHoleRBE2::acceptPanel"
 
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.start  -side right -padx 4
@@ -268,7 +276,7 @@ proc ::AutoHoleRBE2::acceptPanel {} {
     variable ui
 
     if {[llength $ui(selectedComps)] == 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
 
@@ -278,7 +286,7 @@ proc ::AutoHoleRBE2::acceptPanel {} {
     }
     foreach k $doubleKeys {
         if {![string is double -strict $ui($k)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
             return
         }
     }
@@ -289,43 +297,48 @@ proc ::AutoHoleRBE2::acceptPanel {} {
     }
     foreach k $intKeys {
         if {![string is integer -strict $ui($k)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
             return
         }
     }
 
+    if {[lsearch -exact {RBE2 RBE3} $ui(rigidType)] < 0} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "刚性类型必须为 RBE2 或 RBE3。" "Rigid type must be RBE2 or RBE3."]
+        return
+    }
+
     if {$ui(featureAngleDeg) <= 0 || $ui(featureAngleDeg) >= 180} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "光顺面片角度必须在 0 到 180 之间。" "Smooth patch angle must be between 0 and 180."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "光顺面片角度必须在 0 到 180 之间。" "Smooth patch angle must be between 0 and 180."]
         return
     }
 
     if {$ui(loopNormalTolDeg) <= 0 || $ui(loopNormalTolDeg) >= 90} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "开口法向容差必须在 0 到 90 之间。" "Opening normal tolerance must be between 0 and 90."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "开口法向容差必须在 0 到 90 之间。" "Opening normal tolerance must be between 0 and 90."]
         return
     }
 
     if {$ui(cylFitTol) < 0 || $ui(loopRadiusTol) < 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "容差不能为负值。" "Tolerances cannot be negative."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "容差不能为负值。" "Tolerances cannot be negative."]
         return
     }
 
     if {$ui(minWallNodes) < 3 || $ui(minLoopNodes) < 3} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "节点数量阈值至少为 3。" "Node-count thresholds must be at least 3."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "节点数量阈值至少为 3。" "Node-count thresholds must be at least 3."]
         return
     }
 
     if {$ui(minRadius) < 0 || $ui(maxRadius) < 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "孔半径限制不能为负值。" "Radius limits cannot be negative."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "孔半径限制不能为负值。" "Radius limits cannot be negative."]
         return
     }
 
     if {$ui(maxRadius) > 0 && $ui(minRadius) > $ui(maxRadius)} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "最小孔半径不能大于最大孔半径。" "Minimum hole radius cannot exceed maximum hole radius."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "最小孔半径不能大于最大孔半径。" "Minimum hole radius cannot exceed maximum hole radius."]
         return
     }
 
     if {[string trim $ui(resultCompName)] eq ""} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] -message [::HWFlow::txt "结果组件名称不能为空。" "Result component name cannot be empty."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] -message [::HWFlow::txt "结果组件名称不能为空。" "Result component name cannot be empty."]
         return
     }
 
@@ -1093,14 +1106,14 @@ proc ::AutoHoleRBE2::getElemsByComp {compId} {
 proc ::AutoHoleRBE2::elemLooksLikeRBE2 {elemId} {
     if {![catch {set cfgVal [hm_getvalue elems id=$elemId dataname=config]}] && $cfgVal ne ""} {
         set u [string toupper "$cfgVal"]
-        if {$u eq "55" || [string first "RBE2" $u] >= 0 || [string first "RIGID" $u] >= 0} {
+        if {$u eq "55" || [string first "RBE2" $u] >= 0 || [string first "RBE3" $u] >= 0 || [string first "RIGID" $u] >= 0} {
             return 1
         }
     }
     foreach dn {typename solverkeyword solvername cardimage} {
         if {![catch {set v [hm_getvalue elems id=$elemId dataname=$dn]}] && $v ne ""} {
             set u [string toupper "$v"]
-            if {[string first "RBE2" $u] >= 0 || [string first "RIGID" $u] >= 0} {
+            if {[string first "RBE2" $u] >= 0 || [string first "RBE3" $u] >= 0 || [string first "RIGID" $u] >= 0} {
                 return 1
             }
         }
@@ -1113,6 +1126,15 @@ proc ::AutoHoleRBE2::elemLooksLikeRBE2 {elemId} {
     return 0
 }
 
+proc ::AutoHoleRBE2::rigidCenterNode {elemId} {
+    foreach dn {independentnode.id dependentnode.id} {
+        if {![catch {set nodeId [hm_getvalue elems id=$elemId dataname=$dn]}] && $nodeId ne ""} {
+            return $nodeId
+        }
+    }
+    return ""
+}
+
 proc ::AutoHoleRBE2::rbe2DependentNodeKey {elemId} {
     if {![::AutoHoleRBE2::elemLooksLikeRBE2 $elemId]} {
         return ""
@@ -1120,11 +1142,10 @@ proc ::AutoHoleRBE2::rbe2DependentNodeKey {elemId} {
     if {[catch {set allNodes [hm_getvalue elems id=$elemId dataname=nodes]}] || [llength $allNodes] == 0} {
         return ""
     }
-    set independent ""
-    catch {set independent [hm_getvalue elems id=$elemId dataname=independentnode.id]}
+    set centerNode [::AutoHoleRBE2::rigidCenterNode $elemId]
     set depNodes {}
     foreach n $allNodes {
-        if {$independent ne "" && $n == $independent} {
+        if {$centerNode ne "" && $n == $centerNode} {
             continue
         }
         lappend depNodes $n
@@ -1176,6 +1197,7 @@ proc ::AutoHoleRBE2::rememberCreatedRBE2 {wallNodes elemId} {
 proc ::AutoHoleRBE2::createRBE2 {wallNodes center} {
     variable cfg
 
+    set rigidType [string toupper $cfg(rigidType)]
     set x [lindex $center 0]
     set y [lindex $center 1]
     set z [lindex $center 2]
@@ -1186,7 +1208,19 @@ proc ::AutoHoleRBE2::createRBE2 {wallNodes center} {
     set centerNode [hm_latestentityid nodes]
 
     eval *createmark nodes 2 $wallNodes
-    *rigidlink $centerNode 2 $cfg(dof)
+    if {$rigidType eq "RBE3"} {
+        set dofs {}
+        set weights {}
+        foreach n $wallNodes {
+            lappend dofs $cfg(dof)
+            lappend weights 1.0
+        }
+        eval *createarray [llength $dofs] $dofs
+        eval *createdoublearray [llength $weights] $weights
+        *rbe3 2 1 [llength $wallNodes] 1 [llength $wallNodes] $centerNode $cfg(dof) 1.0
+    } else {
+        *rigidlink $centerNode 2 $cfg(dof)
+    }
     catch {*clearmark nodes 2}
 
     set elemId ""
@@ -1210,6 +1244,7 @@ proc ::AutoHoleRBE2::runCore {} {
     variable cfg
     variable ui
     variable stat
+    set rigidType [string toupper $cfg(rigidType)]
 
     array set stat {
         sourceElems 0
@@ -1225,7 +1260,7 @@ proc ::AutoHoleRBE2::runCore {} {
     ::AutoHoleRBE2::message [::HWFlow::txt "已选择 [llength $comps] 个组件。" "Selected [llength $comps] component(s)."]
     if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 5.0 \
-            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "Solid Through-Hole RIGIDS running" "Solid Through-Hole RIGIDS running"] \
             [::HWFlow::txt "正在读取所选组件..." "Reading selected components..."] \
             1}
     }
@@ -1256,7 +1291,7 @@ proc ::AutoHoleRBE2::runCore {} {
     ::AutoHoleRBE2::message [::HWFlow::txt "正在生成自由面..." "Generating free faces..."]
     if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 18.0 \
-            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "Solid Through-Hole RIGIDS running" "Solid Through-Hole RIGIDS running"] \
             [::HWFlow::txt "正在生成自由面..." "Generating free faces..."] \
             1}
     }
@@ -1275,7 +1310,7 @@ proc ::AutoHoleRBE2::runCore {} {
     ::AutoHoleRBE2::message [::HWFlow::txt "正在分析自由面..." "Analyzing free faces..."]
     if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 35.0 \
-            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "Solid Through-Hole RIGIDS running" "Solid Through-Hole RIGIDS running"] \
             [::HWFlow::txt "正在分析自由面，数量：$stat(freeFaces)" "Analyzing free faces: $stat(freeFaces)"] \
             1}
     }
@@ -1308,7 +1343,7 @@ proc ::AutoHoleRBE2::runCore {} {
     ::AutoHoleRBE2::message [::HWFlow::txt "正在识别光顺面片..." "Detecting smooth patches..."]
     if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 52.0 \
-            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "Solid Through-Hole RIGIDS running" "Solid Through-Hole RIGIDS running"] \
             [::HWFlow::txt "正在识别光顺面片..." "Detecting smooth patches..."] \
             1}
     }
@@ -1321,10 +1356,10 @@ proc ::AutoHoleRBE2::runCore {} {
     }
     set resultCompReady 0
 
-    ::AutoHoleRBE2::message [::HWFlow::txt "正在识别孔并创建 RBE2 单元..." "Detecting holes and creating RBE2 elements..."]
+    ::AutoHoleRBE2::message [::HWFlow::txt "正在识别孔并创建 $rigidType 单元..." "Detecting holes and creating $rigidType elements..."]
     if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
         catch {::HWFlow::progressUpdate 65.0 \
-            [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+            [::HWFlow::txt "Solid Through-Hole RIGIDS running" "Solid Through-Hole RIGIDS running"] \
             [::HWFlow::txt "正在处理光顺面片，数量：$stat(segments)" "Processing smooth patches: $stat(segments)"] \
             1}
     }
@@ -1334,7 +1369,7 @@ proc ::AutoHoleRBE2::runCore {} {
         if {[llength [info commands ::HWFlow::progressUpdate]] > 0 && ($segmentIndex == 1 || $segmentIndex == $stat(segments) || [expr {$segmentIndex % 50}] == 0)} {
             set pct [expr {65.0 + 25.0 * ($segmentIndex / double($stat(segments)))}]
             catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "实体贯通孔 RBE2 正在执行" "AutoHoleRBE2 running"] \
+                [::HWFlow::txt "Solid Through-Hole RIGIDS running" "Solid Through-Hole RIGIDS running"] \
                 [::HWFlow::txt "面片 $segmentIndex/$stat(segments) | 已创建=$stat(created) 已跳过既有=$stat(skippedExisting)" "Patch $segmentIndex/$stat(segments) | created=$stat(created) skippedExisting=$stat(skippedExisting)"] \
                 [expr {$segmentIndex == $stat(segments)}]}
         }
@@ -1367,13 +1402,13 @@ proc ::AutoHoleRBE2::runCore {} {
         ::AutoHoleRBE2::rememberCreatedRBE2 $wallNodes $elemId
         incr stat(created)
 
-        ::AutoHoleRBE2::log "MAKE" "centerNode=$centerNode rbe2=$elemId wallNodes=[llength $wallNodes] radius=$radius length=$holeLength center=$center"
+        ::AutoHoleRBE2::log "MAKE" "type=$rigidType centerNode=$centerNode elem=$elemId wallNodes=[llength $wallNodes] radius=$radius length=$holeLength center=$center"
     }
 
     if {$cfg(deleteTempFaces)} {
         if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
             catch {::HWFlow::progressUpdate 94.0 \
-                [::HWFlow::txt "实体贯通孔 RBE2 正在收尾" "AutoHoleRBE2 finishing"] \
+                [::HWFlow::txt "Solid Through-Hole RIGIDS finishing" "Solid Through-Hole RIGIDS finishing"] \
                 [::HWFlow::txt "正在删除自由面临时组件..." "Deleting temporary free-face component..."] \
                 1}
         }
@@ -1393,9 +1428,10 @@ proc ::AutoHoleRBE2::run {} {
     variable cfg
     variable stat
     variable VERSION
+    set rigidType [string toupper $cfg(rigidType)]
 
     if {![::AutoHoleRBE2::showPanel]} {
-        catch {hm_usermessage [::HWFlow::txt "实体贯通孔 RBE2 已取消。" "AutoHoleRBE2 cancelled."]}
+        catch {hm_usermessage [::HWFlow::txt "Solid Through-Hole RIGIDS cancelled." "Solid Through-Hole RIGIDS cancelled."]}
         return
     }
 
@@ -1403,11 +1439,12 @@ proc ::AutoHoleRBE2::run {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] \
+            [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] \
             [::HWFlow::txt "准备识别实体贯通孔..." "Preparing through-hole detection..."] \
             0]
     }
-    ::AutoHoleRBE2::message [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 开始。" "AutoHoleRBE2 v$VERSION started."]
+    set rigidType [string toupper $cfg(rigidType)]
+    ::AutoHoleRBE2::message [::HWFlow::txt "Solid Through-Hole RIGIDS v$VERSION started, type=$rigidType." "Solid Through-Hole RIGIDS v$VERSION started, type=$rigidType."]
 
     set failed 0
     set errMsg ""
@@ -1425,28 +1462,28 @@ proc ::AutoHoleRBE2::run {} {
     }
 
     if {!$failed} {
-        set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 已完成。\n\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 RBE2：$stat(created)\n已跳过既有 RBE2：$stat(skippedExisting)" "AutoHoleRBE2 v$VERSION finished.\n\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated RBE2: $stat(created)\nSkipped existing RBE2: $stat(skippedExisting)"]
+        set msg [::HWFlow::txt "Solid Through-Hole RIGIDS v$VERSION finished.\n\n刚性类型：$rigidType\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 $rigidType：$stat(created)\n已跳过既有 RIGIDS：$stat(skippedExisting)" "Solid Through-Hole RIGIDS v$VERSION finished.\n\nRigid type: $rigidType\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated $rigidType: $stat(created)\nSkipped existing RIGIDS: $stat(skippedExisting)"]
 
         if {$cfg(logFile) ne ""} {
             append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
         }
 
-        ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 RBE2 单元，跳过既有 $stat(skippedExisting) 个。" "Finished: created $stat(created) RBE2 element(s), skipped $stat(skippedExisting) existing."]
+        ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 $rigidType 单元，跳过既有 $stat(skippedExisting) 个。" "Finished: created $stat(created) $rigidType element(s), skipped $stat(skippedExisting) existing."]
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "实体贯通孔 RBE2 已完成。" "AutoHoleRBE2 finished."] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::txt "Solid Through-Hole RIGIDS finished." "Solid Through-Hole RIGIDS finished."] 100.0}
         }
-        catch {tk_messageBox -icon info -title "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION" -message $msg}
+        catch {tk_messageBox -icon info -title "[::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] v$VERSION" -message $msg}
     } else {
-        set msg [::HWFlow::txt "实体贯通孔 RBE2 v$VERSION 执行失败：\n\n$errMsg" "AutoHoleRBE2 v$VERSION failed:\n\n$errMsg"]
+        set msg [::HWFlow::txt "Solid Through-Hole RIGIDS v$VERSION failed:\n\n$errMsg" "Solid Through-Hole RIGIDS v$VERSION failed:\n\n$errMsg"]
 
         if {$cfg(logFile) ne ""} {
             append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
         }
 
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "实体贯通孔 RBE2 执行失败。" "AutoHoleRBE2 failed."] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::txt "Solid Through-Hole RIGIDS failed." "Solid Through-Hole RIGIDS failed."] 100.0}
         }
-        catch {tk_messageBox -icon warning -title "[::HWFlow::txt "实体贯通孔 RBE2" "AutoHoleRBE2"] v$VERSION" -message $msg}
+        catch {tk_messageBox -icon warning -title "[::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] v$VERSION" -message $msg}
     }
 
     ::AutoHoleRBE2::closeLog

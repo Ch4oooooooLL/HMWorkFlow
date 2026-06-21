@@ -12,16 +12,12 @@
 File > Run > Tcl/Tk Script > hw_toolkit.tcl
 ```
 
-运行后会打开 `HyperMesh Toolkit` 主面板。模块按工作阶段分组显示：
+运行后会打开 `HyperMesh Toolkit` 主面板。模块归类为三部分显示：
 
 ```text
-01. Model Setup
-02. Geometry
-03. Seam
-04. Mesh
-05. RBE2
-06. Bolt
-07. Contact
+Organize
+Mesh
+Connector
 ```
 
 主面板中的 `刷新浏览器` 用于恢复 Model Browser 更新并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
@@ -39,9 +35,9 @@ File > Run > Tcl/Tk Script > hw_toolkit.tcl
 
 ### 2.2 建立组件命名和材料基础
 
-先在 `01. Model Setup` 中完成模型基础整理：
+先在 `Organize` 中完成模型基础整理：
 
-1. 运行 `Component Type Classification`。
+1. 运行 `Component Classification`。
 2. 选择 `SHELL`、`SOLID` 或 `CASTING`，再选择对应 component。
 3. 点击 `应用类型`，组件会被重命名为 `CATEGORY_NAME`，例如 `SHELL_BRACKET`。
 4. 运行 `Material Assignment`。
@@ -55,10 +51,10 @@ File > Run > Tcl/Tk Script > hw_toolkit.tcl
 钣金件建议按下面顺序执行：
 
 1. `Midsurface Extraction`：选择钣金几何 component，抽取中面。
-2. `Geometry Cleanup`：对倒角、圆角、沉台等影响中面或网格质量的位置做连续清理。
+2. `Geometry Cleanup: Chamfer/Recess`：对倒角、圆角、沉台等影响中面或网格质量的位置做连续清理。
 3. `Seam Surface Creation`：在需要焊接的位置创建 `SEAM_Tx` 焊缝面。
-4. `Sheet BatchMesh + Washer`：对中面或壳 component 执行 BatchMesh，并按孔径规则生成 washer。
-5. `Shell Washer Hole RBE2`：识别标准 washer 孔并创建 RBE2。
+4. `Sheet BatchMesh and Washer`：对中面或壳 component 执行 BatchMesh，并按孔径规则生成 washer。
+5. `Shell Washer-Hole RBE2`：识别标准 washer 孔并创建 RBE2。
 6. `RBE2 Bolt Connector`：将成组 RBE2 中心节点连接为 CBEAM/CBAR 螺栓段。
 7. `Contact Setup`：在两个 component 的相对区域创建 contact surface 和接触 group。
 
@@ -76,9 +72,9 @@ AUTO_CONTACT_*
 
 实体件和铸件建议按下面顺序执行：
 
-1. `Component Type Classification`：将 component 标记为 `SOLID` 或 `CASTING`。
+1. `Component Classification`：将 component 标记为 `SOLID` 或 `CASTING`。
 2. `Material Assignment`：追加材料 key。
-3. `Geometry Cleanup`：按需要清理小特征、倒角或沉台。
+3. `Geometry Cleanup: Chamfer/Recess`：按需要清理小特征、倒角或沉台。
 4. `Casting TetraMesh`：对铸件执行 surface 清理、三角面网格质量迭代和 TetraMesh。
 5. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
 6. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
@@ -170,7 +166,7 @@ SEAM_T2.0
 
 ## 6. 模块功能和用法
 
-### 6.1 Component Type Classification
+### 6.1 Component Classification
 
 入口：`::CompWorkflow::runCategory`
 
@@ -178,7 +174,7 @@ SEAM_T2.0
 
 用法：
 
-1. 在主面板运行 `Component Type Classification`。
+1. 在主面板运行 `Component Classification`。
 2. 在 `类型 / Category` 中选择目标类型。
 3. 点击 `选择组件`，在 HyperMesh 中选择 component。
 4. 点击 `应用类型`。
@@ -235,7 +231,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - 源几何保留并隐藏。
 - 厚度优先读取源 component 名称中的 `_Tx`；名称中没有厚度时，尝试读取中面拓扑点厚度，仍不可用时按实体体积/中面面积自动测量。
 
-### 6.4 Geometry Cleanup
+### 6.4 Geometry Cleanup: Chamfer/Recess
 
 入口：`::GeomCleanup::run`
 
@@ -243,7 +239,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 用法：
 
-1. 在主面板运行 `Geometry Cleanup`。
+1. 在主面板运行 `Geometry Cleanup: Chamfer/Recess`。
 2. 检查模式、圆角半径范围、缝合容差、邻接扩展层数等参数。
 3. 点击 `进入连续清洗`。
 4. 在 HyperMesh 选择面板中选择一个倒角面、圆角面或沉台底面，按中键执行。
@@ -281,7 +277,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - Line-Line 模式会按两侧特征点对应关系切分曲线段，并逐段创建 ruled 焊缝。
 - 单次失败时撤销本次几何修改并等待下一次选择。
 
-### 6.6 Sheet BatchMesh + Washer
+### 6.6 Sheet BatchMesh and Washer
 
 入口：`::BatchMeshWasher::run`
 
@@ -289,7 +285,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 用法：
 
-1. 在主面板运行 `Sheet BatchMesh + Washer`。
+1. 在主面板运行 `Sheet BatchMesh and Washer`。
 2. 点击 `选择/重选组件`，选择钣金中面或壳网格 component。
 3. 检查网格尺寸、孔径识别范围、BatchMesh 参数和 washer 批量参数。
 4. 确认 `config/washer_rules.txt` 中的孔径规则符合项目标准。
@@ -340,7 +336,7 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 - 质量通过后执行 TetraMesh 体网格填充。
 - 可将失败壳单元组织到 `AUTO_CASTING_FAILED_2D`。
 
-### 6.8 Shell Washer Hole RBE2
+### 6.8 Shell Washer-Hole RBE2
 
 入口：`::RB2W::run`
 
@@ -348,7 +344,7 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 
 用法：
 
-1. 在主面板运行 `Shell Washer Hole RBE2`。
+1. 在主面板运行 `Shell Washer-Hole RBE2`。
 2. 点击 `选择/重选组件`，选择已经带有标准 washer 网格的壳 component。
 3. 检查孔径范围、圆度/椭圆容差、washer 节点圈数和 RBE2 自由度。
 4. 选择执行模式：

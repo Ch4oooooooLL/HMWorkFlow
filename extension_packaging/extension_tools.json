@@ -1,0 +1,91 @@
+{
+  "extension_name": "HMWorkflow",
+  "display_name": "HM WorkFlow",
+  "version": "0.1.0",
+  "min_product_version": "2022.2",
+  "tools": [
+    {
+      "key": "main_panel",
+      "label": "HM Toolkit",
+      "script": "hw_toolkit.tcl",
+      "tooltip": "Open the HM Workflow main panel"
+    },
+    {
+      "key": "shell_rbe2",
+      "label": "Shell RBE2",
+      "script": "modules/shell_washer_hole_rbe2.tcl",
+      "proc": "::RB2W::run",
+      "tooltip": "Run Shell Washer-Hole RIGIDS creation tool"
+    },
+    {
+      "key": "solid_hole_rbe2",
+      "label": "Solid Hole RBE2",
+      "script": "modules/auto_hole_rbe2.tcl",
+      "proc": "::AutoHoleRBE2::run",
+      "tooltip": "Run Solid Through-Hole RIGIDS creation tool"
+    },
+    {
+      "key": "bolt_connector",
+      "label": "Bolt Connector",
+      "script": "modules/rbe2_bolt_connector.tcl",
+      "proc": "::RB2Bolt::run",
+      "tooltip": "Run RIGIDS Bolt Connector tool"
+    },
+    {
+      "key": "contact_setup",
+      "label": "Contact Setup",
+      "script": "modules/contact_setup.tcl",
+      "proc": "::ContactSetup::run",
+      "tooltip": "Run Contact Setup tool"
+    },
+    {
+      "key": "component_category",
+      "label": "Component Category",
+      "script": "modules/component_workflow.tcl",
+      "proc": "::CompWorkflow::runCategory",
+      "tooltip": "Run Component Classification tool"
+    },
+    {
+      "key": "material_assignment",
+      "label": "Material Assignment",
+      "script": "modules/component_workflow.tcl",
+      "proc": "::CompWorkflow::runMaterial",
+      "tooltip": "Run Material Assignment tool"
+    },
+    {
+      "key": "midsurf",
+      "label": "Midsurface",
+      "script": "modules/midsurf.tcl",
+      "proc": "::MidSurf::run",
+      "tooltip": "Run Midsurface Extraction tool"
+    },
+    {
+      "key": "geometry_cleanup",
+      "label": "Geometry Cleanup",
+      "script": "modules/geometry_cleanup.tcl",
+      "proc": "::GeomCleanup::run",
+      "tooltip": "Run Geometry Cleanup tool"
+    },
+    {
+      "key": "seam_surface",
+      "label": "Seam Surface",
+      "script": "modules/seam_surface.tcl",
+      "proc": "::SeamSurf::run",
+      "tooltip": "Run Seam Surface Creation tool"
+    },
+    {
+      "key": "batch_mesh_washer",
+      "label": "BatchMesh Washer",
+      "script": "modules/batch_mesh_washer.tcl",
+      "proc": "::BatchMeshWasher::run",
+      "tooltip": "Run Sheet BatchMesh and Washer tool"
+    },
+    {
+      "key": "casting_tetramesh",
+      "label": "Casting TetraMesh",
+      "script": "modules/casting_tetramesh.tcl",
+      "proc": "::CastingTetMesh::run",
+      "tooltip": "Run Casting TetraMesh tool"
+    }
+  ]
+}

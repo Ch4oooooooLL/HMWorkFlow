@@ -152,13 +152,13 @@ proc ::SeamSurf::showPanel {} {
     catch {destroy .seam_surface}
     set w .seam_surface
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] -font [::HWFlow::uiFont title]
+    label $w.main.title -text [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.mode -text [::HWFlow::txt "1. 创建方式" "1. Creation Mode"] -padx 8 -pady 8
@@ -228,23 +228,23 @@ proc ::SeamSurf::acceptPanel {} {
 
     foreach key {stitch_tolerance feature_angle} {
         if {![string is double -strict $ui($key)] || $ui($key) <= 0.0} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] \
+            tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] \
                 -message [::HWFlow::txt "$key 必须为大于 0 的数值。" "$key must be greater than zero."]
             return
         }
     }
     if {![string is integer -strict $ui(line_sync_divisions)] || $ui(line_sync_divisions) < 4} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] \
+        tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] \
             -message [::HWFlow::txt "line_sync_divisions 必须为不小于 4 的整数。" "line_sync_divisions must be an integer of at least 4."]
         return
     }
     if {$ui(component_mode) ni {by_thickness per_seam}} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] \
+        tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] \
             -message [::HWFlow::txt "component_mode 必须为 by_thickness 或 per_seam。" "component_mode must be by_thickness or per_seam."]
         return
     }
     if {[string trim $ui(thickness_format)] eq ""} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "焊缝面创建" "Seam Surface Creation"] \
+        tk_messageBox -icon warning -title [::HWFlow::txt "Seam Surface Creation" "Seam Surface Creation"] \
             -message [::HWFlow::txt "thickness_format 不能为空。" "thickness_format cannot be empty."]
         return
     }
@@ -1582,7 +1582,7 @@ proc ::SeamSurf::run {} {
     variable stat
 
     if {![::SeamSurf::showPanel]} {
-        catch {hm_usermessage [::HWFlow::txt "焊缝面创建已取消。" "Seam Surface Creation cancelled."]}
+        catch {hm_usermessage [::HWFlow::txt "Seam Surface Creation cancelled." "Seam Surface Creation cancelled."]}
         return
     }
     array unset stat

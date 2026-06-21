@@ -52,6 +52,7 @@ namespace eval ::RB2W {
     variable MAX_OUTER_NODE_RATIO        2.50
 
     # ---------------- RBE2 / output parameters ----------------
+    variable RIGID_TYPE                  RBE2
     variable RBE2_DOF                    123456
     variable RBE2_COMPONENT_PREFIX       "AUTO_RBE2"
     variable BATCH_ORGANIZE_RBE2         1
@@ -138,7 +139,7 @@ proc ::RB2W::stateKeys {} {
         OUTER_OVAL_AXIS_RATIO_TOL CENTER_OFFSET_TOL
         MIN_WASHER_WIDTH_ABS MIN_WASHER_WIDTH_RATIO WASHER_ELEM_COUNT_TOL
         MIN_OUTER_NODE_RATIO MAX_OUTER_NODE_RATIO
-        RBE2_DOF RBE2_COMPONENT_PREFIX BATCH_ORGANIZE_RBE2 ORGANIZE_BATCH_SIZE
+        RIGID_TYPE RBE2_DOF RBE2_COMPONENT_PREFIX BATCH_ORGANIZE_RBE2 ORGANIZE_BATCH_SIZE
         SHOW_OUTPUT_COMPONENTS FORCE_BROWSER_REFRESH
         SKIP_COMPONENT_IF_EXISTING_RBE2 CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2
         CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2 OUTPUT_COMPONENT_SUFFIX_SCAN_LIMIT
@@ -215,13 +216,13 @@ proc ::RB2W::showPanel {} {
 
     set w .rb2w_panel
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "Shell Washer Hole RBE2" "Shell Washer Hole RBE2"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "Shell Washer Hole RBE2" "Shell Washer Hole RBE2"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -255,7 +256,7 @@ proc ::RB2W::showPanel {} {
         {OUTER_OVAL_AXIS_RATIO_TOL  "内外椭圆比差容差"      "Inner/outer oval ratio tolerance"}
         {CENTER_OFFSET_TOL          "内外中心偏移容差"      "Center offset tolerance"}
         {INNER_WASHER_NODE_LOOPS    "绑定 washer 节点圈数"  "Washer node loops to tie"}
-        {RBE2_DOF                   "RBE2 自由度"           "RBE2 DOF"}
+        {RBE2_DOF                   "刚性自由度"           "Rigid DOF"}
         {RBE2_COMPONENT_PREFIX      "输出组件前缀"          "Output component prefix"}
     }
 
@@ -272,13 +273,20 @@ proc ::RB2W::showPanel {} {
         incr i
     }
 
+    set r [expr {$i / 2}]
+    set c [expr {($i % 2) * 2}]
+    label $w.main.param.l_RIGID_TYPE -text [::HWFlow::txt "刚性类型" "Rigid type"] -anchor w
+    tk_optionMenu $w.main.param.m_RIGID_TYPE ::RB2W::ui(RIGID_TYPE) RBE2 RBE3
+    grid $w.main.param.l_RIGID_TYPE -row $r -column $c -sticky w -padx {0 6} -pady 2
+    grid $w.main.param.m_RIGID_TYPE -row $r -column [expr {$c+1}] -sticky w -padx {0 18} -pady 2
+
     labelframe $w.main.opt -text [::HWFlow::txt "4. 选项" "4. Options"] -padx 8 -pady 8
     grid $w.main.opt -row 4 -column 0 -columnspan 4 -sticky ew -pady {0 8}
     checkbutton $w.main.opt.oval -text [::HWFlow::txt "允许识别椭圆孔" "Allow oval holes"] -variable ::RB2W::ui(ALLOW_OVAL_HOLES)
-    checkbutton $w.main.opt.skip -text [::HWFlow::txt "组件已有 RBE2 时跳过" "Skip component if RBE2 exists"] -variable ::RB2W::ui(SKIP_COMPONENT_IF_EXISTING_RBE2)
-    checkbutton $w.main.opt.src -text [::HWFlow::txt "检查源组件已有 RBE2" "Check source component"] -variable ::RB2W::ui(CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2)
-    checkbutton $w.main.opt.out -text [::HWFlow::txt "检查输出组件已有 RBE2" "Check output components"] -variable ::RB2W::ui(CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2)
-    checkbutton $w.main.opt.batch -text [::HWFlow::txt "批量归集 RBE2 到输出组件" "Batch organize RBE2 elements"] -variable ::RB2W::ui(BATCH_ORGANIZE_RBE2)
+    checkbutton $w.main.opt.skip -text [::HWFlow::txt "组件已有 RIGIDS 时跳过" "Skip component if RIGIDS exists"] -variable ::RB2W::ui(SKIP_COMPONENT_IF_EXISTING_RBE2)
+    checkbutton $w.main.opt.src -text [::HWFlow::txt "检查源组件已有 RIGIDS" "Check source component"] -variable ::RB2W::ui(CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2)
+    checkbutton $w.main.opt.out -text [::HWFlow::txt "检查输出组件已有 RIGIDS" "Check output components"] -variable ::RB2W::ui(CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2)
+    checkbutton $w.main.opt.batch -text [::HWFlow::txt "批量归集 RIGIDS 到输出组件" "Batch organize RIGIDS elements"] -variable ::RB2W::ui(BATCH_ORGANIZE_RBE2)
     checkbutton $w.main.opt.perf -text [::HWFlow::txt "性能模式" "Performance mode"] -variable ::RB2W::ui(PERFORMANCE_MODE)
     grid $w.main.opt.oval  -row 0 -column 0 -sticky w -pady 2
     grid $w.main.opt.skip  -row 0 -column 1 -sticky w -pady 2
@@ -293,7 +301,7 @@ proc ::RB2W::showPanel {} {
     button $w.btn.save -text [::HWFlow::txt "保存配置" "Save Config"] -width 12 -command "::RB2W::savePanelState"
     button $w.btn.merge -text [::HWFlow::txt "合并重复节点" "Merge Duplicate Nodes"] -width 16 -command "::RB2W::acceptPanel merge_nodes"
     button $w.btn.rebuild -text [::HWFlow::txt "重建模式" "Rebuild Mode"] -width 12 -command "::RB2W::acceptPanel rebuild"
-    button $w.btn.start -text [::HWFlow::txt "开始创建 RBE2" "Start RBE2 Creation"] -width 18 -command "::RB2W::acceptPanel create"
+    button $w.btn.start -text [::HWFlow::txt "开始创建" "Start Creation"] -width 18 -command "::RB2W::acceptPanel create"
     pack $w.btn.back  -side right -padx 4
     pack $w.btn.save  -side right -padx 4
     pack $w.btn.merge -side right -padx 4
@@ -317,7 +325,7 @@ proc ::RB2W::showPanel {} {
 proc ::RB2W::pickComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择用于创建垫圈孔 RBE2 的壳单元组件" "Select shell component(s) for washer-hole RBE2 creation"]
+    *createmarkpanel comps 1 [::HWFlow::txt "选择用于创建垫圈孔 RIGIDS 的壳单元组件" "Select shell component(s) for washer-hole RIGIDS creation"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     if {[llength $comps] == 0} {
@@ -367,7 +375,7 @@ proc ::RB2W::acceptPanel {{action create}} {
     variable ui
 
     if {[llength $ui(selectedComps)] == 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
 
@@ -378,7 +386,7 @@ proc ::RB2W::acceptPanel {{action create}} {
     }
     foreach k $doubleKeys {
         if {![string is double -strict $ui($k)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "$k 必须为数值。" "$k must be a number."]
             return
         }
     }
@@ -391,35 +399,40 @@ proc ::RB2W::acceptPanel {{action create}} {
     }
     foreach k $intKeys {
         if {![string is integer -strict $ui($k)]} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "$k 必须为整数。" "$k must be an integer."]
             return
         }
     }
 
+    if {[lsearch -exact {RBE2 RBE3} $ui(RIGID_TYPE)] < 0} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "刚性类型必须为 RBE2 或 RBE3。" "Rigid type must be RBE2 or RBE3."]
+        return
+    }
+
     if {$ui(MIN_HOLE_DIAMETER) < 0 || $ui(MAX_HOLE_DIAMETER) <= 0 || $ui(MIN_HOLE_DIAMETER) > $ui(MAX_HOLE_DIAMETER)} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "孔径范围无效。" "Invalid hole diameter range."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "孔径范围无效。" "Invalid hole diameter range."]
         return
     }
     if {$ui(MIN_HOLE_EDGE_NODES) < 3 || $ui(MAX_HOLE_EDGE_NODES) < $ui(MIN_HOLE_EDGE_NODES)} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "孔边节点数量范围无效。" "Invalid edge node range."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "孔边节点数量范围无效。" "Invalid edge node range."]
         return
     }
     if {$ui(INNER_WASHER_NODE_LOOPS) < 2} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "绑定 washer 节点圈数至少为 2。" "Washer node loops must be at least 2."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "绑定 washer 节点圈数至少为 2。" "Washer node loops must be at least 2."]
         return
     }
     if {$ui(MAX_OVAL_AXIS_RATIO) < 1.0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "椭圆 a/b 最大半径比必须不小于 1。" "Max oval a/b radius ratio must be at least 1."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "椭圆 a/b 最大半径比必须不小于 1。" "Max oval a/b radius ratio must be at least 1."]
         return
     }
     foreach k {CIRCULARITY_TOL OVAL_RADIAL_FIT_TOL OUTER_OVAL_RADIAL_FIT_TOL OUTER_OVAL_AXIS_RATIO_TOL CENTER_OFFSET_TOL} {
         if {$ui($k) < 0} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "$k 不能为负值。" "$k cannot be negative."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "$k 不能为负值。" "$k cannot be negative."]
             return
         }
     }
     if {[string trim $ui(RBE2_COMPONENT_PREFIX)] eq ""} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "输出组件前缀不能为空。" "Output component prefix cannot be empty."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "输出组件前缀不能为空。" "Output component prefix cannot be empty."]
         return
     }
 
@@ -446,7 +459,7 @@ proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex lo
     set pctText [format %.1f $overallPct]
     set msg [::HWFlow::txt "RB2W 总进度 ${pctText}% | 组件 $compIndex/$compTotal：$compName | 环线 $loopIndex/$loopTotal | 已创建=$created 已跳过=$skipped 候选=$candidateHoles" "RB2W overall ${pctText}% | comp $compIndex/$compTotal: $compName | loop $loopIndex/$loopTotal | created=$created skipped=$skipped candidates=$candidateHoles"]
     if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
-        set title [::HWFlow::txt "壳单元垫圈孔 RBE2 正在执行" "Shell Washer-Hole RBE2 running"]
+        set title [::HWFlow::txt "Shell Washer-Hole RIGIDS running" "Shell Washer-Hole RIGIDS running"]
         catch {::HWFlow::progressUpdate $overallPct $title $msg $force}
     }
     RB2W::status $msg $force
@@ -1374,8 +1387,13 @@ proc ::RB2W::rbe2CandidatesFromComponents {compIds} {
     variable rbe2CandidateByComp
     set out {}
     foreach cid $compIds {
-        if {$cid eq "" || ![info exists rbe2CandidateByComp($cid)]} { continue }
-        foreach eid $rbe2CandidateByComp($cid) { lappend out $eid }
+        if {$cid eq ""} { continue }
+        if {[info exists rbe2CandidateByComp($cid)]} {
+            foreach eid $rbe2CandidateByComp($cid) { lappend out $eid }
+        }
+        foreach eid [RB2W::getElemsByComp $cid] {
+            if {[RB2W::elemLooksLikeRBE2 $eid]} { lappend out $eid }
+        }
     }
     return [list 1 [RB2W::uniq $out] [lindex $marked 2]]
 }
@@ -1383,7 +1401,7 @@ proc ::RB2W::rbe2CandidatesFromComponents {compIds} {
 proc ::RB2W::elemLooksLikeRBE2 {eid} {
     if {![catch {set cfg [hm_getvalue elems id=$eid dataname=config]}] && $cfg ne ""} {
         set u [string toupper "$cfg"]
-        if {[string first "RBE2" $u] >= 0 || [string first "RIGIDLINK" $u] >= 0} { return 1 }
+        if {[string first "RBE2" $u] >= 0 || [string first "RBE3" $u] >= 0 || [string first "RIGID" $u] >= 0} { return 1 }
         if {[RB2W::elemConfigLooksLikePlainShell $cfg]} { return 0 }
     }
 
@@ -1391,7 +1409,7 @@ proc ::RB2W::elemLooksLikeRBE2 {eid} {
     foreach dn {typename solverkeyword solvername cardimage} {
         if {![catch {set v [hm_getvalue elems id=$eid dataname=$dn]}] && $v ne ""} {
             set u [string toupper "$v"]
-            if {[string first "RBE2" $u] >= 0 || [string first "RIGIDLINK" $u] >= 0} { return 1 }
+            if {[string first "RBE2" $u] >= 0 || [string first "RBE3" $u] >= 0 || [string first "RIGID" $u] >= 0} { return 1 }
         }
     }
 
@@ -1401,6 +1419,15 @@ proc ::RB2W::elemLooksLikeRBE2 {eid} {
         if {[catch {expr {$depmax > 0}} ok] == 0 && $ok} { return 1 }
     }
     return 0
+}
+
+proc ::RB2W::rigidCenterNode {eid} {
+    foreach dn {independentnode.id dependentnode.id} {
+        if {![catch {set nodeId [hm_getvalue elems id=$eid dataname=$dn]}] && $nodeId ne ""} {
+            return $nodeId
+        }
+    }
+    return ""
 }
 
 proc ::RB2W::componentHasRBE2 {compId} {
@@ -1463,11 +1490,10 @@ proc ::RB2W::rbe2DependentNodeKey {eid {knownRBE2 0}} {
     if {[catch {set allNodes [hm_getvalue elems id=$eid dataname=nodes]}] || [llength $allNodes] == 0} {
         return ""
     }
-    set independent ""
-    catch {set independent [hm_getvalue elems id=$eid dataname=independentnode.id]}
+    set centerNode [RB2W::rigidCenterNode $eid]
     set depNodes {}
     foreach n $allNodes {
-        if {$independent ne "" && $n == $independent} { continue }
+        if {$centerNode ne "" && $n == $centerNode} { continue }
         lappend depNodes $n
     }
     if {[llength $depNodes] == 0} { return "" }
@@ -1479,15 +1505,14 @@ proc ::RB2W::rbe2RecordForCleanup {eid {knownRBE2 0}} {
     if {[catch {set allNodes [hm_getvalue elems id=$eid dataname=nodes]}] || [llength $allNodes] == 0} {
         return ""
     }
-    set independent ""
-    catch {set independent [hm_getvalue elems id=$eid dataname=independentnode.id]}
+    set centerNode [RB2W::rigidCenterNode $eid]
     set depNodes {}
     foreach n $allNodes {
-        if {$independent ne "" && $n == $independent} { continue }
+        if {$centerNode ne "" && $n == $centerNode} { continue }
         lappend depNodes $n
     }
     if {[llength $depNodes] == 0} { return "" }
-    return [dict create eid $eid key [::HWFlow::nodeSetKey $depNodes] independent $independent depNodes $depNodes]
+    return [dict create eid $eid key [::HWFlow::nodeSetKey $depNodes] independent $centerNode depNodes $depNodes]
 }
 
 proc ::RB2W::indexRBE2InComponent {compId} {
@@ -1684,7 +1709,9 @@ proc ::RB2W::createCenterNode {center outComp} {
 }
 
 proc ::RB2W::createRigidLink {centerNode depNodes outComp} {
+    variable RIGID_TYPE
     variable RBE2_DOF
+    set rigidType [string toupper $RIGID_TYPE]
     set depNodes [RB2W::uniq $depNodes]
     if {[llength $depNodes] < 3} { error [::HWFlow::txt "从属节点数量不足。" "Too few dependent nodes."] }
     set idx [lsearch -exact $depNodes $centerNode]
@@ -1694,7 +1721,19 @@ proc ::RB2W::createRigidLink {centerNode depNodes outComp} {
     catch {set beforeElem [hm_latestentityid elems]}
     catch {*clearmark nodes 2}
     eval *createmark nodes 2 $depNodes
-    *rigidlink $centerNode 2 $RBE2_DOF
+    if {$rigidType eq "RBE3"} {
+        set dofs {}
+        set weights {}
+        foreach n $depNodes {
+            lappend dofs $RBE2_DOF
+            lappend weights 1.0
+        }
+        eval *createarray [llength $dofs] $dofs
+        eval *createdoublearray [llength $weights] $weights
+        *rbe3 2 1 [llength $depNodes] 1 [llength $depNodes] $centerNode $RBE2_DOF 1.0
+    } else {
+        *rigidlink $centerNode 2 $RBE2_DOF
+    }
     catch {*clearmark nodes 2}
     if {![catch {set latestElem [hm_latestentityid elems]}] && $latestElem ne "" && $latestElem != 0 && $latestElem ne $beforeElem} {
         return [list $latestElem]
@@ -1835,12 +1874,14 @@ proc ::RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
 }
 
 proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
+    variable RIGID_TYPE
     variable LOG_EACH_CREATED
     variable LOG_EACH_SKIPPED
     variable PROGRESS_LOOP_STEP
     variable UI_UPDATE_STEP
     variable BATCH_ORGANIZE_RBE2
     variable PERFORMANCE_MODE
+    set rigidType [string toupper $RIGID_TYPE]
 
     RB2W::clearNodeXYZCache
     array set reasons {}
@@ -1917,15 +1958,15 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
             set indexed [RB2W::initExistingRBE2IndexForSource $compId $outComp]
             set tIndex [expr {$tIndex + ([clock milliseconds] - $tIdx0)}]
             if {$indexed > 0} {
-                RB2W::log "Component $compId: indexed existing RBE2 elements for object-level safety check: $indexed"
+                RB2W::log "Component $compId: indexed existing RIGIDS elements for object-level safety check: $indexed"
             }
         }
         set existing [RB2W::existingRBE2ForDepNodes $depNodes]
         if {[lindex $existing 0]} {
             incr skipped
-            RB2W::bumpReason reasons "existing RBE2 for washer hole"
+            RB2W::bumpReason reasons "existing RIGIDS for washer hole"
             if {$LOG_EACH_SKIPPED} {
-                RB2W::log "Component $compId: skipped existing RBE2 element [lindex $existing 1] for candidate hole D=[format %.3f [expr {2.0*$radius}]]"
+                RB2W::log "Component $compId: skipped existing RIGIDS element [lindex $existing 1] for candidate hole D=[format %.3f [expr {2.0*$radius}]]"
             }
             continue
         }
@@ -1951,14 +1992,14 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
             }
         } err]} {
             incr skipped
-            RB2W::bumpReason reasons "create RBE2 failed"
+            RB2W::bumpReason reasons "create $rigidType failed"
             RB2W::log "Component $compId: failed at D=[format %.3f [expr {2.0*$radius}]], reason=$err"
             continue
         }
 
         incr created
         if {$LOG_EACH_CREATED} {
-            RB2W::log "Component $compId: RBE2 #$created created in $outComp, centerNode=$cnode, rbeElems=$rbeElems, depNodes=[llength $depNodes], innerNodes=[llength [dict get $loop nodes]], outerNodes=$outerCount, shape=$shapeKind, innerD=[format %.3f [expr {2.0*$radius}]], outerD=[format %.3f [expr {2.0*$outerR}]], innerRel=[format %.4f $rel], outerRel=[format %.4f $outerRel], innerAxisRatio=[format %.4f $innerAxisRatio], outerAxisRatio=[format %.4f $outerAxisRatio]"
+            RB2W::log "Component $compId: $rigidType #$created created in $outComp, centerNode=$cnode, rigidElems=$rbeElems, depNodes=[llength $depNodes], innerNodes=[llength [dict get $loop nodes]], outerNodes=$outerCount, shape=$shapeKind, innerD=[format %.3f [expr {2.0*$radius}]], outerD=[format %.3f [expr {2.0*$outerR}]], innerRel=[format %.4f $rel], outerRel=[format %.4f $outerRel], innerAxisRatio=[format %.4f $innerAxisRatio], outerAxisRatio=[format %.4f $outerAxisRatio]"
         }
     }
 
@@ -1968,7 +2009,7 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
         set organizeMoved [RB2W::organizeCreatedRBE2Elements $createdRBE2Elems $outComp]
         set tOrganize [expr {[clock milliseconds] - $tOrg0}]
         set needMove [llength [RB2W::uniq $createdRBE2Elems]]
-        if {$organizeMoved < $needMove} { RB2W::log "Warning: component $compId batch-organized $organizeMoved/$needMove RBE2 element(s) into $outComp." }
+        if {$organizeMoved < $needMove} { RB2W::log "Warning: component $compId batch-organized $organizeMoved/$needMove RIGIDS element(s) into $outComp." }
     }
     if {!$PERFORMANCE_MODE && $outComp ne "" && $created > 0} {
         RB2W::showOutputComponent $outComp 0
@@ -1977,7 +2018,7 @@ proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
     set totalTime [expr {[clock milliseconds] - $t0}]
     set overallDone [expr {100.0 * ($compIndex / double($compTotal))}]
     RB2W::overallStatus $overallDone $compIndex $compTotal $compName $loopTotal $loopTotal $candidateHoles $created $skipped 1
-    RB2W::log "Component $compId ($compName) summary: candidates=$candidateHoles, created=$created, skipped=$skipped, existingIndexTime=${tIndex}ms, createTime=${tCreate}ms, organizedRBE2=$organizeMoved, organizeTime=${tOrganize}ms, graphTime=${tGraph}ms, totalTime=${totalTime}ms, skipReasons={[RB2W::formatReasonStats reasons]}"
+    RB2W::log "Component $compId ($compName) summary: rigidType=$rigidType, candidates=$candidateHoles, created=$created, skipped=$skipped, existingIndexTime=${tIndex}ms, createTime=${tCreate}ms, organizedRIGIDS=$organizeMoved, organizeTime=${tOrganize}ms, graphTime=${tGraph}ms, totalTime=${totalTime}ms, skipReasons={[RB2W::formatReasonStats reasons]}"
     RB2W::clearNodeXYZCache
     if {$created > 0} { RB2W::resetRBE2CandidateCache }
     return [list $created $skipped $candidateHoles $organizeMoved]
@@ -1991,7 +2032,7 @@ proc ::RB2W::printParameterLog {} {
     variable OUTER_RING_CIRCULARITY_TOL; variable CENTER_OFFSET_TOL
     variable OUTER_OVAL_RADIAL_FIT_TOL; variable OUTER_OVAL_AXIS_RATIO_TOL
     variable MIN_WASHER_WIDTH_ABS; variable MIN_WASHER_WIDTH_RATIO; variable WASHER_ELEM_COUNT_TOL
-    variable RBE2_DOF; variable RBE2_COMPONENT_PREFIX
+    variable RIGID_TYPE; variable RBE2_DOF; variable RBE2_COMPONENT_PREFIX
     variable BATCH_ORGANIZE_RBE2; variable ORGANIZE_BATCH_SIZE
     variable SHOW_OUTPUT_COMPONENTS; variable FORCE_BROWSER_REFRESH
     variable SKIP_COMPONENT_IF_EXISTING_RBE2; variable CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2; variable CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2
@@ -2002,7 +2043,7 @@ proc ::RB2W::printParameterLog {} {
     variable LOG_EACH_CREATED; variable LOG_EACH_SKIPPED
 
     RB2W::log "Version=$VERSION"
-    RB2W::log "Parameters: diameter=${MIN_HOLE_DIAMETER}~${MAX_HOLE_DIAMETER}, innerCircTol=$CIRCULARITY_TOL, allowOval=$ALLOW_OVAL_HOLES, maxOvalAxisRatio=$MAX_OVAL_AXIS_RATIO, ovalRadialFitTol=$OVAL_RADIAL_FIT_TOL, edgeNodes=${MIN_HOLE_EDGE_NODES}~${MAX_HOLE_EDGE_NODES}, innerWasherNodeLoops=$INNER_WASHER_NODE_LOOPS, outerCircTol=$OUTER_RING_CIRCULARITY_TOL, outerOvalRadialFitTol=$OUTER_OVAL_RADIAL_FIT_TOL, outerOvalAxisRatioTol=$OUTER_OVAL_AXIS_RATIO_TOL, centerOffsetTol=$CENTER_OFFSET_TOL, minWasherWidthAbs=$MIN_WASHER_WIDTH_ABS, minWasherWidthRatio=$MIN_WASHER_WIDTH_RATIO, washerElemCountTol=$WASHER_ELEM_COUNT_TOL, dof=$RBE2_DOF, outputPrefix=$RBE2_COMPONENT_PREFIX, batchOrganizeRBE2=$BATCH_ORGANIZE_RBE2, organizeBatchSize=$ORGANIZE_BATCH_SIZE, showOutputComponents=$SHOW_OUTPUT_COMPONENTS, browserRefresh=$FORCE_BROWSER_REFRESH"
+    RB2W::log "Parameters: diameter=${MIN_HOLE_DIAMETER}~${MAX_HOLE_DIAMETER}, innerCircTol=$CIRCULARITY_TOL, allowOval=$ALLOW_OVAL_HOLES, maxOvalAxisRatio=$MAX_OVAL_AXIS_RATIO, ovalRadialFitTol=$OVAL_RADIAL_FIT_TOL, edgeNodes=${MIN_HOLE_EDGE_NODES}~${MAX_HOLE_EDGE_NODES}, innerWasherNodeLoops=$INNER_WASHER_NODE_LOOPS, outerCircTol=$OUTER_RING_CIRCULARITY_TOL, outerOvalRadialFitTol=$OUTER_OVAL_RADIAL_FIT_TOL, outerOvalAxisRatioTol=$OUTER_OVAL_AXIS_RATIO_TOL, centerOffsetTol=$CENTER_OFFSET_TOL, minWasherWidthAbs=$MIN_WASHER_WIDTH_ABS, minWasherWidthRatio=$MIN_WASHER_WIDTH_RATIO, washerElemCountTol=$WASHER_ELEM_COUNT_TOL, rigidType=$RIGID_TYPE, dof=$RBE2_DOF, outputPrefix=$RBE2_COMPONENT_PREFIX, batchOrganizeRIGIDS=$BATCH_ORGANIZE_RBE2, organizeBatchSize=$ORGANIZE_BATCH_SIZE, showOutputComponents=$SHOW_OUTPUT_COMPONENTS, browserRefresh=$FORCE_BROWSER_REFRESH"
     RB2W::log "Safety: skipIfExistingRBE2=$SKIP_COMPONENT_IF_EXISTING_RBE2, checkSource=$CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2, checkOutput=$CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2"
     RB2W::log "Performance: performanceMode=$PERFORMANCE_MODE, nodeXYZCache=$USE_NODE_XYZ_CACHE, statusProgress=$USE_STATUS_PROGRESS, progressStep=$PROGRESS_LOOP_STEP, uiUpdateStep=$UI_UPDATE_STEP, forceStatusUpdate=$FORCE_STATUS_UPDATE, statusPercentStep=$STATUS_PERCENT_STEP, statusMinIntervalMs=$STATUS_MIN_INTERVAL_MS, fastRBE2MarkFilter=$FAST_RBE2_MARK_FILTER, logEachCreated=$LOG_EACH_CREATED, logEachSkipped=$LOG_EACH_SKIPPED"
 }
@@ -2010,6 +2051,7 @@ proc ::RB2W::printParameterLog {} {
 proc ::RB2W::main {} {
     variable outputCompBySource
     variable currentComponentName
+    variable RIGID_TYPE
     variable SKIP_COMPONENT_IF_EXISTING_RBE2
     variable PERFORMANCE_MODE
     variable ui
@@ -2027,7 +2069,8 @@ proc ::RB2W::main {} {
     set runStart [clock milliseconds]
     if {![info exists ui(action)] || $ui(action) eq ""} { set ui(action) create }
     set action $ui(action)
-    RB2W::log [::HWFlow::txt "==== 壳单元垫圈孔 RBE2 模块开始，动作=$action ====" "==== Shell washer-hole RBE2 started, action=$action ===="]
+    set rigidType [string toupper $RIGID_TYPE]
+    RB2W::log [::HWFlow::txt "==== Shell Washer-Hole RIGIDS started, action=$action, type=$rigidType ====" "==== Shell Washer-Hole RIGIDS started, action=$action, type=$rigidType ===="]
     RB2W::printParameterLog
     RB2W::log [::HWFlow::txt "开始处理界面中选择的壳单元组件。" "Start processing shell components selected in the panel."]
 
@@ -2043,14 +2086,14 @@ proc ::RB2W::main {} {
         if {$procCode} {
             catch {RB2W::endPerformanceMode}
             RB2W::log [::HWFlow::txt "合并重复节点失败：$procErr" "Merge duplicate nodes failed: $procErr"]
-            tk_messageBox -icon error -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "合并重复节点失败：\n$procErr" "Merge duplicate nodes failed:\n$procErr"]
+            tk_messageBox -icon error -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "合并重复节点失败：\n$procErr" "Merge duplicate nodes failed:\n$procErr"]
             return -options $procOpts $procErr
         }
         set runMs [expr {[clock milliseconds] - $runStart}]
-        set msg [::HWFlow::txt "合并重复节点完成。\n选择组件数：[llength $comps]\n扫描输出组件数：[dict get $mergeStat components]\n扫描 RBE2 数：[dict get $mergeStat scanned]\n删除重复 RBE2：[dict get $mergeStat duplicateElems]\n删除重复中心节点：[dict get $mergeStat duplicateNodes]\n运行时间：${runMs} ms" "Merge duplicate nodes finished.\nSelected components: [llength $comps]\nOutput components scanned: [dict get $mergeStat components]\nRBE2 scanned: [dict get $mergeStat scanned]\nDuplicate RBE2 deleted: [dict get $mergeStat duplicateElems]\nDuplicate center nodes deleted: [dict get $mergeStat duplicateNodes]\nRun time: ${runMs} ms"]
-        RB2W::log [::HWFlow::txt "==== 合并重复节点完成：删除重复 RBE2=[dict get $mergeStat duplicateElems]，删除重复中心节点=[dict get $mergeStat duplicateNodes]，运行时间=${runMs}ms ====" "==== Merge duplicate nodes finished: duplicate RBE2 deleted=[dict get $mergeStat duplicateElems], duplicate center nodes deleted=[dict get $mergeStat duplicateNodes], runtime=${runMs}ms ===="]
+        set msg [::HWFlow::txt "合并重复节点完成。\n选择组件数：[llength $comps]\n扫描输出组件数：[dict get $mergeStat components]\n扫描 RIGIDS 数：[dict get $mergeStat scanned]\n删除重复 RIGIDS：[dict get $mergeStat duplicateElems]\n删除重复中心节点：[dict get $mergeStat duplicateNodes]\n运行时间：${runMs} ms" "Merge duplicate nodes finished.\nSelected components: [llength $comps]\nOutput components scanned: [dict get $mergeStat components]\nRIGIDS scanned: [dict get $mergeStat scanned]\nDuplicate RIGIDS deleted: [dict get $mergeStat duplicateElems]\nDuplicate center nodes deleted: [dict get $mergeStat duplicateNodes]\nRun time: ${runMs} ms"]
+        RB2W::log [::HWFlow::txt "==== 合并重复节点完成：删除重复 RIGIDS=[dict get $mergeStat duplicateElems]，删除重复中心节点=[dict get $mergeStat duplicateNodes]，运行时间=${runMs}ms ====" "==== Merge duplicate nodes finished: duplicate RIGIDS deleted=[dict get $mergeStat duplicateElems], duplicate center nodes deleted=[dict get $mergeStat duplicateNodes], runtime=${runMs}ms ===="]
         RB2W::saveState
-        tk_messageBox -icon info -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message $msg
+        tk_messageBox -icon info -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message $msg
         return
     }
 
@@ -2061,7 +2104,7 @@ proc ::RB2W::main {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "壳单元垫圈孔 RBE2" "Shell Washer-Hole RBE2"] \
+            [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] \
             [::HWFlow::txt "准备处理所选组件..." "Preparing selected components..."] \
             0]
     }
@@ -2106,12 +2149,12 @@ proc ::RB2W::main {} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
             catch {::HWFlow::progressClose [::HWFlow::txt "执行中止。" "Run stopped."] 100.0}
         }
-        tk_messageBox -icon error -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message [::HWFlow::txt "脚本因错误中止：\n$procErr" "Script stopped because of an error:\n$procErr"]
+        tk_messageBox -icon error -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "脚本因错误中止：\n$procErr" "Script stopped because of an error:\n$procErr"]
         return -options $procOpts $procErr
     }
 
     set runMs [expr {[clock milliseconds] - $runStart}]
-    set msg [::HWFlow::txt "Shell Washer Hole RBE2 已完成。\n模式：$action\n选择组件数：[llength $comps]\n重建删除输出组件数：$rebuildDeleted\n安全检查跳过组件数：$safetySkipped\n候选孔数量：$totalCandidates\n已创建 RBE2 数量：$totalCreated\n已归集 RBE2 单元数：$totalOrganized\n跳过的环线/候选数量：$totalSkipped\n运行时间：${runMs} ms" "Shell Washer Hole RBE2 finished.\nMode: $action\nSelected components: [llength $comps]\nRebuild deleted output components: $rebuildDeleted\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated RBE2: $totalCreated\nOrganized RBE2 elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"]
+    set msg [::HWFlow::txt "Shell Washer-Hole RIGIDS finished.\n模式：$action\n刚性类型：$rigidType\n选择组件数：[llength $comps]\n重建删除输出组件数：$rebuildDeleted\n安全检查跳过组件数：$safetySkipped\n候选孔数量：$totalCandidates\n已创建 $rigidType 数量：$totalCreated\n已归集 RIGIDS 单元数：$totalOrganized\n跳过的环线/候选数量：$totalSkipped\n运行时间：${runMs} ms" "Shell Washer-Hole RIGIDS finished.\nMode: $action\nRigid type: $rigidType\nSelected components: [llength $comps]\nRebuild deleted output components: $rebuildDeleted\nSafety skipped components: $safetySkipped\nCandidate holes: $totalCandidates\nCreated $rigidType: $totalCreated\nOrganized RIGIDS elements: $totalOrganized\nSkipped loops/candidates: $totalSkipped\nRun time: ${runMs} ms"]
     set outSummary [RB2W::outputComponentSummary]
     if {$outSummary ne ""} {
         append msg [::HWFlow::txt "\n\n输出组件：\n$outSummary" "\n\nOutput components:\n$outSummary"]
@@ -2127,7 +2170,7 @@ proc ::RB2W::main {} {
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
         catch {::HWFlow::progressClose [::HWFlow::txt "RB2W 总进度 100.0% | 已完成" "RB2W overall 100.0% | finished"] 100.0}
     }
-    tk_messageBox -icon info -title [::HWFlow::txt "壳单元垫圈孔 RBE2" "RB2W"] -message $msg
+    tk_messageBox -icon info -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message $msg
 }
 
 proc ::RB2W::run {} {

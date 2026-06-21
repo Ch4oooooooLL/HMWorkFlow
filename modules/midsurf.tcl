@@ -104,7 +104,7 @@ proc ::MidSurf::showPanel {} {
     grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 8}
     grid $w.main.sel.info -row 0 -column 1 -sticky w
 
-    labelframe $w.main.param -text [::HWFlow::txt "2. 中面抽取参数" "2. Midsurface Parameters"] -padx 8 -pady 8
+    labelframe $w.main.param -text [::HWFlow::txt "2. Midsurface Parameters" "2. Midsurface Parameters"] -padx 8 -pady 8
     grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     set r 0
@@ -664,7 +664,7 @@ proc ::MidSurf::chooseThickness {sourceCompId sourceName midCompId} {
         set t [::MidSurf::measureThicknessByVolumeArea $sourceCompId $midCompId]
         if {$t ne ""} {
             ::MidSurf::msg [::HWFlow::txt \
-                [format "中面抽取：%s 未读取到厚度属性，已按实体体积/中面面积自动测得厚度 %.6g。" $sourceName $t] \
+                [format "Midsurface Extraction: %s 未读取到厚度属性，已按实体体积/中面面积自动测得厚度 %.6g。" $sourceName $t] \
                 [format "MidSurf: no thickness metadata was available for %s; measured thickness %.6g from solid volume / midsurface area." $sourceName $t]]
         }
         return $t
@@ -673,7 +673,7 @@ proc ::MidSurf::chooseThickness {sourceCompId sourceName midCompId} {
     set spread [::MidSurf::valueSpreadRatio $vals $t]
     if {$spread > $cfg(variableThicknessTol)} {
         ::MidSurf::msg [::HWFlow::txt \
-            [format "中面抽取：%s 自动测得的厚度变化较大，使用中位数 %.6g（相对离散度约 %.3f）。" $sourceName $t $spread] \
+            [format "Midsurface Extraction: %s 自动测得的厚度变化较大，使用中位数 %.6g（相对离散度约 %.3f）。" $sourceName $t $spread] \
             [format "MidSurf: measured thickness varies for %s; using median %.6g (relative spread about %.3f)." $sourceName $t $spread]]
     }
 
@@ -862,7 +862,7 @@ proc ::MidSurf::processComponent {compId} {
     variable cfg
 
     set sourceName [::MidSurf::getComponentName $compId]
-    ::MidSurf::msg [::HWFlow::txt "中面抽取：正在处理 $sourceName" "MidSurf: processing $sourceName"]
+    ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: 正在处理 $sourceName" "MidSurf: processing $sourceName"]
 
     set existing [::MidSurf::existingOutputForSource $compId $sourceName]
     if {[llength $existing] > 0} {
@@ -870,7 +870,7 @@ proc ::MidSurf::processComponent {compId} {
         set surfCount [lindex $existing 1]
         ::MidSurf::organizeOutputComponent $outName
         ::MidSurf::hideSourceComponent $sourceName
-        ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName 对应的 $outName 已存在，跳过创建。" "MidSurf: $sourceName already has $outName, skipped creation."]
+        ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: $sourceName 对应的 $outName 已存在，跳过创建。" "MidSurf: $sourceName already has $outName, skipped creation."]
         return [list $outName $surfCount [lindex $existing 2] existing]
     }
 
@@ -890,12 +890,12 @@ proc ::MidSurf::processComponent {compId} {
 
     set midCompId [::MidSurf::componentIdByName $cfg(middleSurfaceName)]
     if {$midCompId eq ""} {
-        error [::HWFlow::txt "中面抽取已结束，但未找到 \"$cfg(middleSurfaceName)\" 组件。" "Extraction finished, but \"$cfg(middleSurfaceName)\" component was not found."]
+        error [::HWFlow::txt "Midsurface Extraction finished, but \"$cfg(middleSurfaceName)\" component was not found." "Extraction finished, but \"$cfg(middleSurfaceName)\" component was not found."]
     }
 
     set newSurfs [::MidSurf::getCompEntityIds $midCompId surfaces surfs]
     if {[llength $newSurfs] == 0} {
-        error [::HWFlow::txt "中面抽取已结束，但 \"$cfg(middleSurfaceName)\" 组件中没有曲面。" "Extraction finished, but \"$cfg(middleSurfaceName)\" contains no surfaces."]
+        error [::HWFlow::txt "Midsurface Extraction finished, but \"$cfg(middleSurfaceName)\" contains no surfaces." "Extraction finished, but \"$cfg(middleSurfaceName)\" contains no surfaces."]
     }
 
     set thickness [::MidSurf::chooseThickness $compId $sourceName $midCompId]
@@ -906,7 +906,7 @@ proc ::MidSurf::processComponent {compId} {
         set surfCount [lindex $existing 1]
         ::MidSurf::organizeOutputComponent $outName
         ::MidSurf::hideSourceComponent $sourceName
-        ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName 对应的 $outName 已存在，已清理本轮临时中面并跳过创建。" "MidSurf: $sourceName already has $outName; cleaned this run's temporary midsurface and skipped creation."]
+        ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: $sourceName 对应的 $outName 已存在，已清理本轮临时中面并跳过创建。" "MidSurf: $sourceName already has $outName; cleaned this run's temporary midsurface and skipped creation."]
         return [list $outName $surfCount [lindex $existing 2] existing]
     }
 
@@ -914,7 +914,7 @@ proc ::MidSurf::processComponent {compId} {
     ::MidSurf::organizeOutputComponent $outName
     ::MidSurf::hideSourceComponent $sourceName
 
-    ::MidSurf::msg [::HWFlow::txt "中面抽取：$sourceName -> $outName，曲面数=[llength $newSurfs]" "MidSurf: $sourceName -> $outName, surfaces=[llength $newSurfs]"]
+    ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: $sourceName -> $outName，曲面数=[llength $newSurfs]" "MidSurf: $sourceName -> $outName, surfaces=[llength $newSurfs]"]
     return [list $outName [llength $newSurfs] $thickness]
 }
 
@@ -929,7 +929,7 @@ proc ::MidSurf::run {} {
     variable VERSION
 
     if {![::MidSurf::showPanel]} {
-        catch {hm_usermessage [::HWFlow::txt "中面抽取已取消。" "MidSurf cancelled."]}
+        catch {hm_usermessage [::HWFlow::txt "Midsurface Extraction cancelled." "MidSurf cancelled."]}
         return
     }
 
@@ -954,7 +954,7 @@ proc ::MidSurf::run {} {
             0]
     }
 
-    ::MidSurf::msg [::HWFlow::txt "中面抽取 v$VERSION 开始，组件数=[llength $comps]" "MidSurf v$VERSION started. Components=[llength $comps]"]
+    ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction v$VERSION started. 组件数=[llength $comps]" "MidSurf v$VERSION started. Components=[llength $comps]"]
 
     set compIndex 0
     foreach compId $comps {
@@ -971,7 +971,7 @@ proc ::MidSurf::run {} {
         if {[catch {set result [::MidSurf::processComponent $compId]} err]} {
             incr stat(skipped)
             lappend failures "$sourceName: $err"
-            ::MidSurf::msg [::HWFlow::txt "中面抽取警告：$sourceName 已跳过。$err" "MidSurf warning: $sourceName skipped. $err"]
+            ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction warning: $sourceName 已跳过。$err" "MidSurf warning: $sourceName skipped. $err"]
             continue
         }
 
@@ -994,7 +994,7 @@ proc ::MidSurf::run {} {
             1}
     }
 
-    set msg [::HWFlow::txt "中面抽取 v$VERSION 已完成。\n\n输出 assembly：$outputAssemblyName\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n已跳过既有中面：$stat(existing)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nOutput assembly: $outputAssemblyName\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped existing midsurfaces: $stat(existing)\nSkipped/failed: $stat(skipped)"]
+    set msg [::HWFlow::txt "Midsurface Extraction v$VERSION finished.\n\n输出 assembly：$outputAssemblyName\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n已跳过既有中面：$stat(existing)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nOutput assembly: $outputAssemblyName\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped existing midsurfaces: $stat(existing)\nSkipped/failed: $stat(skipped)"]
 
     if {[llength $createdNames] > 0} {
         append msg [::HWFlow::txt "\n\n已创建：\n" "\n\nCreated:\n"]
@@ -1020,7 +1020,7 @@ proc ::MidSurf::run {} {
     }
 
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "中面抽取已完成。" "Midsurface extraction finished."] 100.0}
+        catch {::HWFlow::progressClose [::HWFlow::txt "Midsurface extraction finished." "Midsurface extraction finished."] 100.0}
     }
     catch {tk_messageBox -icon info -title "[::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] v$VERSION" -message $msg}
     ::MidSurf::msg $msg

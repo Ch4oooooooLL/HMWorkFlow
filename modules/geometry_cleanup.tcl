@@ -154,7 +154,7 @@ proc ::GeomCleanup::showRules {} {
     variable RULE_FILE
     ::GeomCleanup::ensureConfigFiles
     set msg [::HWFlow::txt "当前几何清理参数文件：\n$RULE_FILE\n\n[::HWFlow::readTextFile $RULE_FILE]" "Current geometry cleanup rule file:\n$RULE_FILE\n\n[::HWFlow::readTextFile $RULE_FILE]"]
-    tk_messageBox -icon info -title [::HWFlow::txt "几何清理参数" "Geometry Cleanup Rules"] -message $msg
+    tk_messageBox -icon info -title [::HWFlow::txt "Geometry Cleanup: Chamfer/Recess Rules" "Geometry Cleanup: Chamfer/Recess Rules"] -message $msg
 }
 
 proc ::GeomCleanup::centerWindow {w} {
@@ -184,13 +184,13 @@ proc ::GeomCleanup::showPanel {} {
     catch {destroy .geometry_cleanup}
     set w .geometry_cleanup
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "Geometry Cleanup" "Geometry Cleanup"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Geometry Cleanup: Chamfer/Recess" "Geometry Cleanup: Chamfer/Recess"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "Geometry Cleanup" "Geometry Cleanup"] -font [::HWFlow::uiFont heading]
+    label $w.main.title -text [::HWFlow::txt "Geometry Cleanup: Chamfer/Recess" "Geometry Cleanup: Chamfer/Recess"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.mode -text [::HWFlow::txt "1. 判断模式" "1. Detection Mode"] -padx 8 -pady 8
@@ -258,16 +258,16 @@ proc ::GeomCleanup::acceptPanel {} {
     set ui(MODE) [::GeomCleanup::normalizeMode $ui(MODE)]
     foreach key {FILLET_MIN_R FILLET_MAX_R AREA_GROWTH_RATIO STITCH_TOLERANCE} {
         if {![string is double -strict $ui($key)] || $ui($key) < 0} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "几何清理" "Geometry Cleanup"] -message [::HWFlow::txt "$key 必须为非负数值。" "$key must be a non-negative number."]
+            tk_messageBox -icon warning -title [::HWFlow::txt "Geometry Cleanup: Chamfer/Recess" "Geometry Cleanup: Chamfer/Recess"] -message [::HWFlow::txt "$key 必须为非负数值。" "$key must be a non-negative number."]
             return
         }
     }
     if {$ui(FILLET_MAX_R) < $ui(FILLET_MIN_R)} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "几何清理" "Geometry Cleanup"] -message [::HWFlow::txt "圆角 R 范围无效。" "Invalid fillet radius range."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Geometry Cleanup: Chamfer/Recess" "Geometry Cleanup: Chamfer/Recess"] -message [::HWFlow::txt "圆角 R 范围无效。" "Invalid fillet radius range."]
         return
     }
     if {![string is integer -strict $ui(MAX_CHAIN_DEPTH)] || $ui(MAX_CHAIN_DEPTH) < 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "几何清理" "Geometry Cleanup"] -message [::HWFlow::txt "邻接扩展层数必须为非负整数。" "Adjacency chain depth must be a non-negative integer."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Geometry Cleanup: Chamfer/Recess" "Geometry Cleanup: Chamfer/Recess"] -message [::HWFlow::txt "邻接扩展层数必须为非负整数。" "Adjacency chain depth must be a non-negative integer."]
         return
     }
     ::GeomCleanup::saveState
@@ -1094,7 +1094,7 @@ proc ::GeomCleanup::continuousCleanup {} {
 
 proc ::GeomCleanup::main {} {
     if {![::GeomCleanup::showPanel]} {
-        catch {hm_usermessage [::HWFlow::txt "几何清理已取消。" "Geometry Cleanup cancelled."]}
+        catch {hm_usermessage [::HWFlow::txt "Geometry Cleanup: Chamfer/Recess cancelled." "Geometry Cleanup: Chamfer/Recess cancelled."]}
         return
     }
     ::GeomCleanup::continuousCleanup

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <actionlist>
+        <action
+            tag="HMWorkflowExt_about"
+            text="About"
+            tooltip="About HM WorkFlow"
+            command="tcl: ::HMWorkflowExt::about"/>
+    </actionlist>
+
+    <page tag="HMWorkflowExt_Page" text="HM WorkFlow">
+        <group tag="HMWorkflowExt_Group_Main" text="Tools">
+            <actiongroup tag="HMWorkflowExt_ActionGroup_Main" text="Run">
+                <action actiontag="HMWorkflowExt_about"/>
+            </actiongroup>
+        </group>
+    </page>
+</root>

@@ -151,13 +151,13 @@ proc ::ContactSetup::showPanel {} {
     catch {destroy .contact_setup}
     set w .contact_setup
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "接触设置" "Contact Setup"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Contact Setup" "Contact Setup"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "接触设置" "Contact Setup"] -font [::HWFlow::uiFont title]
+    label $w.main.title -text [::HWFlow::txt "Contact Setup" "Contact Setup"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
     labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
@@ -989,7 +989,7 @@ proc ::ContactSetup::createContact {} {
             "Contact created: facing faces A=[llength $elemsA]/[llength $allElemsA], B=[llength $elemsB]/[llength $allElemsB], search=[format %.6g [dict get $contactFaces searchTol]], orientation elems=($orientElemA,$orientElemB), reverse=($reverseA,$reverseB), group=$groupName."]
     } err]
     if {$code} {
-        tk_messageBox -icon error -title [::HWFlow::txt "接触设置" "Contact Setup"] -message $err
+        tk_messageBox -icon error -title [::HWFlow::txt "Contact Setup" "Contact Setup"] -message $err
     }
 }
 
@@ -1114,7 +1114,7 @@ proc ::ContactSetup::removeElemsFromSurfaceWithUndo {surfName elems historyName}
 proc ::ContactSetup::trimContact {} {
     variable last
     if {![info exists last(surfAId)] || ![info exists last(surfBId)]} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "接触设置" "Contact Setup"] \
+        tk_messageBox -icon warning -title [::HWFlow::txt "Contact Setup" "Contact Setup"] \
             -message [::HWFlow::txt "请先创建一次接触，再进入修改模式。" "Create contact first, then trim it."]
         return
     }

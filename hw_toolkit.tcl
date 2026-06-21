@@ -13,25 +13,25 @@ namespace eval ::HWToolkit {
 
     set MODULES {
         component_category {
-            group    "01. Setup"
+            group    "Organize"
             file     "component_workflow"
-            label_zh "组件分类"
-            label_en "Component Type Classification"
+            label_zh "Component Classification"
+            label_en "Component Classification"
             desc_zh  "按 SHELL、SOLID、CASTING 分类组件，并规范化组件名称。"
             desc_en  "Classify components as SHELL, SOLID, or CASTING and normalize component names."
             proc     "::CompWorkflow::runCategory"
         }
         material_assignment {
-            group    "01. Setup"
+            group    "Organize"
             file     "component_workflow"
-            label_zh "材料标识"
+            label_zh "Material Assignment"
             label_en "Material Assignment"
             desc_zh  "从材料库分配材料标识，并按材料装配归类。"
             desc_en  "Assign material keys from the material library and organize material assemblies."
             proc     "::CompWorkflow::runMaterial"
         }
         midsurf {
-            group    "02. Geometry"
+            group    "Organize"
             label_zh "Midsurface Extraction"
             label_en "Midsurface Extraction"
             desc_zh  "抽取钣金中面，并按 CATEGORY_NAME_Tx_MATERIAL 规则命名输出组件。"
@@ -39,15 +39,15 @@ namespace eval ::HWToolkit {
             proc     "::MidSurf::run"
         }
         geometry_cleanup {
-            group    "02. Geometry"
-            label_zh "Geometry Cleanup"
+            group    "Organize"
+            label_zh "Geometry Cleanup: Chamfer/Recess"
             label_en "Geometry Cleanup: Chamfer/Recess"
             desc_zh  "处理倒角、圆角和沉台补面等几何清理任务。"
             desc_en  "Clean chamfers, fillets, and recessed pocket surfaces."
             proc     "::GeomCleanup::run"
         }
         seam_surface {
-            group    "03. Seam"
+            group    "Connector"
             label_zh "Seam Surface Creation"
             label_en "Seam Surface Creation"
             desc_zh  "通过线-面或线-线方式创建 SEAM_Tx 焊缝面。"
@@ -55,48 +55,48 @@ namespace eval ::HWToolkit {
             proc     "::SeamSurf::run"
         }
         batch_mesh_washer {
-            group    "04. Mesh"
-            label_zh "Sheet BatchMesh + Washer"
-            label_en "Sheet BatchMesh + Washer"
+            group    "Mesh"
+            label_zh "Sheet BatchMesh and Washer"
+            label_en "Sheet BatchMesh and Washer"
             desc_zh  "对钣金中面/壳组件执行 BatchMesh，不修改几何，并按孔径标准忽略小孔或生成 washer。"
             desc_en  "Run BatchMesh on sheet-metal midsurface/shell components and create washers by hole rules."
             proc     "::BatchMeshWasher::run"
         }
         casting_tetramesh {
-            group    "04. Mesh"
+            group    "Mesh"
             label_zh "Casting TetraMesh"
-            label_en "Casting CFD TetraMesh"
+            label_en "Casting TetraMesh"
             desc_zh  "执行铸件 surface 清理、三角面网格质量迭代和 TetraMesh 体网格。"
             desc_en  "Run casting surface cleanup, tria quality iterations, and TetraMesh volume meshing."
             proc     "::CastingTetMesh::run"
         }
         shell_washer_hole_rbe2 {
-            group    "05. RBE2"
-            label_zh "Shell Washer Hole RBE2"
-            label_en "Shell Washer-Hole RBE2"
-            desc_zh  "识别壳单元 washer 孔，并创建 RBE2。"
-            desc_en  "Create RBE2 elements for shell washer holes."
+            group    "Connector"
+            label_zh "Shell Washer-Hole RIGIDS"
+            label_en "Shell Washer-Hole RIGIDS"
+            desc_zh  "识别壳单元 washer 孔，并创建 RIGIDS。"
+            desc_en  "Create RIGIDS elements for shell washer holes."
             proc     "::RB2W::run"
         }
         auto_hole_rbe2 {
-            group    "05. RBE2"
-            label_zh "Solid Through-Hole RBE2"
-            label_en "Solid Through-Hole RBE2"
-            desc_zh  "识别实体网格圆柱贯通孔，并创建 RBE2。"
-            desc_en  "Create RBE2 elements for cylindrical through-holes in solid meshes."
+            group    "Connector"
+            label_zh "Solid Through-Hole RIGIDS"
+            label_en "Solid Through-Hole RIGIDS"
+            desc_zh  "识别实体网格圆柱贯通孔，并创建 RIGIDS。"
+            desc_en  "Create RIGIDS elements for cylindrical through-holes in solid meshes."
             proc     "::AutoHoleRBE2::run"
         }
         rbe2_bolt_connector {
-            group    "06. Bolt"
-            label_zh "RBE2 Bolt Connector"
-            label_en "RBE2 Bolt Connector"
-            desc_zh  "对 RBE2 中心节点分组，并生成 CBEAM/CBAR 螺栓连接段。"
-            desc_en  "Group RBE2 elements and create CBEAM/CBAR bolt segments."
+            group    "Connector"
+            label_zh "RIGIDS Bolt Connector"
+            label_en "RIGIDS Bolt Connector"
+            desc_zh  "对 RIGIDS 中心节点分组，并生成 CBEAM/CBAR 螺栓连接段。"
+            desc_en  "Group RIGIDS elements and create CBEAM/CBAR bolt segments."
             proc     "::RB2Bolt::run"
         }
         contact_setup {
-            group    "07. Contact"
-            label_zh "接触设置"
+            group    "Connector"
+            label_zh "Contact Setup"
             label_en "Contact Setup"
             desc_zh  "选择两个 component，自动识别方向并创建可修剪的接触面。"
             desc_en  "Pick two components, detect their facing direction, and create trimmable contact surfaces."
@@ -167,6 +167,14 @@ proc ::HWToolkit::sourceModules {} {
 proc ::HWToolkit::moduleGroups {} {
     variable MODULES
     set groups {}
+    foreach group {Organize Mesh Connector} {
+        foreach {key info} $MODULES {
+            if {[dict get $info group] eq $group} {
+                lappend groups $group
+                break
+            }
+        }
+    }
     foreach {key info} $MODULES {
         set group [dict get $info group]
         if {[lsearch -exact $groups $group] < 0} {
@@ -178,27 +186,9 @@ proc ::HWToolkit::moduleGroups {} {
 
 proc ::HWToolkit::groupText {group} {
     switch -- $group {
-        "01. Setup" {
-            return [::HWFlow::txt "01. Model Setup" "01. Model Setup"]
-        }
-        "02. Geometry" {
-            return [::HWFlow::txt "02. 几何处理" "02. Geometry"]
-        }
-        "03. Seam" {
-            return [::HWFlow::txt "03. 焊缝面" "03. Seam"]
-        }
-        "04. Mesh" {
-            return [::HWFlow::txt "04. 网格划分" "04. Mesh"]
-        }
-        "05. RBE2" {
-            return [::HWFlow::txt "05. RBE2 连接" "05. RBE2"]
-        }
-        "06. Bolt" {
-            return [::HWFlow::txt "06. 螺栓连接" "06. Bolt"]
-        }
-        "07. Contact" {
-            return [::HWFlow::txt "07. 接触设置" "07. Contact"]
-        }
+        "Organize" { return "Organize" }
+        "Mesh" { return "Mesh" }
+        "Connector" { return "Connector" }
     }
     return $group
 }

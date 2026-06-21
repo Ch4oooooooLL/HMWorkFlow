@@ -73,16 +73,16 @@ proc ::CompWorkflow::showCategoryPanel {} {
     catch {destroy .comp_category}
     set w .comp_category
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "组件分类" "Component Type Classification"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Component Classification" "Component Classification"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "组件分类" "Component Type Classification"] -font [::HWFlow::uiFont title]
+    label $w.main.title -text [::HWFlow::txt "Component Classification" "Component Classification"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w -pady {0 8}
 
-    labelframe $w.main.classify -text [::HWFlow::txt "组件分类" "Classify Components"] -padx 8 -pady 8
+    labelframe $w.main.classify -text [::HWFlow::txt "Classify Components" "Classify Components"] -padx 8 -pady 8
     grid $w.main.classify -row 1 -column 0 -sticky news -pady {0 8}
 
     label $w.main.classify.l_cat -text [::HWFlow::txt "类型" "Category"]
@@ -134,13 +134,13 @@ proc ::CompWorkflow::showMaterialPanel {} {
     catch {destroy .material_assign}
     set w .material_assign
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "材料标识" "Material Assignment"] v$VERSION"
+    wm title $w "[::HWFlow::txt "Material Assignment" "Material Assignment"] v$VERSION"
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
 
-    label $w.main.title -text [::HWFlow::txt "材料标识" "Material Assignment"] -font [::HWFlow::uiFont title]
+    label $w.main.title -text [::HWFlow::txt "Material Assignment" "Material Assignment"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w -pady {0 8}
 
     labelframe $w.main.mat -text [::HWFlow::txt "材料库" "Material Library"] -padx 8 -pady 8
@@ -160,7 +160,7 @@ proc ::CompWorkflow::showMaterialPanel {} {
     grid $w.main.sel -row 2 -column 0 -sticky ew -pady {0 8}
     button $w.main.sel.pick -text [::HWFlow::txt "选择组件" "Pick Components"] -width 18 -command "::CompWorkflow::pickMaterialComponents"
     label $w.main.sel.info -textvariable ::CompWorkflow::ui(materialText) -width 42 -anchor w
-    button $w.main.sel.apply -text [::HWFlow::txt "应用材料标识" "Apply Material"] -width 18 -command "::CompWorkflow::applyMaterial"
+    button $w.main.sel.apply -text [::HWFlow::txt "Apply Material" "Apply Material"] -width 18 -command "::CompWorkflow::applyMaterial"
     grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 6} -pady 3
     grid $w.main.sel.info -row 0 -column 1 -sticky w -pady 3
     grid $w.main.sel.apply -row 1 -column 0 -columnspan 2 -sticky e -pady {8 0}
@@ -323,7 +323,7 @@ proc ::CompWorkflow::applyCategory {} {
     set comps $ui(classifyComps)
     set category [string toupper [string trim $ui(classifyCategory)]]
     if {[llength $comps] == 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "组件分类" "Component Type Classification"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Component Classification" "Component Classification"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
 
@@ -333,7 +333,7 @@ proc ::CompWorkflow::applyCategory {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "组件类型分类" "Component Type Classification"] \
+            [::HWFlow::txt "Component Classification" "Component Classification"] \
             [::HWFlow::txt "准备应用组件类型..." "Preparing component classification..."] \
             0]
     }
@@ -345,7 +345,7 @@ proc ::CompWorkflow::applyCategory {} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
             set pct [expr {10.0 + 75.0 * ($index / double($total))}]
             catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "组件类型分类正在执行" "Component classification running"] \
+                [::HWFlow::txt "Component classification running" "Component classification running"] \
                 "$index/$total: $oldName -> $newName" \
                 [expr {$index == $total}]}
         }
@@ -363,9 +363,9 @@ proc ::CompWorkflow::applyCategory {} {
     ::CompWorkflow::saveState
     set ui(status) [::HWFlow::txt "已将 [llength $ids] 个组件分类为 $category。" "Classified [llength $ids] component(s) into $category."]
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "组件类型分类已完成。" "Component classification finished."] 100.0}
+        catch {::HWFlow::progressClose [::HWFlow::txt "Component classification finished." "Component classification finished."] 100.0}
     }
-    tk_messageBox -icon info -title [::HWFlow::txt "组件分类" "Component Type Classification"] -message "[::HWFlow::txt "类型已应用：" "Category applied:"]\n[join [lrange $renamed 0 12] \n]"
+    tk_messageBox -icon info -title [::HWFlow::txt "Component Classification" "Component Classification"] -message "[::HWFlow::txt "类型已应用：" "Category applied:"]\n[join [lrange $renamed 0 12] \n]"
 }
 
 proc ::CompWorkflow::applyMaterial {} {
@@ -373,11 +373,11 @@ proc ::CompWorkflow::applyMaterial {} {
     set comps $ui(materialComps)
     set matKey [string trim $ui(selectedMaterial)]
     if {[llength $comps] == 0} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "材料标识" "Material Assignment"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Material Assignment" "Material Assignment"] -message [::HWFlow::txt "请先选择组件。" "Pick components first."]
         return
     }
     if {$matKey eq "" || [::HWFlow::materialRowByKey $matKey] eq ""} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "材料标识" "Material Assignment"] -message [::HWFlow::txt "请选择有效的材料标识。" "Select a valid material."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "Material Assignment" "Material Assignment"] -message [::HWFlow::txt "请选择有效的材料标识。" "Select a valid material."]
         return
     }
 
@@ -388,7 +388,7 @@ proc ::CompWorkflow::applyMaterial {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "材料标识分配" "Material Assignment"] \
+            [::HWFlow::txt "Material Assignment" "Material Assignment"] \
             [::HWFlow::txt "准备应用材料标识..." "Preparing material assignment..."] \
             0]
     }
@@ -401,7 +401,7 @@ proc ::CompWorkflow::applyMaterial {} {
             if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
                 set pct [expr {10.0 + 70.0 * ($index / double($total))}]
                 catch {::HWFlow::progressUpdate $pct \
-                    [::HWFlow::txt "材料标识分配正在执行" "Material assignment running"] \
+                    [::HWFlow::txt "Material assignment running" "Material assignment running"] \
                     "$index/$total: $oldName -> skipped" \
                     [expr {$index == $total}]}
             }
@@ -412,7 +412,7 @@ proc ::CompWorkflow::applyMaterial {} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
             set pct [expr {10.0 + 70.0 * ($index / double($total))}]
             catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "材料标识分配正在执行" "Material assignment running"] \
+                [::HWFlow::txt "Material assignment running" "Material assignment running"] \
                 "$index/$total: $oldName -> $newName" \
                 [expr {$index == $total}]}
         }
@@ -449,9 +449,9 @@ proc ::CompWorkflow::applyMaterial {} {
         append detail [::HWFlow::txt "\n\n已跳过：\n[join [lrange $skipped 0 8] \n]" "\n\nSkipped:\n[join [lrange $skipped 0 8] \n]"]
     }
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "材料标识分配已完成。" "Material assignment finished."] 100.0}
+        catch {::HWFlow::progressClose [::HWFlow::txt "Material assignment finished." "Material assignment finished."] 100.0}
     }
-    tk_messageBox -icon info -title [::HWFlow::txt "材料标识" "Material Assignment"] -message $detail
+    tk_messageBox -icon info -title [::HWFlow::txt "Material Assignment" "Material Assignment"] -message $detail
 }
 
 proc ::CompWorkflow::runCategory {} {

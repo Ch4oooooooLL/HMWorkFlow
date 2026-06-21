@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Extension">
+    <entry name="name" value="HMWorkflow" />
+    <entry name="displayName" value="HM WorkFlow" />
+    <entry name="version" value="0.1.0" />
+    <entry name="minProductVersion" value="2022.2" />
+    <entry name="supportedClient" value="HyperWorksDesktop" />
+    <entry name="resources" value="resources" />
+    <entry name="autoLoad" value="true" />
+    <entry name="tclscript" value="global-init.tcl" />
+
+    <section name="profile" value="HyperMesh">
+        <entry name="ribbonxml" value="hm/hm-ribbon.xml" />
+    </section>
+</section>

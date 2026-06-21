@@ -1,8 +1,8 @@
 # Lightweight contact setup defaults.
 key|value|note
-contact_type|SLIDE|SLIDE, TIE, STICK, FREEZE, FRICTIONLESS or FRICTION
-main_side|AUTO|AUTO, FIRST or SECOND
-friction|0.20|stored parameter for frictional contacts
-result_prefix|AUTO_CONTACT|name prefix for generated contact surfaces/groups
-keep_face_components|1|keep generated face components for solid components
-try_group|1|create solver contact group after contact surfaces
+contact_type|SLIDE|
+main_side|AUTO|
+friction|0.20|
+result_prefix|AUTO_CONTACT|
+keep_face_components|1|
+try_group|1|
