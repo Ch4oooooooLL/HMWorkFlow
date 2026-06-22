@@ -29,8 +29,8 @@ namespace eval ::BatchMeshWasher {
         HOLE_MIN_DIA 6.0
         HOLE_MAX_DIA 30.0
         BATCH_BY_COMPONENT 0
-        SURFACE_BATCH_SIZE 1
-        PERFORMANCE_MODE 0
+        SURFACE_BATCH_SIZE 24
+        PERFORMANCE_MODE 1
         WASHER_PROGRESS_STEP 10
         WASHER_BATCH_MODE 1
         WASHER_BATCH_SIZE 80
@@ -71,10 +71,10 @@ proc ::BatchMeshWasher::defaultMeshRulesText {} {
         {feature_angle|30|feature angle used by washer generation}
         {batchtempfilesmode|1|use temporary criteria/parameter files}
         {batch_by_component|0|0 is faster; 1 gives per-component BatchMesh progress}
-        {surface_batch_size|1|number of surfaces per BatchMesh call; 1 keeps Tk most responsive}
+        {surface_batch_size|24|number of surfaces per BatchMesh call; larger batches reduce HyperMesh command overhead}
         {hole_min_dia|6.0|minimum hole diameter for washer detection; smaller holes are ignored without geometry edits}
         {hole_max_dia|30.0|maximum hole diameter for washer detection}
-        {performance_mode|0|reserved; UI-safe mode keeps HyperMesh/Tk messages enabled}
+        {performance_mode|1|block redraw/browser updates while running}
         {washer_progress_step|10|update washer progress every N holes}
         {washer_batch_mode|1|group holes with identical washer rules into fewer HyperMesh commands}
         {washer_batch_size|80|maximum hole seed nodes per washer command when batch mode is enabled}
@@ -108,10 +108,30 @@ proc ::BatchMeshWasher::msg {text} {
 }
 
 proc ::BatchMeshWasher::beginPerformanceMode {} {
-    return
+    variable ui
+    if {![info exists ui(PERFORMANCE_MODE)] || !$ui(PERFORMANCE_MODE)} {
+        return
+    }
+    catch {hm_blockredraw 1}
+    catch {hm_blockmessages 1}
+    catch {hm_blockerrormessages 1}
+    catch {*setoption block_redraw=1}
+    catch {*setoption block_messages=1}
+    catch {hwbrowsermanager view flush false}
+    catch {hmbr_signals buffer start}
 }
 
 proc ::BatchMeshWasher::endPerformanceMode {} {
+    variable ui
+    if {[info exists ui(PERFORMANCE_MODE)] && $ui(PERFORMANCE_MODE)} {
+        catch {hmbr_signals buffer stop}
+        catch {hwbrowsermanager view flush true}
+        catch {*setoption block_redraw=0}
+        catch {*setoption block_messages=0}
+        catch {hm_blockredraw 0}
+        catch {hm_blockmessages 0}
+        catch {hm_blockerrormessages 0}
+    }
     catch {update idletasks}
 }
 
@@ -352,12 +372,14 @@ proc ::BatchMeshWasher::showPanel {} {
     checkbutton $w.main.opt.wbatch -text [::HWFlow::txt "按相同规则批量创建 washer" "Batch-create washers with identical rules"] -variable ::BatchMeshWasher::ui(WASHER_BATCH_MODE)
     checkbutton $w.main.opt.spider -text [::HWFlow::txt "washer 同时创建 rigid spider" "Create rigid spider with washer"] -variable ::BatchMeshWasher::ui(RIGID_SPIDER)
     checkbutton $w.main.opt.local -text [::HWFlow::txt "创建孔平面局部坐标系" "Create hole local coordinate system"] -variable ::BatchMeshWasher::ui(LOCAL_COORDINATE_SYSTEM)
+    checkbutton $w.main.opt.perf -text [::HWFlow::txt "性能模式：减少图形/浏览器刷新" "Performance mode: reduce graphics/browser updates"] -variable ::BatchMeshWasher::ui(PERFORMANCE_MODE)
     checkbutton $w.main.opt.verbose -text [::HWFlow::txt "输出详细日志" "Verbose log"] -variable ::BatchMeshWasher::ui(VERBOSE)
     grid $w.main.opt.bycomp -row 0 -column 0 -sticky w -pady 2
     grid $w.main.opt.wbatch -row 1 -column 0 -sticky w -pady 2
     grid $w.main.opt.spider -row 2 -column 0 -sticky w -pady 2
     grid $w.main.opt.local -row 2 -column 1 -sticky w -pady 2
-    grid $w.main.opt.verbose -row 3 -column 0 -sticky w -pady 2
+    grid $w.main.opt.perf -row 3 -column 0 -sticky w -pady 2
+    grid $w.main.opt.verbose -row 3 -column 1 -sticky w -pady 2
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
@@ -398,7 +420,7 @@ proc ::BatchMeshWasher::acceptPanel {} {
             return
         }
     }
-    foreach key {BATCH_BY_COMPONENT WASHER_BATCH_MODE RIGID_SPIDER LOCAL_COORDINATE_SYSTEM VERBOSE} {
+    foreach key {BATCH_BY_COMPONENT WASHER_BATCH_MODE RIGID_SPIDER LOCAL_COORDINATE_SYSTEM PERFORMANCE_MODE VERBOSE} {
         if {![string is integer -strict $ui($key)]} {
             tk_messageBox -icon warning -title [::HWFlow::txt "Sheet BatchMesh and Washer" "Sheet BatchMesh and Washer"] -message "$key must be 0 or 1."
             return
@@ -504,7 +526,6 @@ proc ::BatchMeshWasher::runBatchMeshOnSurfaces {surfIds} {
     catch {::HWFlow::progressForceVisible}
     catch {update idletasks}
     catch {update}
-    catch {after 200}
     if {[catch {*hm_batchmesh2 surfs 1 1 2 "dummy" "dummy"} err]} {
         if {[catch {*hm_batchmesh2 surfaces 1 1 2 "dummy" "dummy"} err2]} {
             error "BatchMesh surfaces failed: $err / $err2"
@@ -575,7 +596,6 @@ proc ::BatchMeshWasher::runBatchMeshOnComponents {compIds {progressOpened 0} {st
     catch {::HWFlow::progressForceVisible}
     catch {update idletasks}
     catch {update}
-    catch {after 200}
     if {[catch {*hm_batchmesh2 comps 1 1 2 "dummy" "dummy"} err]} {
         if {[catch {*hm_batchmesh2 components 1 1 2 "dummy" "dummy"} err2]} {
             error "BatchMesh failed: $err / $err2"

@@ -8,10 +8,10 @@ params_generate_mode|shell|generic, scale, midmesh, shell, solid
 feature_angle|30|feature angle used by washer generation
 batchtempfilesmode|1|use temporary criteria/parameter files
 batch_by_component|0|0 is faster; 1 gives per-component BatchMesh progress
-surface_batch_size|1|number of surfaces per BatchMesh call; 1 keeps Tk most responsive
+surface_batch_size|24|number of surfaces per BatchMesh call; larger batches reduce HyperMesh command overhead
 hole_min_dia|6.0|minimum hole diameter for washer detection; smaller holes are ignored without geometry edits
 hole_max_dia|30.0|maximum hole diameter for washer detection
-performance_mode|0|reserved; UI-safe mode keeps HyperMesh/Tk messages enabled
+performance_mode|1|block redraw/browser updates while running
 washer_progress_step|10|update washer progress every N holes
 washer_batch_mode|1|group holes with identical washer rules into fewer HyperMesh commands
 washer_batch_size|80|maximum hole seed nodes per washer command when batch mode is enabled
