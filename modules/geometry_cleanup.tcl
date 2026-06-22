@@ -487,15 +487,6 @@ proc ::GeomCleanup::sortLoopsByPerimeter {loops} {
     return $out
 }
 
-proc ::GeomCleanup::listIntersects {a b} {
-    foreach value $a {
-        if {[::GeomCleanup::contains $b $value]} {
-            return 1
-        }
-    }
-    return 0
-}
-
 proc ::GeomCleanup::edgeOwnerSurfaces {edgeId} {
     set out {}
     foreach cmd [list [list hm_getsurfacesfromedge $edgeId] [list hm_getsurfacesfromline $edgeId]] {
@@ -873,42 +864,41 @@ proc ::GeomCleanup::removeChamfer {seed} {
 
 proc ::GeomCleanup::topEdgesFromWallFaces {floorEdges wallFaces deletedFaces} {
     set floorEdges [::GeomCleanup::uniq $floorEdges]
-    set wallFaces [::GeomCleanup::uniq $wallFaces]
+    set floorPts [::GeomCleanup::loopPoints $floorEdges]
+    set wallFaces [::GeomCleanup::orderedUnique $wallFaces]
     set deletedFaces [::GeomCleanup::uniq $deletedFaces]
     set out {}
+    set eps 1.0e-8
     foreach wall $wallFaces {
-        foreach edge [::GeomCleanup::surfaceEdges $wall] {
-            if {[::GeomCleanup::contains $floorEdges $edge]} {
-                continue
-            }
-            set owners [::GeomCleanup::edgeOwnerSurfaces $edge]
-            set hasOutside 0
-            foreach owner $owners {
-                if {![::GeomCleanup::contains $deletedFaces $owner]} {
-                    set hasOutside 1
-                    break
+        foreach wallLoop [::GeomCleanup::surfaceLoops $wall] {
+            foreach edge $wallLoop {
+                if {[::GeomCleanup::contains $floorEdges $edge]} {
+                    continue
+                }
+                set touchesFloor 0
+                foreach point [::GeomCleanup::edgePoints $edge] {
+                    set distance [::GeomCleanup::pointMinDistance $point $floorPts]
+                    if {$distance ne "" && $distance <= $eps} {
+                        set touchesFloor 1
+                        break
+                    }
+                }
+                if {$touchesFloor} {
+                    continue
+                }
+                set owners [::GeomCleanup::edgeOwnerSurfaces $edge]
+                set hasOutside 0
+                foreach owner $owners {
+                    if {![::GeomCleanup::contains $deletedFaces $owner]} {
+                        set hasOutside 1
+                        break
+                    }
+                }
+                if {$hasOutside} {
+                    lappend out $edge
                 }
             }
-            if {$hasOutside} {
-                lappend out $edge
-            }
         }
-    }
-    return [::GeomCleanup::orderedUnique $out]
-}
-
-proc ::GeomCleanup::datumEdgesFromBaseEdges {baseEdges datumSurfs} {
-    set baseEdges [::GeomCleanup::orderedUnique $baseEdges]
-    set out {}
-    foreach datumSurf [::GeomCleanup::uniq $datumSurfs] {
-        foreach loop [::GeomCleanup::surfaceLoops $datumSurf] {
-            if {[::GeomCleanup::listIntersects $loop $baseEdges]} {
-                set out [concat $out $loop]
-            }
-        }
-    }
-    if {[llength $out] == 0} {
-        set out $baseEdges
     }
     return [::GeomCleanup::orderedUnique $out]
 }
@@ -935,7 +925,7 @@ proc ::GeomCleanup::wallsFromLoop {loop seed} {
             }
         }
     }
-    return [::GeomCleanup::uniq $walls]
+    return [::GeomCleanup::orderedUnique $walls]
 }
 
 proc ::GeomCleanup::loopWallDistanceScore {loop walls} {
@@ -974,6 +964,28 @@ proc ::GeomCleanup::loopWallDistanceScore {loop walls} {
     return 1.0e99
 }
 
+proc ::GeomCleanup::edgesDistanceFromLoop {loop edges} {
+    set loopPts [::GeomCleanup::loopPoints $loop]
+    set best ""
+    set eps 1.0e-8
+    foreach edge $edges {
+        foreach point [::GeomCleanup::edgePoints $edge] {
+            if {[llength $point] < 3} { continue }
+            set distance [::GeomCleanup::pointMinDistance $point $loopPts]
+            if {$distance eq "" || $distance <= $eps} {
+                continue
+            }
+            if {$best eq "" || $distance < $best} {
+                set best $distance
+            }
+        }
+    }
+    if {$best ne ""} {
+        return $best
+    }
+    return 1.0e99
+}
+
 proc ::GeomCleanup::classifyPocketLoops {loops seed} {
     set rows {}
     foreach loop $loops {
@@ -981,9 +993,15 @@ proc ::GeomCleanup::classifyPocketLoops {loops seed} {
         if {[llength $walls] == 0} {
             continue
         }
-        set score [::GeomCleanup::loopWallDistanceScore $loop $walls]
+        set deleteFaces [::GeomCleanup::uniq [concat [list $seed] $walls]]
+        set datumEdges [::GeomCleanup::topEdgesFromWallFaces $loop $walls $deleteFaces]
+        set datumSurfs [::GeomCleanup::outsideSurfacesFromEdges $datumEdges $deleteFaces]
+        set score [::GeomCleanup::edgesDistanceFromLoop $loop $datumEdges]
+        if {$score >= 1.0e98} {
+            set score [::GeomCleanup::loopWallDistanceScore $loop $walls]
+        }
         set perimeter [::GeomCleanup::loopPerimeter $loop]
-        lappend rows [list $score [expr {-$perimeter}] $loop $walls]
+        lappend rows [list $score [expr {-$perimeter}] $loop $walls $datumEdges $datumSurfs]
     }
     if {[llength $rows] != 2} {
         error [::HWFlow::txt "简化沉台流程要求两个边界环都能找到相邻壁面；当前有效边界环数量：[llength $rows]。" "The simplified pocket workflow requires both boundary loops to have adjacent wall surfaces; valid loop count: [llength $rows]."]
@@ -991,12 +1009,24 @@ proc ::GeomCleanup::classifyPocketLoops {loops seed} {
     set rows [lsort -real -index 0 $rows]
     set outerRow [lindex $rows 0]
     set innerRow [lindex $rows 1]
+    set outerScore [lindex $outerRow 0]
+    set innerScore [lindex $innerRow 0]
+    if {$outerScore >= 1.0e98 || $innerScore >= 1.0e98 || !($outerScore + 1.0e-8 < $innerScore)} {
+        error [::HWFlow::txt "无法可靠区分沉台小竖直面和孔壁：候选高度分别为 $outerScore 与 $innerScore。已停止，避免误删其他平面。" "Could not reliably distinguish the small pocket wall from the hole wall: candidate heights are $outerScore and $innerScore. Stopped to avoid modifying unrelated planes."]
+    }
+    if {[llength [lindex $outerRow 4]] == 0 || [llength [lindex $outerRow 5]] == 0} {
+        error [::HWFlow::txt "较短候选壁面没有找到与基准平面相连的基准边，已停止。" "The shorter candidate wall has no datum edges connected to a datum surface. Stopped."]
+    }
     return [dict create \
         outer_loop [lindex $outerRow 2] \
         outer_walls [lindex $outerRow 3] \
+        outer_datum_edges [lindex $outerRow 4] \
+        outer_datum_surfs [lindex $outerRow 5] \
         outer_score [lindex $outerRow 0] \
         inner_loop [lindex $innerRow 2] \
         inner_walls [lindex $innerRow 3] \
+        inner_datum_edges [lindex $innerRow 4] \
+        inner_datum_surfs [lindex $innerRow 5] \
         inner_score [lindex $innerRow 0]]
 }
 
@@ -1053,36 +1083,34 @@ proc ::GeomCleanup::removePocket {seed} {
         error [::HWFlow::txt "简化沉台流程要求所选面恰好包含一个外边和一个内边；当前边界环数量：[llength $loops]。" "The simplified pocket workflow requires exactly one outer loop and one inner loop; found [llength $loops]."]
     }
     set classified [::GeomCleanup::classifyPocketLoops $loops $seed]
-    set outerLoop [dict get $classified outer_loop]
     set innerLoop [dict get $classified inner_loop]
     set outerWalls [dict get $classified outer_walls]
     set innerWalls [dict get $classified inner_walls]
     set outerScore [dict get $classified outer_score]
     set innerScore [dict get $classified inner_score]
+    set baseEdges [dict get $classified outer_datum_edges]
+    set surroundingSurfs [dict get $classified outer_datum_surfs]
 
     if {[llength $outerWalls] == 0} {
         error [::HWFlow::txt "未找到沉台底面与周围正常面的竖直连接面。" "Could not find wall surfaces between pocket floor and surrounding face."]
     }
 
     set deleteFaces [::GeomCleanup::uniq [concat [list $seed] $outerWalls]]
-    set directBaseEdges [::GeomCleanup::topEdgesFromWallFaces $outerLoop $outerWalls $deleteFaces]
-    if {[llength $directBaseEdges] == 0} {
+    if {[llength $baseEdges] == 0} {
         error [::HWFlow::txt "未找到小竖直面与基准平面相连的基准边。" "Could not find the datum edges where the small vertical walls meet the datum plane."]
     }
     if {[llength $innerWalls] == 0} {
         error [::HWFlow::txt "未找到与沉台内边相连的孔壁。" "Could not find the hole wall connected to the pocket inner loop."]
     }
-    set surroundingSurfs [::GeomCleanup::outsideSurfacesFromEdges $directBaseEdges $deleteFaces]
     if {[llength $surroundingSurfs] == 0} {
         error [::HWFlow::txt "未找到与基准边相邻的基准平面。" "Could not find the datum surface adjacent to the datum edges."]
     }
-    set baseEdges [::GeomCleanup::datumEdgesFromBaseEdges $directBaseEdges $surroundingSurfs]
 
     set stat(mode) POCKET
     set stat(targetSurfs) $deleteFaces
     set innerConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $innerLoop [::HWFlow::txt "沉台内边" "Pocket inner loop"]]
     set baseConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $baseEdges [::HWFlow::txt "沉台基准边" "Pocket datum loop"]]
-    ::GeomCleanup::msg [::HWFlow::txt "沉台面=$seed；小竖直面=$outerWalls(score=$outerScore)；孔壁=$innerWalls(score=$innerScore)；内边=$innerLoop；直接基准边=$directBaseEdges；完整基准边=$baseEdges；基准平面=$surroundingSurfs" "Pocket face=$seed; small vertical walls=$outerWalls(score=$outerScore); hole walls=$innerWalls(score=$innerScore); inner loop=$innerLoop; direct datum edges=$directBaseEdges; full datum edges=$baseEdges; datum surfaces=$surroundingSurfs"]
+    ::GeomCleanup::msg [::HWFlow::txt "沉台面=$seed；小竖直面=$outerWalls(score=$outerScore)；孔壁=$innerWalls(score=$innerScore)；内边=$innerLoop；基准边=$baseEdges；基准平面=$surroundingSurfs" "Pocket face=$seed; small vertical walls=$outerWalls(score=$outerScore); hole walls=$innerWalls(score=$innerScore); inner loop=$innerLoop; datum edges=$baseEdges; datum surfaces=$surroundingSurfs"]
 
     set newSurfs {}
     set code [catch {
