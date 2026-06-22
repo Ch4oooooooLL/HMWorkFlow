@@ -362,6 +362,19 @@ proc ::GeomCleanup::markList {entityTypes markId ids} {
     return ""
 }
 
+proc ::GeomCleanup::clearWorkingMarks {} {
+    foreach etype {surfs surfaces lines line comps components solids solid elems elements nodes node} {
+        foreach markId {1 2} {
+            catch {*clearmark $etype $markId}
+        }
+    }
+    foreach etype {lines line surfs surfaces} {
+        foreach listId {1 2} {
+            catch {*createlist $etype $listId}
+        }
+    }
+}
+
 proc ::GeomCleanup::selectedSurface {} {
     catch {*clearmark surfs 1}
     *createmarkpanel surfs 1 [::HWFlow::txt "选择一个待清理面，中键执行；取消选择退出连续清洗" "Select one face and middle-click to execute; cancel to exit continuous cleanup"]
@@ -1108,12 +1121,14 @@ proc ::GeomCleanup::removePocket {seed} {
 
     set stat(mode) POCKET
     set stat(targetSurfs) $deleteFaces
-    set innerConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $innerLoop [::HWFlow::txt "沉台内边" "Pocket inner loop"]]
-    set baseConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $baseEdges [::HWFlow::txt "沉台基准边" "Pocket datum loop"]]
-    ::GeomCleanup::msg [::HWFlow::txt "沉台面=$seed；小竖直面=$outerWalls(score=$outerScore)；孔壁=$innerWalls(score=$innerScore)；内边=$innerLoop；基准边=$baseEdges；基准平面=$surroundingSurfs" "Pocket face=$seed; small vertical walls=$outerWalls(score=$outerScore); hole walls=$innerWalls(score=$innerScore); inner loop=$innerLoop; datum edges=$baseEdges; datum surfaces=$surroundingSurfs"]
-
+    set innerConstruction {}
+    set baseConstruction {}
     set newSurfs {}
     set code [catch {
+        set innerConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $innerLoop [::HWFlow::txt "沉台内边" "Pocket inner loop"]]
+        set baseConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $baseEdges [::HWFlow::txt "沉台基准边" "Pocket datum loop"]]
+        ::GeomCleanup::msg [::HWFlow::txt "沉台面=$seed；小竖直面=${outerWalls}(score=$outerScore)；孔壁=${innerWalls}(score=$innerScore)；内边=$innerLoop；基准边=$baseEdges；基准平面=$surroundingSurfs" "Pocket face=$seed; small vertical walls=${outerWalls}(score=$outerScore); hole walls=${innerWalls}(score=$innerScore); inner loop=$innerLoop; datum edges=$baseEdges; datum surfaces=$surroundingSurfs"]
+
         ::GeomCleanup::deleteSurfaces $deleteFaces
         set newSurfs [::GeomCleanup::createSurfaceBetweenLoops $innerConstruction $baseConstruction]
         ::GeomCleanup::organizeSurfacesToComponent $newSurfs $compId
@@ -1192,6 +1207,7 @@ proc ::GeomCleanup::processSurface {seed} {
         ::HWFlow::refreshBrowser
     } err opts]
 
+    ::GeomCleanup::clearWorkingMarks
     ::GeomCleanup::endPerformanceMode
     if {$historyStarted} {
         catch {*endnotehistorystate $historyName}
@@ -1199,6 +1215,7 @@ proc ::GeomCleanup::processSurface {seed} {
     if {$code} {
         if {$historyStarted} {
             catch {*undohistorystate 1}
+            ::GeomCleanup::clearWorkingMarks
             catch {::HWFlow::refreshBrowser}
         }
         return -options $opts $err
