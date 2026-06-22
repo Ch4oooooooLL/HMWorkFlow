@@ -22,6 +22,27 @@ Connector
 
 主面板中的 `刷新浏览器` 用于恢复 Model Browser 更新并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
 
+### 1.1 HyperWorks Extension 打包和加载
+
+需要以 HyperWorks Extension 方式加载时，先在项目根目录构建 extension：
+
+```bat
+extension_packaging\build_extension.bat
+```
+
+构建完成后会生成：
+
+```text
+dist\HMWorkflow
+dist\HMWorkflow_0.1.0_HyperWorks_Extension.zip
+```
+
+在 HyperWorks 的 `File > Extensions > Add Extension` 中选择 `dist\HMWorkflow`
+目录，或解压 zip 后选择解压出的 `HMWorkflow` 目录。不要选择
+`extension_packaging\extension_template`；如果 Ribbon 中只出现一个 `Run`
+并且点击后只弹出 info，说明加载的是占位模板或错误目录，需要移除后重新加载
+`dist\HMWorkflow`。
+
 ## 2. 推荐工作流
 
 ### 2.1 准备项目配置

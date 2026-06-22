@@ -11,6 +11,7 @@ import sys
 import zipfile
 from html import escape as xml_escape
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -18,6 +19,15 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 CONFIG_FILE = SCRIPT_DIR / "extension_tools.json"
 TEMPLATE_DIR = SCRIPT_DIR / "extension_template"
 DIST_DIR = PROJECT_ROOT / "dist"
+
+PAYLOAD_INCLUDE_ITEMS = [
+    "README.md",
+    "config.yaml",
+    "hw_toolkit.tcl",
+    "config",
+    "doc",
+    "modules",
+]
 
 EXCLUDED_DIR_NAMES = {
     ".git",
@@ -303,7 +313,7 @@ def generate_readme(config: dict) -> str:
 2. Open HyperWorks.
 3. Go to `File > Extensions`.
 4. Click `Add Extension`.
-5. Select the unzipped folder that contains `extension.xml`.
+5. Select the unzipped `{config['extension_name']}` folder that contains `extension.xml`.
 6. Enable the extension.
 
 ## Verify
@@ -318,6 +328,9 @@ def generate_readme(config: dict) -> str:
 - The zip file is only for distribution.
 - Rebuild the extension after changing source Tcl files.
 - Restart HyperWorks if the Ribbon does not refresh.
+- If the Ribbon only shows one `Run` item that opens an info dialog, remove that
+  extension entry and load the generated `{config['extension_name']}` folder from
+  `dist` instead.
 """
 
 
@@ -359,7 +372,7 @@ def build_extension(config: dict) -> tuple[Path, Path]:
     write_text(extension_dir / "README.md", generate_readme(config))
 
     payload_dir = extension_dir / "payload"
-    shutil.copytree(PROJECT_ROOT, payload_dir, ignore=should_ignore)
+    copy_runtime_payload(payload_dir)
 
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in extension_dir.rglob("*"):
@@ -367,7 +380,93 @@ def build_extension(config: dict) -> tuple[Path, Path]:
                 arcname = Path(extension_name) / path.relative_to(extension_dir)
                 zf.write(path, arcname.as_posix())
 
+    verify_extension_package(config, extension_dir, zip_path)
     return extension_dir, zip_path
+
+
+def copy_runtime_payload(payload_dir: Path) -> None:
+    payload_dir.mkdir(parents=True, exist_ok=True)
+    for item in PAYLOAD_INCLUDE_ITEMS:
+        source = PROJECT_ROOT / item
+        if not source.exists():
+            continue
+
+        target = payload_dir / item
+        if source.is_dir():
+            shutil.copytree(source, target, ignore=should_ignore)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def verify_extension_package(config: dict, extension_dir: Path, zip_path: Path) -> None:
+    ribbon_path = extension_dir / "hm" / "hm-ribbon.xml"
+    init_path = extension_dir / "global-init.tcl"
+    payload_dir = extension_dir / "payload"
+
+    if not ribbon_path.exists():
+        raise SystemExit(f"Generated Ribbon XML is missing: {ribbon_path}")
+    if not init_path.exists():
+        raise SystemExit(f"Generated global Tcl wrapper is missing: {init_path}")
+    if "Auto-generated HM WorkFlow Extension wrapper" not in init_path.read_text(encoding="utf-8"):
+        raise SystemExit(f"Generated global Tcl wrapper was not written correctly: {init_path}")
+
+    try:
+        ribbon_root = ET.parse(ribbon_path).getroot()
+    except ET.ParseError as exc:
+        raise SystemExit(f"Generated Ribbon XML is invalid: {ribbon_path}: {exc}") from exc
+
+    action_tags = {
+        action.get("tag")
+        for action in ribbon_root.findall(".//actionlist/action")
+        if action.get("tag")
+    }
+    action_refs = {
+        action.get("actiontag")
+        for action in ribbon_root.findall(".//actiongroup/action")
+        if action.get("actiontag")
+    }
+
+    expected_tool_tags = {f"HMWorkflowExt_{tool['key']}" for tool in config["tools"]}
+    missing_actions = sorted(expected_tool_tags - action_tags)
+    missing_refs = sorted(expected_tool_tags - action_refs)
+    if missing_actions or missing_refs:
+        details = []
+        if missing_actions:
+            details.append("missing action(s): " + ", ".join(missing_actions))
+        if missing_refs:
+            details.append("missing action reference(s): " + ", ".join(missing_refs))
+        raise SystemExit("Generated Ribbon XML is incomplete: " + "; ".join(details))
+
+    missing_payload = []
+    for tool in config["tools"]:
+        script_rel = as_posix_rel(str(tool["script"]))
+        if not (payload_dir / Path(*script_rel.split("/"))).exists():
+            missing_payload.append(script_rel)
+    if missing_payload:
+        raise SystemExit("Generated extension payload is missing Tcl script(s): " + ", ".join(missing_payload))
+
+    nested_extension_xml = [
+        path
+        for path in payload_dir.rglob("extension.xml")
+        if path.is_file()
+    ]
+    if nested_extension_xml:
+        rels = ", ".join(path.relative_to(extension_dir).as_posix() for path in nested_extension_xml)
+        raise SystemExit(
+            "Generated extension payload contains nested extension.xml file(s), "
+            f"which can make HyperWorks load the wrong extension: {rels}"
+        )
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        extension_xml_entries = [
+            name for name in zf.namelist() if name.replace("\\", "/").endswith("/extension.xml")
+        ]
+    if len(extension_xml_entries) != 1:
+        raise SystemExit(
+            "Zip package should contain exactly one extension.xml, found "
+            f"{len(extension_xml_entries)}: {', '.join(extension_xml_entries)}"
+        )
 
 
 def print_summary(config: dict, extension_dir: Path, zip_path: Path) -> None:
@@ -379,7 +478,7 @@ def print_summary(config: dict, extension_dir: Path, zip_path: Path) -> None:
     print("Install:")
     print("  1. Unzip the zip package on the target workstation.")
     print("  2. Open HyperWorks > File > Extensions.")
-    print("  3. Click Add Extension and select the folder containing extension.xml.")
+    print(f"  3. Click Add Extension and select the generated '{config['extension_name']}' folder.")
     print("  4. Enable the extension and switch to the HyperMesh profile.")
     print(f"  5. Confirm the '{config['display_name']}' Ribbon page is visible.")
     print()
