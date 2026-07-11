@@ -1,5 +1,7 @@
 # HyperMesh Toolkit
 
+快捷键的首次安装、更新和恢复流程见 [快捷键安装与更新](doc/shortcut_installation.md)。请优先运行 `install_update.tcl`；`hw_toolkit.tcl` 保留为兼容入口。
+
 面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、铸件四面体网格、RBE2、螺栓连接和接触设置。
 
 默认界面语言为中文。需要英文界面时，将项目根目录 `config.yaml` 中的 `workflow.language` 改为 `en_US`。
@@ -70,6 +72,17 @@ dist\HMWorkflow_0.1.0_HyperWorks_Extension.zip
 `extension_packaging\extension_template`；如果 Ribbon 中只出现一个 `Run`
 并且点击后只弹出 info，说明加载的是占位模板或错误目录，需要移除后重新加载
 `dist\HMWorkflow`。
+
+### 1.3 标准 ZIP 打包
+
+需要分发完整工具目录（含安装入口和帮助页）时，在项目根目录运行：
+
+```powershell
+.\build_package.ps1
+```
+
+或在 Linux/macOS 环境运行 `./build_package.sh`。生成的 ZIP 包含
+`install_update.tcl`、`guide.html`、模块、配置和文档。
 
 ## 2. 推荐工作流
 

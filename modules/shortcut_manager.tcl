@@ -22,7 +22,10 @@ namespace eval ::HWShortcut {
     variable CONFIG_LOADED 0
     variable SELECTED_MODULE ""
     variable CAPTURED_SHORTCUT ""
-    variable AUTO_INSTALL 1
+    variable MAIN_SHORTCUT ""
+    variable MAIN_ENABLED 0
+    variable SETUP_SHORTCUT "Control-Shift-W"
+    variable SETUP_RESULT ""
     variable MARK_START "# >>> HMWorkFlow shortcut loader >>>"
     variable MARK_END "# <<< HMWorkFlow shortcut loader <<<"
 }
@@ -60,11 +63,35 @@ proc ::HWShortcut::getHmcustomFile {} {
     return [file join [file normalize "~"] hmcustom.tcl]
 }
 
+# HyperMesh 2019 keeps the user-facing Key Commands table in the framework
+# settings arrays.  Going through this wrapper is important: the global
+# hm_registerkeyproc registers only for the current context, whereas the
+# framework variant also updates the native key-command library that is saved
+# into hmsettings.tcl on normal HyperMesh exit.
+proc ::HWShortcut::nativeKeyApi {} {
+    if {[llength [info commands ::HM_Framework::hm_registerkeyproc]] > 0} {
+        return ::HM_Framework::hm_registerkeyproc
+    }
+    if {[llength [info commands hm_registerkeyproc]] > 0} {
+        return hm_registerkeyproc
+    }
+    return ""
+}
+
+proc ::HWShortcut::nativeLibraryStatus {} {
+    if {[llength [info commands ::HM_Framework::hm_registerkeyproc]] > 0} {
+        return [::HWFlow::txt "HyperMesh 原生快捷键库" "HyperMesh native key library"]
+    }
+    if {[llength [info commands hm_registerkeyproc]] > 0} {
+        return [::HWFlow::txt "当前会话回退模式" "Session fallback mode"]
+    }
+    return [::HWFlow::txt "不可用" "Unavailable"]
+}
+
 proc ::HWShortcut::moduleExistsVisible {moduleKey} {
     if {![namespace exists ::HWToolkit]} { return 0 }
     variable ::HWToolkit::MODULES
-    if {![dict exists $::HWToolkit::MODULES $moduleKey]} { return 0 }
-    return [::HWToolkit::moduleVisible [dict get $::HWToolkit::MODULES $moduleKey]]
+    return [dict exists $::HWToolkit::MODULES $moduleKey]
 }
 
 proc ::HWShortcut::moduleLabel {moduleKey} {
@@ -203,8 +230,12 @@ proc ::HWShortcut::loadConfig {} {
     variable MODULE_MAP
     variable KEY_MAP
     variable ENABLED_MAP
+    variable MAIN_SHORTCUT
+    variable MAIN_ENABLED
     variable CONFIG_LOADED
     ::HWShortcut::clearMemory
+    set MAIN_SHORTCUT ""
+    set MAIN_ENABLED 0
     set file ""
     if {[catch {set file [::HWShortcut::getConfigFile]} err]} {
         ::HWShortcut::log "cannot resolve config path: $err"
@@ -230,6 +261,16 @@ proc ::HWShortcut::loadConfig {} {
         set moduleKey [lindex $fields 0]
         set shortcut [::HWShortcut::normalizeShortcut [lindex $fields 1]]
         set enabled [lindex $fields 2]
+        if {$moduleKey eq "__toolkit_home__"} {
+            set valid [::HWShortcut::validateShortcut $shortcut]
+            if {![lindex $valid 0]} {
+                ::HWShortcut::log "skip invalid main shortcut $shortcut: [lindex $valid 1]"
+                continue
+            }
+            set MAIN_SHORTCUT $shortcut
+            set MAIN_ENABLED [expr {$enabled ? 1 : 0}]
+            continue
+        }
         if {![::HWShortcut::moduleExistsVisible $moduleKey]} {
             ::HWShortcut::log "skip unknown or hidden module $moduleKey"
             continue
@@ -257,6 +298,8 @@ proc ::HWShortcut::loadConfig {} {
 proc ::HWShortcut::saveConfig {} {
     variable MODULE_MAP
     variable ENABLED_MAP
+    variable MAIN_SHORTCUT
+    variable MAIN_ENABLED
     if {[catch {set file [::HWShortcut::getConfigFile]} err]} {
         error [::HWFlow::txt "无法定位快捷键配置路径：$err" "Cannot resolve shortcut config path: $err"]
     }
@@ -264,7 +307,10 @@ proc ::HWShortcut::saveConfig {} {
     if {[catch {set ch [open $tmp w]} err]} {
         error [::HWFlow::txt "无法写入快捷键配置：$err" "Cannot write shortcut config: $err"]
     }
-    puts $ch "# HMWorkFlow shortcut configuration v1"
+    puts $ch "# HMWorkFlow shortcut configuration v2"
+    if {$MAIN_SHORTCUT ne ""} {
+        puts $ch [list __toolkit_home__ $MAIN_SHORTCUT $MAIN_ENABLED]
+    }
     foreach moduleKey [lsort [array names MODULE_MAP]] {
         set enabled 1
         if {[info exists ENABLED_MAP($moduleKey)]} { set enabled $ENABLED_MAP($moduleKey) }
@@ -293,10 +339,52 @@ proc ::HWShortcut::rebuildKeyMap {} {
     }
 }
 
+proc ::HWShortcut::shortcutAliases {shortcut} {
+    set shortcut [::HWShortcut::normalizeShortcut $shortcut]
+    set parts [split $shortcut "-"]
+    set key [lindex $parts end]
+    set hasShift [expr {[lsearch -exact $parts Shift] >= 0}]
+    if {!$hasShift && [string length $key] == 1 && [string is alpha $key]} {
+        set prefix [join [lrange $parts 0 end-1] "-"]
+        if {$prefix ne ""} { append prefix "-" }
+        return [list "${prefix}[string tolower $key]" "${prefix}[string toupper $key]"]
+    }
+    return [list $shortcut]
+}
+
+proc ::HWShortcut::nativeRegister {shortcut command} {
+    set api [::HWShortcut::nativeKeyApi]
+    if {$api eq ""} {
+        error [::HWFlow::txt "当前 HyperMesh 会话没有可用的快捷键注册接口。" "No keyboard registration API is available in this HyperMesh session."]
+    }
+    foreach alias [::HWShortcut::shortcutAliases $shortcut] {
+        if {[catch {uplevel #0 [list $api $alias {} $command]} err]} {
+            error "[::HWFlow::txt "注册快捷键 $alias 失败" "Failed to register shortcut $alias"]: $err"
+        }
+    }
+    return 1
+}
+
+proc ::HWShortcut::clearNativeBinding {shortcut} {
+    if {$shortcut eq ""} { return 1 }
+    return [::HWShortcut::nativeRegister $shortcut ""]
+}
+
 proc ::HWShortcut::registerBinding {shortcut moduleKey} {
     set script [list ::HWShortcut::dispatch $shortcut]
-    if {[catch {hm_registerkeyproc $shortcut {} $script} err]} {
-        ::HWShortcut::log "hm_registerkeyproc failed for $shortcut: $err"
+    if {[catch {::HWShortcut::nativeRegister $shortcut $script} err]} {
+        ::HWShortcut::log "native shortcut registration failed for $shortcut: $err"
+        return 0
+    }
+    return 1
+}
+
+proc ::HWShortcut::registerMainBinding {} {
+    variable MAIN_SHORTCUT
+    variable MAIN_ENABLED
+    if {!$MAIN_ENABLED || $MAIN_SHORTCUT eq ""} { return 1 }
+    if {[catch {::HWShortcut::nativeRegister $MAIN_SHORTCUT ::HWToolkit::run} err]} {
+        ::HWShortcut::log "native main-panel registration failed for $MAIN_SHORTCUT: $err"
         return 0
     }
     return 1
@@ -304,6 +392,7 @@ proc ::HWShortcut::registerBinding {shortcut moduleKey} {
 
 proc ::HWShortcut::registerAll {} {
     variable KEY_MAP
+    ::HWShortcut::registerMainBinding
     foreach shortcut [array names KEY_MAP] {
         ::HWShortcut::registerBinding $shortcut $KEY_MAP($shortcut)
     }
@@ -326,6 +415,57 @@ proc ::HWShortcut::dispatch {shortcut} {
     ::HWToolkit::invokeModule $KEY_MAP($shortcut)
 }
 
+proc ::HWShortcut::mainShortcut {} {
+    variable MAIN_SHORTCUT
+    variable MAIN_ENABLED
+    if {$MAIN_ENABLED} { return $MAIN_SHORTCUT }
+    return ""
+}
+
+proc ::HWShortcut::mainShortcutConfigured {} {
+    return [expr {[::HWShortcut::mainShortcut] ne ""}]
+}
+
+proc ::HWShortcut::applyMainBinding {shortcut} {
+    variable MAIN_SHORTCUT
+    variable MAIN_ENABLED
+    variable KEY_MAP
+    set shortcut [::HWShortcut::normalizeShortcut $shortcut]
+    set valid [::HWShortcut::validateShortcut $shortcut]
+    if {![lindex $valid 0]} { error [lindex $valid 1] }
+    if {[info exists KEY_MAP($shortcut)]} {
+        error [::HWFlow::txt "该快捷键已被 [::HWShortcut::moduleLabel $KEY_MAP($shortcut)] 使用。" "This shortcut is already used by [::HWShortcut::moduleLabel $KEY_MAP($shortcut)]."]
+    }
+    set previous $MAIN_SHORTCUT
+    if {$previous ne "" && $previous ne $shortcut} {
+        ::HWShortcut::clearNativeBinding $previous
+    }
+    if {[catch {::HWShortcut::nativeRegister $shortcut ::HWToolkit::run} err]} {
+        if {$previous ne ""} {
+            catch {::HWShortcut::nativeRegister $previous ::HWToolkit::run}
+        }
+        error $err
+    }
+    set MAIN_SHORTCUT $shortcut
+    set MAIN_ENABLED 1
+    ::HWShortcut::saveConfig
+    ::HWShortcut::refreshManager
+    return 1
+}
+
+proc ::HWShortcut::clearMainBinding {} {
+    variable MAIN_SHORTCUT
+    variable MAIN_ENABLED
+    if {$MAIN_SHORTCUT ne ""} {
+        ::HWShortcut::clearNativeBinding $MAIN_SHORTCUT
+    }
+    set MAIN_SHORTCUT ""
+    set MAIN_ENABLED 0
+    ::HWShortcut::saveConfig
+    ::HWShortcut::refreshManager
+    return 1
+}
+
 proc ::HWShortcut::applyBinding {moduleKey shortcut} {
     variable MODULE_MAP
     variable KEY_MAP
@@ -338,13 +478,33 @@ proc ::HWShortcut::applyBinding {moduleKey shortcut} {
     if {![lindex $valid 0]} {
         error [lindex $valid 1]
     }
+    if {[::HWShortcut::mainShortcut] eq $shortcut} {
+        error [::HWFlow::txt "该快捷键已用于打开主面板。" "This shortcut is already used to open the main panel."]
+    }
+    set previous ""
     if {[info exists MODULE_MAP($moduleKey)]} {
-        unset -nocomplain KEY_MAP($MODULE_MAP($moduleKey))
+        set previous $MODULE_MAP($moduleKey)
+        unset -nocomplain KEY_MAP($previous)
+    }
+    if {$previous ne "" && $previous ne $shortcut} {
+        ::HWShortcut::clearNativeBinding $previous
     }
     set MODULE_MAP($moduleKey) $shortcut
     set ENABLED_MAP($moduleKey) 1
     set KEY_MAP($shortcut) $moduleKey
-    ::HWShortcut::registerBinding $shortcut $moduleKey
+    if {![::HWShortcut::registerBinding $shortcut $moduleKey]} {
+        unset -nocomplain KEY_MAP($shortcut)
+        if {$previous ne ""} {
+            set MODULE_MAP($moduleKey) $previous
+            set ENABLED_MAP($moduleKey) 1
+            set KEY_MAP($previous) $moduleKey
+            catch {::HWShortcut::registerBinding $previous $moduleKey}
+        } else {
+            unset -nocomplain MODULE_MAP($moduleKey)
+            unset -nocomplain ENABLED_MAP($moduleKey)
+        }
+        error [::HWFlow::txt "无法将快捷键写入 HyperMesh 原生快捷键库。" "Could not write the shortcut to the HyperMesh native key library."]
+    }
     ::HWShortcut::saveConfig
     if {[lindex $valid 2] ne ""} {
         catch {hm_usermessage [lindex $valid 2]}
@@ -366,7 +526,9 @@ proc ::HWShortcut::clearBinding {moduleKey} {
     variable KEY_MAP
     variable ENABLED_MAP
     if {[info exists MODULE_MAP($moduleKey)]} {
-        unset -nocomplain KEY_MAP($MODULE_MAP($moduleKey))
+        set shortcut $MODULE_MAP($moduleKey)
+        ::HWShortcut::clearNativeBinding $shortcut
+        unset -nocomplain KEY_MAP($shortcut)
         unset -nocomplain MODULE_MAP($moduleKey)
         unset -nocomplain ENABLED_MAP($moduleKey)
     }
@@ -377,6 +539,10 @@ proc ::HWShortcut::clearBinding {moduleKey} {
 }
 
 proc ::HWShortcut::clearAllBindings {} {
+    variable MODULE_MAP
+    foreach moduleKey [array names MODULE_MAP] {
+        catch {::HWShortcut::clearNativeBinding $MODULE_MAP($moduleKey)}
+    }
     ::HWShortcut::clearMemory
     ::HWShortcut::saveConfig
     ::HWToolkit::refreshShortcutDisplays
@@ -539,12 +705,92 @@ proc ::HWShortcut::captureShortcut {} {
     return $CAPTURED_SHORTCUT
 }
 
+proc ::HWShortcut::setupCaptureMainShortcut {} {
+    variable SETUP_SHORTCUT
+    set captured [::HWShortcut::captureShortcut]
+    if {$captured ne ""} { set SETUP_SHORTCUT $captured }
+}
+
+proc ::HWShortcut::setupUseRecommendedMainShortcut {} {
+    variable SETUP_SHORTCUT
+    set SETUP_SHORTCUT "Control-Shift-W"
+}
+
+proc ::HWShortcut::setupApplyMainShortcut {} {
+    variable SETUP_SHORTCUT
+    variable SETUP_RESULT
+    if {[catch {::HWShortcut::applyMainBinding $SETUP_SHORTCUT} err]} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "主面板快捷键" "Main Panel Shortcut"] -message $err
+        return
+    }
+    set SETUP_RESULT applied
+    catch {destroy .hwshortcut_setup}
+}
+
+proc ::HWShortcut::setupCancel {} {
+    variable SETUP_RESULT
+    set SETUP_RESULT cancelled
+    catch {destroy .hwshortcut_setup}
+}
+
+proc ::HWShortcut::showInitialSetup {} {
+    variable SETUP_SHORTCUT
+    variable SETUP_RESULT
+    if {[::HWShortcut::mainShortcutConfigured]} { return 1 }
+    catch {destroy .hwshortcut_setup}
+    set SETUP_SHORTCUT "Control-Shift-W"
+    set SETUP_RESULT cancelled
+    set w .hwshortcut_setup
+    ::HWFlow::createTopLevel $w
+    wm title $w [::HWFlow::txt "HMWorkFlow 初始安装" "HMWorkFlow Initial Setup"]
+    wm resizable $w 0 0
+
+    frame $w.main -padx 16 -pady 14
+    pack $w.main -fill both -expand 1
+    label $w.main.title -text [::HWFlow::txt "设置主面板快捷键" "Set Main Panel Shortcut"] -font [::HWFlow::uiFont header] -anchor w
+    label $w.main.desc -text [::HWFlow::txt "此绑定会写入 HyperMesh 原生快捷键库。之后请在主面板的“快捷键管理”中设置各模块快捷键。" "This binding is written to the HyperMesh native key library. Configure module shortcuts later from the main panel's Shortcuts page."] -justify left -wraplength 440 -anchor w
+    pack $w.main.title -fill x -pady {0 6}
+    pack $w.main.desc -fill x -pady {0 12}
+
+    labelframe $w.main.key -text [::HWFlow::txt "主面板 / Main panel" "Main panel"] -padx 10 -pady 10
+    pack $w.main.key -fill x
+    entry $w.main.key.value -textvariable ::HWShortcut::SETUP_SHORTCUT -width 30 -font [::HWFlow::uiFont fixed]
+    button $w.main.key.capture -text [::HWFlow::txt "录入按键" "Capture"] -width 12 -command ::HWShortcut::setupCaptureMainShortcut
+    button $w.main.key.recommended -text [::HWFlow::txt "推荐 Ctrl+Shift+W" "Use Ctrl+Shift+W"] -width 18 -command ::HWShortcut::setupUseRecommendedMainShortcut
+    pack $w.main.key.value -side left -fill x -expand 1 -padx {0 8}
+    pack $w.main.key.capture -side left -padx {0 6}
+    pack $w.main.key.recommended -side left
+
+    label $w.main.note -text [::HWFlow::txt "避免使用 Ctrl+S、Ctrl+O、Ctrl+Z 等 HyperMesh 常用原生快捷键。" "Avoid common HyperMesh native shortcuts such as Ctrl+S, Ctrl+O, and Ctrl+Z."] -font [::HWFlow::uiFont small] -justify left -anchor w
+    pack $w.main.note -fill x -pady {8 12}
+    frame $w.main.actions
+    pack $w.main.actions -fill x
+    button $w.main.actions.cancel -text [::HWFlow::txt "稍后设置" "Set Later"] -width 12 -command ::HWShortcut::setupCancel
+    button $w.main.actions.ok -text [::HWFlow::txt "写入原生快捷键库" "Save to Native Library"] -width 20 -command ::HWShortcut::setupApplyMainShortcut
+    pack $w.main.actions.cancel -side right
+    pack $w.main.actions.ok -side right -padx {0 8}
+
+    bind $w <Escape> ::HWShortcut::setupCancel
+    focus -force $w.main.key.value
+    tkwait window $w
+    return [expr {$SETUP_RESULT eq "applied"}]
+}
+
+proc ::HWShortcut::managerSetMainShortcut {} {
+    set captured [::HWShortcut::captureShortcut]
+    if {$captured eq ""} { return }
+    if {[catch {::HWShortcut::applyMainBinding $captured} err]} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "主面板快捷键" "Main Panel Shortcut"] -message $err
+    }
+}
+
 proc ::HWShortcut::selectedModule {} {
     variable ROW_MODULE
     variable SELECTED_MODULE
     set w .hwshortcut_manager
-    if {[winfo exists $w.list]} {
-        set sel [$w.list curselection]
+    set listbox $w.modules.listframe.list
+    if {[winfo exists $listbox]} {
+        set sel [$listbox curselection]
         if {[llength $sel] > 0 && [info exists ROW_MODULE([lindex $sel 0])]} {
             set SELECTED_MODULE $ROW_MODULE([lindex $sel 0])
         }
@@ -552,31 +798,65 @@ proc ::HWShortcut::selectedModule {} {
     return $SELECTED_MODULE
 }
 
+proc ::HWShortcut::managerModuleKeys {} {
+    variable MODULE_MAP
+    variable ENABLED_MAP
+
+    # Keep the complete library available for assigning new bindings, while
+    # also appending every enabled persisted entry.  The latter makes the
+    # manager resilient when an enabled module is currently hidden from the
+    # home panel or the module list is refreshed after a toolkit update.
+    set keys [::HWToolkit::allModuleKeys]
+    foreach moduleKey [array names MODULE_MAP] {
+        if {![info exists ENABLED_MAP($moduleKey)] || !$ENABLED_MAP($moduleKey)} {
+            continue
+        }
+        if {[lsearch -exact $keys $moduleKey] < 0} {
+            lappend keys $moduleKey
+        }
+    }
+    return $keys
+}
+
 proc ::HWShortcut::refreshManager {} {
     variable ROW_MODULE
     variable SELECTED_MODULE
     set w .hwshortcut_manager
     if {![winfo exists $w]} { return }
-    $w.list delete 0 end
-    catch {array unset ROW_MODULE}
-    set row 0
-    foreach moduleKey [::HWToolkit::visibleModuleKeys] {
-        set shortcut [::HWShortcut::moduleShortcut $moduleKey]
-        if {$shortcut eq ""} {
-            set shortcut [::HWFlow::txt "未绑定" "Unbound"]
-            set status [::HWFlow::txt "未启用" "Disabled"]
-        } else {
-            set status [::HWFlow::txt "已启用" "Enabled"]
+    if {[winfo exists $w.mainpanel.value]} {
+        set mainShortcut [::HWShortcut::mainShortcut]
+        if {$mainShortcut eq ""} { set mainShortcut [::HWFlow::txt "未绑定" "Unbound"] }
+        $w.mainpanel.value configure -text $mainShortcut
+    }
+    if {[winfo exists $w.native]} {
+        $w.native configure -text [::HWFlow::txt "写入位置： [::HWShortcut::nativeLibraryStatus]" "Binding target: [::HWShortcut::nativeLibraryStatus]"]
+    }
+    set listbox $w.modules.listframe.list
+    if {[winfo exists $listbox]} {
+        $listbox delete 0 end
+        catch {array unset ROW_MODULE}
+        set row 0
+        foreach moduleKey [::HWShortcut::managerModuleKeys] {
+            set shortcut [::HWShortcut::moduleShortcut $moduleKey]
+            if {$shortcut eq ""} {
+                set shortcut [::HWFlow::txt "未绑定" "Unbound"]
+                set status [::HWFlow::txt "未启用" "Disabled"]
+            } else {
+                set status [::HWFlow::txt "已启用" "Enabled"]
+            }
+            set groupCol [::HWFlow::padString [::HWShortcut::moduleGroup $moduleKey] 12]
+            set labelCol [::HWFlow::padString [::HWShortcut::moduleLabel $moduleKey] 24]
+            set shortcutCol [::HWFlow::padString $shortcut 20]
+            set line "$groupCol  $labelCol  $shortcutCol  $status"
+            $listbox insert end $line
+            set ROW_MODULE($row) $moduleKey
+            if {$moduleKey eq $SELECTED_MODULE} {
+                $listbox selection clear 0 end
+                $listbox selection set $row
+                $listbox see $row
+            }
+            incr row
         }
-        set line [format "%-12s  %-24s  %-20s  %s" [::HWShortcut::moduleGroup $moduleKey] [::HWShortcut::moduleLabel $moduleKey] $shortcut $status]
-        $w.list insert end $line
-        set ROW_MODULE($row) $moduleKey
-        if {$moduleKey eq $SELECTED_MODULE} {
-            $w.list selection clear 0 end
-            $w.list selection set $row
-            $w.list see $row
-        }
-        incr row
     }
     set info [::HWShortcut::getAutoLoaderInfo]
     catch {$w.status configure -text [::HWFlow::txt "自动加载状态：[::HWShortcut::getAutoLoaderStatus]\n用户配置路径：[::HWShortcut::getConfigFile]\n启动加载路径：[dict get $info path]" "Auto-load status: [::HWShortcut::getAutoLoaderStatus]\nUser config: [::HWShortcut::getConfigFile]\nBootstrap path: [dict get $info path]"]}
@@ -632,40 +912,70 @@ proc ::HWShortcut::showManager {} {
     set w .hwshortcut_manager
     ::HWFlow::createTopLevel $w
     wm title $w [::HWFlow::txt "快捷键管理" "Shortcuts"]
+    wm minsize $w 680 420
     wm resizable $w 1 1
 
-    frame $w.main -padx 12 -pady 10
-    pack $w.main -fill both -expand 1
-    label $w.main.title -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -font [::HWFlow::uiFont heading]
-    pack $w.main.title -anchor w -pady {0 8}
-    label $w.main.header -text [format "%-12s  %-24s  %-20s  %s" [::HWFlow::txt "分组" "Group"] [::HWFlow::txt "模块名称" "Module"] [::HWFlow::txt "当前快捷键" "Shortcut"] [::HWFlow::txt "启用状态" "Status"]] -font [::HWFlow::uiFont default] -anchor w
-    pack $w.main.header -fill x
-    listbox $w.list -width 84 -height 10 -font [::HWFlow::uiFont fixed] -exportselection 0
-    pack $w.list -fill both -expand 1 -padx 12
-    bind $w.list <<ListboxSelect>> {::HWShortcut::selectedModule}
+    label $w.title -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -font [::HWFlow::uiFont header] -anchor w
+    label $w.native -text "" -font [::HWFlow::uiFont small] -anchor w
+    pack $w.title -fill x -padx 14 -pady {12 0}
+    pack $w.native -fill x -padx 14 -pady {2 10}
+    ::HWFlow::bindAutoWrap $w.native 50
 
-    label $w.status -text "" -justify left -anchor w -padx 12 -pady 8
-    pack $w.status -fill x
-    label $w.pending -text [::HWFlow::txt "待应用快捷键：无" "Pending shortcut: none"] -anchor w -padx 12
+    labelframe $w.mainpanel -text [::HWFlow::txt "主入口" "Main entry"] -padx 10 -pady 8
+    pack $w.mainpanel -fill x -padx 14 -pady {0 8}
+    label $w.mainpanel.caption -text [::HWFlow::txt "打开 HyperMesh Toolkit" "Open HyperMesh Toolkit"] -font [::HWFlow::uiFont heading] -anchor w
+    label $w.mainpanel.value -text "" -font [::HWFlow::uiFont fixed] -width 22 -anchor center -relief groove
+    button $w.mainpanel.set -text [::HWFlow::txt "设置主面板快捷键" "Set Main Shortcut"] -width 18 -command ::HWShortcut::managerSetMainShortcut
+    button $w.mainpanel.clear -text [::HWFlow::txt "清除" "Clear"] -width 8 -command ::HWShortcut::clearMainBinding
+    pack $w.mainpanel.caption -side left -fill x -expand 1
+    pack $w.mainpanel.clear -side right
+    pack $w.mainpanel.set -side right -padx {0 6}
+    pack $w.mainpanel.value -side right -padx {0 8}
+
+    labelframe $w.modules -text [::HWFlow::txt "模块快捷键" "Module shortcuts"] -padx 8 -pady 8
+    pack $w.modules -fill both -expand 1 -padx 14
+
+    set groupHeader [::HWFlow::padString [::HWFlow::txt "分组" "Group"] 12]
+    set labelHeader [::HWFlow::padString [::HWFlow::txt "模块名称" "Module"] 24]
+    set shortcutHeader [::HWFlow::padString [::HWFlow::txt "当前快捷键" "Shortcut"] 20]
+    set statusHeader [::HWFlow::txt "状态" "Status"]
+    set headerText "$groupHeader  $labelHeader  $shortcutHeader  $statusHeader"
+    label $w.modules.header -text $headerText -font [::HWFlow::uiFont fixed] -anchor w
+    pack $w.modules.header -fill x -pady {0 4}
+
+    frame $w.modules.listframe
+    pack $w.modules.listframe -fill both -expand 1
+    listbox $w.modules.listframe.list -width 84 -height 10 -font [::HWFlow::uiFont fixed] -exportselection 0 -selectmode browse
+    scrollbar $w.modules.listframe.scroll -orient vertical -command [list $w.modules.listframe.list yview]
+    $w.modules.listframe.list configure -yscrollcommand [list $w.modules.listframe.scroll set]
+    pack $w.modules.listframe.scroll -side right -fill y
+    pack $w.modules.listframe.list -side left -fill both -expand 1
+    bind $w.modules.listframe.list <<ListboxSelect>> {::HWShortcut::selectedModule}
+
+    label $w.pending -text [::HWFlow::txt "待应用快捷键：无" "Pending shortcut: none"] -anchor w -padx 14 -pady 7
     pack $w.pending -fill x
+    ::HWFlow::bindAutoWrap $w.pending 50
 
-    frame $w.actions -padx 12 -pady 4
+    frame $w.actions -padx 14 -pady 5
     pack $w.actions -fill x
-    button $w.actions.capture -text [::HWFlow::txt "录入快捷键" "Capture"] -width 12 -command "::HWShortcut::managerCapture"
-    button $w.actions.apply -text [::HWFlow::txt "应用绑定" "Apply"] -width 12 -command "::HWShortcut::managerApply"
-    button $w.actions.clear -text [::HWFlow::txt "清除绑定" "Clear"] -width 12 -command "::HWShortcut::managerClear"
-    button $w.actions.clearall -text [::HWFlow::txt "清除全部" "Clear All"] -width 12 -command "::HWShortcut::clearAllBindings"
-    button $w.actions.refresh -text [::HWFlow::txt "刷新" "Refresh"] -width 10 -command "::HWShortcut::refreshManager"
-    pack $w.actions.capture $w.actions.apply $w.actions.clear $w.actions.clearall $w.actions.refresh -side left -padx {0 6}
+    button $w.actions.capture -text [::HWFlow::txt "录入快捷键" "Capture"] -width 12 -command ::HWShortcut::managerCapture
+    button $w.actions.apply -text [::HWFlow::txt "应用绑定" "Apply"] -width 12 -command ::HWShortcut::managerApply
+    button $w.actions.clear -text [::HWFlow::txt "清除绑定" "Clear"] -width 12 -command ::HWShortcut::managerClear
+    button $w.actions.clearall -text [::HWFlow::txt "清除全部" "Clear All"] -width 12 -command ::HWShortcut::clearAllBindings
+    pack $w.actions.capture $w.actions.apply $w.actions.clear $w.actions.clearall -side left -padx {0 6}
+    button $w.actions.close -text [::HWFlow::txt "关闭" "Close"] -width 10 -command [list destroy $w]
+    pack $w.actions.close -side right
 
-    frame $w.persist -padx 12 -pady 4
+    label $w.status -text "" -justify left -anchor w -font [::HWFlow::uiFont small] -padx 14 -pady 3
+    pack $w.status -fill x
+    ::HWFlow::bindAutoWrap $w.status 50
+
+    frame $w.persist -padx 14 -pady 6
     pack $w.persist -fill x
-    button $w.persist.enable -text [::HWFlow::txt "启用持久化" "Enable Restore"] -width 14 -command "::HWShortcut::installAutoLoader"
-    button $w.persist.repair -text [::HWFlow::txt "修复自动加载" "Repair Loader"] -width 14 -command "::HWShortcut::repairAutoLoader"
-    button $w.persist.disable -text [::HWFlow::txt "禁用自动加载" "Disable Loader"] -width 14 -command "::HWShortcut::removeAutoLoader"
-    button $w.persist.close -text [::HWFlow::txt "关闭" "Close"] -width 10 -command "destroy .hwshortcut_manager"
+    button $w.persist.enable -text [::HWFlow::txt "安装启动加载" "Install Startup Loader"] -width 18 -command ::HWShortcut::installAutoLoader
+    button $w.persist.repair -text [::HWFlow::txt "更新启动加载" "Update Loader"] -width 18 -command ::HWShortcut::repairAutoLoader
+    button $w.persist.disable -text [::HWFlow::txt "移除启动加载" "Remove Loader"] -width 18 -command ::HWShortcut::removeAutoLoader
     pack $w.persist.enable $w.persist.repair $w.persist.disable -side left -padx {0 6}
-    pack $w.persist.close -side right
-    bind $w <Escape> "destroy .hwshortcut_manager"
+    bind $w <Escape> [list destroy $w]
     ::HWShortcut::refreshManager
 }

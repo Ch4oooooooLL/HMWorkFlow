@@ -2,18 +2,18 @@
 # HyperMesh Toolkit - Main Entry
 # HyperMesh 2019 Tcl/Tk
 #
-# Manual launcher. The core file can be sourced silently by startup scripts.
+# Compatibility launcher. install_update.tcl is the supported entry point for
+# both first installation and later tool-library updates.
 # ============================================================================
 
 set scriptDir [file dirname [file normalize [info script]]]
-set coreFile [file join $scriptDir "hw_toolkit_core.tcl"]
+set installerFile [file join $scriptDir "install_update.tcl"]
 
 if {[catch {
-    if {![file exists $coreFile]} {
-        error "Core file not found: $coreFile"
+    if {![file exists $installerFile]} {
+        error "Install/update file not found: $installerFile"
     }
-    source $coreFile
-    ::HWToolkit::run
+    source $installerFile
 } hwToolkitErr]} {
     catch {puts "HMWorkFlow startup failed: $hwToolkitErr"}
     if {[llength [info commands tk_messageBox]] > 0} {

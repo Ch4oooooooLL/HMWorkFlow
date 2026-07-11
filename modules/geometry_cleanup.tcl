@@ -185,10 +185,12 @@ proc ::GeomCleanup::showPanel {{settingsOnly 0}} {
     set w .geometry_cleanup
     ::HWFlow::createTopLevel $w
     wm title $w "[::HWFlow::txt "Geometry Cleanup: Chamfer/Recess" "Geometry Cleanup: Chamfer/Recess"] v$VERSION"
-    wm resizable $w 0 0
+    wm minsize $w 650 480
+    wm resizable $w 1 0
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
+    grid columnconfigure $w.main 0 -weight 1
 
     label $w.main.title -text [::HWFlow::txt "Geometry Cleanup: Chamfer/Recess" "Geometry Cleanup: Chamfer/Recess"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
@@ -204,6 +206,11 @@ proc ::GeomCleanup::showPanel {{settingsOnly 0}} {
 
     labelframe $w.main.param -text [::HWFlow::txt "2. 参数" "2. Parameters"] -padx 8 -pady 8
     grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    grid columnconfigure $w.main.param 0 -weight 1
+    grid columnconfigure $w.main.param 1 -weight 1
+    grid columnconfigure $w.main.param 2 -weight 1
+    grid columnconfigure $w.main.param 3 -weight 1
+
     set fields {
         {FILLET_MIN_R "圆角最小 R" "Min fillet R"}
         {FILLET_MAX_R "圆角/倒角最大 R" "Max fillet/chamfer R"}
@@ -218,9 +225,9 @@ proc ::GeomCleanup::showPanel {{settingsOnly 0}} {
         set r [expr {$i / 2}]
         set c [expr {($i % 2) * 2}]
         label $w.main.param.l_$key -text $label -anchor w
-        entry $w.main.param.e_$key -textvariable ::GeomCleanup::ui($key) -width 16
+        entry $w.main.param.e_$key -textvariable ::GeomCleanup::ui($key)
         grid $w.main.param.l_$key -row $r -column $c -sticky w -padx {0 6} -pady 2
-        grid $w.main.param.e_$key -row $r -column [expr {$c + 1}] -sticky w -padx {0 18} -pady 2
+        grid $w.main.param.e_$key -row $r -column [expr {$c + 1}] -sticky ew -padx {0 18} -pady 2
         incr i
     }
     labelframe $w.main.opt -text [::HWFlow::txt "3. 选项" "3. Options"] -padx 8 -pady 8
@@ -234,8 +241,9 @@ proc ::GeomCleanup::showPanel {{settingsOnly 0}} {
     grid $w.main.opt.solid -row 2 -column 0 -sticky w -pady 2
     grid $w.main.opt.perf -row 3 -column 0 -sticky w -pady 2
 
-    label $w.main.status -textvariable ::GeomCleanup::ui(status) -width 78 -anchor w
+    label $w.main.status -textvariable ::GeomCleanup::ui(status) -anchor w
     grid $w.main.status -row 4 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    ::HWFlow::bindAutoWrap $w.main.status 50
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x

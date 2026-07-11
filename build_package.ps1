@@ -40,6 +40,8 @@ $IncludeItems = @(
     "README.md",
     "使用教程.pdf",
     "config.yaml",
+    "guide.html",
+    "install_update.tcl",
     "hw_toolkit.tcl",
     "hw_toolkit_core.tcl",
     "shortcut_bootstrap.tcl",

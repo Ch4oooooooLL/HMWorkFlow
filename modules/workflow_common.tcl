@@ -37,6 +37,8 @@ namespace eval ::HWFlow {
     variable UI_FONT_FAMILY ""
     variable UI_FIXED_FONT_FAMILY ""
     variable touchedComponents {}
+    variable WRAP_TIMERS
+    catch {array set WRAP_TIMERS {}}
 }
 
 proc ::HWFlow::globalConfigFile {} {
@@ -172,9 +174,65 @@ proc ::HWFlow::initFonts {} {
         catch {font configure TkHeadingFont -family $UI_FONT_FAMILY -size 9 -weight bold}
         catch {font configure TkFixedFont -family $UI_FIXED_FONT_FAMILY -size 9 -weight normal}
         catch {option add *Font TkDefaultFont}
+
+
     }
 
     set FONT_INITIALIZED 1
+}
+
+proc ::HWFlow::bindAutoWrap {labelWidget {padding 40}} {
+    if {[llength [info commands bind]] == 0 || ![winfo exists $labelWidget]} {
+        return
+    }
+    set top [winfo toplevel $labelWidget]
+    if {$top ne ""} {
+        bind $top <Configure> +[list ::HWFlow::onConfigure %W $top $labelWidget $padding]
+    }
+}
+
+proc ::HWFlow::onConfigure {eventWidget top labelWidget padding} {
+    if {$eventWidget eq $top} {
+        ::HWFlow::queueLabelWrap $labelWidget $padding
+    }
+}
+
+proc ::HWFlow::queueLabelWrap {labelWidget padding} {
+    variable WRAP_TIMERS
+    if {![info exists WRAP_TIMERS($labelWidget)]} {
+        set WRAP_TIMERS($labelWidget) ""
+    }
+    if {$WRAP_TIMERS($labelWidget) ne ""} {
+        catch {after cancel $WRAP_TIMERS($labelWidget)}
+    }
+    set WRAP_TIMERS($labelWidget) [after 50 [list ::HWFlow::updateLabelWrap $labelWidget $padding]]
+}
+
+proc ::HWFlow::updateLabelWrap {labelWidget padding} {
+    variable WRAP_TIMERS
+    set WRAP_TIMERS($labelWidget) ""
+    if {![winfo exists $labelWidget]} { return }
+    set top [winfo toplevel $labelWidget]
+    if {$top eq ""} { return }
+    set wWidth [winfo width $top]
+    if {$wWidth > 50} {
+        set wrap [expr {$wWidth - $padding}]
+        if {$wrap < 100} { set wrap 100 }
+        catch {
+            set currentWrap [$labelWidget cget -wraplength]
+            if {$currentWrap != $wrap} {
+                $labelWidget configure -wraplength $wrap
+            }
+        }
+    }
+}
+
+proc ::HWFlow::createTopLevel {w} {
+    toplevel $w
+    ::HWFlow::keepWindowTopmost $w
+    bind $w <Map> [list ::HWFlow::keepWindowTopmost $w]
+    after idle [list ::HWFlow::keepWindowTopmost $w]
+    return $w
 }
 
 proc ::HWFlow::uiFont {{role default}} {
@@ -221,8 +279,6 @@ proc ::HWFlow::createTopLevel {w} {
     toplevel $w
     ::HWFlow::keepWindowTopmost $w
     bind $w <Map> [list ::HWFlow::keepWindowTopmost $w]
-    bind $w <Visibility> [list ::HWFlow::progressPumpEvents 1]
-    bind $w <Configure> [list ::HWFlow::progressPumpEvents 0]
     after idle [list ::HWFlow::keepWindowTopmost $w]
     return $w
 }
@@ -1461,6 +1517,27 @@ proc ::HWFlow::backToHome {{window ""}} {
     if {[llength [info commands ::HWToolkit::showHome]] > 0} {
         after idle ::HWToolkit::showHome
     }
+}
+
+proc ::HWFlow::visualLength {str} {
+    set len 0
+    set strLen [string length $str]
+    for {set i 0} {$i < $strLen} {incr i} {
+        set char [string index $str $i]
+        if {[regexp {[\u4e00-\u9fa5]} $char]} {
+            incr len 2
+        } else {
+            incr len 1
+        }
+    }
+    return $len
+}
+
+proc ::HWFlow::padString {str width} {
+    set curLen [::HWFlow::visualLength $str]
+    set pad [expr {$width - $curLen}]
+    if {$pad < 0} { set pad 0 }
+    return "$str[string repeat " " $pad]"
 }
 
 ::HWFlow::ensureDefaultConfigs

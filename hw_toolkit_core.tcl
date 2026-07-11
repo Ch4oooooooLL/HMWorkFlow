@@ -228,6 +228,18 @@ proc ::HWToolkit::visibleModuleKeys {} {
     return $out
 }
 
+# The home panel may intentionally hide unfinished/advanced tools, but the
+# shortcut manager must enumerate the complete tool library so users can
+# review, clear, or assign every available module binding.
+proc ::HWToolkit::allModuleKeys {} {
+    variable MODULES
+    set out {}
+    foreach {key info} $MODULES {
+        lappend out $key
+    }
+    return $out
+}
+
 proc ::HWToolkit::moduleGroups {} {
     variable MODULES
     set groups {}
@@ -322,14 +334,16 @@ proc ::HWToolkit::showPanel {} {
     set w .hwtoolkit
     ::HWFlow::createTopLevel $w
     wm title $w "HyperMesh Toolkit"
-    wm resizable $w 0 0
+    wm minsize $w 640 420
+    wm resizable $w 1 1
 
     frame $w.header -padx 12 -pady 10
     pack $w.header -fill x
     label $w.header.title -text "HyperMesh Toolkit" -font [::HWFlow::uiFont header]
-    label $w.header.subtitle -text "Preprocessing Utilities" -font [::HWFlow::uiFont default]
+    label $w.header.subtitle -text [::HWFlow::txt "按类别选择工具；主入口和模块快捷键均由 HyperMesh 原生快捷键库维护。" "Select a tool by category; main and module shortcuts are maintained in the HyperMesh native key library."] -font [::HWFlow::uiFont default] -justify left -anchor w
     pack $w.header.title -anchor w
     pack $w.header.subtitle -anchor w
+    ::HWFlow::bindAutoWrap $w.header.subtitle 40
 
     frame $w.body -padx 12 -pady 4
     pack $w.body -fill both -expand 1
@@ -356,14 +370,18 @@ proc ::HWToolkit::showPanel {} {
             }
             set labelText [::HWToolkit::moduleText $info label]
             frame $tabPath.row_$key
-            button $tabPath.row_$key.run -text $labelText -font [::HWFlow::uiFont module] -width 34 -anchor w -command [list ::HWToolkit::runModule $key]
-            button $tabPath.row_$key.settings -text "more" -width 10 -command [list ::HWToolkit::settingsModule $key]
+            button $tabPath.row_$key.run -text $labelText -font [::HWFlow::uiFont module] -width 28 -anchor w -command [list ::HWToolkit::runModule $key]
+            label $tabPath.row_$key.desc -text [::HWToolkit::moduleText $info desc] -font [::HWFlow::uiFont small] -justify left -anchor w
+            ::HWFlow::bindAutoWrap $tabPath.row_$key.desc 340
+            button $tabPath.row_$key.settings -text [::HWFlow::txt "设置" "Settings"] -width 10 -command [list ::HWToolkit::settingsModule $key]
             set shortcutText [::HWToolkit::shortcutText $key]
             button $tabPath.row_$key.shortcut -text $shortcutText -width 16 -command [list ::HWShortcut::showForModule $key]
-            pack $tabPath.row_$key.run -side left -fill x -expand 1 -padx {0 6}
-            pack $tabPath.row_$key.settings -side left -padx {0 6}
-            pack $tabPath.row_$key.shortcut -side left
-            grid $tabPath.row_$key -row $innerRow -column 0 -sticky ew -pady 3
+            grid $tabPath.row_$key.run -row 0 -column 0 -sticky nw -padx {0 8}
+            grid $tabPath.row_$key.desc -row 0 -column 1 -sticky new -padx {0 8}
+            grid $tabPath.row_$key.settings -row 0 -column 2 -sticky n -padx {0 6}
+            grid $tabPath.row_$key.shortcut -row 0 -column 3 -sticky n
+            grid columnconfigure $tabPath.row_$key 1 -weight 1
+            grid $tabPath.row_$key -row $innerRow -column 0 -sticky ew -pady 6
             incr innerRow
         }
         if {$innerRow == 0} {
@@ -375,12 +393,12 @@ proc ::HWToolkit::showPanel {} {
 
     frame $w.foot -padx 12 -pady 10
     pack $w.foot -fill x
-    button $w.foot.refresh -text [::HWFlow::txt "刷新浏览器" "Refresh Browser"] -width 14 -command "::HWToolkit::manualRefreshBrowser"
+    button $w.foot.help -text [::HWFlow::txt "查看帮助" "View Help"] -width 14 -command "::HWToolkit::openGuide"
     button $w.foot.shortcuts -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -width 14 -command "::HWShortcut::showManager"
     button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command "destroy .hwtoolkit"
     pack $w.foot.close -side right
     pack $w.foot.shortcuts -side right -padx {0 8}
-    pack $w.foot.refresh -side right -padx {0 8}
+    pack $w.foot.help -side right -padx {0 8}
     bind $w <Escape> "destroy .hwtoolkit"
 
     update idletasks
@@ -429,78 +447,40 @@ proc ::HWToolkit::showHome {} {
     ::HWToolkit::showPanel
 }
 
-proc ::HWToolkit::manualRefreshBrowser {} {
-    if {[llength [info commands ::HWFlow::refreshBrowser]] > 0} {
-        set progressOpened 0
-        if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
-            set progressOpened [::HWFlow::progressOpen \
-                [::HWFlow::txt "刷新浏览器" "Refresh Browser"] \
-                [::HWFlow::txt "正在刷新 Model Browser..." "Refreshing Model Browser..."] \
-                0]
-        }
+proc ::HWToolkit::openGuide {} {
+    variable SCRIPT_DIR
 
-        if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
-            catch {::HWFlow::progressUpdate 10.0 \
-                [::HWFlow::txt "正在准备刷新" "Preparing refresh"] \
-                [::HWFlow::txt "解除浏览器缓冲并刷新 Model Browser，不改变组件显示/隐藏状态。" "Resetting browser buffers and refreshing Model Browser without changing component visibility."] \
-                1}
-        }
-
-        set summary [::HWFlow::refreshBrowser 0 0]
-
-        if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
-            set touchedCount 0
-            if {[dict exists $summary touchedCount]} {
-                set touchedCount [dict get $summary touchedCount]
-            }
-            set modelCount 0
-            if {[dict exists $summary modelCount]} {
-                set modelCount [dict get $summary modelCount]
-            }
-            set preview {}
-            set previewTotal $modelCount
-            set previewSource [::HWFlow::txt "模型 component" "Model components"]
-            if {[dict exists $summary touchedComponents]} {
-                set preview [lrange [dict get $summary touchedComponents] 0 12]
-            }
-            if {$touchedCount == 0 && [dict exists $summary modelComponents]} {
-                set preview [lrange [dict get $summary modelComponents] 0 12]
-                set previewTotal $modelCount
-            } elseif {$touchedCount > 0} {
-                set previewSource [::HWFlow::txt "脚本记录 component" "Tracked components"]
-                set previewTotal $touchedCount
-            }
-            set detail [::HWFlow::txt "当前模型 component：$modelCount 个；脚本记录 component：$touchedCount 个" "Model components: $modelCount; tracked components: $touchedCount"]
-            if {[llength $preview] > 0} {
-                append detail "\n${previewSource}:"
-                append detail [::HWFlow::txt "\n[join $preview \n]" "\n[join $preview \n]"]
-                if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
-                    foreach compName $preview {
-                        catch {::HWFlow::progressAppend $compName 1}
-                    }
-                }
-                if {$previewTotal > [llength $preview]} {
-                    append detail [::HWFlow::txt "\n..." "\n..."]
-                }
-            } elseif {[llength [info commands ::HWFlow::progressAppend]] > 0} {
-                catch {::HWFlow::progressAppend [::HWFlow::txt "未扫描到模型 component。" "No model components found."] 1}
-            }
-            catch {::HWFlow::progressUpdate 80.0 \
-                [::HWFlow::txt "正在整理刷新结果" "Finalizing browser refresh"] \
-                $detail \
-                1}
-        }
-
-        set message [::HWFlow::refreshBrowserSummaryText $summary]
-        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "浏览器刷新已完成。" "Browser refresh completed."] 100.0}
-        }
+    set guideFile [file join $SCRIPT_DIR "guide.html"]
+    if {![file exists $guideFile]} {
+        set message [::HWFlow::txt "未找到本地帮助文件：\n$guideFile" "Local help file was not found:\n$guideFile"]
         if {[llength [info commands tk_messageBox]] > 0} {
-            tk_messageBox -icon info -title [::HWFlow::txt "刷新浏览器" "Refresh Browser"] -message $message
-        } elseif {[llength [info commands hm_usermessage]] > 0} {
+            tk_messageBox -icon error -title [::HWFlow::txt "查看帮助" "View Help"] -message $message
+        } else {
             catch {hm_usermessage $message}
         }
+        return 0
     }
+
+    set nativeGuideFile [file nativename $guideFile]
+    set code [catch {
+        if {$::tcl_platform(platform) eq "windows"} {
+            exec cmd.exe /c start "" $nativeGuideFile &
+        } elseif {$::tcl_platform(os) eq "Darwin"} {
+            exec open $guideFile &
+        } else {
+            exec xdg-open $guideFile &
+        }
+    } err]
+    if {$code} {
+        set message [::HWFlow::txt "无法打开本地帮助网页：\n$nativeGuideFile\n\n$err" "Could not open the local help page:\n$nativeGuideFile\n\n$err"]
+        if {[llength [info commands tk_messageBox]] > 0} {
+            tk_messageBox -icon error -title [::HWFlow::txt "查看帮助" "View Help"] -message $message
+        } else {
+            catch {hm_usermessage $message}
+        }
+        return 0
+    }
+    return 1
 }
 
 proc ::HWToolkit::runModule {key} {
@@ -521,9 +501,6 @@ proc ::HWToolkit::invokeModule {key} {
         return 0
     }
     set info [dict get $MODULES $key]
-    if {![::HWToolkit::moduleVisible $info]} {
-        return 0
-    }
     if {![::HWToolkit::ensureCoreLoaded]} {
         return 0
     }
