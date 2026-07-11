@@ -89,7 +89,7 @@ proc ::AutoHoleRBE2::savePanelState {} {
 # User Interface
 # ----------------------------------------------------------------------
 
-proc ::AutoHoleRBE2::showPanel {} {
+proc ::AutoHoleRBE2::showPanel {{settingsOnly 0}} {
     variable cfg
     variable ui
     variable VERSION
@@ -199,7 +199,11 @@ proc ::AutoHoleRBE2::showPanel {} {
     pack $w.btn -fill x
 
     button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::AutoHoleRBE2::savePanelState; set ::AutoHoleRBE2::ui(ok) 0; ::AutoHoleRBE2::backToHome .autoHoleRBE2"
-    button $w.btn.start  -text [::HWFlow::txt "开始创建" "Start Creation"] -width 18 -command "::AutoHoleRBE2::acceptPanel"
+    if {$settingsOnly} {
+        button $w.btn.start  -text [::HWFlow::txt "保存设置" "Save Settings"] -width 18 -command "::AutoHoleRBE2::saveSettingsPanel"
+    } else {
+        button $w.btn.start  -text [::HWFlow::txt "开始创建" "Start Creation"] -width 18 -command "::AutoHoleRBE2::acceptPanel"
+    }
 
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.start  -side right -padx 4
@@ -351,7 +355,22 @@ proc ::AutoHoleRBE2::acceptPanel {} {
     ::AutoHoleRBE2::savePanelState
 
     set ui(ok) 1
-    destroy .autoHoleRBE2
+    catch {destroy .autoHoleRBE2}
+}
+
+proc ::AutoHoleRBE2::saveSettingsPanel {} {
+    variable cfg
+    variable ui
+
+    foreach k [array names ui] {
+        if {$k eq "ok" || $k eq "selectedText" || $k eq "selectedComps"} {
+            continue
+        }
+        set cfg($k) $ui($k)
+    }
+    ::AutoHoleRBE2::savePanelState
+    set ui(ok) 1
+    catch {destroy .autoHoleRBE2}
 }
 
 # ----------------------------------------------------------------------
@@ -1424,16 +1443,11 @@ proc ::AutoHoleRBE2::runCore {} {
     ::AutoHoleRBE2::clearMarks
 }
 
-proc ::AutoHoleRBE2::run {} {
+proc ::AutoHoleRBE2::runCurrentSelection {} {
     variable cfg
     variable stat
     variable VERSION
     set rigidType [string toupper $cfg(rigidType)]
-
-    if {![::AutoHoleRBE2::showPanel]} {
-        catch {hm_usermessage [::HWFlow::txt "Solid Through-Hole RIGIDS cancelled." "Solid Through-Hole RIGIDS cancelled."]}
-        return
-    }
 
     ::AutoHoleRBE2::initLog
     set progressOpened 0
@@ -1487,4 +1501,41 @@ proc ::AutoHoleRBE2::run {} {
     }
 
     ::AutoHoleRBE2::closeLog
+}
+
+proc ::AutoHoleRBE2::runAction {} {
+    variable cfg
+    variable ui
+
+    if {[llength [info commands ::HWFlow::applyStateToArray]] > 0} {
+        ::HWFlow::applyStateToArray auto_hole_rbe2 ::AutoHoleRBE2::cfg
+    }
+    foreach k [array names cfg] {
+        set ui($k) $cfg($k)
+    }
+    set ui(ok) 0
+    set ui(selectedComps) ""
+    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
+
+    ::AutoHoleRBE2::pickComponents
+    if {[llength $ui(selectedComps)] == 0} {
+        return
+    }
+    ::AutoHoleRBE2::acceptPanel
+    if {![info exists ui(ok)] || !$ui(ok)} {
+        return
+    }
+    ::AutoHoleRBE2::runCurrentSelection
+}
+
+proc ::AutoHoleRBE2::runSettings {} {
+    ::AutoHoleRBE2::showPanel 1
+}
+
+proc ::AutoHoleRBE2::run {} {
+    if {![::AutoHoleRBE2::showPanel]} {
+        catch {hm_usermessage [::HWFlow::txt "Solid Through-Hole RIGIDS cancelled." "Solid Through-Hole RIGIDS cancelled."]}
+        return
+    }
+    ::AutoHoleRBE2::runCurrentSelection
 }

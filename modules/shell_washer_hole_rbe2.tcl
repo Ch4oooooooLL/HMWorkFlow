@@ -195,7 +195,7 @@ proc ::RB2W::savePanelState {} {
     ::RB2W::saveState
 }
 
-proc ::RB2W::showPanel {} {
+proc ::RB2W::showPanel {{settingsOnly 0}} {
     variable ui
     variable VERSION
 
@@ -299,13 +299,19 @@ proc ::RB2W::showPanel {} {
     pack $w.btn -fill x
     button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; ::RB2W::backToHome .rb2w_panel"
     button $w.btn.save -text [::HWFlow::txt "保存配置" "Save Config"] -width 12 -command "::RB2W::savePanelState"
-    button $w.btn.merge -text [::HWFlow::txt "合并重复节点" "Merge Duplicate Nodes"] -width 16 -command "::RB2W::acceptPanel merge_nodes"
-    button $w.btn.rebuild -text [::HWFlow::txt "重建模式" "Rebuild Mode"] -width 12 -command "::RB2W::acceptPanel rebuild"
-    button $w.btn.start -text [::HWFlow::txt "开始创建" "Start Creation"] -width 18 -command "::RB2W::acceptPanel create"
+    if {$settingsOnly} {
+        button $w.btn.start -text [::HWFlow::txt "保存设置" "Save Settings"] -width 18 -command "::RB2W::saveSettingsPanel"
+    } else {
+        button $w.btn.merge -text [::HWFlow::txt "合并重复节点" "Merge Duplicate Nodes"] -width 16 -command "::RB2W::acceptPanel merge_nodes"
+        button $w.btn.rebuild -text [::HWFlow::txt "重建模式" "Rebuild Mode"] -width 12 -command "::RB2W::acceptPanel rebuild"
+        button $w.btn.start -text [::HWFlow::txt "开始创建" "Start Creation"] -width 18 -command "::RB2W::acceptPanel create"
+    }
     pack $w.btn.back  -side right -padx 4
     pack $w.btn.save  -side right -padx 4
-    pack $w.btn.merge -side right -padx 4
-    pack $w.btn.rebuild -side right -padx 4
+    if {!$settingsOnly} {
+        pack $w.btn.merge -side right -padx 4
+        pack $w.btn.rebuild -side right -padx 4
+    }
     pack $w.btn.start -side right -padx 4
 
     bind $w <Escape> "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; destroy .rb2w_panel"
@@ -439,7 +445,14 @@ proc ::RB2W::acceptPanel {{action create}} {
     ::RB2W::savePanelState
     set ui(action) $action
     set ui(ok) 1
-    destroy .rb2w_panel
+    catch {destroy .rb2w_panel}
+}
+
+proc ::RB2W::saveSettingsPanel {} {
+    variable ui
+    ::RB2W::savePanelState
+    set ui(ok) 1
+    catch {destroy .rb2w_panel}
 }
 
 proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex loopTotal candidateHoles created skipped {force 0}} {
@@ -2049,16 +2062,19 @@ proc ::RB2W::printParameterLog {} {
 }
 
 proc ::RB2W::main {} {
+    if {![::RB2W::showPanel]} {
+        return
+    }
+    ::RB2W::runCurrentSelection
+}
+
+proc ::RB2W::runCurrentSelection {} {
     variable outputCompBySource
     variable currentComponentName
     variable RIGID_TYPE
     variable SKIP_COMPONENT_IF_EXISTING_RBE2
     variable PERFORMANCE_MODE
     variable ui
-
-    if {![::RB2W::showPanel]} {
-        return
-    }
 
     set currentComponentName ""
     catch {array unset outputCompBySource}
@@ -2175,4 +2191,34 @@ proc ::RB2W::main {} {
 
 proc ::RB2W::run {} {
     ::RB2W::main
+}
+
+proc ::RB2W::runAction {} {
+    variable ui
+
+    ::RB2W::loadState
+    foreach key [::RB2W::stateKeys] {
+        upvar #0 ::RB2W::$key v
+        if {[info exists v]} {
+            set ui($key) $v
+        }
+    }
+    set ui(ok) 0
+    set ui(action) create
+    set ui(selectedComps) ""
+    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
+
+    ::RB2W::pickComponents
+    if {[llength $ui(selectedComps)] == 0} {
+        return
+    }
+    ::RB2W::acceptPanel create
+    if {![info exists ui(ok)] || !$ui(ok)} {
+        return
+    }
+    ::RB2W::runCurrentSelection
+}
+
+proc ::RB2W::runSettings {} {
+    ::RB2W::showPanel 1
 }

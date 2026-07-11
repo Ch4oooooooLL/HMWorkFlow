@@ -41,7 +41,10 @@ $IncludeItems = @(
     "使用教程.pdf",
     "config.yaml",
     "hw_toolkit.tcl",
+    "hw_toolkit_core.tcl",
+    "shortcut_bootstrap.tcl",
     "build_package.ps1",
+    "build_package.sh",
     "config",
     "doc",
     "modules"

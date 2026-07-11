@@ -15,14 +15,42 @@ File > Run > Tcl/Tk Script > hw_toolkit.tcl
 运行后会打开 `HyperMesh Toolkit` 主面板。模块归类为三部分显示：
 
 ```text
-Organize
+Geometry
 Mesh
-Connector
+Connection
 ```
 
 主面板中的 `刷新浏览器` 用于恢复 Model Browser 更新并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
 
-### 1.1 HyperWorks Extension 打包和加载
+主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。每个模块行右侧会显示当前快捷键；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
+
+快捷键会直接调用模块的 `proc` 执行入口，不会打开 HMWorkFlow 主界面，也不会打开模块的 `more` 配置界面。
+
+### 1.1 快捷键持久化
+
+快捷键配置保存到当前 Windows 用户目录，不写入项目目录：
+
+```text
+%APPDATA%\HMWorkFlow\shortcuts.cfg
+```
+
+如果没有 `APPDATA` 环境变量，则保存到：
+
+```text
+~/.hmworkflow/shortcuts.cfg
+```
+
+首次成功应用快捷键时，工具会尝试在用户 Home 目录的 `hmcustom.tcl` 中安装 HMWorkFlow 专用加载块：
+
+```text
+# >>> HMWorkFlow shortcut loader >>>
+...
+# <<< HMWorkFlow shortcut loader <<<
+```
+
+工具只维护这两个标记之间的内容，不会覆盖 `hmcustom.tcl` 中的其他用户代码。项目目录移动后，快捷键管理器会显示 `路径失效`，点击 `修复自动加载` 可更新为当前项目路径。点击 `禁用自动加载` 只删除 HMWorkFlow 标记块，不删除用户快捷键配置。
+
+### 1.2 HyperWorks Extension 打包和加载
 
 需要以 HyperWorks Extension 方式加载时，先在项目根目录构建 extension：
 
@@ -113,6 +141,8 @@ AUTO_CONTACT_*
 ```text
 .
 |-- hw_toolkit.tcl
+|-- hw_toolkit_core.tcl
+|-- shortcut_bootstrap.tcl
 |-- config.yaml
 |-- config/
 |   |-- materials.txt
@@ -124,6 +154,7 @@ AUTO_CONTACT_*
 |   `-- contact_rules.txt
 `-- modules/
     |-- workflow_common.tcl
+    |-- shortcut_manager.tcl
     |-- component_workflow.tcl
     |-- midsurf.tcl
     |-- geometry_cleanup.tcl
@@ -416,14 +447,16 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
    - `components`：选择包含 RBE2 的 component。
 3. 设置搜索轴向、最大轴向连接距离、横向中心偏移容差和最小分组数量。
 4. 选择输出类型 `CBEAM` 或 `CBAR`。
-5. 可先勾选预览模式检查分组，再取消预览创建连接段。
-6. 点击确定执行。
+5. `1D 属性名称` 留空时，工具会按孔径自动创建/复用 `PBEAM`/`PBAR` 属性和默认 `MAT1` 材料；填写时使用指定属性。
+6. 可先勾选预览模式检查分组，再取消预览创建连接段。
+7. 点击确定执行。
 
 输出：
 
 - 对符合条件的 RBE2 中心节点分组。
-- 沿识别轴向连接相邻 RBE2。
+- 沿识别轴向连接相邻 RBE2，CBEAM/CBAR 端点会强制使用 RBE2 中心节点 ID，避免同坐标重复节点造成 free 1D。
 - 输出 component 按孔径和单元类型命名，例如 `BOLT_D12_CBEAM`。
+- 输出属性按孔径和属性卡命名，例如 `BOLT_D12_PBEAM`，避免 CBEAM/CBAR 只有几何线而没有求解刚度。
 - 只组织新建的一维连接单元，不移动源节点。
 
 ### 6.11 Contact Setup

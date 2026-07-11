@@ -174,7 +174,7 @@ proc ::GeomCleanup::backToHome {w} {
     }
 }
 
-proc ::GeomCleanup::showPanel {} {
+proc ::GeomCleanup::showPanel {{settingsOnly 0}} {
     variable ui
     variable VERSION
     ::GeomCleanup::loadState
@@ -241,7 +241,11 @@ proc ::GeomCleanup::showPanel {} {
     pack $w.btn -fill x
     button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::GeomCleanup::savePanelState; set ::GeomCleanup::ui(ok) 0; ::GeomCleanup::backToHome .geometry_cleanup"
     button $w.btn.rules -text [::HWFlow::txt "查看参数" "Show Rules"] -width 12 -command "::GeomCleanup::showRules"
-    button $w.btn.start -text [::HWFlow::txt "进入连续清洗" "Start Continuous Cleanup"] -width 16 -command "::GeomCleanup::acceptPanel"
+    if {$settingsOnly} {
+        button $w.btn.start -text [::HWFlow::txt "保存设置" "Save Settings"] -width 16 -command "::GeomCleanup::acceptPanel"
+    } else {
+        button $w.btn.start -text [::HWFlow::txt "进入连续清洗" "Start Continuous Cleanup"] -width 16 -command "::GeomCleanup::acceptPanel"
+    }
     pack $w.btn.back -side right -padx 4
     pack $w.btn.start -side right -padx 4
     pack $w.btn.rules -side right -padx 4
@@ -1264,6 +1268,15 @@ proc ::GeomCleanup::main {} {
         return
     }
     ::GeomCleanup::continuousCleanup
+}
+
+proc ::GeomCleanup::runAction {} {
+    ::GeomCleanup::loadState
+    ::GeomCleanup::continuousCleanup
+}
+
+proc ::GeomCleanup::runSettings {} {
+    ::GeomCleanup::showPanel 1
 }
 
 proc ::GeomCleanup::run {} {

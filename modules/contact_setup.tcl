@@ -135,7 +135,7 @@ proc ::ContactSetup::backToHome {w} {
     }
 }
 
-proc ::ContactSetup::showPanel {} {
+proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     variable VERSION
     variable cfg
     variable ui
@@ -202,12 +202,16 @@ proc ::ContactSetup::showPanel {} {
         -command "::ContactSetup::savePanelState; ::ContactSetup::restoreView; ::ContactSetup::backToHome .contact_setup"
     button $w.btn.save -text [::HWFlow::txt "保存参数" "Save Parameters"] -width 12 -command "::ContactSetup::saveRules"
     button $w.btn.restore -text [::HWFlow::txt "恢复视图" "Restore View"] -width 12 -command "::ContactSetup::restoreView"
-    button $w.btn.trim -text [::HWFlow::txt "修改接触" "Trim Contact"] -width 12 -command "::ContactSetup::trimContact"
-    button $w.btn.create -text [::HWFlow::txt "创建接触" "Create Contact"] -width 12 -command "::ContactSetup::createContact"
+    if {!$settingsOnly} {
+        button $w.btn.trim -text [::HWFlow::txt "修改接触" "Trim Contact"] -width 12 -command "::ContactSetup::trimContact"
+        button $w.btn.create -text [::HWFlow::txt "创建接触" "Create Contact"] -width 12 -command "::ContactSetup::createContact"
+    }
     pack $w.btn.back -side right -padx 4
     pack $w.btn.restore -side right -padx 4
-    pack $w.btn.trim -side right -padx 4
-    pack $w.btn.create -side right -padx 4
+    if {!$settingsOnly} {
+        pack $w.btn.trim -side right -padx 4
+        pack $w.btn.create -side right -padx 4
+    }
     pack $w.btn.save -side right -padx 4
 
     bind $w <Escape> "::ContactSetup::savePanelState; ::ContactSetup::restoreView; destroy .contact_setup"
@@ -1207,4 +1211,27 @@ proc ::ContactSetup::listMinus {items removed} {
 
 proc ::ContactSetup::run {} {
     ::ContactSetup::showPanel
+}
+
+proc ::ContactSetup::runAction {} {
+    variable cfg
+    variable ui
+
+    ::ContactSetup::loadRules
+    foreach key [::ContactSetup::stateKeys] {
+        set ui($key) $cfg($key)
+    }
+    set ui(selectedComps) ""
+    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
+    set ui(status) ""
+
+    ::ContactSetup::pickComponents
+    if {[llength $ui(selectedComps)] != 2} {
+        return
+    }
+    ::ContactSetup::createContact
+}
+
+proc ::ContactSetup::runSettings {} {
+    ::ContactSetup::showPanel 1
 }

@@ -25,8 +25,10 @@
 #     planar RBE2 records first; spatial RBE2 records are still connected.
 #   - Spatial-only RBE2 groups are skipped and do not create CBEAM elements.
 #   - No nodes are moved to components. Only CBEAM elements are organized.
-#   - Property/beamsection creation is deliberately not forced in this first
-#     version; it focuses on reliable geometry connection and organization.
+#   - When no explicit 1D property is supplied, the tool creates/reuses a
+#     diameter-specific PBAR/PBEAM property and a default MAT1 material, so the
+#     generated CBAR/CBEAM elements have solver stiffness instead of only
+#     graphical connectivity.
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -57,6 +59,8 @@ namespace eval ::RB2Bolt {
     variable _sortAxis 2
     variable beamSegmentIndex
     variable compIdCache
+    variable propIdCache
+    variable matIdCache
     variable currentOutputComp ""
     variable bulkCreateMode 0
     variable bulkTouchedOutputComps {}
@@ -196,7 +200,7 @@ proc ::RB2Bolt::chooseModeDiameter {ds} {
 }
 
 # ------------------------- GUI ---------------------------------------------
-proc ::RB2Bolt::showDialog {} {
+proc ::RB2Bolt::showDialog {{settingsOnly 0}} {
     variable P
     variable done
     variable VERSION
@@ -218,10 +222,17 @@ proc ::RB2Bolt::showDialog {} {
     labelframe $w.main.sel -text [::HWFlow::txt "1. 选择范围" "1. Selection Scope"] -padx 8 -pady 8
     grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
-    label $w.main.sel.l_mode -text [::HWFlow::txt "选择方式" "Select by"] -anchor w
-    tk_optionMenu $w.main.sel.m_mode ::RB2Bolt::P(selectMode) elements components
-    grid $w.main.sel.l_mode -row 0 -column 0 -sticky w -padx {0 8}
-    grid $w.main.sel.m_mode -row 0 -column 1 -sticky w
+    if {$settingsOnly} {
+        label $w.main.sel.note -text [::HWFlow::txt \
+            "执行时在 HyperMesh 选择面板中切换 elems / comps；这里不再保存选择类型。" \
+            "Switch elems / comps in the HyperMesh selection panel when running; selection type is no longer saved here."] -anchor w
+        grid $w.main.sel.note -row 0 -column 0 -columnspan 2 -sticky w
+    } else {
+        label $w.main.sel.l_mode -text [::HWFlow::txt "选择方式" "Select by"] -anchor w
+        tk_optionMenu $w.main.sel.m_mode ::RB2Bolt::P(selectMode) elements components
+        grid $w.main.sel.l_mode -row 0 -column 0 -sticky w -padx {0 8}
+        grid $w.main.sel.m_mode -row 0 -column 1 -sticky w
+    }
 
     labelframe $w.main.param -text [::HWFlow::txt "2. 分组与建模参数" "2. Grouping and Modeling Parameters"] -padx 8 -pady 8
     grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
@@ -269,11 +280,17 @@ proc ::RB2Bolt::showDialog {} {
     pack $w.btn -fill x
 
     button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command {set ::RB2Bolt::done -2}
-    button $w.btn.unused -text [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -width 22 -command {set ::RB2Bolt::done 2}
-    button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command {set ::RB2Bolt::done 1}
+    if {!$settingsOnly} {
+        button $w.btn.unused -text [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -width 22 -command {set ::RB2Bolt::done 2}
+        button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command {set ::RB2Bolt::done 1}
+    } else {
+        button $w.btn.ok -text [::HWFlow::txt "保存设置" "Save Settings"] -width 12 -command {set ::RB2Bolt::done 1}
+    }
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
-    pack $w.btn.unused -side right -padx 4
+    if {!$settingsOnly} {
+        pack $w.btn.unused -side right -padx 4
+    }
 
     bind $w <Return> {set ::RB2Bolt::done 1}
     bind $w <Escape> {set ::RB2Bolt::done -1}
@@ -539,6 +556,52 @@ proc ::RB2Bolt::selectedElementIds {} {
         set selected [hm_getmark elems 1]
         set out [::RB2Bolt::rbe2CandidatesFromSelectedElements $selected]
     }
+    ::RB2Bolt::clearSelectionMarks
+    return [::RB2Bolt::uniqueIntegerIds $out]
+}
+
+proc ::RB2Bolt::markIds {entityTypes markId} {
+    foreach entityType $entityTypes {
+        if {![catch {set ids [hm_getmark $entityType $markId]}] && [llength $ids] > 0} {
+            return [list $entityType $ids]
+        }
+    }
+    return [list "" {}]
+}
+
+proc ::RB2Bolt::selectedElementIdsInteractive {} {
+    set out {}
+    ::RB2Bolt::clearSelectionMarks
+
+    set prompt [::HWFlow::txt \
+        "选择 RBE2 单元或包含 RBE2 的组件；在选择面板中切换 elems/comps。" \
+        "Select RBE2 elements or components containing RBE2; switch elems/comps in the selection panel."]
+
+    set opened 0
+    foreach entityType {entities entity} {
+        if {![catch {*createmarkpanel $entityType 1 $prompt}]} {
+            set opened 1
+            break
+        }
+    }
+    if {!$opened} {
+        tk_messageBox -icon error -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt \
+            "当前 HyperMesh 未能打开可切换实体类型的选择面板。" \
+            "HyperMesh could not open the entity-switching selection panel."]
+        return {}
+    }
+
+    set compMark [::RB2Bolt::markIds {comps components} 1]
+    set elemMark [::RB2Bolt::markIds {elems elements} 1]
+    set comps [lindex $compMark 1]
+    set elems [lindex $elemMark 1]
+
+    if {[llength $comps] > 0} {
+        set out [::RB2Bolt::rbe2CandidatesFromComponents $comps]
+    } elseif {[llength $elems] > 0} {
+        set out [::RB2Bolt::rbe2CandidatesFromSelectedElements $elems]
+    }
+
     ::RB2Bolt::clearSelectionMarks
     return [::RB2Bolt::uniqueIntegerIds $out]
 }
@@ -837,6 +900,175 @@ proc ::RB2Bolt::groupDiameter {g} {
 }
 
 # ------------------------- creation ----------------------------------------
+proc ::RB2Bolt::entityIdByName {entityTypes name} {
+    foreach etype $entityTypes {
+        if {![catch {set id [hm_getvalue $etype name=$name dataname=id]}] && $id ne "" && $id != 0} {
+            return $id
+        }
+        if {![catch {set id [hm_entityinfo id $etype $name -byname]}] && $id ne "" && $id != 0} {
+            return $id
+        }
+    }
+    return ""
+}
+
+proc ::RB2Bolt::trySetValue {entityTypes selector field value} {
+    foreach etype $entityTypes {
+        set cmd [list *setvalue $etype $selector STATUS=1 "$field=$value"]
+        if {![catch {eval $cmd}]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+proc ::RB2Bolt::trySetEntityRef {entityTypes selector fields refType refId} {
+    set refValue [format "{%s %s}" $refType $refId]
+    foreach field $fields {
+        foreach value [list $refValue $refId] {
+            if {[::RB2Bolt::trySetValue $entityTypes $selector $field $value]} {
+                return 1
+            }
+        }
+    }
+    return 0
+}
+
+proc ::RB2Bolt::ensureBoltMaterial {} {
+    variable P
+    variable matIdCache
+
+    set matName [safeName "${P(compPrefix)}_BOLT_STEEL_MAT1"]
+    if {$matName eq ""} {set matName BOLT_STEEL_MAT1}
+    if {[info exists matIdCache($matName)] && $matIdCache($matName) ne ""} {
+        return [list $matName $matIdCache($matName)]
+    }
+
+    set id [::RB2Bolt::entityIdByName {mats materials} $matName]
+    if {$id eq ""} {
+        set err1 ""
+        set err2 ""
+        if {[catch {*createentity mats cardimage=MAT1 includeid=0 name=$matName} err1]} {
+            if {[catch {*createentity materials cardimage=MAT1 includeid=0 name=$matName} err2]} {
+                error [::HWFlow::txt "无法创建默认螺栓材料 $matName：$err1 / $err2" "Cannot create default bolt material $matName: $err1 / $err2"]
+            }
+        }
+        set id [::RB2Bolt::entityIdByName {mats materials} $matName]
+    }
+    if {$id eq "" || $id == 0} {
+        error [::HWFlow::txt "无法读取默认螺栓材料 $matName 的 ID。" "Cannot read default bolt material id for $matName."]
+    }
+
+    foreach selector [list "id=$id" "name=$matName"] {
+        catch {*setvalue mats $selector cardimage=MAT1}
+        catch {*setvalue materials $selector cardimage=MAT1}
+        ::RB2Bolt::trySetValue {mats materials} $selector E 210000.0
+        ::RB2Bolt::trySetValue {mats materials} $selector 1 210000.0
+        ::RB2Bolt::trySetValue {mats materials} $selector Nu 0.30
+        ::RB2Bolt::trySetValue {mats materials} $selector 3 0.30
+        ::RB2Bolt::trySetValue {mats materials} $selector Rho 7.85e-9
+        ::RB2Bolt::trySetValue {mats materials} $selector 4 7.85e-9
+    }
+
+    set matIdCache($matName) $id
+    return [list $matName $id]
+}
+
+proc ::RB2Bolt::propertyCardForElementType {elemType} {
+    set u [string toupper $elemType]
+    if {$u eq "CBAR"} {return PBAR}
+    return PBEAM
+}
+
+proc ::RB2Bolt::autoPropertyName {elemType dia} {
+    variable P
+    set card [::RB2Bolt::propertyCardForElementType $elemType]
+    if {[string is double -strict $dia] && $dia > 0} {
+        set d [format "%.12g" $dia]
+    } else {
+        set d UNKNOWN
+    }
+    return [safeName [format "%s_D%s_%s" $P(compPrefix) $d $card]]
+}
+
+proc ::RB2Bolt::effectivePropertyName {elemType dia} {
+    variable P
+    if {$P(propName) ne ""} {
+        return $P(propName)
+    }
+    return [::RB2Bolt::autoPropertyName $elemType $dia]
+}
+
+proc ::RB2Bolt::circleSection {dia} {
+    if {![string is double -strict $dia] || $dia <= 0} {
+        set dia 1.0
+    }
+    set pi [expr {acos(-1.0)}]
+    set area [expr {$pi * $dia * $dia / 4.0}]
+    set inertia [expr {$pi * pow($dia, 4) / 64.0}]
+    set torsion [expr {$pi * pow($dia, 4) / 32.0}]
+    return [list $area $inertia $inertia 0.0 $torsion 0.0]
+}
+
+proc ::RB2Bolt::ensureBoltProperty {elemType dia} {
+    variable P
+    variable propIdCache
+
+    set propName [::RB2Bolt::effectivePropertyName $elemType $dia]
+    if {$P(propName) ne ""} {
+        return $propName
+    }
+
+    set card [::RB2Bolt::propertyCardForElementType $elemType]
+    if {[info exists propIdCache($propName)] && $propIdCache($propName) ne ""} {
+        return $propName
+    }
+
+    set matInfo [::RB2Bolt::ensureBoltMaterial]
+    set matId [lindex $matInfo 1]
+
+    set id [::RB2Bolt::entityIdByName {props properties} $propName]
+    if {$id eq ""} {
+        set err1 ""
+        set err2 ""
+        if {[catch {*createentity props cardimage=$card includeid=0 name=$propName} err1]} {
+            if {[catch {*createentity properties cardimage=$card includeid=0 name=$propName} err2]} {
+                error [::HWFlow::txt "无法创建螺栓属性 $propName：$err1 / $err2" "Cannot create bolt property $propName: $err1 / $err2"]
+            }
+        }
+        set id [::RB2Bolt::entityIdByName {props properties} $propName]
+    }
+    if {$id eq "" || $id == 0} {
+        error [::HWFlow::txt "无法读取螺栓属性 $propName 的 ID。" "Cannot read bolt property id for $propName."]
+    }
+
+    foreach selector [list "id=$id" "name=$propName"] {
+        catch {*setvalue props $selector cardimage=$card}
+        catch {*setvalue properties $selector cardimage=$card}
+        ::RB2Bolt::trySetEntityRef {props properties} $selector {materialid material.id material MID Mid mid} mats $matId
+
+        set sec [::RB2Bolt::circleSection $dia]
+        set area [lindex $sec 0]
+        set i1 [lindex $sec 1]
+        set i2 [lindex $sec 2]
+        set i12 [lindex $sec 3]
+        set j [lindex $sec 4]
+        set nsm [lindex $sec 5]
+
+        foreach f {A A(A) Area area} {::RB2Bolt::trySetValue {props properties} $selector $f $area}
+        foreach f {I1 I1(A) I1A} {::RB2Bolt::trySetValue {props properties} $selector $f $i1}
+        foreach f {I2 I2(A) I2A} {::RB2Bolt::trySetValue {props properties} $selector $f $i2}
+        foreach f {I12 I12(A) I12A} {::RB2Bolt::trySetValue {props properties} $selector $f $i12}
+        foreach f {J J(A) JA} {::RB2Bolt::trySetValue {props properties} $selector $f $j}
+        foreach f {NSM NSM(A) NSMA} {::RB2Bolt::trySetValue {props properties} $selector $f $nsm}
+        foreach f {K1 K1(A) K1A} {::RB2Bolt::trySetValue {props properties} $selector $f 1.0}
+        foreach f {K2 K2(A) K2A} {::RB2Bolt::trySetValue {props properties} $selector $f 1.0}
+    }
+
+    set propIdCache($propName) $id
+    return $propName
+}
+
 proc ::RB2Bolt::enableInteractiveBrowserUpdates {} {
     catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
@@ -1118,10 +1350,9 @@ proc ::RB2Bolt::elemLooksLike1DConnector {eid elemType} {
     return 0
 }
 
-proc ::RB2Bolt::indexExistingBeamSegments {compName elemType} {
-    variable P
+proc ::RB2Bolt::indexExistingBeamSegments {compName elemType propName} {
     variable beamSegmentIndex
-    set indexKey "$compName|$elemType|$P(propName)"
+    set indexKey "$compName|$elemType|$propName"
     if {[info exists beamSegmentIndex(__indexed,$indexKey)]} {
         return 0
     }
@@ -1140,28 +1371,26 @@ proc ::RB2Bolt::indexExistingBeamSegments {compName elemType} {
         if {![::RB2Bolt::elemLooksLike1DConnector $eid $elemType] && [llength $nodes] != 2} {
             continue
         }
-        set key [::RB2Bolt::beamSegmentKey [lindex $nodes 0] [lindex $nodes 1] $elemType $P(propName)]
+        set key [::RB2Bolt::beamSegmentKey [lindex $nodes 0] [lindex $nodes 1] $elemType $propName]
         set beamSegmentIndex($key) $eid
         incr count
     }
     return $count
 }
 
-proc ::RB2Bolt::existingBeamSegment {n1 n2 elemType compName} {
-    variable P
+proc ::RB2Bolt::existingBeamSegment {n1 n2 elemType compName {propName ""}} {
     variable beamSegmentIndex
-    ::RB2Bolt::indexExistingBeamSegments $compName $elemType
-    set key [::RB2Bolt::beamSegmentKey $n1 $n2 $elemType $P(propName)]
+    ::RB2Bolt::indexExistingBeamSegments $compName $elemType $propName
+    set key [::RB2Bolt::beamSegmentKey $n1 $n2 $elemType $propName]
     if {[info exists beamSegmentIndex($key)]} {
         return [list 1 $beamSegmentIndex($key) $key]
     }
     return [list 0 "" $key]
 }
 
-proc ::RB2Bolt::rememberBeamSegment {n1 n2 elemType compName elemId} {
-    variable P
+proc ::RB2Bolt::rememberBeamSegment {n1 n2 elemType compName elemId {propName ""}} {
     variable beamSegmentIndex
-    set key [::RB2Bolt::beamSegmentKey $n1 $n2 $elemType $P(propName)]
+    set key [::RB2Bolt::beamSegmentKey $n1 $n2 $elemType $propName]
     if {$elemId eq ""} {
         set elemId created
     }
@@ -1186,14 +1415,209 @@ proc ::RB2Bolt::orientVecForNodes {n1 n2} {
     return {0.0 1.0 0.0}
 }
 
-proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
+proc ::RB2Bolt::createdElementIdAfter {beforeElem} {
+    set elemId ""
+    catch {set elemId [hm_latestentityid elems]}
+    if {$elemId eq $beforeElem} {set elemId ""}
+    return $elemId
+}
+
+proc ::RB2Bolt::assignBeamProperty {elemId propName} {
+    if {$elemId eq "" || $propName eq ""} {return 0}
+    set propId [::RB2Bolt::entityIdByName {props properties} $propName]
+    catch {*clearmark elems 1}
+    catch {*createmark elems 1 $elemId}
+    set ok 0
+    if {![catch {*propertyupdate elems 1 $propName}]} {set ok 1}
+    if {!$ok && ![catch {*propertyupdate elements 1 $propName}]} {set ok 1}
+    catch {*clearmark elems 1}
+    if {$propId ne ""} {
+        foreach selector [list "id=$elemId"] {
+            if {[::RB2Bolt::trySetEntityRef {elems elements} $selector {propertyid property.id property PID pid} props $propId]} {
+                set ok 1
+            }
+        }
+    }
+    return $ok
+}
+
+proc ::RB2Bolt::createdBeamHasProperty {elemId propName} {
+    if {$elemId eq "" || $propName eq ""} {return 1}
+    set propId [::RB2Bolt::entityIdByName {props properties} $propName]
+    set readable 0
+    foreach dn {property.id propertyid property collector.id prop.id} {
+        if {[catch {set v [hm_getvalue elems id=$elemId dataname=$dn]}] || $v eq ""} {
+            continue
+        }
+        if {[string is double -strict $v] && $v == 0} {
+            continue
+        }
+        set readable 1
+        if {$propId ne "" && "$v" eq "$propId"} {return 1}
+        if {[string equal -nocase "$v" "$propName"] || [string first [string toupper $propName] [string toupper "$v"]] >= 0} {
+            return 1
+        }
+    }
+    if {$readable} {return 0}
+    return -1
+}
+
+proc ::RB2Bolt::createdBeamNodeIds {elemId} {
+    if {$elemId eq ""} {return {}}
+    set out {}
+    foreach dn {node1.id node2.id} {
+        if {![catch {set v [hm_getvalue elems id=$elemId dataname=$dn]}] && $v ne "" && !([string is double -strict $v] && $v == 0)} {
+            lappend out $v
+        }
+    }
+    if {[llength $out] >= 2} {
+        return [lrange $out 0 1]
+    }
+    if {![catch {set nodes [hm_getvalue elems id=$elemId dataname=nodes]}] && [llength $nodes] >= 2} {
+        return [lrange $nodes 0 1]
+    }
+    return {}
+}
+
+proc ::RB2Bolt::replaceOneNode {sourceNode targetNode} {
+    if {$sourceNode eq "" || $targetNode eq "" || "$sourceNode" eq "$targetNode"} {
+        return 1
+    }
+    catch {*createlist nodes 1}
+    catch {*createlist nodes 2}
+    set ok 0
+    if {![catch {*replacenodes source_node=$sourceNode target_node=$targetNode equiv=1 midpoint=0 collapse_check=2}]} {
+        set ok 1
+    }
+    if {!$ok} {
+        if {![catch {*createlist nodes 1 $sourceNode}]} {
+            if {![catch {*createlist nodes 2 $targetNode}]} {
+                if {![catch {*replacenodes source_list=1 target_list=2 equiv=1 midpoint=0 collapse_check=2}]} {
+                    set ok 1
+                }
+            }
+        }
+    }
+    catch {*createlist nodes 1}
+    catch {*createlist nodes 2}
+    return $ok
+}
+
+proc ::RB2Bolt::nodeDistanceById {a b} {
+    if {$a eq "" || $b eq ""} {return 1.0e99}
+    if {[catch {set pa [nodeXYZ $a]}] || [catch {set pb [nodeXYZ $b]}]} {
+        return 1.0e99
+    }
+    return [dist3 [lindex $pa 0] [lindex $pa 1] [lindex $pa 2] [lindex $pb 0] [lindex $pb 1] [lindex $pb 2]]
+}
+
+proc ::RB2Bolt::nodesCoincident {a b} {
+    variable P
+    set tol $P(minBeamLength)
+    if {$tol < 1.0e-6} {set tol 1.0e-6}
+    return [expr {[::RB2Bolt::nodeDistanceById $a $b] <= $tol}]
+}
+
+proc ::RB2Bolt::forceBeamEndpointNodes {elemId n1 n2} {
+    if {$elemId eq ""} {return 0}
+    set nodes [::RB2Bolt::createdBeamNodeIds $elemId]
+    if {[llength $nodes] >= 2 && [lindex $nodes 0] eq "$n1" && [lindex $nodes 1] eq "$n2"} {
+        return 1
+    }
+    if {[llength $nodes] >= 2 && [lindex $nodes 0] eq "$n2" && [lindex $nodes 1] eq "$n1"} {
+        return 1
+    }
+
+    set ref1 [format "{nodes %s}" $n1]
+    set ref2 [format "{nodes %s}" $n2]
+    set directOk 0
+    foreach etype {elems elements} {
+        if {![catch {*setvalue $etype id=$elemId node1=$ref1 node2=$ref2}]} {
+            set directOk 1
+            break
+        }
+        if {![catch {*setvalue $etype id=$elemId node1=$n1 node2=$n2}]} {
+            set directOk 1
+            break
+        }
+    }
+    if {$directOk} {
+        set chk [::RB2Bolt::createdBeamNodeIds $elemId]
+        if {[llength $chk] >= 2 && (([lindex $chk 0] eq "$n1" && [lindex $chk 1] eq "$n2") || ([lindex $chk 0] eq "$n2" && [lindex $chk 1] eq "$n1"))} {
+            return 1
+        }
+    }
+
+    if {[llength $nodes] < 2} {return 0}
+    set old1 [lindex $nodes 0]
+    set old2 [lindex $nodes 1]
+    set dStraight [expr {[::RB2Bolt::nodeDistanceById $old1 $n1] + [::RB2Bolt::nodeDistanceById $old2 $n2]}]
+    set dSwap [expr {[::RB2Bolt::nodeDistanceById $old1 $n2] + [::RB2Bolt::nodeDistanceById $old2 $n1]}]
+    if {$dSwap < $dStraight} {
+        set target1 $n2
+        set target2 $n1
+    } else {
+        set target1 $n1
+        set target2 $n2
+    }
+    if {![::RB2Bolt::nodesCoincident $old1 $target1] || ![::RB2Bolt::nodesCoincident $old2 $target2]} {
+        return 0
+    }
+    if {![::RB2Bolt::replaceOneNode $old1 $target1]} {return 0}
+    if {![::RB2Bolt::replaceOneNode $old2 $target2]} {return 0}
+
+    set chk [::RB2Bolt::createdBeamNodeIds $elemId]
+    if {[llength $chk] >= 2 && (([lindex $chk 0] eq "$n1" && [lindex $chk 1] eq "$n2") || ([lindex $chk 0] eq "$n2" && [lindex $chk 1] eq "$n1"))} {
+        return 1
+    }
+    return 0
+}
+
+proc ::RB2Bolt::createdBeamUsesNodes {elemId n1 n2} {
+    if {$elemId eq ""} {return 1}
+    set nodes [::RB2Bolt::createdBeamNodeIds $elemId]
+    if {[llength $nodes] == 0} {
+        return 1
+    }
+    return [expr {[lsearch -exact $nodes $n1] >= 0 && [lsearch -exact $nodes $n2] >= 0}]
+}
+
+proc ::RB2Bolt::deleteElementIfKnown {elemId} {
+    if {$elemId eq ""} {return}
+    catch {*clearmark elems 1}
+    if {![catch {*createmark elems 1 $elemId}]} {
+        catch {*deletemark elems 1}
+    }
+    catch {*clearmark elems 1}
+}
+
+proc ::RB2Bolt::finalizeCreatedBeam {elemId n1 n2 elemType compName propName} {
+    if {![::RB2Bolt::forceBeamEndpointNodes $elemId $n1 $n2] || ![::RB2Bolt::createdBeamUsesNodes $elemId $n1 $n2]} {
+        msg [::HWFlow::txt "$elemType 创建后节点校验失败：期望 $n1-$n2，单元=$elemId。" "$elemType node check failed after creation: expected $n1-$n2, elem=$elemId."]
+        ::RB2Bolt::deleteElementIfKnown $elemId
+        return 0
+    }
+    set assigned [::RB2Bolt::assignBeamProperty $elemId $propName]
+    set propOk [::RB2Bolt::createdBeamHasProperty $elemId $propName]
+    if {$propOk == 0} {
+        msg [::HWFlow::txt "$elemType 创建后属性校验失败：单元=$elemId，属性=$propName。" "$elemType property check failed after creation: elem=$elemId, property=$propName."]
+        return 0
+    }
+    if {$propOk < 0 && !$assigned && $propName ne ""} {
+        msg [::HWFlow::txt "$elemType 已创建，但无法确认属性是否已赋给单元=$elemId，属性=$propName。" "$elemType was created, but property assignment could not be verified: elem=$elemId, property=$propName."]
+    }
+    ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId $propName
+    return 1
+}
+
+proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName {propName ""}} {
     variable P
     set xyz1 [nodeXYZ $n1]
     set xyz2 [nodeXYZ $n2]
     set len [dist3 [lindex $xyz1 0] [lindex $xyz1 1] [lindex $xyz1 2] [lindex $xyz2 0] [lindex $xyz2 1] [lindex $xyz2 2]]
     if {$len <= $P(minBeamLength)} {return 0}
 
-    set existing [::RB2Bolt::existingBeamSegment $n1 $n2 $elemType $compName]
+    set existing [::RB2Bolt::existingBeamSegment $n1 $n2 $elemType $compName $propName]
     if {[lindex $existing 0]} {
         msg [::HWFlow::txt "$elemType 已存在，跳过节点 $n1-$n2。" "$elemType already exists, skipped nodes $n1-$n2."]
         return -1
@@ -1210,7 +1634,9 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
         return 0
     }
 
-    if {$P(propName) ne ""} {
+    if {$propName ne ""} {
+        set propCandidates [list $propName]
+    } elseif {$P(propName) ne ""} {
         set propCandidates [list $P(propName)]
     } else {
         # Different HM/profile versions accept either 0 or an empty property name
@@ -1227,10 +1653,8 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
         catch {set beforeElem [hm_latestentityid elems]}
         set rc1 [catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop 0 0 0 0 0 0 0 0} err1]
         if {$rc1 == 0} {
-            set elemId ""
-            catch {set elemId [hm_latestentityid elems]}
-            if {$elemId eq $beforeElem} { set elemId "" }
-            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
+            set elemId [::RB2Bolt::createdElementIdAfter $beforeElem]
+            if {![::RB2Bolt::finalizeCreatedBeam $elemId $n1 $n2 $elemType $compName $prop]} {return 0}
             return 1
         }
         set lastErr "barFull=$err1"
@@ -1240,36 +1664,18 @@ proc ::RB2Bolt::createBeamBetween {n1 n2 elemType compName} {
         catch {set beforeElem [hm_latestentityid elems]}
         set rc2 [catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop} err2]
         if {$rc2 == 0} {
-            set elemId ""
-            catch {set elemId [hm_latestentityid elems]}
-            if {$elemId eq $beforeElem} { set elemId "" }
-            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
+            set elemId [::RB2Bolt::createdElementIdAfter $beforeElem]
+            if {![::RB2Bolt::finalizeCreatedBeam $elemId $n1 $n2 $elemType $compName $prop]} {return 0}
             return 1
         }
         append lastErr "; barShort=$err2"
     }
 
-    # Last fallback: *createelements1d without newer HM2020+ options.
-    # Use plural nodes for *createlist, matching HyperMesh command syntax.
-    catch {*createlist nodes 1}
-    *createlist nodes 1 $n1 $n2
-    set cmd [list *createelements1d nodes list=1 elemsize=$len elemtype=$elemType useshell=0 breakangle=0 elemdensity=1 useelemdensity=0 biasdensity=0 biasstyle=0]
-    if {$P(propName) ne ""} {lappend cmd property=$P(propName)}
-    set err3 ""
-    set beforeElem ""
-    catch {set beforeElem [hm_latestentityid elems]}
-    if {[catch {eval $cmd} err3]} {
-        msg [::HWFlow::txt "$elemType 创建失败：节点 $n1-$n2；$lastErr；create1d=$err3" "Create $elemType failed: nodes $n1-$n2; $lastErr; create1d=$err3"]
-        return 0
-    }
-    set elemId ""
-    catch {set elemId [hm_latestentityid elems]}
-    if {$elemId eq $beforeElem} { set elemId "" }
-    ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
-    return 1
+    msg [::HWFlow::txt "$elemType 创建失败：节点 $n1-$n2；$lastErr" "Create $elemType failed: nodes $n1-$n2; $lastErr"]
+    return 0
 }
 
-proc ::RB2Bolt::createBeamBetweenRecords {r1 r2 elemType compName} {
+proc ::RB2Bolt::createBeamBetweenRecords {r1 r2 elemType compName {propName ""}} {
     variable P
 
     set n1 [lindex $r1 1]
@@ -1287,7 +1693,7 @@ proc ::RB2Bolt::createBeamBetweenRecords {r1 r2 elemType compName} {
     set len [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
     if {$len <= $P(minBeamLength)} {return 0}
 
-    set existing [::RB2Bolt::existingBeamSegment $n1 $n2 $elemType $compName]
+    set existing [::RB2Bolt::existingBeamSegment $n1 $n2 $elemType $compName $propName]
     if {[lindex $existing 0]} {
         return -1
     }
@@ -1304,7 +1710,9 @@ proc ::RB2Bolt::createBeamBetweenRecords {r1 r2 elemType compName} {
         return 0
     }
 
-    if {$P(propName) ne ""} {
+    if {$propName ne ""} {
+        set propCandidates [list $propName]
+    } elseif {$P(propName) ne ""} {
         set propCandidates [list $P(propName)]
     } else {
         set propCandidates [list 0 ""]
@@ -1314,40 +1722,21 @@ proc ::RB2Bolt::createBeamBetweenRecords {r1 r2 elemType compName} {
         set beforeElem ""
         catch {set beforeElem [hm_latestentityid elems]}
         if {![catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop 0 0 0 0 0 0 0 0}]} {
-            set elemId ""
-            catch {set elemId [hm_latestentityid elems]}
-            if {$elemId eq $beforeElem} { set elemId "" }
-            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
+            set elemId [::RB2Bolt::createdElementIdAfter $beforeElem]
+            if {![::RB2Bolt::finalizeCreatedBeam $elemId $n1 $n2 $elemType $compName $prop]} {return 0}
             return 1
         }
 
         set beforeElem ""
         catch {set beforeElem [hm_latestentityid elems]}
         if {![catch {*barelementcreatewithoffsets $n1 $n2 1 0 1 0 0 $prop}]} {
-            set elemId ""
-            catch {set elemId [hm_latestentityid elems]}
-            if {$elemId eq $beforeElem} { set elemId "" }
-            ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
+            set elemId [::RB2Bolt::createdElementIdAfter $beforeElem]
+            if {![::RB2Bolt::finalizeCreatedBeam $elemId $n1 $n2 $elemType $compName $prop]} {return 0}
             return 1
         }
     }
 
-    catch {*createlist nodes 1}
-    if {[catch {*createlist nodes 1 $n1 $n2}]} {
-        return 0
-    }
-    set cmd [list *createelements1d nodes list=1 elemsize=$len elemtype=$elemType useshell=0 breakangle=0 elemdensity=1 useelemdensity=0 biasdensity=0 biasstyle=0]
-    if {$P(propName) ne ""} {lappend cmd property=$P(propName)}
-    set beforeElem ""
-    catch {set beforeElem [hm_latestentityid elems]}
-    if {[catch {eval $cmd}]} {
-        return 0
-    }
-    set elemId ""
-    catch {set elemId [hm_latestentityid elems]}
-    if {$elemId eq $beforeElem} { set elemId "" }
-    ::RB2Bolt::rememberBeamSegment $n1 $n2 $elemType $compName $elemId
-    return 1
+    return 0
 }
 
 proc ::RB2Bolt::pairGroupRecords {g axis} {
@@ -1370,6 +1759,13 @@ proc ::RB2Bolt::pairGroupRecords {g axis} {
 
 proc ::RB2Bolt::createBolts {groups} {
     variable P
+    variable propIdCache
+    variable matIdCache
+    catch {unset propIdCache}
+    array set propIdCache {}
+    catch {unset matIdCache}
+    array set matIdCache {}
+
     set created 0
     set skipped 0
     set skippedExisting 0
@@ -1404,6 +1800,7 @@ proc ::RB2Bolt::createBolts {groups} {
         set dia [groupDiameter $g]
         if {$dia <= 0} {set dia UNKNOWN}
         set compName [safeName [format "%s_D%s_%s" $P(compPrefix) $dia $P(elemType)]]
+        set propName [::RB2Bolt::effectivePropertyName $P(elemType) $dia]
 
         msg [::HWFlow::txt "螺栓分组 $gi / $groupCount，轴向=$axis，D=$dia，RBE2=[llength $g]，相邻连接段=[llength $pairs]，跳过连接段=$unpaired" "Bolt group $gi / $groupCount, axis=$axis, D=$dia, RBE2=[llength $g], adjacent_segments=[llength $pairs], skipped_segments=$unpaired"]
 
@@ -1417,7 +1814,10 @@ proc ::RB2Bolt::createBolts {groups} {
             set r2 [lindex $pr 1]
             set n1 [lindex $r1 1]
             set n2 [lindex $r2 1]
-            set createResult [createBeamBetween $n1 $n2 $P(elemType) $compName]
+            if {$P(propName) eq ""} {
+                set propName [::RB2Bolt::ensureBoltProperty $P(elemType) $dia]
+            }
+            set createResult [createBeamBetween $n1 $n2 $P(elemType) $compName $propName]
             if {$createResult > 0} {
                 incr created
             } elseif {$createResult < 0} {
@@ -1471,12 +1871,13 @@ proc ::RB2Bolt::buildBoltPairList {groups} {
         set dia [groupDiameter $g]
         if {$dia <= 0} {set dia UNKNOWN}
         set compName [safeName [format "%s_D%s_%s" $P(compPrefix) $dia $P(elemType)]]
+        set propName [::RB2Bolt::effectivePropertyName $P(elemType) $dia]
 
         if {[llength $pairs] > 0} {
             lappend outputComps $compName
         }
         foreach pr $pairs {
-            lappend boltPairs [list $compName $axis $gi [lindex $pr 0] [lindex $pr 1]]
+            lappend boltPairs [list $compName $propName $dia $axis $gi [lindex $pr 0] [lindex $pr 1]]
         }
         incr skipped $unpaired
     }
@@ -1492,9 +1893,15 @@ proc ::RB2Bolt::buildBoltPairList {groups} {
 proc ::RB2Bolt::createBoltsFast {groups} {
     variable P
     variable compIdCache
+    variable propIdCache
+    variable matIdCache
 
     catch {unset compIdCache}
     array set compIdCache {}
+    catch {unset propIdCache}
+    array set propIdCache {}
+    catch {unset matIdCache}
+    array set matIdCache {}
 
     set tPair0 [clock milliseconds]
     set pairInfo [::RB2Bolt::buildBoltPairList $groups]
@@ -1516,6 +1923,11 @@ proc ::RB2Bolt::createBoltsFast {groups} {
     foreach compName $outputComps {
         ::RB2Bolt::ensureComponentFast $compName
     }
+    if {$P(propName) eq ""} {
+        foreach boltPair $boltPairs {
+            ::RB2Bolt::ensureBoltProperty $P(elemType) [lindex $boltPair 2]
+        }
+    }
 
     set created 0
     set skippedExisting 0
@@ -1535,9 +1947,10 @@ proc ::RB2Bolt::createBoltsFast {groups} {
             }
 
             set compName [lindex $boltPair 0]
-            set r1 [lindex $boltPair 3]
-            set r2 [lindex $boltPair 4]
-            set createResult [::RB2Bolt::createBeamBetweenRecords $r1 $r2 $P(elemType) $compName]
+            set propName [lindex $boltPair 1]
+            set r1 [lindex $boltPair 5]
+            set r2 [lindex $boltPair 6]
+            set createResult [::RB2Bolt::createBeamBetweenRecords $r1 $r2 $P(elemType) $compName $propName]
             if {$createResult > 0} {
                 incr created
             } elseif {$createResult < 0} {
@@ -1745,7 +2158,7 @@ proc ::RB2Bolt::runFindUnusedShellRBE2 {} {
     variable P
 
     msg [::HWFlow::txt "开始检测未用 Shell RBE2。" "Started finding unused shell RBE2 elements."]
-    set elemIds [selectedElementIds]
+    set elemIds [selectedElementIdsInteractive]
     if {[llength $elemIds] == 0} {
         ::RB2Bolt::clearSelectionMarks
         tk_messageBox -icon warning -title [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -message [::HWFlow::txt "选择范围内未找到 RBE2 候选单元。" "No RBE2 candidate elements were found in the selection scope."]
@@ -1811,6 +2224,89 @@ proc ::RB2Bolt::runFindUnusedShellRBE2 {} {
 }
 
 # ------------------------- entry point -------------------------------------
+proc ::RB2Bolt::runCreateFromSelection {} {
+    variable P
+    variable beamSegmentIndex
+
+    msg [::HWFlow::txt "RBE2 Bolt Connector 开始。若需要 CBEAM 输出，请确认 BAR2 单元类型已设置为 CBEAM。" "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."]
+
+    set elemIds [selectedElementIdsInteractive]
+    if {[llength $elemIds] == 0} {
+        ::RB2Bolt::clearSelectionMarks
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择范围内未找到 RBE2 候选单元。" "No RBE2 candidate elements were found in the selection scope."]
+        return
+    }
+
+    msg [::HWFlow::txt "RBE2 候选单元数：[llength $elemIds]" "RBE2 candidate elements: [llength $elemIds]"]
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] \
+            [::HWFlow::txt "准备读取 RBE2 单元..." "Preparing to read RBE2 elements..."] \
+            0]
+    }
+    set tRecords0 [clock milliseconds]
+    set records [collectRBE2Records $elemIds]
+    set tRecords1 [clock milliseconds]
+    if {[llength $records] < 2} {
+        ::RB2Bolt::clearSelectionMarks
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "可用 RBE2 记录不足。" "Not enough usable RBE2 records."] 100.0}
+        }
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择集中可用 RBE2 单元少于 2 个。" "Fewer than 2 usable RBE2 elements were found in the selection."]
+        return
+    }
+
+    msg [::HWFlow::txt "有效 RBE2 记录数：[llength $records]。正在建立分组..." "Valid RBE2 records: [llength $records]. Building groups..."]
+    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate 45.0 \
+            [::HWFlow::txt "RBE2 Bolt Connector 正在执行" "RBE2 Bolt Connector running"] \
+            [::HWFlow::txt "正在建立分组..." "Building groups..."] \
+            1}
+    }
+    set tGroups0 [clock milliseconds]
+    set groups [buildGroups $records]
+    set tGroups1 [clock milliseconds]
+    if {[llength $groups] == 0} {
+        ::RB2Bolt::clearSelectionMarks
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "没有匹配的 RBE2 分组。" "No matching RBE2 groups."] 100.0}
+        }
+        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "没有 RBE2 分组满足当前容差。可尝试增大轴向连接距离或横向中心偏移容差。" "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."]
+        return
+    }
+
+    catch {array unset beamSegmentIndex}
+    array set beamSegmentIndex {}
+    set result [createBoltsFast $groups]
+    set created [lindex $result 0]
+    set skipped [lindex $result 1]
+    set spatialOnlyGroups [lindex $result 3]
+    set skippedExisting [lindex $result 4]
+    set recordsMs [expr {$tRecords1 - $tRecords0}]
+    set groupsMs [expr {$tGroups1 - $tGroups0}]
+    msg [::HWFlow::txt "RBE2 records 读取耗时：$recordsMs ms；groups 建立耗时：$groupsMs ms。" "RBE2 records read time: $recordsMs ms; groups build time: $groupsMs ms."]
+
+    set txt [::HWFlow::txt "RBE2 Bolt Connector 已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n已跳过既有 $P(elemType)：$skippedExisting\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped existing $P(elemType): $skippedExisting\nSkipped/failed: $skipped"]
+    ::RB2Bolt::clearSelectionMarks
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "RBE2 Bolt Connector 已完成。" "RBE2 Bolt Connector finished."] 100.0}
+    }
+    tk_messageBox -icon info -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message $txt
+    msg $txt
+}
+
+proc ::RB2Bolt::runAction {} {
+    ::RB2Bolt::loadState
+    if {![validateParams]} {return}
+    ::RB2Bolt::saveState
+    ::RB2Bolt::runCreateFromSelection
+}
+
+proc ::RB2Bolt::runSettings {} {
+    ::RB2Bolt::showDialog 1
+}
+
 proc ::RB2Bolt::run {} {
     variable P
     variable beamSegmentIndex
