@@ -300,6 +300,7 @@ proc ::RB2W::showPanel {{settingsOnly 0}} {
     button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; ::RB2W::backToHome .rb2w_panel"
     button $w.btn.save -text [::HWFlow::txt "保存配置" "Save Config"] -width 12 -command "::RB2W::savePanelState"
     if {$settingsOnly} {
+        button $w.btn.collect -text [::HWFlow::txt "归集全部 RBE2" "Collect All RBE2"] -width 16 -command "::RB2W::collectProjectRBE2FromSettings"
         button $w.btn.start -text [::HWFlow::txt "保存设置" "Save Settings"] -width 18 -command "::RB2W::saveSettingsPanel"
     } else {
         button $w.btn.merge -text [::HWFlow::txt "合并重复节点" "Merge Duplicate Nodes"] -width 16 -command "::RB2W::acceptPanel merge_nodes"
@@ -308,6 +309,9 @@ proc ::RB2W::showPanel {{settingsOnly 0}} {
     }
     pack $w.btn.back  -side right -padx 4
     pack $w.btn.save  -side right -padx 4
+    if {$settingsOnly} {
+        pack $w.btn.collect -side right -padx 4
+    }
     if {!$settingsOnly} {
         pack $w.btn.merge -side right -padx 4
         pack $w.btn.rebuild -side right -padx 4
@@ -453,6 +457,105 @@ proc ::RB2W::saveSettingsPanel {} {
     ::RB2W::savePanelState
     set ui(ok) 1
     catch {destroy .rb2w_panel}
+}
+
+proc ::RB2W::projectRBE2ComponentIds {} {
+    variable ui
+    variable RBE2_COMPONENT_PREFIX
+
+    set prefixes [list "AUTO_RBE2"]
+    if {[info exists ui(RBE2_COMPONENT_PREFIX)] && [string trim $ui(RBE2_COMPONENT_PREFIX)] ne ""} {
+        lappend prefixes [RB2W::sanitizeNamePart $ui(RBE2_COMPONENT_PREFIX) "AUTO_RBE2"]
+    } elseif {[string trim $RBE2_COMPONENT_PREFIX] ne ""} {
+        lappend prefixes [RB2W::sanitizeNamePart $RBE2_COMPONENT_PREFIX "AUTO_RBE2"]
+    }
+    set prefixes [RB2W::uniq $prefixes]
+
+    set out {}
+    catch {*clearmark comps 1}
+    if {[catch {*createmark comps 1 all}]} { return {} }
+    set compIds {}
+    catch {set compIds [hm_getmark comps 1]}
+    catch {*clearmark comps 1}
+    foreach cid $compIds {
+        set name [RB2W::getComponentName $cid]
+        foreach prefix $prefixes {
+            if {[string match "${prefix}_*" $name]} {
+                lappend out $cid
+                break
+            }
+        }
+    }
+    return [RB2W::uniq $out]
+}
+
+proc ::RB2W::collectProjectRBE2 {} {
+    set sourceCompIds [RB2W::projectRBE2ComponentIds]
+    if {[llength $sourceCompIds] == 0} {
+        return [dict create components 0 rbe2 0 moved 0 deleted 0 failed 0]
+    }
+
+    set marked [RB2W::markRigidLinkCandidates 2]
+    if {![lindex $marked 0]} {
+        error [::HWFlow::txt "当前求解器配置下无法可靠识别 RBE2 单元，未执行归集。" "RBE2 elements cannot be identified reliably with the current solver profile; nothing was changed."]
+    }
+    set allRBE2 [lindex $marked 1]
+    array set isRBE2 {}
+    foreach eid $allRBE2 { set isRBE2($eid) 1 }
+
+    set moveIds {}
+    foreach cid $sourceCompIds {
+        foreach eid [RB2W::getElemsByComp $cid] {
+            if {[info exists isRBE2($eid)]} { lappend moveIds $eid }
+        }
+    }
+    set moveIds [RB2W::uniq $moveIds]
+
+    set moved 0
+    if {[llength $moveIds] > 0} {
+        RB2W::createComponentByName RBE2
+        set moved [RB2W::organizeCreatedRBE2Elements $moveIds RBE2]
+    }
+
+    # getElemsByComp is cached; refresh it after the ownership change before
+    # deciding which source components are truly empty.
+    RB2W::clearComponentElemCache
+    set deleted 0
+    set failed 0
+    foreach cid $sourceCompIds {
+        set name [RB2W::getComponentName $cid]
+        if {[llength [RB2W::getElemsByComp $cid]] != 0} { continue }
+        if {[RB2W::deleteComponentByName $name]} {
+            incr deleted
+        } else {
+            incr failed
+            RB2W::log "Warning: empty project RBE2 component could not be deleted: $name"
+        }
+    }
+    RB2W::clearComponentElemCache
+    RB2W::resetRBE2CandidateCache
+    RB2W::refreshBrowsersAndGraphics 1
+    RB2W::log "Collect project RBE2: components=[llength $sourceCompIds], detected=[llength $moveIds], moved=$moved, deletedEmpty=$deleted, deleteFailed=$failed"
+    return [dict create components [llength $sourceCompIds] rbe2 [llength $moveIds] moved $moved deleted $deleted failed $failed]
+}
+
+proc ::RB2W::collectProjectRBE2FromSettings {} {
+    set answer [tk_messageBox -icon question -type yesno -default no \
+        -title [::HWFlow::txt "归集项目 RBE2" "Collect Project RBE2"] \
+        -message [::HWFlow::txt "将把本项目输出组件中的所有 RBE2 单元移动到统一的 RBE2 组件，并删除搬移后不含单元的输出组件。是否继续？" "Move all RBE2 elements in project output components into one RBE2 component and delete output components that contain no elements afterward. Continue?"]]
+    if {$answer ne "yes"} { return }
+
+    set code [catch {set stat [RB2W::collectProjectRBE2]} err]
+    if {$code} {
+        tk_messageBox -icon error -title [::HWFlow::txt "归集项目 RBE2" "Collect Project RBE2"] -message $err
+        return
+    }
+    set msg [::HWFlow::txt \
+        "归集完成。\n扫描项目组件：[dict get $stat components]\n识别 RBE2：[dict get $stat rbe2]\n已移动：[dict get $stat moved]\n已删除空组件：[dict get $stat deleted]\n删除失败：[dict get $stat failed]" \
+        "Collection complete.\nProject components scanned: [dict get $stat components]\nRBE2 detected: [dict get $stat rbe2]\nMoved: [dict get $stat moved]\nEmpty components deleted: [dict get $stat deleted]\nDelete failures: [dict get $stat failed]"]
+    tk_messageBox -icon info -title [::HWFlow::txt "归集项目 RBE2" "Collect Project RBE2"] -message $msg
+    catch {raise .rb2w_panel}
+    catch {focus .rb2w_panel}
 }
 
 proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex loopTotal candidateHoles created skipped {force 0}} {
