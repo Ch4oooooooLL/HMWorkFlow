@@ -52,28 +52,7 @@ Connection
 
 工具只维护这两个标记之间的内容，不会覆盖 `hmcustom.tcl` 中的其他用户代码。项目目录移动后，快捷键管理器会显示 `路径失效`，点击 `修复自动加载` 可更新为当前项目路径。点击 `禁用自动加载` 只删除 HMWorkFlow 标记块，不删除用户快捷键配置。
 
-### 1.2 HyperWorks Extension 打包和加载
-
-需要以 HyperWorks Extension 方式加载时，先在项目根目录构建 extension：
-
-```bat
-extension_packaging\build_extension.bat
-```
-
-构建完成后会生成：
-
-```text
-dist\HMWorkflow
-dist\HMWorkflow_0.1.0_HyperWorks_Extension.zip
-```
-
-在 HyperWorks 的 `File > Extensions > Add Extension` 中选择 `dist\HMWorkflow`
-目录，或解压 zip 后选择解压出的 `HMWorkflow` 目录。不要选择
-`extension_packaging\extension_template`；如果 Ribbon 中只出现一个 `Run`
-并且点击后只弹出 info，说明加载的是占位模板或错误目录，需要移除后重新加载
-`dist\HMWorkflow`。
-
-### 1.3 标准 ZIP 打包
+### 1.2 标准 ZIP 打包
 
 需要分发完整工具目录（含安装入口和帮助页）时，在项目根目录运行：
 
