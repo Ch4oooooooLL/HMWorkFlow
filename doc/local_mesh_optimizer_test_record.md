@@ -1,14 +1,14 @@
 # Local Mesh Optimizer 测试记录
 
-日期：2026-07-14
+日期：2026-07-15
 
 ## 当前环境
 
-- 未发现 HyperMesh/HM Batch 可执行文件；
-- 未发现 Altair/HyperMesh 环境变量；
-- 未发现 `command.cmf` 或 `.criteria` 样本；
-- 系统没有 `tclsh`，Python 的 Tk 绑定也缺少运行库，因此未完成独立 Tcl 解释器 source smoke test；
-- Python 3 可用。
+- 已发现并实机使用 `C:/Program Files/Altair/2019`；
+- 已使用 `examples/test.criteria` 完成 62556 单元、11592 失败单元的原生质量检查和优化压力运行；
+- 实机运行确认 split、collapse、模型任务前快照、质量恶化守卫和整任务恢复路径可达；
+- 系统 PATH 没有独立 `tclsh`；离线测试使用项目捆绑 Python 3.8.10；
+- 新的多 collapse 共用一次 Element Quality 会话尚需下一次实机运行确认。
 
 ## 已通过
 
@@ -16,7 +16,16 @@
 python3 -m unittest discover -s modules/local_mesh_optimizer/tests -v
 ```
 
-通过 13 项：
+通过 25 项；除原有邻接、区域、动作、批次、报告和控制器用例外，新增覆盖：
+
+- 高级设置初始化和未验证 profile 的可见反馈；
+- FEM 压力模型规模、washer、可处理/不可处理缺陷及规划器映射；
+- 共享失败边上的危险 collapse 整簇转人工复核；
+- 节点不相交区域的宏区域稳定打包，重叠区域不合并；
+- 宏区域启用后的串行/多进程动作协议一致；
+- 进度节流、日志缓冲、Element Quality 会话复用和回退开关静态协议。
+
+原始覆盖清单：
 
 1. 共享完整边邻接；
 2. 角点接触不误连；
@@ -31,18 +40,23 @@ python3 -m unittest discover -s modules/local_mesh_optimizer/tests -v
 11. 控制器生成 `optimization_actions.csv` 和 `regions.json` 动作协议（四边形切分案例）。
 12. Tcl 自动流程无 `tk_messageBox`、模型读写预置 `hm_answernext`，且仅有任务前/最终两次模型写入调用。
 13. criteria 上下文缓存、检查结果复用、分层进度调用及默认 Washer 排除协议的静态回归检查。
+14. `MeshState` 局部删除/添加单元后反向索引、邻接和脏区更新；
+15. 同一共享边候选的稳定去重；
+16. 重叠一环操作的冲突识别和确定性分批；
+17. 统一 `operations.json`、冲突/批次协议、生成 Tcl 批次和性能计数文件；
+18. 两个节点不相交区域在串行/双进程 Python 规划下生成相同旧版动作协议。
 
-另执行 `python3 -m py_compile modules/local_mesh_optimizer/python/*.py`、运行时自检、`bash -n build_package.sh`、Linux 打包烟雾测试和 `git diff --check`。测试包确认包含 `python.exe`、`pythonw.exe`、控制器和响应性检查文档。
+真实压力任务只读重规划结果：5425 个原始区域合并为 33 个宏区域，7065 个实机旧批次数投影为 112 个新批次；11592 个失败单元的逐单元动作签名差异为 0。记录见 `doc/local_mesh_optimizer_ab_projection.json`。
+
+另执行全部 Python 文件 `py_compile`、捆绑 Python 3.8.10 运行时自检、Tcl 8.6 `source modules/local_mesh_optimizer.tcl`（98 个模块过程成功加载）和 `git diff --check`。离线 2,000 操作批量基准记录在 `doc/local_mesh_optimizer_batch_benchmark.json`。
 
 ## 尚未执行
 
-- HyperMesh 2019 criteria 原生检查；
-- `*splitelements 2/102` 的 HM2019 对角方向和新 element ID 行为；
-- `*elementqualitycollapseedge` 的 HM2019 edge index、相邻重连和 shutdown；
+- `*splitelements 102` 反向对角在 HM2019 的独立实机确认；
+- 多个互不冲突 collapse 在同一 `*elementqualitysetup`/`shutdown` 会话内连续执行；
 - `*nodemodify` 自由边外扩和几何关联行为；
 - RBE2/RBE3/焊缝保护节点；
-- 模型快照和恢复；
-- 取消、质量恶化或修改命令异常时的全任务恢复；
+- 用户取消和修改命令异常时的全任务恢复；质量恶化恢复已实机触发；
 - 任务期间不存在区域/轮次 `.hm` 检查点；
 - 自动流程没有 `tk_messageBox`，模型读写预置 `hm_answernext yes`；
 - 完成进度窗口保留到用户主动关闭；
@@ -50,7 +64,10 @@ python3 -m unittest discover -s modules/local_mesh_optimizer/tests -v
 - Washer 孔环识别、排除层数和人工处理报告与实际试验模型的一致性；
 - 区域/轮次/动作百分比单调性及 ETA 在 HM2019 长任务中的显示效果；
 - 中文 `.hm` 和 `.criteria` 路径的 HM 端行为；
-- 大模型性能；
+- A/B 版本在同一压力 FEM 上的最终墙钟时间；
+- 批量/旧版同模型功能等价与实机耗时对比；
+- 同方法 quad mark 批量执行、批次结果状态和脏区增量复检的 HM2019 行为；
+- 批次命令失败、取消和最终守卫失败后的快照恢复；
 - 快速/标准/深度修改流程；
 - 有效 `.hm` 测试模型和示例优化结果。
 

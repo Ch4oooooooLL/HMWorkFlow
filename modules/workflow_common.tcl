@@ -20,9 +20,11 @@ namespace eval ::HWFlow {
     variable progressWin ".hwflow_progress"
     variable progressMessage ""
     variable progressDetail ""
+    variable progressPercentText "0.0%"
     variable progressLastLog ""
     variable progressLogMaxLines 220
     variable progressCancelRequested 0
+    variable progressActive 0
     variable progressLastEventPumpMs 0
     variable progressEventPumpActive 0
     variable componentColorSeeded 0
@@ -39,6 +41,10 @@ namespace eval ::HWFlow {
     variable touchedComponents {}
     variable WRAP_TIMERS
     catch {array set WRAP_TIMERS {}}
+    variable UI_INITIALIZED 0
+    variable UI_BACKEND "tk"
+    variable UI_WINDOWS
+    catch {array set UI_WINDOWS {}}
 }
 
 proc ::HWFlow::globalConfigFile {} {
@@ -260,27 +266,133 @@ proc ::HWFlow::uiFont {{role default}} {
     }
 }
 
+proc ::HWFlow::initUI {} {
+    variable UI_INITIALIZED
+    variable UI_BACKEND
+
+    if {$UI_INITIALIZED} {
+        return $UI_BACKEND
+    }
+
+    set UI_BACKEND "tk"
+    if {![catch {package require hwtk} hwtkVersion] &&
+        [llength [info commands ::hwtk::toplevel]] > 0} {
+        set UI_BACKEND "hwtk"
+        catch {puts "HWToolkit: using hwtk $hwtkVersion UI backend"}
+    } else {
+        catch {puts "HWToolkit: hwtk unavailable; using Tk compatibility backend"}
+    }
+    set UI_INITIALIZED 1
+    return $UI_BACKEND
+}
+
+proc ::HWFlow::uiBackend {} {
+    return [::HWFlow::initUI]
+}
+
+proc ::HWFlow::usingHwtk {} {
+    return [expr {[::HWFlow::uiBackend] eq "hwtk"}]
+}
+
+# Create a child widget through the active UI backend.  Only shared and shell
+# UI should use this adapter during the first migration stage; module-specific
+# parameter layouts intentionally remain compatible with their existing Tk
+# widget paths and commands.
+proc ::HWFlow::uiWidget {kind w args} {
+    set candidates {}
+    if {[::HWFlow::usingHwtk] && [llength [info commands ::hwtk::$kind]] > 0} {
+        lappend candidates ::hwtk::$kind
+    }
+    if {$kind in {frame label button labelframe scrollbar checkbutton radiobutton entry}} {
+        if {[llength [info commands ::ttk::$kind]] > 0} {
+            lappend candidates ::ttk::$kind
+        }
+        if {[llength [info commands ::$kind]] > 0} {
+            lappend candidates ::$kind
+        }
+    } elseif {$kind eq "notebook"} {
+        if {[llength [info commands ::ttk::notebook]] == 0} {
+            catch {package require tile}
+        }
+        if {[llength [info commands ::ttk::notebook]] > 0} {
+            lappend candidates ::ttk::notebook
+        }
+    } elseif {$kind eq "progressbar"} {
+        if {[llength [info commands ::ttk::progressbar]] > 0} {
+            lappend candidates ::ttk::progressbar
+        }
+    }
+
+    set lastError "no widget command is available for $kind"
+    foreach command $candidates {
+        catch {destroy $w}
+        set code [catch {uplevel 1 [linsert $args 0 $command $w]} result]
+        if {!$code} {
+            return $result
+        }
+        set lastError $result
+    }
+    return -code error $lastError
+}
+
+proc ::HWFlow::registerWindow {w {role module}} {
+    variable UI_WINDOWS
+    set UI_WINDOWS($w) $role
+    bind $w <Destroy> +[list ::HWFlow::unregisterWindow %W $w]
+}
+
+proc ::HWFlow::unregisterWindow {eventWidget registeredWindow} {
+    variable UI_WINDOWS
+    if {$eventWidget eq $registeredWindow} {
+        catch {unset UI_WINDOWS($registeredWindow)}
+    }
+}
+
+proc ::HWFlow::managedWindows {} {
+    variable UI_WINDOWS
+    set result {}
+    foreach w [array names UI_WINDOWS] {
+        if {[llength [info commands winfo]] > 0 && [winfo exists $w]} {
+            lappend result $w
+        } else {
+            catch {unset UI_WINDOWS($w)}
+        }
+    }
+    return $result
+}
+
+proc ::HWFlow::destroyManagedWindows {} {
+    foreach w [::HWFlow::managedWindows] {
+        catch {destroy $w}
+    }
+    catch {update idletasks}
+}
+
+proc ::HWFlow::progressIsActive {} {
+    variable progressActive
+    return $progressActive
+}
+
+# Compatibility entry point retained for modules that previously requested a
+# permanent topmost window.  hwtk windows are raised only when explicitly
+# requested; the topmost attribute is no longer installed or rebound.
 proc ::HWFlow::keepWindowTopmost {w} {
     if {[llength [info commands winfo]] == 0 || ![winfo exists $w]} {
         return
     }
-    catch {wm attributes $w -topmost 1}
+    catch {raise $w}
 }
 
-# HyperMesh mark panels are native modal UI. A Tk toolbox window with the
-# topmost attribute can cover that panel and make HyperMesh appear frozen.
-# Temporarily hide mapped toolbox top levels while native selection is active,
-# then restore them even if the HyperMesh command raises an error.
+# HyperMesh mark panels are native modal UI.  Temporarily unpost only windows
+# owned by this toolkit, rather than every Tcl toplevel in the HyperMesh
+# process.  This preserves compatibility with HM2019 selection panels while
+# avoiding the former permanent-topmost focus conflict.
 proc ::HWFlow::nativeMarkPanel {entityType markId prompt} {
     set windows {}
     if {[llength [info commands winfo]] > 0} {
-        foreach w [winfo children .] {
-            if {[catch {set class [winfo class $w]}] || $class ne "Toplevel"} { continue }
+        foreach w [::HWFlow::managedWindows] {
             set mapped [winfo ismapped $w]
-            set topmost 0
-            catch {set topmost [wm attributes $w -topmost]}
-            lappend windows [list $w $mapped $topmost]
-            catch {wm attributes $w -topmost 0}
+            lappend windows [list $w $mapped]
             if {$mapped} { catch {wm withdraw $w} }
         }
         catch {set grabbed [grab current]}
@@ -290,10 +402,9 @@ proc ::HWFlow::nativeMarkPanel {entityType markId prompt} {
 
     set code [catch {*createmarkpanel $entityType $markId $prompt} err opts]
     foreach state $windows {
-        lassign $state w mapped topmost
+        lassign $state w mapped
         if {![winfo exists $w]} { continue }
         if {$mapped} { catch {wm deiconify $w} }
-        catch {wm attributes $w -topmost $topmost}
         if {$mapped} { catch {raise $w} }
     }
     catch {update idletasks}
@@ -301,11 +412,19 @@ proc ::HWFlow::nativeMarkPanel {entityType markId prompt} {
     return [hm_getmark $entityType $markId]
 }
 
-proc ::HWFlow::createTopLevel {w} {
-    toplevel $w
-    ::HWFlow::keepWindowTopmost $w
-    bind $w <Map> [list ::HWFlow::keepWindowTopmost $w]
-    after idle [list ::HWFlow::keepWindowTopmost $w]
+proc ::HWFlow::createTopLevel {w {role module}} {
+    set created 0
+    if {[::HWFlow::usingHwtk] && [llength [info commands ::hwtk::toplevel]] > 0} {
+        if {![catch {::hwtk::toplevel $w}]} {
+            set created 1
+        } else {
+            catch {destroy $w}
+        }
+    }
+    if {!$created} {
+        toplevel $w
+    }
+    ::HWFlow::registerWindow $w $role
     return $w
 }
 
@@ -630,6 +749,27 @@ proc ::HWFlow::replaceMaterialInName {name matKey} {
     return [join $tokens "_"]
 }
 
+# Canonical thickness naming shared by midsurface and mesh-weld outputs.
+# Keeping both the reader and formatter here prevents one module from creating
+# a T token that the next module cannot recognize.
+proc ::HWFlow::thicknessFromComponentName {name} {
+    if {[regexp -nocase {(^|_)T([0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?)(_|$)} $name -> prefix value decimal exponent suffix] &&
+        [string is double -strict $value] && $value > 0.0} {
+        return [expr {double($value)}]
+    }
+    return ""
+}
+
+proc ::HWFlow::formatThicknessToken {value} {
+    if {$value eq "" || ![string is double -strict $value] || $value <= 0.0} {
+        return "UNKNOWN"
+    }
+    set text [format "%.6g" $value]
+    regsub {\.0+$} $text "" text
+    regsub {(\.[0-9]*?)0+([eE].*)?$} $text {\1\2} text
+    return [::HWFlow::sanitizeToken $text UNKNOWN]
+}
+
 proc ::HWFlow::formatMidsurfName {sourceName thicknessText} {
     set tText [::HWFlow::sanitizeToken $thicknessText UNKNOWN]
     set tokens [::HWFlow::nameTokens $sourceName]
@@ -645,7 +785,7 @@ proc ::HWFlow::formatMidsurfName {sourceName thicknessText} {
 
     set clean {}
     foreach token $tokens {
-        if {![regexp {^T[0-9.+-]+$} $token]} {
+        if {[::HWFlow::thicknessFromComponentName $token] eq ""} {
             lappend clean $token
         }
     }
@@ -1239,37 +1379,41 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
     variable progressWin
     variable progressMessage
     variable progressDetail
+    variable progressPercentText
     variable progressLastLog
     variable progressCancelRequested
+    variable progressActive
 
     set progressMessage $message
     set progressDetail ""
+    set progressPercentText "0.0%"
     set progressLastLog ""
     set progressCancelRequested 0
+    set progressActive 1
 
     if {[llength [info commands toplevel]] == 0} {
+        set progressActive 0
         return 0
     }
 
     set w $progressWin
     catch {destroy $w}
     if {[catch {
-        ::HWFlow::createTopLevel $w
+        ::HWFlow::createTopLevel $w progress
         wm title $w $title
         wm resizable $w 0 0
 
-        frame $w.main -padx 14 -pady 12
-        pack $w.main -fill both -expand 1
+        ::HWFlow::uiWidget frame $w.main
+        pack $w.main -fill both -expand 1 -padx 14 -pady 12
 
-        label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
-        label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
-        label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
-        canvas $w.main.bar -width 520 -height 18 -highlightthickness 1 -highlightbackground #8a8a8a -background white
-        $w.main.bar create rectangle 0 0 0 18 -tags fill -fill #2f74d0 -outline ""
-        $w.main.bar create text 260 9 -tags text -text "0.0%" -fill #222222 -font [::HWFlow::uiFont small]
-        labelframe $w.main.stream -text [::HWFlow::txt "命令流" "Command Stream"] -padx 6 -pady 6
+        ::HWFlow::uiWidget label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
+        ::HWFlow::uiWidget label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget progressbar $w.main.bar -mode determinate -value 0
+        ::HWFlow::uiWidget label $w.main.percent -textvariable ::HWFlow::progressPercentText -width 7 -anchor e
+        ::HWFlow::uiWidget labelframe $w.main.stream -text [::HWFlow::txt "命令流" "Command Stream"]
         text $w.main.stream.text -width 78 -height 11 -wrap word -font [::HWFlow::uiFont fixedSmall] -state disabled -background #f8f8f8
-        scrollbar $w.main.stream.scroll -orient vertical -command "$w.main.stream.text yview"
+        ::HWFlow::uiWidget scrollbar $w.main.stream.scroll -orient vertical -command "$w.main.stream.text yview"
         $w.main.stream.text configure -yscrollcommand "$w.main.stream.scroll set"
         grid $w.main.stream.text -row 0 -column 0 -sticky nsew
         grid $w.main.stream.scroll -row 0 -column 1 -sticky ns
@@ -1280,14 +1424,15 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         grid $w.main.msg -row 1 -column 0 -sticky ew
         grid $w.main.detail -row 2 -column 0 -sticky ew -pady {2 8}
         grid $w.main.bar -row 3 -column 0 -sticky ew
-        grid $w.main.stream -row 4 -column 0 -sticky nsew -pady {8 0}
+        grid $w.main.percent -row 3 -column 1 -sticky e -padx {8 0}
+        grid $w.main.stream -row 4 -column 0 -columnspan 2 -sticky nsew -pady {8 0}
         grid rowconfigure $w.main 4 -weight 1
         grid columnconfigure $w.main 0 -weight 1
 
         if {$allowCancel} {
-            frame $w.btn -padx 14 -pady {0 12}
-            pack $w.btn -fill x
-            button $w.btn.cancel -text [::HWFlow::txt "取消" "Cancel"] -width 10 -command ::HWFlow::progressRequestCancel
+            ::HWFlow::uiWidget frame $w.btn
+            pack $w.btn -fill x -padx 14 -pady {0 12}
+            ::HWFlow::uiWidget button $w.btn.cancel -text [::HWFlow::txt "取消" "Cancel"] -width 10 -command ::HWFlow::progressRequestCancel
             pack $w.btn.cancel -side right
             wm protocol $w WM_DELETE_WINDOW ::HWFlow::progressRequestCancel
         } else {
@@ -1303,6 +1448,7 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         ::HWFlow::progressForceVisible
     } err]} {
         catch {destroy $w}
+        set progressActive 0
         if {$allowCancel} {
             return [::HWFlow::progressOpen $title $message 0]
         }
@@ -1353,8 +1499,8 @@ proc ::HWFlow::progressForceVisible {} {
     if {![winfo exists $progressWin]} {
         return 0
     }
-    # Intentionally do not raise or focus here. The window's persistent topmost
-    # state is configured when the toplevel is created.
+    # Do not steal focus from HyperMesh.  Pumping events is enough to keep the
+    # native hwtk progress window painted without a permanent topmost flag.
     ::HWFlow::progressPumpEvents 1
     return 1
 }
@@ -1363,36 +1509,41 @@ proc ::HWFlow::progressOpenMinimal {title {message ""}} {
     variable progressWin
     variable progressMessage
     variable progressDetail
+    variable progressPercentText
     variable progressLastLog
     variable progressCancelRequested
+    variable progressActive
 
     set progressMessage $message
     set progressDetail ""
+    set progressPercentText "0.0%"
     set progressLastLog ""
     set progressCancelRequested 0
+    set progressActive 1
 
     if {[llength [info commands toplevel]] == 0} {
+        set progressActive 0
         return 0
     }
 
     set w $progressWin
     catch {destroy $w}
     if {[catch {
-        ::HWFlow::createTopLevel $w
+        ::HWFlow::createTopLevel $w progress
         wm title $w $title
         wm resizable $w 0 0
-        frame $w.main -padx 14 -pady 12
-        pack $w.main -fill both -expand 1
-        label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
-        label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
-        label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
-        canvas $w.main.bar -width 520 -height 18 -highlightthickness 1 -highlightbackground #8a8a8a -background white
-        $w.main.bar create rectangle 0 0 0 18 -tags fill -fill #2f74d0 -outline ""
-        $w.main.bar create text 260 9 -tags text -text "0.0%" -fill #222222 -font [::HWFlow::uiFont small]
+        ::HWFlow::uiWidget frame $w.main
+        pack $w.main -fill both -expand 1 -padx 14 -pady 12
+        ::HWFlow::uiWidget label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
+        ::HWFlow::uiWidget label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget progressbar $w.main.bar -mode determinate -value 0
+        ::HWFlow::uiWidget label $w.main.percent -textvariable ::HWFlow::progressPercentText -width 7 -anchor e
         grid $w.main.title -row 0 -column 0 -sticky ew -pady {0 6}
         grid $w.main.msg -row 1 -column 0 -sticky ew
         grid $w.main.detail -row 2 -column 0 -sticky ew -pady {2 8}
         grid $w.main.bar -row 3 -column 0 -sticky ew
+        grid $w.main.percent -row 3 -column 1 -sticky e -padx {8 0}
         grid columnconfigure $w.main 0 -weight 1
         wm protocol $w WM_DELETE_WINDOW [list destroy $w]
         update idletasks
@@ -1404,6 +1555,7 @@ proc ::HWFlow::progressOpenMinimal {title {message ""}} {
         ::HWFlow::progressForceVisible
     }]} {
         catch {destroy $w}
+        set progressActive 0
         return 0
     }
 
@@ -1416,6 +1568,7 @@ proc ::HWFlow::progressUpdate {percent {message ""} {detail ""} {force 0}} {
     variable progressWin
     variable progressMessage
     variable progressDetail
+    variable progressPercentText
 
     if {$message ne ""} {
         set progressMessage $message
@@ -1429,6 +1582,7 @@ proc ::HWFlow::progressUpdate {percent {message ""} {detail ""} {force 0}} {
     }
     if {$percent < 0.0} { set percent 0.0 }
     if {$percent > 100.0} { set percent 100.0 }
+    set progressPercentText "[format %.1f $percent]%"
 
     if {[llength [info commands winfo]] == 0} {
         return [::HWFlow::progressCancelled]
@@ -1439,12 +1593,16 @@ proc ::HWFlow::progressUpdate {percent {message ""} {detail ""} {force 0}} {
 
     set bar $progressWin.main.bar
     if {[winfo exists $bar]} {
-        set width [$bar cget -width]
-        set height [$bar cget -height]
-        set fillWidth [expr {int(double($width) * double($percent) / 100.0)}]
-        $bar coords fill 0 0 $fillWidth $height
-        $bar coords text [expr {int(double($width) / 2.0)}] [expr {int(double($height) / 2.0)}]
-        $bar itemconfigure text -text "[format %.1f $percent]%"
+        if {[catch {$bar configure -value $percent}]} {
+            # Compatibility with a progress window created by an older loaded
+            # version of this module in the same HyperMesh session.
+            set width [$bar cget -width]
+            set height [$bar cget -height]
+            set fillWidth [expr {int(double($width) * double($percent) / 100.0)}]
+            $bar coords fill 0 0 $fillWidth $height
+            $bar coords text [expr {int(double($width) / 2.0)}] [expr {int(double($height) / 2.0)}]
+            $bar itemconfigure text -text $progressPercentText
+        }
     }
 
     set logText ""
@@ -1524,6 +1682,8 @@ proc ::HWFlow::progressCancelled {} {
 
 proc ::HWFlow::progressClose {{message ""} {percent 100.0}} {
     variable progressWin
+    variable progressActive
+    set progressActive 0
 
     if {$message ne ""} {
         catch {::HWFlow::progressUpdate $percent $message "" 1}
@@ -1541,6 +1701,8 @@ proc ::HWFlow::progressClose {{message ""} {percent 100.0}} {
 # command returns.  The former Cancel button becomes an explicit Close button.
 proc ::HWFlow::progressFinish {{message ""} {percent 100.0}} {
     variable progressWin
+    variable progressActive
+    set progressActive 0
 
     if {$message ne ""} {
         catch {::HWFlow::progressUpdate $percent $message "" 1}

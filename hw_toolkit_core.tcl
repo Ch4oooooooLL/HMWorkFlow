@@ -13,6 +13,8 @@ namespace eval ::HWToolkit {
     variable SOURCED_FILES {}
     variable MODULE_BUSY 0
     variable QUIET_ERRORS 0
+    variable PENDING_SHORTCUT_TARGET ""
+    variable PENDING_SHORTCUT_AFTER ""
 
     set MODULES {
         component_category {
@@ -37,10 +39,9 @@ namespace eval ::HWToolkit {
         }
         midsurf {
             group    "Geometry"
-            hidden   1
-            label_zh "Midsurface Extraction"
+            label_zh "抽中面"
             label_en "Midsurface Extraction"
-            desc_zh  "抽取钣金中面，并按 CATEGORY_NAME_Tx_MATERIAL 规则命名输出组件。"
+            desc_zh  "抽取钣金中面，并按与网格焊缝一致的 T<厚度> 规则命名输出组件。"
             desc_en  "Extract sheet-metal midsurfaces and name outputs as CATEGORY_NAME_Tx_MATERIAL."
             proc     "::MidSurf::run"
         }
@@ -309,6 +310,11 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {set ::SeamSurf::ui(promptOk) -1}
     catch {set ::SeamSurf::ui(pickOk) -1}
 
+    # hwtk/Tk windows created through the shared factory are authoritative.
+    # Keep the legacy path list below for windows created by an older version
+    # that may still exist in the same HyperMesh session.
+    catch {::HWFlow::destroyManagedWindows}
+
     foreach w {
         .hwtoolkit
         .hwflow_progress
@@ -344,32 +350,29 @@ proc ::HWToolkit::showPanel {} {
 
     catch {destroy .hwtoolkit}
     set w .hwtoolkit
-    ::HWFlow::createTopLevel $w
+    ::HWFlow::createTopLevel $w main
     wm title $w "HyperMesh Toolkit"
     wm minsize $w 640 420
     wm resizable $w 1 1
 
-    frame $w.header -padx 12 -pady 10
-    pack $w.header -fill x
-    label $w.header.title -text "HyperMesh Toolkit" -font [::HWFlow::uiFont header]
-    label $w.header.subtitle -text [::HWFlow::txt "按类别选择工具；主入口和模块快捷键均由 HyperMesh 原生快捷键库维护。" "Select a tool by category; main and module shortcuts are maintained in the HyperMesh native key library."] -font [::HWFlow::uiFont default] -justify left -anchor w
+    ::HWFlow::uiWidget frame $w.header
+    pack $w.header -fill x -padx 12 -pady 10
+    ::HWFlow::uiWidget label $w.header.title -text "HyperMesh Toolkit" -font [::HWFlow::uiFont header]
+    ::HWFlow::uiWidget label $w.header.subtitle -text [::HWFlow::txt "按类别选择工具；主入口和模块快捷键均由 HyperMesh 原生快捷键库维护。" "Select a tool by category; main and module shortcuts are maintained in the HyperMesh native key library."] -font [::HWFlow::uiFont default] -justify left -anchor w
     pack $w.header.title -anchor w
     pack $w.header.subtitle -anchor w
     ::HWFlow::bindAutoWrap $w.header.subtitle 40
 
-    frame $w.body -padx 12 -pady 4
-    pack $w.body -fill both -expand 1
+    ::HWFlow::uiWidget frame $w.body
+    pack $w.body -fill both -expand 1 -padx 12 -pady 4
 
-    if {[llength [info commands ttk::notebook]] == 0} {
-        catch {package require tile}
-    }
-    ttk::notebook $w.body.tabs
+    ::HWFlow::uiWidget notebook $w.body.tabs
     pack $w.body.tabs -fill both -expand 1
 
     set tabIndex 0
     foreach group {Geometry Mesh Connector} {
         set tabPath $w.body.tabs.tab$tabIndex
-        frame $tabPath -padx 8 -pady 8
+        ::HWFlow::uiWidget frame $tabPath
         $w.body.tabs add $tabPath -text [::HWToolkit::groupText $group]
         grid columnconfigure $tabPath 0 -weight 1
         set innerRow 0
@@ -381,13 +384,13 @@ proc ::HWToolkit::showPanel {} {
                 continue
             }
             set labelText [::HWToolkit::moduleText $info label]
-            frame $tabPath.row_$key
-            button $tabPath.row_$key.run -text $labelText -font [::HWFlow::uiFont module] -width 28 -anchor w -command [list ::HWToolkit::runModule $key]
-            label $tabPath.row_$key.desc -text [::HWToolkit::moduleText $info desc] -font [::HWFlow::uiFont small] -justify left -anchor w
+            ::HWFlow::uiWidget frame $tabPath.row_$key
+            ::HWFlow::uiWidget button $tabPath.row_$key.run -text $labelText -font [::HWFlow::uiFont module] -width 28 -anchor w -command [list ::HWToolkit::runModule $key]
+            ::HWFlow::uiWidget label $tabPath.row_$key.desc -text [::HWToolkit::moduleText $info desc] -font [::HWFlow::uiFont small] -justify left -anchor w
             ::HWFlow::bindAutoWrap $tabPath.row_$key.desc 340
-            button $tabPath.row_$key.settings -text [::HWFlow::txt "设置" "Settings"] -width 10 -command [list ::HWToolkit::settingsModule $key]
+            ::HWFlow::uiWidget button $tabPath.row_$key.settings -text [::HWFlow::txt "设置" "Settings"] -width 10 -command [list ::HWToolkit::settingsModule $key]
             set shortcutText [::HWToolkit::shortcutText $key]
-            button $tabPath.row_$key.shortcut -text $shortcutText -width 16 -command [list ::HWShortcut::showForModule $key]
+            ::HWFlow::uiWidget button $tabPath.row_$key.shortcut -text $shortcutText -width 16 -command [list ::HWShortcut::showForModule $key]
             grid $tabPath.row_$key.run -row 0 -column 0 -sticky nw -padx {0 8}
             grid $tabPath.row_$key.desc -row 0 -column 1 -sticky new -padx {0 8}
             grid $tabPath.row_$key.settings -row 0 -column 2 -sticky n -padx {0 6}
@@ -397,17 +400,17 @@ proc ::HWToolkit::showPanel {} {
             incr innerRow
         }
         if {$innerRow == 0} {
-            label $tabPath.empty -text [::HWFlow::txt "暂无可用工具" "No tools available"] -font [::HWFlow::uiFont default] -anchor center
+            ::HWFlow::uiWidget label $tabPath.empty -text [::HWFlow::txt "暂无可用工具" "No tools available"] -font [::HWFlow::uiFont default] -anchor center
             grid $tabPath.empty -row 0 -column 0 -sticky ew -pady 18
         }
         incr tabIndex
     }
 
-    frame $w.foot -padx 12 -pady 10
-    pack $w.foot -fill x
-    button $w.foot.help -text [::HWFlow::txt "查看帮助" "View Help"] -width 14 -command "::HWToolkit::openGuide"
-    button $w.foot.shortcuts -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -width 14 -command "::HWShortcut::showManager"
-    button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command "destroy .hwtoolkit"
+    ::HWFlow::uiWidget frame $w.foot
+    pack $w.foot -fill x -padx 12 -pady 10
+    ::HWFlow::uiWidget button $w.foot.help -text [::HWFlow::txt "查看帮助" "View Help"] -width 14 -command "::HWToolkit::openGuide"
+    ::HWFlow::uiWidget button $w.foot.shortcuts -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -width 14 -command "::HWShortcut::showManager"
+    ::HWFlow::uiWidget button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command "destroy .hwtoolkit"
     pack $w.foot.close -side right
     pack $w.foot.shortcuts -side right -padx {0 8}
     pack $w.foot.help -side right -padx {0 8}
@@ -459,6 +462,72 @@ proc ::HWToolkit::showHome {} {
     ::HWToolkit::showPanel
 }
 
+proc ::HWToolkit::shortcutLaunchBlocked {} {
+    if {[llength [info commands ::HWFlow::progressIsActive]] > 0 &&
+        [::HWFlow::progressIsActive]} {
+        catch {hm_usermessage [::HWFlow::txt \
+            "当前任务仍在执行，不能通过快捷键关闭任务窗口。请先等待完成或请求取消。" \
+            "A task is still running. Wait for it to finish or request cancellation before switching tools."]}
+        return 1
+    }
+    return 0
+}
+
+# Native key callbacks can arrive while a module proc is suspended in
+# `tkwait window`.  Destroy the registered toolkit windows first, then defer
+# the requested launch until that nested call stack has unwound and
+# MODULE_BUSY has returned to zero.
+proc ::HWToolkit::requestShortcutLaunch {target} {
+    variable MODULES
+    variable PENDING_SHORTCUT_TARGET
+    variable PENDING_SHORTCUT_AFTER
+
+    if {$target ne "__toolkit_home__" && ![dict exists $MODULES $target]} {
+        catch {hm_usermessage "HMWorkFlow: unknown shortcut target $target"}
+        return 0
+    }
+    if {[::HWToolkit::shortcutLaunchBlocked]} {
+        return 0
+    }
+    set PENDING_SHORTCUT_TARGET $target
+    ::HWToolkit::clearExistingWindows
+    if {$PENDING_SHORTCUT_AFTER eq ""} {
+        set PENDING_SHORTCUT_AFTER [after idle ::HWToolkit::drainShortcutLaunch]
+    }
+    return 1
+}
+
+proc ::HWToolkit::requestShortcutModule {key} {
+    return [::HWToolkit::requestShortcutLaunch $key]
+}
+
+proc ::HWToolkit::requestShortcutHome {} {
+    return [::HWToolkit::requestShortcutLaunch "__toolkit_home__"]
+}
+
+proc ::HWToolkit::drainShortcutLaunch {} {
+    variable MODULE_BUSY
+    variable PENDING_SHORTCUT_TARGET
+    variable PENDING_SHORTCUT_AFTER
+
+    set PENDING_SHORTCUT_AFTER ""
+    if {$PENDING_SHORTCUT_TARGET eq ""} {
+        return
+    }
+    if {$MODULE_BUSY} {
+        set PENDING_SHORTCUT_AFTER [after 10 ::HWToolkit::drainShortcutLaunch]
+        return
+    }
+
+    set target $PENDING_SHORTCUT_TARGET
+    set PENDING_SHORTCUT_TARGET ""
+    if {$target eq "__toolkit_home__"} {
+        ::HWToolkit::run
+    } else {
+        ::HWToolkit::invokeModule $target
+    }
+}
+
 proc ::HWToolkit::openGuide {} {
     variable SCRIPT_DIR
 
@@ -503,6 +572,7 @@ proc ::HWToolkit::runModule {key} {
 proc ::HWToolkit::invokeModule {key} {
     variable MODULES
     variable MODULE_BUSY
+    variable PENDING_SHORTCUT_TARGET
 
     if {$MODULE_BUSY} {
         catch {hm_usermessage [::HWFlow::txt "当前已有模块正在运行，请先完成或退出当前操作。" "Another module is already active. Complete or exit it first."]}
@@ -532,6 +602,10 @@ proc ::HWToolkit::invokeModule {key} {
     set MODULE_BUSY 0
     catch {::HWFlow::refreshBrowser}
     if {$code} {
+        if {$PENDING_SHORTCUT_TARGET ne ""} {
+            catch {puts "HMWorkFlow module $key was closed by shortcut switch: $err"}
+            return 0
+        }
         catch {puts "HMWorkFlow module $key failed: $err"}
         if {[llength [info commands tk_messageBox]] > 0} {
             tk_messageBox -icon error -title [::HWFlow::txt "HW 工作流" "HWToolkit"] -message [::HWFlow::txt "模块 $key 运行失败：\n$err" "Module $key error:\n$err"]

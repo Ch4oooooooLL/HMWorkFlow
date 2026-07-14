@@ -18,8 +18,11 @@ Local Mesh Optimizer 根据 HyperMesh `.criteria` 检查失败壳单元，用 Py
 - 模型快照/恢复命令适配壳及明确错误；
 - 基于缺陷形态的 quad 切分、短边塌缩、自由边协调外扩动作规划；
 - 快速/标准/深度真实轮次和动作映射门禁。
+- 统一 Operation、增量 MeshState、去重/预模拟/冲突图和确定性批次规划；
+- 默认批量执行与旧版逐项回归模式切换；
+- 批次结果、脏区增量复检以及 Python/Tcl/HyperMesh 性能统计。
 
-当前开发机没有 HyperMesh 2019，无法从 `command.cmf` 验证 `*splitelements`、`*elementqualitycollapseedge`、`*nodemodify`、Element Quality 会话和模型读写的准确行为。因此修改模型的“开始优化”仍受 `HM2019_PROFILE=hm2019_recorded` 门禁保护。工具不会伪造质量改善、保护状态或进度。
+当前优化流程使用的修改命令已经在 HyperMesh 2019 实机任务中运行验证，不再要求输入额外的命令验证标识。“开始优化”直接使用现有计划，或在计划失效时自动重新检查；运行时错误捕获、任务前快照、质量复检和整任务回滚仍然保留。
 
 ## 启动
 
@@ -70,7 +73,7 @@ File > Run > Tcl/Tk Script > install_update.tcl
 
 1. 普通失败四边形：分别计算两条对角线切分后的两组三角形，以“较差三角形的形状得分最高”为最优解，再映射到 `*splitelements 2` 或反向方法 `102`。
 2. 两条边均显著长于第三边的三角形：选择短边并进入 Element Quality 会话执行短边塌缩。短边触及锚点、保护边或与其他拓扑动作冲突时转人工处理。
-3. 细长四边形条带：若长边是真实自由边，则把共享自由边节点按各自短边向外方向统一计算、每个节点每轮只移动一次；若不在自由边，塌缩可安全处理的内部短边。
+3. 细长四边形条带：若长边是真实自由边，先按共享节点识别连续自由边链；共享节点对相邻短边方向取折中，直线链合并为一个移动块，曲线链按约 6–10° 方向差和 15% 位移差分块，再用节点 mark 批量外移，每个节点每轮只移动一次。若不在自由边，则合并可安全处理的内部短边节点。
 4. 其余三角形、受保护动作、冲突动作和无法确认真实自由边的动作标记为人工处理。
 
 - 快速：执行一次安全拓扑动作和复检，不执行自由边外扩。
@@ -90,15 +93,17 @@ File > Run > Tcl/Tk Script > install_update.tcl
 | 特征角 | 30° | 待 HM2019 特征边适配验证 |
 | 优化级别 | 标准 | 快速/标准/深度 |
 
-高级设置包含瘦长三角形阈值、细长四边形阈值、自由边目标长宽比、单轮最大外扩倍数、单区域上限、Python 3 命令、报告目录和自动保存/打开选项。
+高级设置包含瘦长三角形阈值、细长四边形阈值、自由边目标长宽比、单轮最大外扩倍数、单区域上限、批次最大操作数、Python 分析进程数、脏区扩展层数、宏区域上限、界面刷新间隔、日志缓冲行数、执行模式、预模拟/增量复检/性能统计/宏区域合并/Element Quality 会话复用开关、Python 3 命令、报告目录和自动保存/打开选项。默认使用批量模式；旧版逐项模式只用于对比、回归和特殊模型诊断。
 
 “排除 Washer 网格（人工处理）”默认开启。它复用 `shell_washer_hole_rbe2.tcl` 的闭合自由边、孔径、圆度/椭圆度及外环一致性验证，并按 `config/washer_rules.txt` 的最大 washer 层数排除相关单元。排除的失败单元仍保留在完整质量结果、`washer_excluded_failed.txt` 和报告统计中，但不会进入 Python 区域划分或 Tcl 自动拓扑动作。只有用户明确关闭该开关后才允许自动处理 Washer 网格。
 
-“保护自由边”仍保护一般自由边；“允许细长条带自由边受控外扩”只对规划器确认且 Tcl 再次核验为真实自由边的节点开放。启用“保持节点几何关联”时，`*nodemodify` 外扩会跳过并转人工处理，因为当前没有 HM2019 实机证据证明它能可靠保持关联。
+“保护自由边”仍保护一般自由边；“允许细长条带自由边受控外扩”是用户明确开启的窄条修复特例，只对规划器确认且 Tcl 再次核验为真实自由边的节点开放。该动作采用 `*createmark`、`*createvector` 和 `*translatemark` 分块执行，并由修改后质量复检及任务级快照回滚兜底；“保持节点几何关联”不再把这一明确启用的受控动作转成人工处理。
 
 目标 QI 为空时使用 criteria。Python 解析 criteria 只用于元数据/报告，不替代 HyperMesh 判断。
 
-优化进度按“任务 → 区域 → 轮次 → 动作 → 连接刷新 → 保护核验 → 局部复检 → 最终守卫 → 保存 → 报告”分配单调递增的百分比，并显示区域/轮次/动作计数、已用时间和预计剩余时间。动作数量很大时最多分约 20 个刷新批次，避免命令流快速滚动反而拖慢界面。
+优化进度按“任务 → 区域 → 轮次 → 动作 → 连接刷新 → 保护核验 → 局部复检 → 最终守卫 → 保存 → 报告”分配单调递增的百分比，并显示区域/轮次/动作计数、已用时间和预计剩余时间。默认最多每 500 ms 刷新一次；INFO 明细进入缓冲日志，进度命令流只即时显示警告和错误。`optimizer.log` 默认每 200 行或 1 秒批量写入，任务状态切换时强制落盘。
+
+批量模式默认启用宏区域：Python 将扩展节点集合互不相交的小区域稳定打包，每个宏区域默认最多包含 200 个原始区域、500 个失败单元和 10000 个扩展单元。原区域的锚点和保护边界取并集，因此不会开放新的跨区域移动；宏区域只减少 Tcl 调度、批次文件加载和原生复检次数。单个原始区域超过上限时保持独立，不会被截断。
 
 ## 停止
 
@@ -140,7 +145,9 @@ LocalMeshOptimizer_Report_YYYYMMDD_HHMMSS/
 
 ## Python 与 Tcl 通信
 
-Tcl 写入 `task.json`、`failed_elements.txt`、`element_connectivity.csv`、`node_coordinates.csv`、保护 ID/边文件；Python 写入 `regions.json`、`region_tasks.csv` 和 `progress.json`。区域执行结果通过 `region_results.csv` 汇总，再由 Python finalize 阶段生成报告。
+Tcl 写入 `task.json`、`failed_elements.txt`、`element_connectivity.csv`、`node_coordinates.csv`、保护 ID/边文件；Python 写入 `regions.json`、`region_tasks.csv`、`operations.json`、`conflicts.json`、`batches.json`、`batch_tasks.csv`、`batches/*.tcl` 和 `progress.json`。Tcl 批次结果写入 `batch_results/*.json`，区域执行结果通过 `region_results.csv` 汇总，再由 Python finalize 阶段生成报告。完整协议见 [批量架构说明](doc/local_mesh_optimizer_batch_architecture.md)。
+
+本项目的 62556 单元压力样例离线重规划中，宏区域打包将 5425 个原始区域压缩为 33 个执行区域，将上一次实机任务的 7065 个批次文件投影降低为 112 个。该数字只证明调度规模下降；最终 HyperMesh 墙钟时间需重新实测。
 
 所有 JSON 使用 UTF-8，Python 写入采用同目录临时文件和 `os.replace`。大 ID 集合使用行文本/CSV，避免逐 element 进程通信。
 
@@ -173,7 +180,7 @@ python optimizer_controller.py --task task.json --stage report
 - “选择后像卡死”：确认所有模块均通过新版 `workflow_common.tcl` 加载；原生选择期间工具窗口应暂时隐藏，中键确认或 Esc 取消后恢复。
 - “criteria 读取失败”：在 HyperMesh 2019 手工打开同一文件，检查 solver profile、路径和文件格式，并查看任务日志。
 - “质量摘要和 mark 不一致”：不要继续优化；录制一次手工质量检查并核对 `command.cmf`。
-- “优化被禁用”：完成 [HM2019 命令验证](doc/local_mesh_optimizer_hm2019_validation.md)，再把实录命令接入版本适配层。
+- “优化未启动”：检查 criteria、处理范围和参数输入；模块不再要求填写额外的 HM2019 命令验证标识。
 - “恢复失败”：不要覆盖原模型；保留任务目录、当前模型和日志，手工打开 `before.hm`（若已生成）。
 
 ## 测试

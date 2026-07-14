@@ -1,0 +1,22 @@
+{
+  "source_task": "temp/local_mesh_optimizer/task_20260714_213054_29904",
+  "input": {
+    "checked_elements": 62556,
+    "failed_elements": 11592,
+    "source_regions": 5425,
+    "observed_generated_batches": 7065
+  },
+  "ab_replan": {
+    "macro_regions": 33,
+    "projected_generated_batches": 112,
+    "batch_source_reduction_percent": 98.41,
+    "offline_replan_seconds": 24.825
+  },
+  "limits": {
+    "macro_max_regions": 200,
+    "macro_max_failures": 500,
+    "macro_max_elements": 10000,
+    "batch_max_operations": 200
+  },
+  "note": "Read-only scheduling projection. HyperMesh wall-clock improvement requires a new live run."
+}

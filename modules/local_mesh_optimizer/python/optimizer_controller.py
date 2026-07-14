@@ -9,8 +9,9 @@ import logging
 import os
 import sys
 import traceback
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, Optional, Sequence
+from typing import Dict, Mapping, Optional, Sequence
 
 # The Windows embeddable distribution uses a restrictive pythonXY._pth file.
 # Add the controller directory explicitly so sibling modules remain importable
@@ -20,10 +21,20 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from adjacency import read_connectivity
+from batch_planner import plan_batches, prevalidate_operation, write_batch_artifacts
 from criteria_parser import parse_criteria_metadata
 from io_utils import atomic_write_json, atomic_write_text, read_id_file, read_json
+from mesh_state import MeshState
+from operation_model import adapt_existing_actions, deduplicate_operations
 from optimization_planner import plan_optimization_actions
-from region_builder import build_regions, feature_edges, read_blocked_edges, read_node_coordinates
+from performance_metrics import PerformanceMetrics
+from region_builder import (
+    build_regions,
+    feature_edges,
+    merge_independent_regions,
+    read_blocked_edges,
+    read_node_coordinates,
+)
 from report_generator import generate_report
 
 EXIT_SUCCESS = 0
@@ -32,6 +43,26 @@ EXIT_CANCELLED = 2
 EXIT_INPUT = 3
 EXIT_HYPERMESH = 4
 EXIT_INTERNAL = 5
+
+
+def _plan_one_region(arguments: Dict[str, object]) -> list:
+    """Process-pool entry; inputs contain only pickle-safe standard objects."""
+    return plan_optimization_actions(**arguments)
+
+
+def _regions_have_disjoint_nodes(regions: Sequence[dict], elements: Mapping[int, object]) -> bool:
+    claimed = set()
+    for region in regions:
+        nodes = {
+            node
+            for element_id in region["expanded_elements"]
+            if element_id in elements
+            for node in elements[element_id].nodes
+        }
+        if claimed.intersection(nodes):
+            return False
+        claimed.update(nodes)
+    return True
 
 
 def _path(task_dir: Path, task: Dict[str, object], key: str, default: str) -> Path:
@@ -58,70 +89,160 @@ def _progress(task_dir: Path, stage: str, percent: float, message: str) -> None:
     )
 
 
+def _write_performance_report(task_dir: Path, report_dir: Path, task: Dict[str, object]) -> None:
+    python_path = task_dir / "python_performance_metrics.json"
+    tcl_path = task_dir / "tcl_performance_metrics.json"
+    python_metrics = read_json(python_path) if python_path.exists() else {"timings_seconds": {}, "counters": {}}
+    tcl_metrics = read_json(tcl_path) if tcl_path.exists() else {"timings_seconds": {}, "counters": {}}
+    operation_total = int(tcl_metrics.get("counters", {}).get("operation_total", 0))
+    topology_seconds = float(tcl_metrics.get("timings_seconds", {}).get("hm_topology_operations", 0.0))
+    payload = {
+        "execution_mode": str(task.get("execution_mode", "batch")),
+        "python": python_metrics,
+        "tcl_hypermesh": tcl_metrics,
+        "derived": {
+            "average_hm_seconds_per_operation": (
+                topology_seconds / operation_total if operation_total else 0.0
+            ),
+            "live_hypermesh_measurement_available": bool(tcl_path.exists()),
+        },
+    }
+    atomic_write_json(report_dir / "performance_metrics.json", payload)
+    rows = ["layer,kind,name,value"]
+    for layer, metrics in (("python", python_metrics), ("tcl_hypermesh", tcl_metrics)):
+        for kind in ("timings_seconds", "counters"):
+            for name, value in sorted(metrics.get(kind, {}).items()):
+                rows.append("{},{},{},{}".format(layer, kind, name, value))
+    rows.append(
+        "derived,metric,average_hm_seconds_per_operation,{}".format(
+            payload["derived"]["average_hm_seconds_per_operation"]
+        )
+    )
+    atomic_write_text(report_dir / "performance_metrics.csv", "\n".join(rows) + "\n")
+
+
 def build(task_path: Path) -> int:
     task_path = task_path.resolve()
     task_dir = task_path.parent
     _configure_logging(task_dir)
+    metrics = PerformanceMetrics()
+    metrics.increment("python_starts")
     task = read_json(task_path)
     _progress(task_dir, "validating", 5.0, "正在验证区域构建输入")
     criteria = Path(str(task.get("criteria_path", "")))
     if not criteria.is_absolute():
         criteria = (task_dir / criteria).resolve()
-    metadata = parse_criteria_metadata(criteria)
+    with metrics.measure("criteria_parse"):
+        metadata = parse_criteria_metadata(criteria)
     atomic_write_json(task_dir / "criteria_metadata.json", metadata)
     if (task_dir / "cancel.flag").exists():
         _progress(task_dir, "cancelled", 100.0, "用户已取消")
         return EXIT_CANCELLED
-    elements = read_connectivity(_path(task_dir, task, "connectivity_file", "element_connectivity.csv"))
+    with metrics.measure("topology_read"):
+        elements = read_connectivity(_path(task_dir, task, "connectivity_file", "element_connectivity.csv"))
     failed = read_id_file(_path(task_dir, task, "failed_elements_file", "failed_elements.txt"))
     if not failed:
         atomic_write_json(task_dir / "regions.json", [])
+        atomic_write_text(task_dir / "region_tasks.csv", "region_id,failed_elements,expanded_elements,components,anchor_nodes\n")
+        atomic_write_text(
+            task_dir / "optimization_actions.csv",
+            "region_id,action_id,action_type,element_id,edge_index,node_a,node_b,reference_a,reference_b,target_distance,split_method,reason\n",
+        )
+        write_batch_artifacts(task_dir, [], [], [])
+        atomic_write_json(task_dir / "python_performance_metrics.json", metrics.to_dict())
         _progress(task_dir, "ready", 100.0, "没有失败单元")
         return EXIT_SUCCESS
     _progress(task_dir, "building_regions", 35.0, "正在按共享边划分失败区域")
-    blocked_edges = read_blocked_edges(_path(task_dir, task, "protected_edges_file", "protected_edges.csv"))
-    coordinates = read_node_coordinates(_path(task_dir, task, "node_coordinates_file", "node_coordinates.csv"))
+    with metrics.measure("topology_read"):
+        blocked_edges = read_blocked_edges(_path(task_dir, task, "protected_edges_file", "protected_edges.csv"))
+        coordinates = read_node_coordinates(_path(task_dir, task, "node_coordinates_file", "node_coordinates.csv"))
     user_anchor_nodes = set(read_id_file(_path(task_dir, task, "protected_nodes_file", "protected_nodes.txt")))
     protect_features = bool(task.get("protection", {}).get("feature_edges", True))
     if protect_features:
         blocked_edges.update(feature_edges(elements, coordinates, float(task.get("feature_angle", 30.0))))
-    regions = build_regions(
-        elements=elements,
-        failed_ids=failed,
-        layers=int(task.get("adjacency_layers", 2)),
-        max_region_elements=int(task.get("max_region_elements", 50000)),
-        blocked_edges=blocked_edges,
-        cross_components=not bool(task.get("protection", {}).get("no_cross_component_movement", True)),
-        coordinates=coordinates,
-        user_anchor_nodes=user_anchor_nodes,
-        protect_feature_edges=False,
-        feature_angle=float(task.get("feature_angle", 30.0)),
-    )
-    actions = plan_optimization_actions(
-        elements=elements,
-        failed_ids=failed,
-        coordinates=coordinates,
-        regions=regions,
-        blocked_edges=blocked_edges,
-        user_anchor_nodes=user_anchor_nodes,
-        allow_free_edge_move=(
-            bool(task.get("allow_controlled_free_edge_move", True))
-            and str(task.get("optimization_level", "standard")) != "quick"
-            and not bool(task.get("protection", {}).get("preserve_geometry_association", True))
-        ),
-        skinny_triangle_ratio=float(task.get("skinny_triangle_ratio", 2.5)),
-        narrow_quad_ratio=float(task.get("narrow_quad_ratio", 2.5)),
-        narrow_target_aspect=float(task.get("narrow_target_aspect", 1.5)),
-    )
+    with metrics.measure("region_build"):
+        regions = build_regions(
+            elements=elements,
+            failed_ids=failed,
+            layers=int(task.get("adjacency_layers", 2)),
+            max_region_elements=int(task.get("max_region_elements", 50000)),
+            blocked_edges=blocked_edges,
+            cross_components=not bool(task.get("protection", {}).get("no_cross_component_movement", True)),
+            coordinates=coordinates,
+            user_anchor_nodes=user_anchor_nodes,
+            protect_feature_edges=False,
+            feature_angle=float(task.get("feature_angle", 30.0)),
+        )
+    metrics.increment("source_regions", len(regions))
+    if (
+        str(task.get("execution_mode", "batch")) == "batch"
+        and bool(task.get("enable_macro_batching", True))
+        and len(regions) > 1
+    ):
+        with metrics.measure("macro_region_packing"):
+            regions = merge_independent_regions(
+                regions,
+                elements,
+                coordinates,
+                max_source_regions=int(task.get("macro_max_regions", 200)),
+                max_failed_elements=int(task.get("macro_max_failures", 500)),
+                max_expanded_elements=int(task.get("macro_max_elements", 10000)),
+            )
+    metrics.increment("execution_regions", len(regions))
+    with metrics.measure("candidate_generation"):
+        planner_common = {
+            "elements": elements,
+            "coordinates": coordinates,
+            "blocked_edges": blocked_edges,
+            "user_anchor_nodes": user_anchor_nodes,
+            "allow_free_edge_move": (
+                bool(task.get("allow_controlled_free_edge_move", True))
+                and str(task.get("optimization_level", "standard")) != "quick"
+            ),
+            "skinny_triangle_ratio": float(task.get("skinny_triangle_ratio", 2.5)),
+            "narrow_quad_ratio": float(task.get("narrow_quad_ratio", 2.5)),
+            "narrow_target_aspect": float(task.get("narrow_target_aspect", 1.5)),
+        }
+        requested_workers = max(1, min(8, int(task.get("analysis_workers", 1))))
+        can_parallelize = (
+            requested_workers > 1
+            and len(regions) > 1
+            and _regions_have_disjoint_nodes(regions, elements)
+        )
+        if can_parallelize:
+            jobs = []
+            for region in regions:
+                job = dict(planner_common)
+                job["failed_ids"] = list(region["failed_elements"])
+                job["regions"] = [region]
+                jobs.append(job)
+            with ProcessPoolExecutor(max_workers=min(requested_workers, len(jobs))) as executor:
+                actions = [action for result in executor.map(_plan_one_region, jobs) for action in result]
+            action_priority = {"collapse_short_edge": 0, "expand_free_edge": 1, "split_quad": 2, "manual_review": 3}
+            actions.sort(
+                key=lambda action: (
+                    str(action["region_id"]),
+                    action_priority[str(action["action_type"])],
+                    int(action["element_id"]),
+                )
+            )
+            for index, action in enumerate(actions, 1):
+                action["action_id"] = "{}_A{:06d}".format(action["region_id"], index)
+            metrics.increment("parallel_region_jobs", len(jobs))
+        else:
+            actions = plan_optimization_actions(
+                failed_ids=failed,
+                regions=regions,
+                **planner_common
+            )
+            metrics.increment("serial_region_planning")
     actions_by_region: Dict[str, list] = {}
     for action in actions:
         actions_by_region.setdefault(str(action["region_id"]), []).append(action)
+    # Preserve the existing controlled-free-edge exception: region perimeter
+    # anchors remain protected except for explicitly planned moving nodes.
     for region in regions:
         region_actions = actions_by_region.get(str(region["region_id"]), [])
-        region["planned_actions"] = region_actions
-        region["manual_review_count"] = sum(
-            1 for action in region_actions if action["action_type"] == "manual_review"
-        )
         controlled_nodes = {
             int(node)
             for action in region_actions
@@ -131,6 +252,49 @@ def build(task_path: Path) -> int:
         region["anchor_nodes"] = sorted(
             set(region["anchor_nodes"]).difference(controlled_nodes.difference(user_anchor_nodes))
         )
+    with metrics.measure("mesh_state_build"):
+        mesh_state = MeshState(coordinates, elements)
+    with metrics.measure("operation_adaptation_and_deduplication"):
+        all_operations = adapt_existing_actions(actions, mesh_state)
+        operations, dedupe_events = deduplicate_operations(all_operations)
+    region_anchors = {
+        str(region["region_id"]): set(region.get("anchor_nodes", [])).union(user_anchor_nodes)
+        for region in regions
+    }
+    presimulation = bool(task.get("enable_presimulation", True))
+    with metrics.measure("candidate_presimulation"):
+        for operation in operations:
+            if presimulation:
+                valid, reason = prevalidate_operation(
+                    operation,
+                    mesh_state,
+                    region_anchors.get(str(operation.metadata.get("region_id", "")), user_anchor_nodes),
+                )
+            else:
+                valid, reason = (operation.operation_type != "manual_review", "disabled")
+            operation.validation = {"valid": valid, "reason": reason, "layer": "python_precheck"}
+            if not valid and operation.operation_type != "manual_review":
+                operation.status = "validation_failed"
+    with metrics.measure("conflict_analysis_and_batching"):
+        batches, conflicts = plan_batches(
+            operations,
+            max_operations=int(task.get("batch_max_operations", 200)),
+        )
+    write_batch_artifacts(task_dir, all_operations, batches, conflicts)
+    atomic_write_json(task_dir / "deduplication_events.json", dedupe_events)
+    metrics.increment("candidate_operations", len(all_operations))
+    metrics.increment("deduplicated_operations", len(all_operations) - len(operations))
+    metrics.increment("validation_failed_operations", sum(1 for operation in operations if operation.status == "validation_failed"))
+    metrics.increment("executable_batches", len(batches))
+    metrics.increment("executable_operations", sum(len(batch.operations) for batch in batches))
+    metrics.increment("conflict_edges", len(conflicts))
+    for region in regions:
+        region_actions = actions_by_region.get(str(region["region_id"]), [])
+        region["planned_actions"] = region_actions
+        region["manual_review_count"] = sum(
+            1 for action in region_actions if action["action_type"] == "manual_review"
+        )
+        region["planned_batch_count"] = sum(1 for batch in batches if batch.region_id == region["region_id"])
     atomic_write_json(task_dir / "regions.json", regions)
     rows = ["region_id,failed_elements,expanded_elements,components,anchor_nodes"]
     for region in regions:
@@ -155,6 +319,7 @@ def build(task_path: Path) -> int:
     for action in actions:
         action_rows.append(",".join(str(action[field]) for field in action_fields))
     atomic_write_text(task_dir / "optimization_actions.csv", "\n".join(action_rows) + "\n")
+    atomic_write_json(task_dir / "python_performance_metrics.json", metrics.to_dict())
     _progress(task_dir, "ready", 100.0, "区域构建完成：{} 个".format(len(regions)))
     logging.info("Built %d regions from %d failed elements", len(regions), len(failed))
     return EXIT_SUCCESS
@@ -202,7 +367,8 @@ def finalize(task_path: Path) -> int:
     )
     atomic_write_json(result_path, result)
     report_dir = _path(task_dir, task, "report_dir", "report")
-    generate_report(report_dir, task, result, regions)
+    _write_performance_report(task_dir, report_dir, task)
+    generate_report(report_dir, task, result, regions, task_dir=task_dir)
     _progress(task_dir, "reported", 100.0, "结果汇总和报告生成完成")
     return EXIT_CANCELLED if result.get("cancelled") else EXIT_SUCCESS
 
@@ -217,7 +383,8 @@ def report(task_path: Path) -> int:
     regions = read_json(regions_path) if regions_path.exists() else []
     result = read_json(result_path) if result_path.exists() else {}
     report_dir = _path(task_dir, task, "report_dir", "report")
-    generate_report(report_dir, task, result, regions)
+    _write_performance_report(task_dir, report_dir, task)
+    generate_report(report_dir, task, result, regions, task_dir=task_dir)
     _progress(task_dir, "reported", 100.0, "报告生成完成")
     return EXIT_CANCELLED if result.get("cancelled") else EXIT_SUCCESS
 

@@ -161,3 +161,99 @@ def build_regions(
             }
         )
     return result
+
+
+def merge_independent_regions(
+    regions: Sequence[dict],
+    elements: Mapping[int, ShellElement],
+    coordinates: Optional[Mapping[int, Tuple[float, float, float]]] = None,
+    max_source_regions: int = 200,
+    max_failed_elements: int = 500,
+    max_expanded_elements: int = 10000,
+) -> List[dict]:
+    """Pack node-disjoint small regions into macro regions.
+
+    The Tcl executor already applies actions and performs native quality checks
+    per region.  Thousands of isolated failures therefore caused thousands of
+    UI updates, batch files and quality calls.  Packing only regions whose
+    expanded node sets are disjoint preserves the original local protection
+    boundaries while allowing one execution/recheck pass for many islands.
+    """
+    if min(max_source_regions, max_failed_elements, max_expanded_elements) < 1:
+        raise ValueError("macro region limits must be positive")
+    coordinates = coordinates or {}
+    buckets: List[dict] = []
+    ordered = sorted(regions, key=lambda region: str(region["region_id"]))
+    for region in ordered:
+        expanded = set(int(value) for value in region["expanded_elements"])
+        nodes = {
+            node
+            for element_id in expanded
+            if element_id in elements
+            for node in elements[element_id].nodes
+        }
+        failed_count = len(region["failed_elements"])
+        placed = False
+        for bucket in buckets:
+            if len(bucket["regions"]) >= max_source_regions:
+                continue
+            if bucket["failed_count"] + failed_count > max_failed_elements:
+                continue
+            combined_expanded = bucket["expanded"].union(expanded)
+            if len(combined_expanded) > max_expanded_elements:
+                continue
+            if bucket["nodes"].intersection(nodes):
+                continue
+            bucket["regions"].append(region)
+            bucket["nodes"].update(nodes)
+            bucket["expanded"] = combined_expanded
+            bucket["failed_count"] += failed_count
+            placed = True
+            break
+        if not placed:
+            buckets.append(
+                {
+                    "regions": [region],
+                    "nodes": set(nodes),
+                    "expanded": set(expanded),
+                    "failed_count": failed_count,
+                }
+            )
+
+    result: List[dict] = []
+    for index, bucket in enumerate(buckets, 1):
+        sources = bucket["regions"]
+        failed = sorted(
+            {int(value) for region in sources for value in region["failed_elements"]}
+        )
+        expanded = sorted(bucket["expanded"])
+        bbox, centroid = _geometry(expanded, elements, coordinates)
+        result.append(
+            {
+                "region_id": "Region_{:04d}".format(index),
+                "source_region_ids": [str(region["region_id"]) for region in sources],
+                "failed_elements": failed,
+                "expanded_elements": expanded,
+                "components": sorted(
+                    {int(value) for region in sources for value in region["components"]}
+                ),
+                "failed_count": len(failed),
+                "expanded_count": len(expanded),
+                "requested_layers": max(int(region["requested_layers"]) for region in sources),
+                "completed_layers": min(int(region["completed_layers"]) for region in sources),
+                "expansion_truncated": any(bool(region["expansion_truncated"]) for region in sources),
+                "bbox": bbox,
+                "centroid": centroid,
+                "anchor_nodes": sorted(
+                    {int(value) for region in sources for value in region["anchor_nodes"]}
+                ),
+                "current_failed_count": len(failed),
+                "rounds": 0,
+                "optimization_methods": [],
+                "rollback_count": 0,
+                "elapsed_seconds": 0.0,
+                "status": "pending",
+                "message": "",
+            }
+        )
+    return result

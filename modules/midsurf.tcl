@@ -26,7 +26,6 @@ namespace eval ::MidSurf {
         maxRTtRatio           2.0
         maxThicknessRatio     10.0
         surfaceNormals        -1
-        thicknessFormat       "%.3g"
         variableThicknessTol  0.05
         requireCleanMiddle    1
         keepTransparency      0
@@ -123,7 +122,6 @@ proc ::MidSurf::showPanel {} {
         {maxThicknessRatio     "最大厚度比" "Max thickness ratio"}
         {surfaceNormals        "曲面法向" "Surface normals"}
         {variableThicknessTol  "变厚容差" "Variable thickness tolerance"}
-        {thicknessFormat       "厚度格式" "Thickness format"}
     }
 
     set i 0
@@ -232,11 +230,6 @@ proc ::MidSurf::acceptPanel {} {
         tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "variableThicknessTol 不能为负值。" "variableThicknessTol cannot be negative."]
         return
     }
-    if {[string trim $ui(thicknessFormat)] eq ""} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "Midsurface Extraction" "Midsurface Extraction"] -message [::HWFlow::txt "thicknessFormat 不能为空。" "thicknessFormat cannot be empty."]
-        return
-    }
-
     foreach k [array names cfg] {
         set cfg($k) $ui($k)
     }
@@ -315,22 +308,13 @@ proc ::MidSurf::valueSpreadRatio {vals center} {
 }
 
 proc ::MidSurf::formatThickness {value} {
-    variable cfg
-
+    if {[llength [info commands ::HWFlow::formatThicknessToken]] > 0} {
+        return [::HWFlow::formatThicknessToken $value]
+    }
     if {$value eq "" || ![string is double -strict $value] || $value <= 0.0} {
         return "UNKNOWN"
     }
-
-    if {[catch {set out [format $cfg(thicknessFormat) $value]}]} {
-        set out [format %.3g $value]
-    }
-
-    set out [string trim $out]
-    regsub -all {[^0-9A-Za-z_.+-]+} $out {_} out
-    if {$out eq ""} {
-        return "UNKNOWN"
-    }
-    return $out
+    return [format "%.6g" $value]
 }
 
 proc ::MidSurf::getComponentName {compId} {
@@ -513,9 +497,8 @@ proc ::MidSurf::clearMarks {} {
 # ----------------------------------------------------------------------
 
 proc ::MidSurf::readThicknessFromComponentName {name} {
-    if {[regexp -nocase {(^|_)T([0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?)(_|$)} $name -> prefix value decimal exponent suffix] &&
-        [string is double -strict $value] && $value > 0.0} {
-        return $value
+    if {[llength [info commands ::HWFlow::thicknessFromComponentName]] > 0} {
+        return [::HWFlow::thicknessFromComponentName $name]
     }
     return ""
 }

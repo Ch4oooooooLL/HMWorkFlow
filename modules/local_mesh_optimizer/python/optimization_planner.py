@@ -79,7 +79,46 @@ def _action(region_id: str, action_id: int, action_type: str, element_id: int, r
     return result
 
 
-def _quad_action(
+def _assign_free_edge_chain_ids(actions: List[dict]) -> None:
+    """Label connected free-edge action chains using the compatibility field.
+
+    ``split_method`` is unused by expansion actions and already travels through
+    the CSV/Tcl protocol, so it safely carries a deterministic chain ID without
+    widening the legacy file schema.
+    """
+    by_region: Dict[str, List[int]] = {}
+    for index, action in enumerate(actions):
+        if action["action_type"] == "expand_free_edge":
+            by_region.setdefault(str(action["region_id"]), []).append(index)
+    chain_id = 0
+    for region_id in sorted(by_region):
+        indices = by_region[region_id]
+        node_to_indices: Dict[int, List[int]] = {}
+        for index in indices:
+            action = actions[index]
+            for node in (int(action["node_a"]), int(action["node_b"])):
+                node_to_indices.setdefault(node, []).append(index)
+        pending = set(indices)
+        while pending:
+            chain_id += 1
+            seed = min(pending, key=lambda index: int(actions[index]["element_id"]))
+            pending.remove(seed)
+            stack = [seed]
+            component = []
+            while stack:
+                current = stack.pop()
+                component.append(current)
+                action = actions[current]
+                for node in (int(action["node_a"]), int(action["node_b"])):
+                    for neighbor in node_to_indices.get(node, []):
+                        if neighbor in pending:
+                            pending.remove(neighbor)
+                            stack.append(neighbor)
+            for index in component:
+                actions[index]["split_method"] = chain_id
+
+
+def _quad_actions(
     region_id: str,
     action_id: int,
     element: ShellElement,
@@ -90,7 +129,7 @@ def _quad_action(
     allow_free_edge_move: bool,
     narrow_ratio: float,
     target_aspect: float,
-) -> dict:
+) -> List[dict]:
     lengths = _edge_lengths(element, coordinates)
     pair_02 = (lengths[0] + lengths[2]) / 2.0
     pair_13 = (lengths[1] + lengths[3]) / 2.0
@@ -109,7 +148,7 @@ def _quad_action(
             reference_b = element.nodes[(edge_index + 2) % 4]
             moving = {node_a, node_b}
             if allow_free_edge_move and not moving.intersection(mandatory_nodes):
-                return _action(
+                return [_action(
                     region_id,
                     action_id,
                     "expand_free_edge",
@@ -121,28 +160,39 @@ def _quad_action(
                     reference_a=reference_a,
                     reference_b=reference_b,
                     target_distance=long_average / max(target_aspect, 1.0),
-                )
-            return _action(region_id, action_id, "manual_review", element.element_id, "free_edge_move_protected_or_disabled")
+                )]
+            return [_action(region_id, action_id, "manual_review", element.element_id, "free_edge_move_protected_or_disabled")]
 
         internal_short = [
             index for index in short_indices if len(edge_owners.get(_edge(element, index), [])) == 2
         ]
-        if not internal_short:
-            return _action(region_id, action_id, "manual_review", element.element_id, "narrow_quad_has_no_internal_short_edge")
-        collapse_index = min(internal_short, key=lambda index: lengths[index])
-        collapse_nodes = set(_edge(element, collapse_index))
-        if not collapse_nodes.intersection(protected_nodes):
-            return _action(
+        # Removing an internal thin strip requires collapsing both opposite
+        # short edges. Collapsing only one side turns the quad into a triangle
+        # and commonly leaves (or creates) another sliver. Require both sides
+        # to be internal and unprotected so the pair is an atomic plan.
+        if len(internal_short) != 2:
+            return [_action(
+                region_id,
+                action_id,
+                "manual_review",
+                element.element_id,
+                "narrow_quad_requires_two_internal_short_edges",
+            )]
+        if any(set(_edge(element, index)).intersection(protected_nodes) for index in internal_short):
+            return [_action(region_id, action_id, "manual_review", element.element_id, "narrow_quad_short_edge_protected")]
+        return [
+            _action(
                 region_id,
                 action_id,
                 "collapse_short_edge",
                 element.element_id,
-                "narrow_internal_quad",
-                edge_index=collapse_index + 1,
-                node_a=element.nodes[collapse_index],
-                node_b=element.nodes[(collapse_index + 1) % 4],
+                "narrow_internal_quad_paired_short_edges",
+                edge_index=index + 1,
+                node_a=element.nodes[index],
+                node_b=element.nodes[(index + 1) % 4],
             )
-        return _action(region_id, action_id, "manual_review", element.element_id, "narrow_quad_short_edge_protected")
+            for index in internal_short
+        ]
 
     nodes = element.nodes
     score_02 = min(
@@ -157,14 +207,14 @@ def _quad_action(
     diagonal_02 = _distance(coordinates[nodes[0]], coordinates[nodes[2]])
     diagonal_13 = _distance(coordinates[nodes[1]], coordinates[nodes[3]])
     selected_is_shortest = (diagonal_02 <= diagonal_13) == selected_02
-    return _action(
+    return [_action(
         region_id,
         action_id,
         "split_quad",
         element.element_id,
         "best_worst_triangle_score",
         split_method=2 if selected_is_shortest else 102,
-    )
+    )]
 
 
 def plan_optimization_actions(
@@ -179,7 +229,12 @@ def plan_optimization_actions(
     narrow_quad_ratio: float = 2.5,
     narrow_target_aspect: float = 1.5,
 ) -> List[dict]:
-    """Return deterministic, one-per-failed-element repair proposals."""
+    """Return deterministic repair proposals for failed shell elements.
+
+    A skinny triangle contributes one short-edge collapse. A fully internal
+    narrow quad contributes the two opposite short-edge collapses needed to
+    remove the complete thin strip.
+    """
     blocked_edges = set(blocked_edges or set())
     user_anchor_nodes = set(user_anchor_nodes or set())
     _, edge_owners = build_adjacency(elements)
@@ -188,8 +243,9 @@ def plan_optimization_actions(
         for element_id in region["failed_elements"]:
             region_by_element[element_id] = region
 
+    failed_set = set(failed_ids)
     actions: List[dict] = []
-    for action_index, element_id in enumerate(sorted(set(failed_ids)), 1):
+    for action_index, element_id in enumerate(sorted(failed_set), 1):
         element = elements.get(element_id)
         region = region_by_element.get(element_id)
         if element is None or region is None:
@@ -204,8 +260,8 @@ def plan_optimization_actions(
             mandatory_nodes.update(edge)
 
         if len(element.nodes) == 4:
-            actions.append(
-                _quad_action(
+            actions.extend(
+                _quad_actions(
                     region_id,
                     action_index,
                     element,
@@ -242,16 +298,29 @@ def plan_optimization_actions(
                 actions.append(_action(region_id, action_index, "manual_review", element_id, "skinny_triangle_short_edge_protected"))
         else:
             actions.append(_action(region_id, action_index, "manual_review", element_id, "tria_not_matching_safe_collapse_rule"))
+    # A skinny triangle can share its short edge with another failed shell. A
+    # midpoint node replacement intentionally removes that sliver and updates
+    # the neighbour, so shared failure ownership alone is not a conflict.
+    # Exact duplicate edge proposals are retained for provenance and are
+    # deduplicated by the operation adapter below the planner. Different
+    # collapse directions that merely meet at one node remain conflicts.
     claimed_nodes: Set[int] = set()
+    claimed_edges: Set[Edge] = set()
     for action in actions:
         if action["action_type"] != "collapse_short_edge":
             continue
         nodes = {int(action["node_a"]), int(action["node_b"])}
+        edge = tuple(sorted(nodes))
+        if edge in claimed_edges:
+            # Keep exact duplicates until operation adaptation so provenance is
+            # retained in deduplication_events.json.
+            continue
         if nodes.intersection(claimed_nodes):
             action["action_type"] = "manual_review"
             action["reason"] = "topology_action_conflict"
         else:
             claimed_nodes.update(nodes)
+            claimed_edges.add(edge)
     for action in actions:
         if action["action_type"] in ("collapse_short_edge", "manual_review"):
             continue
@@ -259,6 +328,15 @@ def plan_optimization_actions(
         if set(element.nodes).intersection(claimed_nodes):
             action["action_type"] = "manual_review"
             action["reason"] = "adjacent_to_planned_edge_collapse"
+    _assign_free_edge_chain_ids(actions)
     priority = {"collapse_short_edge": 0, "expand_free_edge": 1, "split_quad": 2, "manual_review": 3}
-    actions.sort(key=lambda action: (str(action["region_id"]), priority[action["action_type"]], int(action["element_id"])))
+    actions.sort(key=lambda action: (
+        str(action["region_id"]),
+        priority[action["action_type"]],
+        int(action["element_id"]),
+        min(int(action.get("node_a", 0)), int(action.get("node_b", 0))),
+        max(int(action.get("node_a", 0)), int(action.get("node_b", 0))),
+    ))
+    for index, action in enumerate(actions, 1):
+        action["action_id"] = "{}_A{:06d}".format(action["region_id"], index)
     return actions

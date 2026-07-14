@@ -11,12 +11,14 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::LocalMeshOptimizer {
-    variable VERSION "0.1.0"
+    variable VERSION "0.4.1"
     variable SCRIPT_DIR [file dirname [file normalize [info script]]]
     variable MODULE_DIR [file join $SCRIPT_DIR local_mesh_optimizer]
     variable PYTHON_ENTRY [file join $MODULE_DIR python optimizer_controller.py]
     variable WINDOW .local_mesh_optimizer
     variable ADVANCED_WINDOW .local_mesh_optimizer_advanced
+    variable generatedBatchId ""
+    variable generatedBatchOperations {}
     variable ui
     variable runtime
     array set ui {}
@@ -31,6 +33,8 @@ namespace eval ::LocalMeshOptimizer {
         optimizedElements {}
         checkedElements 0
         taskDir ""
+        currentReportDir ""
+        currentReportPath ""
         backupPath ""
         sourceModelPath ""
         lastOutputModel ""
@@ -49,6 +53,12 @@ namespace eval ::LocalMeshOptimizer {
         checkedScopeIds {}
         checkedPlanSettings ""
         planReady 0
+        performanceMetrics {}
+        progressLastMs 0
+        progressLastPercent -1.0
+        progressLastStage ""
+        logBuffer {}
+        logLastFlushMs 0
     }
     variable DEFAULTS
     array set DEFAULTS {
@@ -82,7 +92,21 @@ namespace eval ::LocalMeshOptimizer {
         AUTO_OPEN_REPORT 0
         AUTO_SAVE_MODEL 1
         PYTHON_COMMAND ""
-        HM2019_PROFILE unverified
+        EXECUTION_MODE batch
+        BATCH_MAX_OPERATIONS 200
+        ANALYSIS_WORKERS 1
+        DIRTY_EXPANSION_LAYERS 1
+        ENABLE_PRESIMULATION 1
+        ENABLE_INCREMENTAL_RECHECK 1
+        ENABLE_PERFORMANCE_STATS 1
+        DEBUG_BATCH_FILES 1
+        UI_UPDATE_INTERVAL_MS 500
+        LOG_FLUSH_LINES 200
+        ENABLE_MACRO_BATCHING 1
+        MACRO_MAX_REGIONS 200
+        MACRO_MAX_FAILURES 500
+        MACRO_MAX_ELEMENTS 10000
+        REUSE_ELEMENT_QUALITY_SESSION 1
     }
 }
 
@@ -92,6 +116,7 @@ proc ::LocalMeshOptimizer::setStatus {level message} {
     variable ui
     set ui(RESULT_TEXT) $message
     ::LocalMeshOptimizer::log $level $message
+    catch {::LocalMeshOptimizer::flushLog 1}
     catch {update idletasks}
     return 0
 }
@@ -114,9 +139,71 @@ proc ::LocalMeshOptimizer::formatDuration {seconds} {
     return [format {%02d:%02d} $minutes $secs]
 }
 
+proc ::LocalMeshOptimizer::performanceReset {} {
+    variable runtime
+    variable ui
+    if {[info exists ui(ENABLE_PERFORMANCE_STATS)] && !$ui(ENABLE_PERFORMANCE_STATS)} {
+        set runtime(performanceMetrics) ""
+        return
+    }
+    set runtime(performanceMetrics) [dict create \
+        counters [dict create operation_total 0 hm_command_calls 0 full_model_rechecks 0 local_rechecks 0 progress_writes 0 progress_suppressed 0 log_writes 0 log_flushes 0 tcl_sources 0 python_starts 0 model_saves 0 model_restores 0] \
+        timings_seconds [dict create topology_export 0.0 criteria_parse 0.0 full_model_quality 0.0 local_recheck 0.0 tcl_python_communication 0.0 hm_topology_operations 0.0 ui_refresh 0.0 log_write 0.0 model_save 0.0 model_restore 0.0]]
+}
+
+proc ::LocalMeshOptimizer::performanceIncr {name {amount 1}} {
+    variable runtime
+    variable ui
+    if {[info exists ui(ENABLE_PERFORMANCE_STATS)] && !$ui(ENABLE_PERFORMANCE_STATS)} { return }
+    if {$runtime(performanceMetrics) eq ""} { ::LocalMeshOptimizer::performanceReset }
+    set counters [dict get $runtime(performanceMetrics) counters]
+    dict incr counters $name $amount
+    dict set runtime(performanceMetrics) counters $counters
+}
+
+proc ::LocalMeshOptimizer::performanceAdd {name seconds} {
+    variable runtime
+    variable ui
+    if {[info exists ui(ENABLE_PERFORMANCE_STATS)] && !$ui(ENABLE_PERFORMANCE_STATS)} { return }
+    if {$runtime(performanceMetrics) eq ""} { ::LocalMeshOptimizer::performanceReset }
+    set current [dict get $runtime(performanceMetrics) timings_seconds $name]
+    dict set runtime(performanceMetrics) timings_seconds $name [expr {double($current) + double($seconds)}]
+}
+
+proc ::LocalMeshOptimizer::writePerformanceMetrics {} {
+    variable runtime
+    variable ui
+    catch {::LocalMeshOptimizer::flushLog 1}
+    if {[info exists ui(ENABLE_PERFORMANCE_STATS)] && !$ui(ENABLE_PERFORMANCE_STATS)} { return }
+    if {$runtime(taskDir) eq "" || $runtime(performanceMetrics) eq ""} { return }
+    set counterRows {}
+    dict for {key value} [dict get $runtime(performanceMetrics) counters] {
+        lappend counterRows "    [::LocalMeshOptimizer::jsonString $key]: $value"
+    }
+    set timingRows {}
+    dict for {key value} [dict get $runtime(performanceMetrics) timings_seconds] {
+        lappend timingRows "    [::LocalMeshOptimizer::jsonString $key]: $value"
+    }
+    set json "{\n  \"counters\": {\n[join $counterRows ,\n]\n  },\n  \"timings_seconds\": {\n[join $timingRows ,\n]\n  }\n}"
+    ::HWFlow::writeTextFile [file join $runtime(taskDir) tcl_performance_metrics.json] $json
+}
+
 proc ::LocalMeshOptimizer::optimizationProgress {percent stage detail {force 1}} {
     variable runtime
+    variable ui
     set now [clock milliseconds]
+    set interval 500
+    if {[info exists ui(UI_UPDATE_INTERVAL_MS)] && [string is integer -strict $ui(UI_UPDATE_INTERVAL_MS)]} {
+        set interval [expr {max(100, int($ui(UI_UPDATE_INTERVAL_MS)))}]
+    }
+    set terminal [expr {double($percent) >= 99.9}]
+    if {!$terminal && $runtime(progressLastMs) > 0 && ($now - $runtime(progressLastMs)) < $interval} {
+        ::LocalMeshOptimizer::performanceIncr progress_suppressed
+        return 0
+    }
+    set runtime(progressLastMs) $now
+    set runtime(progressLastPercent) $percent
+    set runtime(progressLastStage) $stage
     if {$runtime(progressStartedMs) <= 0} { set runtime(progressStartedMs) $now }
     set elapsed [expr {($now - $runtime(progressStartedMs)) / 1000.0}]
     set timing [::LocalMeshOptimizer::txt "已用 [::LocalMeshOptimizer::formatDuration $elapsed]" "Elapsed [::LocalMeshOptimizer::formatDuration $elapsed]"]
@@ -131,23 +218,57 @@ proc ::LocalMeshOptimizer::optimizationProgress {percent stage detail {force 1}}
     }
     if {$detail ne ""} { append detail "；" }
     append detail $timing
-    return [::HWFlow::progressUpdate $percent $stage $detail $force]
+    set started [clock milliseconds]
+    set result [::HWFlow::progressUpdate $percent $stage $detail $force]
+    ::LocalMeshOptimizer::performanceIncr progress_writes
+    ::LocalMeshOptimizer::performanceAdd ui_refresh [expr {([clock milliseconds] - $started) / 1000.0}]
+    return $result
 }
 
 proc ::LocalMeshOptimizer::log {level message {region "-"} {round "-"} {command "-"} {inputCount "-"} {outputCount "-"} {elapsed "-"}} {
     variable runtime
+    set logStarted [clock milliseconds]
     set timestamp [clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}]
     set line "\[$timestamp\] \[$level\] \[LocalMeshOptimizer\] region=$region round=$round command=$command input=$inputCount output=$outputCount elapsed=$elapsed $message"
-    catch {puts $line}
-    catch {::HWFlow::progressAppend $line}
-    if {$runtime(taskDir) ne "" && [file isdirectory $runtime(taskDir)]} {
-        set path [file join $runtime(taskDir) optimizer.log]
-        if {![catch {set stream [open $path a]}]} {
-            fconfigure $stream -encoding utf-8 -translation lf
-            puts $stream $line
-            close $stream
-        }
+    if {$level in {WARN ERROR}} {
+        catch {puts $line}
+        catch {::HWFlow::progressAppend $line}
     }
+    lappend runtime(logBuffer) $line
+    catch {::LocalMeshOptimizer::flushLog 0}
+    ::LocalMeshOptimizer::performanceIncr log_writes
+    ::LocalMeshOptimizer::performanceAdd log_write [expr {([clock milliseconds] - $logStarted) / 1000.0}]
+}
+
+proc ::LocalMeshOptimizer::flushLog {{force 0}} {
+    variable runtime
+    variable ui
+    if {[llength $runtime(logBuffer)] == 0} { return 0 }
+    if {$runtime(taskDir) eq "" || ![file isdirectory $runtime(taskDir)]} { return 0 }
+    set now [clock milliseconds]
+    set lineLimit 200
+    if {[info exists ui(LOG_FLUSH_LINES)] && [string is integer -strict $ui(LOG_FLUSH_LINES)]} {
+        set lineLimit [expr {max(10, int($ui(LOG_FLUSH_LINES)))}]
+    }
+    if {!$force && [llength $runtime(logBuffer)] < $lineLimit &&
+        $runtime(logLastFlushMs) > 0 && ($now - $runtime(logLastFlushMs)) < 1000} {
+        return 0
+    }
+    set path [file join $runtime(taskDir) optimizer.log]
+    set lines $runtime(logBuffer)
+    set runtime(logBuffer) {}
+    if {[catch {
+        set stream [open $path a]
+        fconfigure $stream -encoding utf-8 -translation lf
+        puts $stream [join $lines "\n"]
+        close $stream
+    } err]} {
+        set runtime(logBuffer) [concat $lines $runtime(logBuffer)]
+        return -code error $err
+    }
+    set runtime(logLastFlushMs) $now
+    ::LocalMeshOptimizer::performanceIncr log_flushes
+    return [llength $lines]
 }
 
 proc ::LocalMeshOptimizer::loadState {} {
@@ -192,7 +313,6 @@ proc ::LocalMeshOptimizer::restoreMainWindow {} {
     variable WINDOW
     if {[llength [info commands winfo]] == 0 || ![winfo exists $WINDOW]} { return }
     catch {wm deiconify $WINDOW}
-    catch {::HWFlow::keepWindowTopmost $WINDOW}
     catch {raise $WINDOW}
     catch {focus -force $WINDOW}
     catch {update idletasks}
@@ -210,15 +330,13 @@ proc ::LocalMeshOptimizer::runSelectionPanel {entityType prompt} {
     set runtime(selectionActive) 1
     catch {*clearmark $entityType 1}
 
-    # A persistent topmost Tk window can sit above HyperMesh's native mark
-    # panel and make the application appear frozen. Fully release the Tk grab,
-    # remove topmost, and withdraw the module while native picking is active.
+    # Release any widget grab and temporarily unpost the module while the
+    # HyperMesh native mark panel owns the interaction.
     if {[llength [info commands grab]] > 0} {
         catch {set grabbed [grab current]}
         if {[info exists grabbed] && $grabbed ne ""} { catch {grab release $grabbed} }
     }
     if {[winfo exists $WINDOW]} {
-        catch {wm attributes $WINDOW -topmost 0}
         catch {wm withdraw $WINDOW}
     }
     catch {update}
@@ -392,12 +510,19 @@ proc ::LocalMeshOptimizer::markScope {markId} {
 proc ::LocalMeshOptimizer::validateInputs {} {
     variable ui
     if {![file isfile $ui(CRITERIA_PATH)]} { error [::LocalMeshOptimizer::txt "criteria 文件不存在。" "Criteria file does not exist."] }
-    foreach key {ADJACENCY_LAYERS MAX_ROUNDS MAX_REGION_ELEMENTS MAX_REGION_SECONDS} {
+    foreach key {ADJACENCY_LAYERS MAX_ROUNDS MAX_REGION_ELEMENTS MAX_REGION_SECONDS BATCH_MAX_OPERATIONS ANALYSIS_WORKERS DIRTY_EXPANSION_LAYERS UI_UPDATE_INTERVAL_MS LOG_FLUSH_LINES MACRO_MAX_REGIONS MACRO_MAX_FAILURES MACRO_MAX_ELEMENTS} {
         if {![string is integer -strict $ui($key)]} { error "$key must be an integer" }
     }
     if {$ui(ADJACENCY_LAYERS) < 1 || $ui(ADJACENCY_LAYERS) > 3} { error "ADJACENCY_LAYERS must be 1..3" }
     if {$ui(MAX_ROUNDS) < 1 || $ui(MAX_ROUNDS) > 10} { error "MAX_ROUNDS must be 1..10" }
     if {$ui(MAX_REGION_ELEMENTS) < 1 || $ui(MAX_REGION_SECONDS) < 1} { error "Region limits must be positive" }
+    if {$ui(BATCH_MAX_OPERATIONS) < 1 || $ui(BATCH_MAX_OPERATIONS) > 10000} { error "BATCH_MAX_OPERATIONS must be 1..10000" }
+    if {$ui(ANALYSIS_WORKERS) < 1 || $ui(ANALYSIS_WORKERS) > 8} { error "ANALYSIS_WORKERS must be 1..8" }
+    if {$ui(DIRTY_EXPANSION_LAYERS) < 0 || $ui(DIRTY_EXPANSION_LAYERS) > 3} { error "DIRTY_EXPANSION_LAYERS must be 0..3" }
+    if {$ui(UI_UPDATE_INTERVAL_MS) < 100 || $ui(UI_UPDATE_INTERVAL_MS) > 5000} { error "UI_UPDATE_INTERVAL_MS must be 100..5000" }
+    if {$ui(LOG_FLUSH_LINES) < 10 || $ui(LOG_FLUSH_LINES) > 10000} { error "LOG_FLUSH_LINES must be 10..10000" }
+    if {$ui(MACRO_MAX_REGIONS) < 1 || $ui(MACRO_MAX_FAILURES) < 1 || $ui(MACRO_MAX_ELEMENTS) < 1} { error "Macro region limits must be positive" }
+    if {$ui(EXECUTION_MODE) ni {batch legacy}} { error "EXECUTION_MODE must be batch or legacy" }
     foreach key {FEATURE_ANGLE SKINNY_TRIANGLE_RATIO NARROW_QUAD_RATIO NARROW_TARGET_ASPECT CONTROLLED_EDGE_GROWTH} {
         if {![string is double -strict $ui($key)] || $ui($key) <= 0.0} { error "$key must be a positive number" }
     }
@@ -440,6 +565,7 @@ proc ::LocalMeshOptimizer::readCriteria {{force 0}} {
         error [::LocalMeshOptimizer::txt "HyperMesh 读取 criteria 失败：$err" "HyperMesh could not read criteria: $err"]
     }
     set elapsed [expr {([clock milliseconds] - $started) / 1000.0}]
+    ::LocalMeshOptimizer::performanceAdd criteria_parse $elapsed
     ::LocalMeshOptimizer::log INFO "criteria loaded: $path" - - *readqualitycriteria 1 1 $elapsed
     set ui(CRITERIA_STATUS) [::LocalMeshOptimizer::txt "HyperMesh 读取成功" "Read successfully by HyperMesh"]
     set runtime(criteriaLoadedPath) $path
@@ -448,7 +574,7 @@ proc ::LocalMeshOptimizer::readCriteria {{force 0}} {
     return 1
 }
 
-proc ::LocalMeshOptimizer::nativeQualityCheck {scopeIds {progressBase 15.0} {progressSpan 10.0} {progressContext ""}} {
+proc ::LocalMeshOptimizer::nativeQualityCheck {scopeIds {progressBase 15.0} {progressSpan 10.0} {progressContext ""} {checkKind local}} {
     if {[llength $scopeIds] == 0} { error "Quality check received an empty element list" }
     catch {*clearmark elems 1}
     catch {*clearmark elems 2}
@@ -482,6 +608,13 @@ proc ::LocalMeshOptimizer::nativeQualityCheck {scopeIds {progressBase 15.0} {pro
             "Quality summary ($reportedFailed) and failed mark ([llength $failedIds]) disagree; stopped to avoid a false result."]
     }
     set elapsed [expr {([clock milliseconds] - $started) / 1000.0}]
+    if {$checkKind eq "full"} {
+        ::LocalMeshOptimizer::performanceIncr full_model_rechecks
+        ::LocalMeshOptimizer::performanceAdd full_model_quality $elapsed
+    } else {
+        ::LocalMeshOptimizer::performanceIncr local_rechecks
+        ::LocalMeshOptimizer::performanceAdd local_recheck $elapsed
+    }
     ::LocalMeshOptimizer::log INFO "native quality check complete detail=$info" - - hm_getelementsqualityinfo [llength $scopeIds] [llength $failedIds] $elapsed
     return [dict create checked [llength $scopeIds] failedIds $failedIds detail $info]
 }
@@ -503,6 +636,11 @@ proc ::LocalMeshOptimizer::createTaskDir {} {
     set stamp [clock format [clock seconds] -format {%Y%m%d_%H%M%S}]
     set suffix [pid]
     set runtime(taskDir) [file normalize [file join $root temp local_mesh_optimizer "task_${stamp}_${suffix}"]]
+    set runtime(currentReportDir) ""
+    set runtime(currentReportPath) ""
+    set runtime(logBuffer) {}
+    set runtime(logLastFlushMs) 0
+    set runtime(progressLastMs) 0
     set probe [file join $runtime(taskDir) .write_test]
     ::HWFlow::writeTextFile $probe ok
     file delete -force $probe
@@ -527,6 +665,7 @@ proc ::LocalMeshOptimizer::cancelRequested {} {
 
 proc ::LocalMeshOptimizer::exportScope {scopeIds} {
     variable runtime
+    set exportStarted [clock milliseconds]
     set connectivityPath [file join $runtime(taskDir) element_connectivity.csv]
     set coordinatePath [file join $runtime(taskDir) node_coordinates.csv]
     set connectivityStream [open $connectivityPath w]
@@ -600,6 +739,7 @@ proc ::LocalMeshOptimizer::exportScope {scopeIds} {
     # validated in HM2019. Component crossing is independently blocked in Python.
     ::HWFlow::writeTextFile [file join $runtime(taskDir) protected_edges.csv] "n1,n2\n"
     ::LocalMeshOptimizer::writeIdFile [file join $runtime(taskDir) protected_nodes.txt] $runtime(userAnchorNodes)
+    ::LocalMeshOptimizer::performanceAdd topology_export [expr {([clock milliseconds] - $exportStarted) / 1000.0}]
     return [dict create elements $exportedElements nodes $exportedNodes]
 }
 
@@ -614,11 +754,16 @@ proc ::LocalMeshOptimizer::reportDir {} {
     variable SCRIPT_DIR
     variable ui
     variable runtime
-    if {[string trim $ui(REPORT_DIR)] ne ""} { return [file normalize $ui(REPORT_DIR)] }
+    if {$runtime(currentReportDir) ne ""} { return $runtime(currentReportDir) }
+    if {[string trim $ui(REPORT_DIR)] ne ""} {
+        set runtime(currentReportDir) [file normalize $ui(REPORT_DIR)]
+        return $runtime(currentReportDir)
+    }
     set model [::LocalMeshOptimizer::modelPath]
     set stamp [clock format [clock seconds] -format {%Y%m%d_%H%M%S}]
     if {$model ne ""} { set base [file dirname $model] } else { set base [file dirname [file dirname $SCRIPT_DIR]] }
-    return [file normalize [file join $base "LocalMeshOptimizer_Report_$stamp"]]
+    set runtime(currentReportDir) [file normalize [file join $base "LocalMeshOptimizer_Report_$stamp"]]
+    return $runtime(currentReportDir)
 }
 
 proc ::LocalMeshOptimizer::writeTask {scopeIds failedIds} {
@@ -626,6 +771,7 @@ proc ::LocalMeshOptimizer::writeTask {scopeIds failedIds} {
     variable runtime
     set model [::LocalMeshOptimizer::modelPath]
     set report [::LocalMeshOptimizer::reportDir]
+    set runtime(currentReportPath) [file join $report summary.html]
     set lines [list \
         "{" \
         "  \"model_path\": [::LocalMeshOptimizer::jsonString $model]," \
@@ -640,6 +786,21 @@ proc ::LocalMeshOptimizer::writeTask {scopeIds failedIds} {
         "  \"skinny_triangle_ratio\": $ui(SKINNY_TRIANGLE_RATIO)," \
         "  \"narrow_quad_ratio\": $ui(NARROW_QUAD_RATIO)," \
         "  \"narrow_target_aspect\": $ui(NARROW_TARGET_ASPECT)," \
+        "  \"execution_mode\": [::LocalMeshOptimizer::jsonString $ui(EXECUTION_MODE)]," \
+        "  \"batch_max_operations\": $ui(BATCH_MAX_OPERATIONS)," \
+        "  \"analysis_workers\": $ui(ANALYSIS_WORKERS)," \
+        "  \"dirty_expansion_layers\": $ui(DIRTY_EXPANSION_LAYERS)," \
+        "  \"enable_macro_batching\": [::LocalMeshOptimizer::jsonBool $ui(ENABLE_MACRO_BATCHING)]," \
+        "  \"macro_max_regions\": $ui(MACRO_MAX_REGIONS)," \
+        "  \"macro_max_failures\": $ui(MACRO_MAX_FAILURES)," \
+        "  \"macro_max_elements\": $ui(MACRO_MAX_ELEMENTS)," \
+        "  \"ui_update_interval_ms\": $ui(UI_UPDATE_INTERVAL_MS)," \
+        "  \"log_flush_lines\": $ui(LOG_FLUSH_LINES)," \
+        "  \"reuse_element_quality_session\": [::LocalMeshOptimizer::jsonBool $ui(REUSE_ELEMENT_QUALITY_SESSION)]," \
+        "  \"enable_presimulation\": [::LocalMeshOptimizer::jsonBool $ui(ENABLE_PRESIMULATION)]," \
+        "  \"enable_incremental_recheck\": [::LocalMeshOptimizer::jsonBool $ui(ENABLE_INCREMENTAL_RECHECK)]," \
+        "  \"enable_performance_stats\": [::LocalMeshOptimizer::jsonBool $ui(ENABLE_PERFORMANCE_STATS)]," \
+        "  \"debug_batch_files\": [::LocalMeshOptimizer::jsonBool $ui(DEBUG_BATCH_FILES)]," \
         "  \"allow_controlled_free_edge_move\": [::LocalMeshOptimizer::jsonBool $ui(ALLOW_CONTROLLED_FREE_EDGE_MOVE)]," \
         "  \"checked_elements\": [llength $scopeIds]," \
         "  \"failed_before\": [llength $runtime(failedElements)]," \
@@ -775,6 +936,7 @@ proc ::LocalMeshOptimizer::runPython {stage taskPath} {
     catch {file delete -force $statusPath $stdoutPath $stderrPath}
     set command [concat $python [list $PYTHON_ENTRY --task $taskPath --stage $stage --status-file $statusPath]]
     ::LocalMeshOptimizer::log INFO "starting Python stage=$stage" - - python 1 0
+    ::LocalMeshOptimizer::performanceIncr python_starts
     set started [clock milliseconds]
     if {[catch {set runtime(pythonPid) [exec {*}$command > $stdoutPath 2> $stderrPath &]} launchErr opts]} {
         ::LocalMeshOptimizer::log ERROR "Python background launch failed: $launchErr" - - python 1 0
@@ -810,6 +972,7 @@ proc ::LocalMeshOptimizer::runPython {stage taskPath} {
         error [::LocalMeshOptimizer::txt "Python 阶段 $stage 失败（返回码 $exitCode）。详见：$stderrPath" "Python stage $stage failed (exit $exitCode). See: $stderrPath"]
     }
     set elapsed [expr {([clock milliseconds] - $started) / 1000.0}]
+    ::LocalMeshOptimizer::performanceAdd tcl_python_communication $elapsed
     ::LocalMeshOptimizer::log INFO "Python background stage=$stage complete pid=$runtime(pythonPid)" - - python 1 1 $elapsed
     return 1
 }
@@ -822,6 +985,7 @@ proc ::LocalMeshOptimizer::checkQuality {} {
         return 0
     }
     set runtime(running) 1
+    ::LocalMeshOptimizer::performanceReset
     set runtime(planReady) 0
     set runtime(progressStartedMs) [clock milliseconds]
     set progressOpened 0
@@ -831,7 +995,7 @@ proc ::LocalMeshOptimizer::checkQuality {} {
         catch {::HWFlow::progressUpdate 5.0 [::LocalMeshOptimizer::txt "正在建立处理范围" "Building the processing scope"] "" 1}
         set scopeIds [::LocalMeshOptimizer::markScope 1]
         ::LocalMeshOptimizer::createTaskDir
-        set quality [::LocalMeshOptimizer::nativeQualityCheck $scopeIds]
+        set quality [::LocalMeshOptimizer::nativeQualityCheck $scopeIds 15.0 10.0 "" full]
         set runtime(failedElements) [dict get $quality failedIds]
         set runtime(checkedElements) [dict get $quality checked]
         set runtime(washerElements) [::LocalMeshOptimizer::washerElementsInScope $scopeIds]
@@ -852,6 +1016,7 @@ proc ::LocalMeshOptimizer::checkQuality {} {
         set runtime(checkedScopeIds) [::LocalMeshOptimizer::uniq $scopeIds]
         set runtime(checkedPlanSettings) [::LocalMeshOptimizer::planSettingsSignature]
         set runtime(planReady) 1
+        ::LocalMeshOptimizer::writePerformanceMetrics
         set plan [::LocalMeshOptimizer::planSummary]
         set ui(RESULT_TEXT) [::LocalMeshOptimizer::txt \
             "检查及优化规划完成：$runtime(checkedElements) 个单元，失败 [llength $runtime(failedElements)] 个；其中 Washer 人工处理 [llength $runtime(washerExcludedFailed)] 个；自动优化区域 [dict get $plan regions] 个，自动动作 [expr {[dict get $plan actions]-[dict get $plan manual]}] 个，其他人工复核 [dict get $plan manual] 个。任务目录：$runtime(taskDir)" \
@@ -913,18 +1078,6 @@ proc ::LocalMeshOptimizer::showOptimized {} {
         catch {hm_usermessage [::LocalMeshOptimizer::txt "已优化单元较多，已跳过逐单元编号显示。" "Many optimized elements are recorded; individual labels were skipped."]}
     }
     catch {*viewfit}
-}
-
-proc ::LocalMeshOptimizer::profileStatus {} {
-    variable ui
-    if {$ui(HM2019_PROFILE) ne "hm2019_recorded"} {
-        return [list 0 [::LocalMeshOptimizer::txt \
-            "HM2019 修改命令尚未通过 command.cmf 录制验证。为保护模型，优化被禁用；质量检查、区域划分和报告仍可使用。" \
-            "HM2019 modification commands have not been verified from command.cmf. Optimization is disabled to protect the model; checking, region building and reports remain available."]]
-    }
-    # The profile flag records operator validation; command existence is still
-    # checked at call time and any error forces a whole-task restore.
-    return [list 1 ""]
 }
 
 proc ::LocalMeshOptimizer::semicolonIds {text} {
@@ -1150,6 +1303,102 @@ proc ::LocalMeshOptimizer::readOptimizationActions {} {
     return $result
 }
 
+proc ::LocalMeshOptimizer::readBatchTasks {} {
+    variable runtime
+    set path [file join $runtime(taskDir) batch_tasks.csv]
+    set result [dict create]
+    if {![file isfile $path]} { return $result }
+    set lines [split [::HWFlow::readTextFile $path] "\n"]
+    foreach line [lrange $lines 1 end] {
+        if {[string trim $line] eq ""} { continue }
+        set fields [split $line ,]
+        if {[llength $fields] != 5} { error "Damaged batch task row: $line" }
+        set relativePath [lindex $fields 4]
+        if {[file pathtype $relativePath] eq "absolute"} {
+            set batchPath [file normalize $relativePath]
+        } else {
+            set batchPath [file normalize [file join $runtime(taskDir) $relativePath]]
+        }
+        set batch [dict create \
+            regionId [lindex $fields 0] batchId [lindex $fields 1] \
+            stage [lindex $fields 2] operationCount [lindex $fields 3] batchFile $batchPath]
+        dict lappend result [dict get $batch regionId] $batch
+    }
+    return $result
+}
+
+proc ::LocalMeshOptimizer::operationResultJson {result} {
+    set operationId [expr {[dict exists $result operationId] ? [dict get $result operationId] : ""}]
+    set status [expr {[dict exists $result status] ? [dict get $result status] : "hm_command_failed"}]
+    set message [expr {[dict exists $result message] ? [dict get $result message] : ""}]
+    # Escape literal brackets: unescaped [] inside a Tcl double-quoted string
+    # are command substitution and previously produced invalid JSON fields.
+    return "{\"operation_id\":[::LocalMeshOptimizer::jsonString $operationId],\"status\":[::LocalMeshOptimizer::jsonString $status],\"created_elements\":\[\],\"deleted_elements\":\[\],\"created_nodes\":\[\],\"deleted_nodes\":\[\],\"message\":[::LocalMeshOptimizer::jsonString $message]}"
+}
+
+proc ::LocalMeshOptimizer::writeBatchResult {batchId success operationResults dirtyNodes dirtyElements elapsed} {
+    variable runtime
+    set rows {}
+    foreach result $operationResults { lappend rows [::LocalMeshOptimizer::operationResultJson $result] }
+    set nodeJson [join [::LocalMeshOptimizer::uniq $dirtyNodes] ,]
+    set elementJson [join [::LocalMeshOptimizer::uniq $dirtyElements] ,]
+    set json "{\n  \"batch_id\": [::LocalMeshOptimizer::jsonString $batchId],\n  \"success\": [::LocalMeshOptimizer::jsonBool $success],\n  \"operations\": \[[join $rows ,]\],\n  \"dirty_nodes\": \[$nodeJson\],\n  \"dirty_elements\": \[$elementJson\],\n  \"elapsed_seconds\": $elapsed\n}"
+    set outputDir [file join $runtime(taskDir) batch_results]
+    file mkdir $outputDir
+    ::HWFlow::writeTextFile [file join $outputDir "${batchId}.json"] $json
+}
+
+proc ::LocalMeshOptimizer::runPlannedBatches {regionId round batches fallbackActions failedIds regionElements anchorIds progressBase progressSpan} {
+    variable generatedBatchId
+    variable generatedBatchOperations
+    set aggregate [dict create applied 0 topologyChangeCount 0 methods {} manual 0 touchedNodes {} dirtyElements {} operationResults {}]
+    if {[llength $batches] == 0} {
+        set manual 0
+        foreach action $fallbackActions { if {[dict get $action actionType] eq "manual_review"} { incr manual } }
+        dict set aggregate manual $manual
+        return $aggregate
+    }
+    set batchCount [llength $batches]
+    set batchIndex 0
+    foreach batch $batches {
+        incr batchIndex
+        set batchId [dict get $batch batchId]
+        set executionBatchId "${batchId}_round_[format %02d $round]"
+        set batchFile [dict get $batch batchFile]
+        if {![file isfile $batchFile]} { error "Batch file not found: $batchFile" }
+        set generatedBatchId ""
+        set generatedBatchOperations {}
+        set sourceCode [catch {uplevel #0 [list source $batchFile]} sourceErr sourceOpts]
+        if {$sourceCode} { return -options $sourceOpts $sourceErr }
+        ::LocalMeshOptimizer::performanceIncr tcl_sources
+        if {$generatedBatchId ne $batchId} { error "Batch identity mismatch: expected=$batchId actual=$generatedBatchId" }
+        if {[llength $generatedBatchOperations] != [dict get $batch operationCount]} {
+            error "Batch operation count mismatch for $batchId"
+        }
+        set batchStarted [clock milliseconds]
+        set batchBase [expr {double($progressBase) + double($progressSpan) * ($batchIndex - 1) / double($batchCount)}]
+        set batchSpan [expr {double($progressSpan) / double($batchCount)}]
+        set code [catch {
+            set result [::LocalMeshOptimizer::runPlannedActions $regionId $round $generatedBatchOperations $failedIds $regionElements $anchorIds $batchBase $batchSpan 1]
+        } err opts]
+        set elapsed [expr {([clock milliseconds] - $batchStarted) / 1000.0}]
+        if {$code} {
+            set failedResults [list [dict create operationId "" status hm_command_failed message $err]]
+            catch {::LocalMeshOptimizer::writeBatchResult $executionBatchId 0 $failedResults {} {} $elapsed}
+            return -options $opts $err
+        }
+        set dirtyElements [::LocalMeshOptimizer::dirtyElementsFromImpact [dict get $result dirtyElements] [dict get $result touchedNodes]]
+        ::LocalMeshOptimizer::writeBatchResult $executionBatchId 1 [dict get $result operationResults] [dict get $result touchedNodes] $dirtyElements $elapsed
+        foreach key {applied topologyChangeCount manual} { dict incr aggregate $key [dict get $result $key] }
+        dict set aggregate methods [::LocalMeshOptimizer::uniq [concat [dict get $aggregate methods] [dict get $result methods]]]
+        dict set aggregate touchedNodes [::LocalMeshOptimizer::uniq [concat [dict get $aggregate touchedNodes] [dict get $result touchedNodes]]]
+        dict set aggregate dirtyElements [::LocalMeshOptimizer::uniq [concat [dict get $aggregate dirtyElements] [dict get $result dirtyElements] $dirtyElements]]
+        dict set aggregate operationResults [concat [dict get $aggregate operationResults] [dict get $result operationResults]]
+        ::LocalMeshOptimizer::log INFO "batch complete operations=[dict get $batch operationCount]" $regionId $round source [dict get $batch operationCount] [dict get $result applied] $elapsed
+    }
+    return $aggregate
+}
+
 proc ::LocalMeshOptimizer::planSummary {} {
     variable runtime
     set regionCount 0
@@ -1182,6 +1431,11 @@ proc ::LocalMeshOptimizer::planSettingsSignature {} {
         PROTECT_HOLE_EDGES PROTECT_FEATURE_EDGES PROTECT_RIGID_NODES
         PROTECT_WELD_NODES PROTECT_USER_NODES NO_CROSS_COMPONENT_MOVEMENT
         PRESERVE_GEOMETRY_ASSOCIATION
+        EXECUTION_MODE BATCH_MAX_OPERATIONS ANALYSIS_WORKERS
+        DIRTY_EXPANSION_LAYERS ENABLE_PRESIMULATION ENABLE_INCREMENTAL_RECHECK
+        ENABLE_PERFORMANCE_STATS DEBUG_BATCH_FILES ENABLE_MACRO_BATCHING
+        MACRO_MAX_REGIONS MACRO_MAX_FAILURES MACRO_MAX_ELEMENTS
+        REUSE_ELEMENT_QUALITY_SESSION
     }
     set values {}
     foreach key $keys { lappend values $key $ui($key) }
@@ -1195,6 +1449,7 @@ proc ::LocalMeshOptimizer::optimizationPlanCurrent {} {
     foreach name {region_tasks.csv optimization_actions.csv failed_elements.txt task.json} {
         if {![file isfile [file join $runtime(taskDir) $name]]} { return 0 }
     }
+    if {$ui(EXECUTION_MODE) eq "batch" && ![file isfile [file join $runtime(taskDir) batch_tasks.csv]]} { return 0 }
     if {![file isfile $ui(CRITERIA_PATH)]} { return 0 }
     set criteria [file normalize $ui(CRITERIA_PATH)]
     if {$criteria ne $runtime(checkedCriteriaPath) || [file mtime $criteria] != $runtime(checkedCriteriaMtime)} { return 0 }
@@ -1224,6 +1479,58 @@ proc ::LocalMeshOptimizer::isTrueFreeEdge {nodeA nodeB} {
         }
     }
     return [expr {[llength [::LocalMeshOptimizer::uniq $shellOwners]] == 1}]
+}
+
+proc ::LocalMeshOptimizer::existingShellElements {elementIds} {
+    set result {}
+    foreach elementId [::LocalMeshOptimizer::uniq $elementIds] {
+        if {![catch {set nodes [hm_getvalue elems id=$elementId dataname=nodes]}] && [llength $nodes] in {3 4}} {
+            lappend result $elementId
+        }
+    }
+    return $result
+}
+
+proc ::LocalMeshOptimizer::existingNodeIds {nodeIds} {
+    set result {}
+    foreach nodeId [::LocalMeshOptimizer::uniq $nodeIds] {
+        if {![catch {set existing [hm_getvalue nodes id=$nodeId dataname=id]}] && $existing ne ""} {
+            lappend result $nodeId
+        }
+    }
+    return $result
+}
+
+proc ::LocalMeshOptimizer::currentShellEdgeByNodes {nodeA nodeB preferredElementId allowedElements} {
+    # Element Quality may delete the originally planned shell after the first
+    # edge collapse of a narrow quad. Resolve the surviving shell and its
+    # current local edge index from the stable endpoint pair immediately before
+    # every command instead of trusting a stale element ID/edge index.
+    if {$nodeA == $nodeB} { return {} }
+    if {[catch {set existsA [hm_getvalue nodes id=$nodeA dataname=id]}] || $existsA eq "" ||
+        [catch {set existsB [hm_getvalue nodes id=$nodeB dataname=id]}] || $existsB eq ""} {
+        return {}
+    }
+    catch {*clearmark elems 2}
+    *createmark elems 2 "by all nodes" $nodeA $nodeB
+    set candidates [lsort -integer -unique [hm_getmark elems 2]]
+    set preferredIndex [lsearch -exact $candidates $preferredElementId]
+    if {$preferredIndex >= 0} {
+        set candidates [linsert [lreplace $candidates $preferredIndex $preferredIndex] 0 $preferredElementId]
+    }
+    foreach elementId $candidates {
+        if {[llength $allowedElements] > 0 && [lsearch -exact $allowedElements $elementId] < 0} { continue }
+        if {[catch {set nodes [hm_getvalue elems id=$elementId dataname=nodes]}] || [llength $nodes] ni {3 4}} { continue }
+        set count [llength $nodes]
+        for {set index 0} {$index < $count} {incr index} {
+            set first [lindex $nodes $index]
+            set second [lindex $nodes [expr {($index + 1) % $count}]]
+            if {($first == $nodeA && $second == $nodeB) || ($first == $nodeB && $second == $nodeA)} {
+                return [list $elementId [expr {$index + 1}]]
+            }
+        }
+    }
+    return {}
 }
 
 proc ::LocalMeshOptimizer::regionNodeIds {elementIds} {
@@ -1260,6 +1567,38 @@ proc ::LocalMeshOptimizer::currentRegionElements {regionNodeIds componentIds pre
     return [::LocalMeshOptimizer::uniq $result]
 }
 
+proc ::LocalMeshOptimizer::dirtyElementsFromImpact {sourceElementIds touchedNodeIds} {
+    variable ui
+    set dirty {}
+    foreach elementId $sourceElementIds {
+        if {![catch {set nodes [hm_getvalue elems id=$elementId dataname=nodes]}] && [llength $nodes] in {3 4}} {
+            lappend dirty $elementId
+        }
+    }
+    set frontierNodes [::LocalMeshOptimizer::uniq $touchedNodeIds]
+    set layers [expr {$ui(ENABLE_INCREMENTAL_RECHECK) ? $ui(DIRTY_EXPANSION_LAYERS) : 0}]
+    for {set layer 0} {$layer <= $layers} {incr layer} {
+        set validNodes {}
+        foreach nodeId $frontierNodes {
+            if {![catch {set existing [hm_getvalue nodes id=$nodeId dataname=id]}] && $existing ne ""} { lappend validNodes $nodeId }
+        }
+        if {[llength $validNodes] == 0} { break }
+        catch {*clearmark elems 2}
+        eval *createmark elems 2 {"by node id"} $validNodes
+        set layerElements {}
+        set nextNodes {}
+        foreach elementId [hm_getmark elems 2] {
+            if {![catch {set nodes [hm_getvalue elems id=$elementId dataname=nodes]}] && [llength $nodes] in {3 4}} {
+                lappend layerElements $elementId
+                set nextNodes [concat $nextNodes $nodes]
+            }
+        }
+        set dirty [concat $dirty $layerElements]
+        set frontierNodes [::LocalMeshOptimizer::uniq $nextNodes]
+    }
+    return [::LocalMeshOptimizer::uniq $dirty]
+}
+
 proc ::LocalMeshOptimizer::targetCoordinateFromReference {nodeId referenceId targetDistance} {
     variable ui
     set point [::LocalMeshOptimizer::nodeCoordinate $nodeId]
@@ -1278,18 +1617,25 @@ proc ::LocalMeshOptimizer::targetCoordinateFromReference {nodeId referenceId tar
     return [list $x $y $z]
 }
 
-proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds regionElements anchorIds {progressBase -1.0} {progressSpan 0.0}} {
+proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds regionElements anchorIds {progressBase -1.0} {progressSpan 0.0} {batchMode 0}} {
     variable ui
     set applied 0
     set methods {}
     set manual 0
     set touchedNodes {}
+    set dirtyElements {}
+    set operationResults {}
+    set freeOperationIds {}
     set freeActionCount 0
     set topologyChangeCount 0
     array set moveX {}
     array set moveY {}
     array set moveZ {}
     array set moveCount {}
+    array set moveGroup {}
+    array set splitElements {}
+    array set splitOperationIds {}
+    set collapseActions {}
     set actionTotal [llength $actions]
     set actionIndex 0
     set progressEvery [expr {max(1, int(ceil(max(1, $actionTotal) / 20.0)))}]
@@ -1304,42 +1650,79 @@ proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds r
                 "$regionId, round $round; action $actionIndex/$actionTotal; applied=$applied; manual=$manual; type=$type"]
             catch {::LocalMeshOptimizer::optimizationProgress $actionPct [::LocalMeshOptimizer::txt "正在执行局部拓扑动作" "Applying local topology actions"] $actionDetail 1}
         }
-        if {$type eq "manual_review"} { incr manual; continue }
-        if {[lsearch -exact $failedIds $elementId] < 0} { continue }
+        set actionId [expr {[dict exists $action operationId] ? [dict get $action operationId] : [dict get $action actionId]}]
+        if {$type eq "manual_review"} {
+            incr manual
+            lappend operationResults [dict create operationId $actionId status skipped message manual_review]
+            continue
+        }
+        if {$type ne "collapse_short_edge" && [lsearch -exact $failedIds $elementId] < 0} {
+            if {[catch {hm_getvalue elems id=$elementId dataname=nodes}]} {
+                lappend operationResults [dict create operationId $actionId status entity_missing message "source element no longer exists"]
+            } else {
+                lappend operationResults [dict create operationId $actionId status skipped message "source element is no longer in failed set"]
+            }
+            continue
+        }
+        lappend dirtyElements $elementId
         if {[::LocalMeshOptimizer::cancelRequested]} { error "cancel requested" }
-        set actionId [dict get $action actionId]
         set started [clock milliseconds]
         if {![catch {set actionNodes [hm_getvalue elems id=$elementId dataname=nodes]}]} {
             set touchedNodes [concat $touchedNodes $actionNodes]
         }
         if {$type eq "split_quad"} {
             catch {*clearmark elems 1}
-            *createmark elems 1 $elementId
             set method [dict get $action splitMethod]
             if {$method ni {2 102}} { error "Invalid quad split method for $actionId: $method" }
+            if {$batchMode} {
+                lappend splitElements($method) $elementId
+                lappend splitOperationIds($method) $actionId
+                incr topologyChangeCount
+                continue
+            }
+            *createmark elems 1 $elementId
             uplevel #0 [list *splitelements $method 1]
             incr topologyChangeCount
         } elseif {$type eq "collapse_short_edge"} {
-            catch {*clearmark elems 1}
-            eval *createmark elems 1 $regionElements
-            set setupCode [catch {*elementqualitysetup 1} setupErr setupOpts]
-            if {$setupCode} { return -options $setupOpts $setupErr }
-            set actionCode [catch {uplevel #0 [list *elementqualitycollapseedge $elementId [dict get $action edgeIndex]]} actionErr actionOpts]
-            set shutdownCode [catch {*elementqualityshutdown 1} shutdownErr shutdownOpts]
-            if {$actionCode} { return -options $actionOpts $actionErr }
-            if {$shutdownCode} { return -options $shutdownOpts $shutdownErr }
-            incr topologyChangeCount
-        } elseif {$type eq "expand_free_edge"} {
-            if {!$ui(ALLOW_CONTROLLED_FREE_EDGE_MOVE) || $ui(PRESERVE_GEOMETRY_ASSOCIATION)} { incr manual; continue }
             set nodeA [dict get $action nodeA]
             set nodeB [dict get $action nodeB]
-            if {[lsearch -exact $anchorIds $nodeA] >= 0 || [lsearch -exact $anchorIds $nodeB] >= 0} { incr manual; continue }
-            if {![::LocalMeshOptimizer::isTrueFreeEdge $nodeA $nodeB]} { incr manual; continue }
+            if {[lsearch -exact $anchorIds $nodeA] >= 0 || [lsearch -exact $anchorIds $nodeB] >= 0} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "collapse edge touches protected node"]
+                continue
+            }
+            # Conflict analysis guarantees that operations in this batch have
+            # disjoint affected rings. Queue the node pairs for direct midpoint
+            # replacement. The endpoint pair is authoritative because a
+            # preceding paired-edge action may already have deleted the
+            # original narrow quad.
+            set touchedNodes [concat $touchedNodes [list $nodeA $nodeB]]
+            lappend collapseActions [list $actionId $elementId $nodeA $nodeB [dict get $action reason]]
+            continue
+        } elseif {$type eq "expand_free_edge"} {
+            if {!$ui(ALLOW_CONTROLLED_FREE_EDGE_MOVE)} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "controlled free-edge movement disabled"]
+                continue
+            }
+            set nodeA [dict get $action nodeA]
+            set nodeB [dict get $action nodeB]
+            if {[lsearch -exact $anchorIds $nodeA] >= 0 || [lsearch -exact $anchorIds $nodeB] >= 0} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "moving node is protected"]
+                continue
+            }
+            if {![::LocalMeshOptimizer::isTrueFreeEdge $nodeA $nodeB]} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "edge is no longer free"]
+                continue
+            }
             foreach pair [list [list $nodeA [dict get $action referenceA]] [list $nodeB [dict get $action referenceB]]] {
                 set nodeId [lindex $pair 0]
                 set target [::LocalMeshOptimizer::targetCoordinateFromReference $nodeId [lindex $pair 1] [dict get $action targetDistance]]
                 if {![info exists moveCount($nodeId)]} {
                     set moveX($nodeId) 0.0; set moveY($nodeId) 0.0; set moveZ($nodeId) 0.0; set moveCount($nodeId) 0
+                    set moveGroup($nodeId) [dict get $action splitMethod]
                 }
                 set moveX($nodeId) [expr {$moveX($nodeId) + double([lindex $target 0])}]
                 set moveY($nodeId) [expr {$moveY($nodeId) + double([lindex $target 1])}]
@@ -1348,25 +1731,144 @@ proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds r
             }
             set touchedNodes [concat $touchedNodes [list $nodeA $nodeB [dict get $action referenceA] [dict get $action referenceB]]]
             incr freeActionCount
+            lappend freeOperationIds $actionId
             continue
         } else {
             error "Unknown optimization action: $type"
         }
         incr applied
+        ::LocalMeshOptimizer::performanceIncr operation_total
+        ::LocalMeshOptimizer::performanceIncr hm_command_calls
+        lappend operationResults [dict create operationId $actionId status success message ""]
         lappend methods $type
         set elapsed [expr {([clock milliseconds] - $started) / 1000.0}]
+        ::LocalMeshOptimizer::performanceAdd hm_topology_operations $elapsed
         ::LocalMeshOptimizer::log INFO "planned action complete action=$actionId reason=[dict get $action reason]" $regionId $round $type 1 1 $elapsed
     }
+    if {[llength $collapseActions] > 0} {
+        # HM2019 can terminate the process when many topology-changing
+        # native Element Quality edge-collapse calls are made in a reused
+        # Quality session. The requested operation is specifically a node-pair
+        # merge, so use the stable core command directly. mode=1 replaces the
+        # first node; location=1 places the surviving node at the midpoint.
+        # Validate that the pair is still a real shell edge immediately before
+        # every command so paired quad actions remain safe after the source quad
+        # disappears.
+        set collapseStarted [clock milliseconds]
+        set collapseApplied 0
+        set allowedElements [::LocalMeshOptimizer::existingShellElements $regionElements]
+        foreach item $collapseActions {
+            lassign $item actionId elementId nodeA nodeB reason
+            set currentEdge [::LocalMeshOptimizer::currentShellEdgeByNodes $nodeA $nodeB $elementId $allowedElements]
+            if {[llength $currentEdge] != 2} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "collapse edge no longer exists"]
+                continue
+            }
+            lassign $currentEdge currentElement currentEdgeIndex
+            lappend dirtyElements $currentElement
+            # The legacy HM2019 syntax warns that connected elements can
+            # collapse. This is the intended operation, so pre-answer the
+            # native confirmation instead of blocking every batch on a modal
+            # dialog. Keep it immediately adjacent to the command so the
+            # answer cannot be consumed by an unrelated operation.
+            hm_answernext yes
+            set actionCode [catch {uplevel #0 [list *replacenodes $nodeA $nodeB 1 1]} actionErr actionOpts]
+            if {$actionCode} { return -options $actionOpts $actionErr }
+            incr applied
+            incr collapseApplied
+            incr topologyChangeCount
+            lappend operationResults [dict create operationId $actionId status success message ""]
+            lappend methods collapse_short_edge
+        }
+        ::LocalMeshOptimizer::performanceIncr operation_total $collapseApplied
+        ::LocalMeshOptimizer::performanceIncr hm_command_calls $collapseApplied
+        ::LocalMeshOptimizer::performanceAdd hm_topology_operations [expr {([clock milliseconds] - $collapseStarted) / 1000.0}]
+        ::LocalMeshOptimizer::log INFO "direct midpoint node-pair merge operations=$collapseApplied" $regionId $round *replacenodes [llength $collapseActions] $collapseApplied
+    }
+    foreach method [lsort -integer [array names splitElements]] {
+        set splitStarted [clock milliseconds]
+        catch {*clearmark elems 1}
+        eval *createmark elems 1 $splitElements($method)
+        uplevel #0 [list *splitelements $method 1]
+        set count [llength $splitElements($method)]
+        set applied [expr {$applied + $count}]
+        ::LocalMeshOptimizer::performanceIncr operation_total $count
+        ::LocalMeshOptimizer::performanceIncr hm_command_calls
+        ::LocalMeshOptimizer::performanceAdd hm_topology_operations [expr {([clock milliseconds] - $splitStarted) / 1000.0}]
+        foreach operationId $splitOperationIds($method) { lappend operationResults [dict create operationId $operationId status success message ""] }
+        lappend methods split_quad
+        ::LocalMeshOptimizer::log INFO "batched quad split method=$method operations=$count" $regionId $round *splitelements $count $count
+    }
     if {$freeActionCount > 0} {
-        foreach nodeId [array names moveCount] {
+        set moveStarted [clock milliseconds]
+        # Convert all element-level proposals into one displacement per free
+        # boundary node. Shared nodes receive the average of their neighbouring
+        # short-edge targets, which is the required direction compromise on a
+        # curved boundary. Quantized unit directions (~6 degree bins) and 15%
+        # logarithmic distance bins create straight/near-straight movement
+        # blocks. Each block is selected and translated with one native command
+        # instead of issuing one *nodemodify per node.
+        array set blockNodes {}
+        array set blockDx {}
+        array set blockDy {}
+        array set blockDz {}
+        array set blockCount {}
+        foreach nodeId [lsort -integer [array names moveCount]] {
             set count [expr {double($moveCount($nodeId))}]
-            uplevel #0 [list *nodemodify $nodeId [expr {$moveX($nodeId)/$count}] [expr {$moveY($nodeId)/$count}] [expr {$moveZ($nodeId)/$count}]]
+            set targetX [expr {$moveX($nodeId)/$count}]
+            set targetY [expr {$moveY($nodeId)/$count}]
+            set targetZ [expr {$moveZ($nodeId)/$count}]
+            set current [::LocalMeshOptimizer::nodeCoordinate $nodeId]
+            set dx [expr {$targetX - double([lindex $current 0])}]
+            set dy [expr {$targetY - double([lindex $current 1])}]
+            set dz [expr {$targetZ - double([lindex $current 2])}]
+            set distance [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
+            if {$distance <= 1.0e-12} { continue }
+            set ux [expr {$dx/$distance}]
+            set uy [expr {$dy/$distance}]
+            set uz [expr {$dz/$distance}]
+            set qx [expr {int(round($ux*10.0))}]
+            set qy [expr {int(round($uy*10.0))}]
+            set qz [expr {int(round($uz*10.0))}]
+            set qd [expr {int(round(log($distance)/log(1.15)))}]
+            set blockKey "$moveGroup($nodeId)_${qx}_${qy}_${qz}_${qd}"
+            if {![info exists blockCount($blockKey)]} {
+                set blockNodes($blockKey) {}
+                set blockDx($blockKey) 0.0
+                set blockDy($blockKey) 0.0
+                set blockDz($blockKey) 0.0
+                set blockCount($blockKey) 0
+            }
+            lappend blockNodes($blockKey) $nodeId
+            set blockDx($blockKey) [expr {$blockDx($blockKey) + $dx}]
+            set blockDy($blockKey) [expr {$blockDy($blockKey) + $dy}]
+            set blockDz($blockKey) [expr {$blockDz($blockKey) + $dz}]
+            incr blockCount($blockKey)
+        }
+        set moveBlockCount 0
+        foreach blockKey [lsort [array names blockCount]] {
+            set count [expr {double($blockCount($blockKey))}]
+            set dx [expr {$blockDx($blockKey)/$count}]
+            set dy [expr {$blockDy($blockKey)/$count}]
+            set dz [expr {$blockDz($blockKey)/$count}]
+            set distance [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
+            if {$distance <= 1.0e-12} { continue }
+            catch {*clearmark nodes 1}
+            eval *createmark nodes 1 $blockNodes($blockKey)
+            *createvector 1 [expr {$dx/$distance}] [expr {$dy/$distance}] [expr {$dz/$distance}]
+            *translatemark nodes 1 1 $distance
+            incr moveBlockCount
         }
         set applied [expr {$applied + $freeActionCount}]
+        ::LocalMeshOptimizer::performanceIncr operation_total $freeActionCount
+        ::LocalMeshOptimizer::performanceIncr hm_command_calls [expr {$moveBlockCount * 3}]
+        ::LocalMeshOptimizer::performanceAdd hm_topology_operations [expr {([clock milliseconds] - $moveStarted) / 1000.0}]
+        foreach operationId $freeOperationIds { lappend operationResults [dict create operationId $operationId status success message ""] }
         lappend methods expand_free_edge
-        ::LocalMeshOptimizer::log INFO "coordinated free-edge expansion actions=$freeActionCount nodes=[array size moveCount]" $regionId $round *nodemodify $freeActionCount [array size moveCount]
+        ::LocalMeshOptimizer::log INFO "coordinated free-edge expansion actions=$freeActionCount nodes=[array size moveCount] direction_blocks=$moveBlockCount" $regionId $round *translatemark $freeActionCount [array size moveCount]
     }
-    return [dict create applied $applied topologyChangeCount $topologyChangeCount methods [::LocalMeshOptimizer::uniq $methods] manual $manual touchedNodes [::LocalMeshOptimizer::uniq $touchedNodes]]
+    return [dict create applied $applied topologyChangeCount $topologyChangeCount methods [::LocalMeshOptimizer::uniq $methods] manual $manual touchedNodes [::LocalMeshOptimizer::uniq $touchedNodes] dirtyElements [::LocalMeshOptimizer::uniq $dirtyElements] operationResults $operationResults]
 }
 
 proc ::LocalMeshOptimizer::outputModelPath {} {
@@ -1395,6 +1897,7 @@ proc ::LocalMeshOptimizer::writeResultJson {checked before after cancelled outpu
 }
 
 proc ::LocalMeshOptimizer::saveModelSnapshot {path} {
+    set snapshotStarted [clock milliseconds]
     file mkdir [file dirname $path]
     catch {::HWFlow::progressAppend [::LocalMeshOptimizer::txt "HyperMesh 正在保存安全快照：[file tail $path]" "HyperMesh is saving a safety snapshot: [file tail $path]"]}
     catch {update idletasks}
@@ -1411,10 +1914,13 @@ proc ::LocalMeshOptimizer::saveModelSnapshot {path} {
         error [::LocalMeshOptimizer::txt "无法保存可靠模型快照：$err" "Could not save a reliable model snapshot: $err"]
     }
     if {![file isfile $path] || [file size $path] == 0} { error [::LocalMeshOptimizer::txt "模型快照命令未生成有效文件。" "The model snapshot command did not produce a valid file."] }
+    ::LocalMeshOptimizer::performanceIncr model_saves
+    ::LocalMeshOptimizer::performanceAdd model_save [expr {([clock milliseconds] - $snapshotStarted) / 1000.0}]
     return 1
 }
 
 proc ::LocalMeshOptimizer::restoreSnapshot {path} {
+    set restoreStarted [clock milliseconds]
     if {![file isfile $path]} { error [::LocalMeshOptimizer::txt "恢复快照不存在：$path" "Recovery snapshot does not exist: $path"] }
     # Reading replaces a modified database and may otherwise show a modal
     # confirmation behind the progress window.
@@ -1424,6 +1930,8 @@ proc ::LocalMeshOptimizer::restoreSnapshot {path} {
         error [::LocalMeshOptimizer::txt "恢复模型快照失败：$err" "Could not restore model snapshot: $err"]
     }
     catch {::HWFlow::refreshBrowser}
+    ::LocalMeshOptimizer::performanceIncr model_restores
+    ::LocalMeshOptimizer::performanceAdd model_restore [expr {([clock milliseconds] - $restoreStarted) / 1000.0}]
     return 1
 }
 
@@ -1491,13 +1999,15 @@ proc ::LocalMeshOptimizer::startOptimization {} {
 proc ::LocalMeshOptimizer::startOptimizationCore {} {
     variable runtime
     variable ui
-    set status [::LocalMeshOptimizer::profileStatus]
-    if {![lindex $status 0]} {
-        ::LocalMeshOptimizer::setStatus WARN [lindex $status 1]
-        return 0
-    }
     set regions [::LocalMeshOptimizer::readRegionTasks]
     set actionMap [::LocalMeshOptimizer::readOptimizationActions]
+    set batchMap [dict create]
+    if {$ui(EXECUTION_MODE) eq "batch"} {
+        set batchMap [::LocalMeshOptimizer::readBatchTasks]
+        ::LocalMeshOptimizer::log INFO "batch execution enabled planned_regions=[dict size $batchMap]"
+    } else {
+        ::LocalMeshOptimizer::log INFO "legacy per-action execution enabled"
+    }
     if {[llength $regions] == 0} {
         if {[llength $runtime(washerExcludedFailed)] > 0} {
             ::LocalMeshOptimizer::setStatus INFO [::LocalMeshOptimizer::txt "没有可自动优化区域；[llength $runtime(washerExcludedFailed)] 个 Washer 失败单元已按默认设置保留给人工处理。" "No automatically optimizable regions; [llength $runtime(washerExcludedFailed)] failed washer elements are reserved for manual work by default."]
@@ -1533,10 +2043,27 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
         set regionId [dict get $region regionId]
         set elements [dict get $region expanded]
         set components [dict get $region components]
-        set anchors [dict get $region anchors]
+        set plannedAnchors [dict get $region anchors]
+        set anchors [::LocalMeshOptimizer::existingNodeIds $plannedAnchors]
+        set missingAnchors [::LocalMeshOptimizer::listDifference $plannedAnchors $anchors]
+        set missingUserAnchors [::LocalMeshOptimizer::listIntersection $missingAnchors $runtime(userAnchorNodes)]
+        if {[llength $missingUserAnchors] > 0} {
+            set taskRolledBack 1
+            set taskRollbackReason "user-protected anchor nodes disappeared before $regionId: [lrange $missingUserAnchors 0 20]"
+            ::LocalMeshOptimizer::log ERROR $taskRollbackReason $regionId - anchor_validation [llength $plannedAnchors] [llength $missingUserAnchors]
+            break
+        }
+        if {[llength $missingAnchors] > 0} {
+            # A previously optimized neighbouring region can legitimately
+            # remove automatic boundary anchors shared by the original plans.
+            # Retain all anchors that still exist and continue with live model
+            # state; aborting the whole region leaves the next strip untouched.
+            ::LocalMeshOptimizer::log WARN "discarded stale automatic anchors before region execution: [lrange $missingAnchors 0 20]" $regionId - anchor_refresh [llength $plannedAnchors] [llength $anchors]
+        }
         set regionNodes [::LocalMeshOptimizer::regionNodeIds $elements]
-        set currentElements $elements
+        set currentElements [::LocalMeshOptimizer::existingShellElements $elements]
         if {[dict exists $actionMap $regionId]} { set actions [dict get $actionMap $regionId] } else { set actions {} }
+        if {[dict exists $batchMap $regionId]} { set regionBatches [dict get $batchMap $regionId] } else { set regionBatches {} }
         set initialFailed [llength [dict get $region failed]]
         set currentFailed $initialFailed
         set rounds 0
@@ -1545,6 +2072,7 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
         set message ""
         set methodsUsed {}
         set regionElapsed 0.0
+        set cachedQuality ""
         if {[::HWFlow::progressCancelled] || [file exists [file join $runtime(taskDir) cancel.flag]]} { set cancelled 1; break }
         set regionBase [expr {10.0 + 78.0 * ($regionIndex - 1) / double($totalRegions)}]
         set regionSpan [expr {78.0 / double($totalRegions)}]
@@ -1574,6 +2102,9 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
                 }
                 set before [dict create failedIds $plannedFailed checked [llength $currentElements] detail {}]
                 catch {::LocalMeshOptimizer::optimizationProgress [expr {$roundBase + 0.08*$roundSpan}] [::LocalMeshOptimizer::txt "复用检查阶段质量结果" "Reusing check-stage quality result"] "$roundContext；failed=[llength $plannedFailed]" 1}
+            } elseif {$ui(ENABLE_INCREMENTAL_RECHECK) && $cachedQuality ne ""} {
+                set before $cachedQuality
+                catch {::LocalMeshOptimizer::optimizationProgress [expr {$roundBase + 0.08*$roundSpan}] [::LocalMeshOptimizer::txt "复用上一轮增量质量结果" "Reusing previous incremental quality result"] "$roundContext；failed=[llength [dict get $before failedIds]]" 1}
             } elseif {[catch {set before [::LocalMeshOptimizer::nativeQualityCheck $currentElements [expr {$roundBase + 0.02*$roundSpan}] [expr {0.10*$roundSpan}] $roundContext]} qualityErr]} {
                     set status failed
                     set message "region quality check failed: $qualityErr"
@@ -1587,7 +2118,12 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
                 break
             }
             catch {::LocalMeshOptimizer::optimizationProgress [expr {$roundBase + 0.16*$roundSpan}] [::LocalMeshOptimizer::txt "正在准备保护节点和局部动作" "Preparing anchors and local actions"] "$roundContext；anchors=[llength $anchors]；actions=[llength $actions]" 1}
-            if {[catch {set actionResult [::LocalMeshOptimizer::runPlannedActions $regionId $round $actions [dict get $before failedIds] $currentElements $anchors [expr {$roundBase + 0.20*$roundSpan}] [expr {0.50*$roundSpan}]]} actionErr]} {
+            if {$ui(EXECUTION_MODE) eq "batch"} {
+                set executionCommand [list ::LocalMeshOptimizer::runPlannedBatches $regionId $round $regionBatches $actions [dict get $before failedIds] $currentElements $anchors [expr {$roundBase + 0.20*$roundSpan}] [expr {0.50*$roundSpan}]]
+            } else {
+                set executionCommand [list ::LocalMeshOptimizer::runPlannedActions $regionId $round $actions [dict get $before failedIds] $currentElements $anchors [expr {$roundBase + 0.20*$roundSpan}] [expr {0.50*$roundSpan}]]
+            }
+            if {[catch {set actionResult [uplevel #0 $executionCommand]} actionErr]} {
                 incr rollbacks
                 set taskRolledBack 1
                 set taskRollbackReason "planned topology action failed in $regionId: $actionErr"
@@ -1633,7 +2169,15 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
                 ::LocalMeshOptimizer::log ERROR $message $regionId $round planned_actions [llength $anchors] [llength $movedAnchors]
                 break
             }
-            if {[catch {set after [::LocalMeshOptimizer::nativeQualityCheck $currentElements [expr {$roundBase + 0.86*$roundSpan}] [expr {0.10*$roundSpan}] [::LocalMeshOptimizer::txt "$roundContext，修改后复检" "$roundContext, post-change recheck"]]} recheckErr]} {
+            if {$ui(ENABLE_INCREMENTAL_RECHECK)} {
+                set dirtyCoverage [::LocalMeshOptimizer::uniq [concat [dict get $actionResult dirtyElements] [::LocalMeshOptimizer::dirtyElementsFromImpact [dict get $actionResult dirtyElements] [dict get $actionResult touchedNodes]]]]
+                set recheckElements [::LocalMeshOptimizer::listIntersection $dirtyCoverage $currentElements]
+                if {[llength $recheckElements] == 0} { set recheckElements $currentElements }
+            } else {
+                set dirtyCoverage $currentElements
+                set recheckElements $currentElements
+            }
+            if {[catch {set dirtyAfter [::LocalMeshOptimizer::nativeQualityCheck $recheckElements [expr {$roundBase + 0.86*$roundSpan}] [expr {0.10*$roundSpan}] [::LocalMeshOptimizer::txt "$roundContext，修改后脏区复检" "$roundContext, post-change dirty-region recheck"]]} recheckErr]} {
                 incr rollbacks
                 set taskRolledBack 1
                 set taskRollbackReason "region recheck failed in $regionId: $recheckErr"
@@ -1641,6 +2185,14 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
                 set message "$taskRollbackReason; restoring pre-task model"
                 break
             }
+            if {$ui(ENABLE_INCREMENTAL_RECHECK)} {
+                set unchangedFailed [::LocalMeshOptimizer::listDifference [dict get $before failedIds] $dirtyCoverage]
+                set combinedFailed [::LocalMeshOptimizer::uniq [concat $unchangedFailed [dict get $dirtyAfter failedIds]]]
+                set after [dict create failedIds $combinedFailed checked [llength $currentElements] detail [dict get $dirtyAfter detail]]
+            } else {
+                set after $dirtyAfter
+            }
+            set cachedQuality $after
             set afterCount [llength [dict get $after failedIds]]
             catch {::LocalMeshOptimizer::optimizationProgress [expr {$roundBase + 0.98*$roundSpan}] [::LocalMeshOptimizer::txt "本轮复检完成" "Round recheck complete"] "$roundContext；before=$beforeCount；after=$afterCount" 1}
             set currentFailed $afterCount
@@ -1701,7 +2253,7 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
         if {[catch {
             catch {::LocalMeshOptimizer::optimizationProgress 89.0 [::LocalMeshOptimizer::txt "正在执行最终全范围质量守卫" "Running final whole-scope quality guard"] [::LocalMeshOptimizer::txt "仅复检最终模型，不重新加载 criteria" "Checking the final model without reloading criteria"] 1}
             set finalScope [::LocalMeshOptimizer::markScope 1]
-            set finalQuality [::LocalMeshOptimizer::nativeQualityCheck $finalScope 89.0 2.0 [::LocalMeshOptimizer::txt "最终全范围检查" "Final whole-scope check"]]
+            set finalQuality [::LocalMeshOptimizer::nativeQualityCheck $finalScope 89.0 2.0 [::LocalMeshOptimizer::txt "最终全范围检查" "Final whole-scope check"] full]
             set finalIds [dict get $finalQuality failedIds]
             set newFailures [::LocalMeshOptimizer::listDifference $finalIds $runtime(failedElements)]
             set newFailuresOutside [::LocalMeshOptimizer::listDifference $newFailures $runtime(optimizedElements)]
@@ -1737,10 +2289,16 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
     set topologyPartial [expr {!$taskRolledBack && !$cancelled && $finalFailed > $taskInitialFailed}]
     set taskStatus [expr {$cancelled ? "cancelled" : ($taskRolledBack ? "task_rolled_back" : ($topologyPartial ? "partial_success" : "complete"))}]
     ::LocalMeshOptimizer::writeResultJson $runtime(checkedElements) $taskInitialFailed $finalFailed $cancelled $output $elapsed $taskStatus
+    ::LocalMeshOptimizer::writePerformanceMetrics
     set taskPath [file join $runtime(taskDir) task.json]
     catch {::LocalMeshOptimizer::optimizationProgress 96.0 [::LocalMeshOptimizer::txt "正在生成报告" "Generating report"] [::LocalMeshOptimizer::txt "汇总区域结果、CSV 和 HTML" "Summarizing regions, CSV and HTML"] 1}
     set reportCode [catch {::LocalMeshOptimizer::runPython finalize $taskPath} reportErr]
+    if {!$reportCode} {
+        set runtime(currentReportPath) [file join $runtime(currentReportDir) summary.html]
+    }
+    ::LocalMeshOptimizer::writePerformanceMetrics
     if {$reportCode} { ::LocalMeshOptimizer::log ERROR "Report finalize failed: $reportErr" }
+    if {!$ui(DEBUG_BATCH_FILES)} { catch {file delete -force [file join $runtime(taskDir) batches]} }
     if {$taskRolledBack} {
         set ui(RESULT_TEXT) [::LocalMeshOptimizer::txt "优化未保留：已恢复任务前模型。原因：$taskRollbackReason；报告：[::LocalMeshOptimizer::reportDir]" "Optimization was not retained; the pre-task model was restored. Reason: $taskRollbackReason; report: [::LocalMeshOptimizer::reportDir]"]
     } elseif {$topologyPartial} {
@@ -1750,6 +2308,7 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
     }
     ::LocalMeshOptimizer::log INFO $ui(RESULT_TEXT)
     catch {::HWFlow::progressFinish $ui(RESULT_TEXT) 100.0}
+    if {!$reportCode && $ui(AUTO_OPEN_REPORT)} { after idle ::LocalMeshOptimizer::openReport }
     return [expr {!$cancelled && !$taskRolledBack}]
 }
 
@@ -1778,12 +2337,103 @@ proc ::LocalMeshOptimizer::openReportDirectory {} {
     }
 }
 
+proc ::LocalMeshOptimizer::reportPathFromTask {taskPath} {
+    if {![file isfile $taskPath]} { return "" }
+    set data [::HWFlow::readTextFile $taskPath]
+    if {![regexp {"report_dir"\s*:\s*"([^"]+)"} $data -> directory]} { return "" }
+    set candidate [file join $directory summary.html]
+    if {[file isfile $candidate]} { return [file normalize $candidate] }
+    return ""
+}
+
+proc ::LocalMeshOptimizer::latestReportPath {} {
+    variable SCRIPT_DIR
+    variable ui
+    variable runtime
+    set candidates {}
+    if {$runtime(currentReportPath) ne "" && [file isfile $runtime(currentReportPath)]} {
+        return [file normalize $runtime(currentReportPath)]
+    }
+    if {$runtime(taskDir) ne ""} {
+        set fromTask [::LocalMeshOptimizer::reportPathFromTask [file join $runtime(taskDir) task.json]]
+        if {$fromTask ne ""} { return $fromTask }
+        foreach path [glob -nocomplain -types f [file join $runtime(taskDir) LocalMeshOptimizer_Report_* summary.html]] {
+            lappend candidates $path
+        }
+        set currentLatest ""
+        set currentLatestTime -1
+        foreach path $candidates {
+            if {[file isfile $path] && [file mtime $path] > $currentLatestTime} {
+                set currentLatest [file normalize $path]
+                set currentLatestTime [file mtime $path]
+            }
+        }
+        if {$currentLatest ne ""} { return $currentLatest }
+    }
+    set root [file dirname $SCRIPT_DIR]
+    set searchRoots [list $root [file dirname $root]]
+    if {[string trim $ui(REPORT_DIR)] ne ""} { lappend searchRoots [file normalize $ui(REPORT_DIR)] }
+    foreach directory $searchRoots {
+        if {[file isfile [file join $directory summary.html]]} { lappend candidates [file join $directory summary.html] }
+        foreach path [glob -nocomplain -types f [file join $directory LocalMeshOptimizer_Report_* summary.html]] {
+            lappend candidates $path
+        }
+    }
+    set taskRoot [file join $root temp local_mesh_optimizer]
+    foreach taskPath [glob -nocomplain -types f [file join $taskRoot task_* task.json]] {
+        set fromTask [::LocalMeshOptimizer::reportPathFromTask $taskPath]
+        if {$fromTask ne ""} { lappend candidates $fromTask }
+        set taskDirectory [file dirname $taskPath]
+        foreach path [glob -nocomplain -types f [file join $taskDirectory LocalMeshOptimizer_Report_* summary.html]] {
+            lappend candidates $path
+        }
+    }
+    set latest ""
+    set latestTime -1
+    foreach path [lsort -unique $candidates] {
+        if {[file isfile $path] && [file mtime $path] > $latestTime} {
+            set latest [file normalize $path]
+            set latestTime [file mtime $path]
+        }
+    }
+    return $latest
+}
+
+proc ::LocalMeshOptimizer::openReport {} {
+    variable runtime
+    set report [::LocalMeshOptimizer::latestReportPath]
+    if {$report eq ""} {
+        ::LocalMeshOptimizer::setStatus WARN [::LocalMeshOptimizer::txt "未找到可查看的网格优化报告。请先完成一次质量检查和优化任务。" "No mesh optimization report was found. Run a quality check and optimization task first."]
+        return 0
+    }
+    set runtime(currentReportDir) [file dirname $report]
+    set runtime(currentReportPath) $report
+    if {[catch {
+        if {$::tcl_platform(platform) eq "windows"} {
+            exec rundll32.exe url.dll,FileProtocolHandler [file nativename $report] &
+        } elseif {$::tcl_platform(os) eq "Darwin"} {
+            exec open $report &
+        } else {
+            exec xdg-open $report &
+        }
+    } err]} {
+        ::LocalMeshOptimizer::setStatus ERROR [::LocalMeshOptimizer::txt "无法打开报告：$err" "Could not open report: $err"]
+        return 0
+    }
+    ::LocalMeshOptimizer::setStatus INFO [::LocalMeshOptimizer::txt "已打开报告：$report" "Opened report: $report"]
+    return 1
+}
+
 proc ::LocalMeshOptimizer::browseReportDir {} {
     variable ui
     variable runtime
     if {$runtime(running)} { return }
     set path [tk_chooseDirectory -parent .local_mesh_optimizer_advanced -title [::LocalMeshOptimizer::txt "选择报告输出目录" "Select report output directory"]]
-    if {$path ne ""} { set ui(REPORT_DIR) [file normalize $path] }
+    if {$path ne ""} {
+        set ui(REPORT_DIR) [file normalize $path]
+        set runtime(currentReportDir) ""
+        set runtime(currentReportPath) ""
+    }
 }
 
 proc ::LocalMeshOptimizer::showAdvanced {} {
@@ -1791,9 +2441,19 @@ proc ::LocalMeshOptimizer::showAdvanced {} {
     variable runtime
     if {$runtime(running)} { return }
     set w .local_mesh_optimizer_advanced
-    if {[winfo exists $w]} { raise $w; return }
+    if {[winfo exists $w]} {
+        # Remove a window left half-built by an earlier UI construction error.
+        if {![winfo exists $w.btn.close]} {
+            catch {destroy $w}
+        } else {
+            raise $w
+            focus -force $w
+            return
+        }
+    }
     ::HWFlow::createTopLevel $w
     wm title $w [::LocalMeshOptimizer::txt "局部网格优化 - 高级设置" "Local Mesh Optimizer - Advanced Settings"]
+    wm resizable $w 1 1
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
     set fields {
@@ -1804,10 +2464,24 @@ proc ::LocalMeshOptimizer::showAdvanced {} {
         {NARROW_QUAD_RATIO "细长四边形长短边比" "Narrow-quad long/short ratio"}
         {NARROW_TARGET_ASPECT "自由边外扩目标长宽比" "Free-edge expansion target aspect"}
         {CONTROLLED_EDGE_GROWTH "自由边单轮最大外扩倍数" "Maximum free-edge growth per round"}
+        {BATCH_MAX_OPERATIONS "每批最大操作数" "Maximum operations per batch"}
+        {ANALYSIS_WORKERS "Python 分析进程数（当前独立区域预留）" "Python analysis workers (reserved for independent regions)"}
+        {DIRTY_EXPANSION_LAYERS "脏区扩展层数" "Dirty-region expansion layers"}
+        {UI_UPDATE_INTERVAL_MS "界面刷新间隔（毫秒）" "UI update interval (ms)"}
+        {LOG_FLUSH_LINES "日志批量写入行数" "Buffered log flush lines"}
+        {MACRO_MAX_REGIONS "每个宏区域最多原始区域" "Source regions per macro region"}
+        {MACRO_MAX_FAILURES "每个宏区域最多失败单元" "Failed elements per macro region"}
+        {MACRO_MAX_ELEMENTS "每个宏区域最多扩展单元" "Expanded elements per macro region"}
         {PYTHON_COMMAND "Python 3 路径/命令" "Python 3 path/command"}
         {REPORT_DIR "报告输出目录（空=模型目录）" "Report directory (empty=model directory)"}
     }
     set row 0
+    labelframe $w.main.mode -text [::LocalMeshOptimizer::txt "执行模式" "Execution Mode"] -padx 8 -pady 6
+    radiobutton $w.main.mode.batch -text [::LocalMeshOptimizer::txt "批量模式（默认）" "Batch mode (default)"] -variable ::LocalMeshOptimizer::ui(EXECUTION_MODE) -value batch
+    radiobutton $w.main.mode.legacy -text [::LocalMeshOptimizer::txt "旧版逐项模式（回归对比）" "Legacy per-action mode (regression comparison)"] -variable ::LocalMeshOptimizer::ui(EXECUTION_MODE) -value legacy
+    pack $w.main.mode.batch $w.main.mode.legacy -side left -padx {0 12}
+    grid $w.main.mode -row $row -column 0 -columnspan 2 -sticky ew -pady {6 4}
+    incr row
     foreach item $fields {
         set key [lindex $item 0]
         label $w.main.l_$key -text [::LocalMeshOptimizer::txt [lindex $item 1] [lindex $item 2]] -anchor w
@@ -1823,18 +2497,22 @@ proc ::LocalMeshOptimizer::showAdvanced {} {
     checkbutton $w.main.freeedge -text [::LocalMeshOptimizer::txt "允许细长条带自由边受控外扩（保持几何关联时跳过）" "Allow controlled narrow-strip free-edge expansion (skipped when preserving geometry association)"] -variable ::LocalMeshOptimizer::ui(ALLOW_CONTROLLED_FREE_EDGE_MOVE)
     checkbutton $w.main.autosave -text [::LocalMeshOptimizer::txt "自动另存优化模型" "Automatically save optimized model"] -variable ::LocalMeshOptimizer::ui(AUTO_SAVE_MODEL)
     checkbutton $w.main.autoopen -text [::LocalMeshOptimizer::txt "自动打开报告" "Automatically open report"] -variable ::LocalMeshOptimizer::ui(AUTO_OPEN_REPORT)
+    checkbutton $w.main.presim -text [::LocalMeshOptimizer::txt "启用候选预模拟" "Enable candidate presimulation"] -variable ::LocalMeshOptimizer::ui(ENABLE_PRESIMULATION)
+    checkbutton $w.main.incremental -text [::LocalMeshOptimizer::txt "启用脏区增量复检" "Enable dirty-region incremental recheck"] -variable ::LocalMeshOptimizer::ui(ENABLE_INCREMENTAL_RECHECK)
+    checkbutton $w.main.perf -text [::LocalMeshOptimizer::txt "启用性能统计" "Enable performance statistics"] -variable ::LocalMeshOptimizer::ui(ENABLE_PERFORMANCE_STATS)
+    checkbutton $w.main.debugbatch -text [::LocalMeshOptimizer::txt "保留调试批次文件" "Keep debug batch files"] -variable ::LocalMeshOptimizer::ui(DEBUG_BATCH_FILES)
+    checkbutton $w.main.macro -text [::LocalMeshOptimizer::txt "合并互不相交的小区域（高性能）" "Merge node-disjoint small regions (high performance)"] -variable ::LocalMeshOptimizer::ui(ENABLE_MACRO_BATCHING)
+    checkbutton $w.main.eqsession -text [::LocalMeshOptimizer::txt "批内复用 Element Quality 会话" "Reuse Element Quality session within each batch"] -variable ::LocalMeshOptimizer::ui(REUSE_ELEMENT_QUALITY_SESSION)
     grid $w.main.project -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid $w.main.freeedge -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid $w.main.autosave -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid $w.main.autoopen -row $row -column 0 -columnspan 2 -sticky w; incr row
-    labelframe $w.main.verify -text [::LocalMeshOptimizer::txt "HM2019 命令验证" "HM2019 Command Validation"] -padx 8 -pady 8
-    grid $w.main.verify -row $row -column 0 -columnspan 2 -sticky ew -pady {8 0}
-    label $w.main.verify.note -text [::LocalMeshOptimizer::txt \
-        "只有按 doc/local_mesh_optimizer_hm2019_validation.md 完成 command.cmf 录制后，才可将配置值设为 hm2019_recorded。此标记不会绕过运行时 catch 和回退。" \
-        "Set the value to hm2019_recorded only after completing command.cmf recording per doc/local_mesh_optimizer_hm2019_validation.md. Runtime error handling and rollback remain mandatory."] -wraplength 560 -justify left -anchor w
-    entry $w.main.verify.profile -textvariable ::LocalMeshOptimizer::ui(HM2019_PROFILE) -width 24
-    grid $w.main.verify.note -row 0 -column 0 -columnspan 2 -sticky ew
-    grid $w.main.verify.profile -row 1 -column 0 -sticky w -pady {6 0}
+    grid $w.main.presim -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.incremental -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.perf -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.debugbatch -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.macro -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.eqsession -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid columnconfigure $w.main 1 -weight 1
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
@@ -1953,7 +2631,7 @@ proc ::LocalMeshOptimizer::showPanel {} {
     labelframe $w.main.result -text [::LocalMeshOptimizer::txt "状态" "Status"] -padx 8 -pady 8
     grid $w.main.result -row 7 -column 0 -sticky nsew -pady {0 8}
     label $w.main.result.text -textvariable ::LocalMeshOptimizer::ui(RESULT_TEXT) -anchor nw -justify left -wraplength 700
-    label $w.main.result.version -text [::LocalMeshOptimizer::txt "HyperMesh 版本：[::LocalMeshOptimizer::hmVersion]；修改命令配置：$ui(HM2019_PROFILE)" "HyperMesh version: [::LocalMeshOptimizer::hmVersion]; modification profile: $ui(HM2019_PROFILE)"] -anchor w
+    label $w.main.result.version -text [::LocalMeshOptimizer::txt "HyperMesh 版本：[::LocalMeshOptimizer::hmVersion]；模块版本：$VERSION" "HyperMesh version: [::LocalMeshOptimizer::hmVersion]; module version: $VERSION"] -anchor w
     pack $w.main.result.text -fill both -expand 1
     pack $w.main.result.version -fill x -pady {4 0}
     grid rowconfigure $w.main 7 -weight 1
@@ -1971,7 +2649,7 @@ proc ::LocalMeshOptimizer::showPanel {} {
         {failed "显示失败" "Show Failed" ::LocalMeshOptimizer::showFailed 11}
         {optimized "显示已优化" "Show Optimized" ::LocalMeshOptimizer::showOptimized 12}
         {restore "恢复优化前模型" "Restore Before" ::LocalMeshOptimizer::restoreBefore 15}
-        {report "打开报告目录" "Open Reports" ::LocalMeshOptimizer::openReportDirectory 13}
+        {report "查看报告" "View Report" ::LocalMeshOptimizer::openReport 11}
         {home "返回主页" "Back to Home" {::LocalMeshOptimizer::closeWindow; ::HWToolkit::showHome} 11}
         {close "关闭" "Close" ::LocalMeshOptimizer::closeWindow 9}
     } {

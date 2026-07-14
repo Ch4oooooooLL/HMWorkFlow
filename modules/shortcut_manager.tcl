@@ -383,7 +383,7 @@ proc ::HWShortcut::registerMainBinding {} {
     variable MAIN_SHORTCUT
     variable MAIN_ENABLED
     if {!$MAIN_ENABLED || $MAIN_SHORTCUT eq ""} { return 1 }
-    if {[catch {::HWShortcut::nativeRegister $MAIN_SHORTCUT ::HWToolkit::run} err]} {
+    if {[catch {::HWShortcut::nativeRegister $MAIN_SHORTCUT ::HWToolkit::requestShortcutHome} err]} {
         ::HWShortcut::log "native main-panel registration failed for $MAIN_SHORTCUT: $err"
         return 0
     }
@@ -412,7 +412,7 @@ proc ::HWShortcut::dispatch {shortcut} {
     variable KEY_MAP
     set shortcut [::HWShortcut::normalizeShortcut $shortcut]
     if {![info exists KEY_MAP($shortcut)]} { return }
-    ::HWToolkit::invokeModule $KEY_MAP($shortcut)
+    ::HWToolkit::requestShortcutModule $KEY_MAP($shortcut)
 }
 
 proc ::HWShortcut::mainShortcut {} {
@@ -440,9 +440,9 @@ proc ::HWShortcut::applyMainBinding {shortcut} {
     if {$previous ne "" && $previous ne $shortcut} {
         ::HWShortcut::clearNativeBinding $previous
     }
-    if {[catch {::HWShortcut::nativeRegister $shortcut ::HWToolkit::run} err]} {
+    if {[catch {::HWShortcut::nativeRegister $shortcut ::HWToolkit::requestShortcutHome} err]} {
         if {$previous ne ""} {
-            catch {::HWShortcut::nativeRegister $previous ::HWToolkit::run}
+            catch {::HWShortcut::nativeRegister $previous ::HWToolkit::requestShortcutHome}
         }
         error $err
     }

@@ -4,9 +4,13 @@
 
 面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、局部网格优化、铸件四面体网格、RBE2、螺栓连接和接触设置。
 
-局部网格优化模块的集成状态、使用步骤、HM2019 命令验证门禁和已知限制见 [README_LocalMeshOptimizer.md](README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定；未经目标 HM2019 build 验证的修改命令不会执行。
+局部网格优化模块的集成状态、使用步骤、HM2019 运行验证和已知限制见 [README_LocalMeshOptimizer.md](README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定，并保留运行时错误处理、任务快照、复检和回滚。
 
 默认界面语言为中文。需要英文界面时，将项目根目录 `config.yaml` 中的 `workflow.language` 改为 `en_US`。
+
+界面基础设施已统一迁移到 HyperWorks 2019 内置的 `hwtk 1.0`。主面板、所有模块顶层窗口和公共进度窗口通过 `modules/workflow_common.tcl` 中的统一适配层创建；在非 HyperWorks Tcl 环境中会自动回退到 Tk/ttk。第一阶段保留各模块内部的既有参数控件和业务逻辑，后续可以按模块逐步替换为 hwtk 控件。
+
+窗口不再使用永久 `-topmost`。调用 HyperMesh 原生实体选择面板时，只临时隐藏由工具箱登记的窗口，不影响同一 HyperMesh 进程中的其他 Tcl 窗口。
 
 ## 1. 快速启动
 
@@ -29,6 +33,8 @@ Connection
 主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。每个模块行右侧会显示当前快捷键；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
 
 快捷键会直接调用模块的 `proc` 执行入口，不会打开 HMWorkFlow 主界面，也不会打开模块的 `more` 配置界面。
+
+快捷键采用抢占式窗口切换：按下主面板或模块快捷键时，工具会先保存当前面板状态并销毁本项目已经打开的窗口，待旧窗口的 `tkwait` 调用退出后再创建目标窗口。因此窗口即使位于 HyperMesh 后台，也不需要手动关闭。公共进度任务仍在执行时不会强制销毁任务窗口，以避免中断模型修改；应先等待任务完成或请求取消。
 
 ### 1.1 快捷键持久化
 
@@ -212,6 +218,7 @@ SEAM_T2.0
 - 材料后缀来自 `config/materials.txt` 中的 `key`。
 - Material Assignment 会识别材料库中已有 key，并替换组件名中已有的材料后缀。
 - Midsurface Extraction 优先读取源组件名中的 `_Tx`，无法读取时会尝试从中面拓扑或体积/面积测量厚度。
+- Midsurface Extraction 与 Mesh Seam Weld 共用厚度标记规则；中面输出中的 `_Tx` 可直接被网格焊缝读取并生成 `SEAM_Tx`。
 - Seam Surface Creation 输出 `SEAM_Tx`，其中 `x` 优先取相邻组件名中较薄的厚度。
 
 ## 6. 模块功能和用法
@@ -271,7 +278,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 1. 在主面板运行 `Midsurface Extraction`。
 2. 点击 `选择/重选组件`，选择需要抽中面的几何 component。
-3. 检查抽取方法、阶梯对齐步数、中面位置、R/T 比、厚度格式等参数。
+3. 检查抽取方法、阶梯对齐步数、中面位置、R/T 比等参数。
 4. 点击 `开始抽取`。
 
 输出：

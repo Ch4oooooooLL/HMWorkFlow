@@ -6,7 +6,7 @@
 
 | 检查点 | 原风险 | 处理结果 |
 | --- | --- | --- |
-| HyperMesh 原生选择面板 | 工具箱 Tk 窗口永久置顶，可能遮住原生 modal 面板，看起来像卡死 | 新增公共 `::HWFlow::nativeMarkPanel`：释放 grab、临时取消置顶并隐藏已映射工具窗口，结束/异常后恢复 |
+| HyperMesh 原生选择面板 | 工具箱窗口可能遮住原生 modal 面板，看起来像卡死 | hwtk 窗口不再永久置顶；公共 `::HWFlow::nativeMarkPanel` 释放 grab，只临时隐藏已登记的工具箱窗口，并在结束/异常后恢复 |
 | 工具箱其他选择入口 | 多个模块直接调用 `*createmarkpanel`，存在同类风险 | 全仓库 Tcl 入口统一改用公共包装；底层仅保留一个经过保护的直接调用 |
 | Python 调用 | Tcl 同步 `exec` 会停止 Tk 事件处理；`python.exe` 会显示控制台 | Windows 强制映射到 `pythonw.exe`，后台启动并重定向日志；通过原子完成状态文件回收结果 |
 | Python 等待 | 忙等或阻塞等待会冻结进度窗口 | 使用短周期 `after`/`vwait`，等待期间持续读取 `progress.json` 并处理 UI 事件 |

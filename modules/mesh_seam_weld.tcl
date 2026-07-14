@@ -718,19 +718,17 @@ proc ::MeshSeamWeld::componentNames {compIds} {
 }
 
 proc ::MeshSeamWeld::thicknessFromComponentName {name} {
-    if {[regexp -nocase {(^|_)T([0-9]+(\.[0-9]+)?)(_|$)} $name -> _ thicknessText]} {
-        if {[string is double -strict $thicknessText] && $thicknessText > 0} {
-            return [expr {double($thicknessText)}]
-        }
+    if {[llength [info commands ::HWFlow::thicknessFromComponentName]] > 0} {
+        return [::HWFlow::thicknessFromComponentName $name]
     }
     return ""
 }
 
 proc ::MeshSeamWeld::formatThickness {thickness} {
-    set text [format "%.6g" $thickness]
-    regsub {\.0+$} $text "" text
-    regsub {(\.[0-9]*?)0+$} $text {\1} text
-    return $text
+    if {[llength [info commands ::HWFlow::formatThicknessToken]] > 0} {
+        return [::HWFlow::formatThicknessToken $thickness]
+    }
+    return [format "%.6g" $thickness]
 }
 
 proc ::MeshSeamWeld::seamComponentForRelatedComps {relatedCompIds} {

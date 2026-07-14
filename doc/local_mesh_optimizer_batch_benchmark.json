@@ -1,0 +1,21 @@
+{
+  "synthetic_elements": 2000,
+  "batch_size": 200,
+  "timings_seconds": {
+    "mesh_state_build": 0.0100938,
+    "operation_adaptation": 0.023287400000000007,
+    "presimulation_conflict_batching": 0.1387914,
+    "total_python_batch_planning": 0.1721726
+  },
+  "counts": {
+    "legacy_split_hm_command_calls": 2000,
+    "projected_batch_split_hm_command_calls": 10,
+    "generated_batches": 10,
+    "deduplicated_operations": 0,
+    "conflict_edges": 0
+  },
+  "notes": [
+    "The mesh contains disjoint operations assigned to one synthetic region to isolate batch packing overhead.",
+    "No HyperMesh wall time is measured by this offline benchmark."
+  ]
+}

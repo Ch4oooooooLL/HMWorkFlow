@@ -83,13 +83,13 @@ modules/local_mesh_optimizer/
 
 `modules/workflow_common.tcl` 已提供：
 
-- `::HWFlow::createTopLevel`：创建顶层窗口并保持置顶；
+- `::HWFlow::createTopLevel`：通过 hwtk/Tk 适配层创建并登记顶层窗口，不使用永久置顶；
 - `::HWFlow::uiFont`：`header/title/heading/module/small/fixed` 字体角色；
 - `::HWFlow::txt`：中英文切换；
 - `::HWFlow::bindAutoWrap`：描述文字自动换行；
 - `::HWFlow::backToHome`：返回主界面。
 
-主界面按钮宽度、字体和布局由 `hw_toolkit_core.tcl` 统一生成。新模块的独立窗口应沿用现有 `labelframe/frame/grid/pack`、按钮宽度和 `uiFont`，不引入额外 GUI 库。
+主界面按钮宽度、字体和布局由 `hw_toolkit_core.tcl` 统一生成。界面基础设施现以 HyperWorks 2019 内置 `hwtk 1.0` 为首选后端并保留 Tk/ttk 回退；新模块不得建立独立 GUI 后端或复制窗口生命周期逻辑。
 
 ### 3.2 配置持久化
 
