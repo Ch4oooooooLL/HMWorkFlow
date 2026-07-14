@@ -30,3 +30,12 @@ Thumbs.db
 *~
 *.bak
 *.tmp
+__pycache__/
+*.pyc
+*.pyo
+
+# Local Mesh Optimizer runtime artifacts (models and reports are user data)
+temp/local_mesh_optimizer/
+LocalMeshOptimizer_Report_*/
+!examples/LocalMeshOptimizer_Report_Example/
+!examples/LocalMeshOptimizer_Report_Example/**

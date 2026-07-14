@@ -301,7 +301,7 @@ proc ::SeamSurf::selectOne {entityType prompt} {
     variable ui
 
     catch {*clearmark $entityType 1}
-    *createmarkpanel $entityType 1 $prompt
+    ::HWFlow::nativeMarkPanel $entityType 1 $prompt
     set ids {}
     catch {set ids [hm_getmark $entityType 1]}
     catch {*clearmark $entityType 1}

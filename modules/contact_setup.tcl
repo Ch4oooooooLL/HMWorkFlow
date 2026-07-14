@@ -224,7 +224,7 @@ proc ::ContactSetup::pickComponents {} {
     variable ui
 
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "请选择两个需要创建接触的 component" "Select two components for contact creation"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "请选择两个需要创建接触的 component" "Select two components for contact creation"]
     set comps [hm_getmark comps 1]
     if {[llength $comps] != 2} {
         set ui(selectedComps) ""
@@ -1134,7 +1134,7 @@ proc ::ContactSetup::trimContact {} {
     set totalB 0
     while {1} {
         catch {*clearmark elems 1}
-        *createmarkpanel elems 1 [::HWFlow::txt \
+        ::HWFlow::nativeMarkPanel elems 1 [::HWFlow::txt \
             "选择要从 contact surface 中移除的单元；取消选择退出连续修改" \
             "Select elements to remove from contact surfaces; cancel to exit continuous trim"]
         set selected {}

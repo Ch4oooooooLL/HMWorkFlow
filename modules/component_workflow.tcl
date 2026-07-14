@@ -291,7 +291,7 @@ proc ::CompWorkflow::saveMaterialEditor {} {
 proc ::CompWorkflow::pickClassifyComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择需要分类的组件" "Select components to classify"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择需要分类的组件" "Select components to classify"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     set ui(classifyComps) $comps
@@ -307,7 +307,7 @@ proc ::CompWorkflow::pickClassifyComponents {} {
 proc ::CompWorkflow::pickMaterialComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择需要分配材料标识的已分类组件" "Select classified components for material assignment"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择需要分配材料标识的已分类组件" "Select classified components for material assignment"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     set ui(materialComps) $comps

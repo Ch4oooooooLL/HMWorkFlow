@@ -13,12 +13,12 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.6"
+    variable VERSION "0.10"
 
     variable cfg
     array set cfg {
         output_component       MESH_SEAM_WELD
-        weld_mesh_size         15
+        weld_mesh_size         8
         patch_expand_layers    2
         imprint_remain         3
         imprint_remesh_mode    2
@@ -45,11 +45,13 @@ namespace eval ::MeshSeamWeld {
     variable elemComponentCache
     variable nodeFreeEdgeNeighborsCache
     variable nodeXYZCache
+    variable freeEdgePrimedComponents
     array set elemNodesCache {}
     array set nodeElemsCache {}
     array set elemComponentCache {}
     array set nodeFreeEdgeNeighborsCache {}
     array set nodeXYZCache {}
+    array set freeEdgePrimedComponents {}
 }
 
 proc ::MeshSeamWeld::stateKeys {} {
@@ -139,7 +141,6 @@ proc ::MeshSeamWeld::showPanel {} {
         {imprint_angle "imprint angle 参数" "Imprint angle option"}
         {mesh_face_shape "焊缝面 shape_type" "Weld face shape_type"}
         {mesh_elem_type "焊缝面 elem_type，2 为混合" "Weld face elem_type, 2 = mixed"}
-        {mesh_cross_size "横向边参数" "Cross edge parameter"}
     }
     set row 0
     foreach item $fields {
@@ -152,8 +153,8 @@ proc ::MeshSeamWeld::showPanel {} {
     }
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "执行时先在 HyperMesh 面板选择焊缝源 node path，再选择目标 component。随后调用 imprint_nodelist 完成目标局部重绘，并用 ruled surface + automesh 生成焊缝网格。" \
-        "When running, select the source node path first, then target components. The tool then uses imprint_nodelist for local target remesh and creates the weld mesh with ruled surface + automesh."]
+        "连续节点按开放 node path 处理；彼此不连续的节点分别作为闭合边界种子，并共用一个目标 component。imprint 后会校正目标路径方向，再按焊缝网格尺寸生成多层连接带。" \
+        "Continuous nodes form an open node path. Disconnected nodes are closed-boundary seeds sharing one target component. After imprint, target-path orientation is aligned and a multilayer strip is meshed at the weld mesh size."]
     grid $w.main.note -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -254,7 +255,7 @@ proc ::MeshSeamWeld::runSettings {} {
 proc ::MeshSeamWeld::resetRunCaches {} {
     foreach arrayName {
         elemNodesCache nodeElemsCache elemComponentCache
-        nodeFreeEdgeNeighborsCache nodeXYZCache
+        nodeFreeEdgeNeighborsCache nodeXYZCache freeEdgePrimedComponents
     } {
         upvar #0 ::MeshSeamWeld::$arrayName cache
         catch {array unset cache}
@@ -289,15 +290,17 @@ proc ::MeshSeamWeld::clearTransientSelections {} {
 
 proc ::MeshSeamWeld::pickNodes {} {
     ::MeshSeamWeld::clearNodeSelection
-    set prompt [::HWFlow::txt "选择焊缝源 node path" "Select weld source node path"]
-    # The dedicated panel is documented to open directly in the "by path"
-    # collector.  Keep the generic list panel only as a compatibility fallback
-    # for an older/custom HyperMesh installation where this command is absent.
-    if {[catch {*createlistbypathpanel nodes 1 $prompt} pathErr]} {
-        if {[catch {*createlistpanel nodes 1 $prompt} listErr]} {
+    set prompt [::HWFlow::txt "按路径顺序选择焊缝源节点" "Select weld source nodes in path order"]
+    # The by-path collector repeatedly expands and processes adjacent elements
+    # after every click.  On large models that blocks the UI even when only one
+    # node is wanted.  A regular list preserves pick order without doing that
+    # interactive element traversal; retain by-path only as a compatibility
+    # fallback for installations where the regular list panel is unavailable.
+    if {[catch {*createlistpanel nodes 1 $prompt} listErr]} {
+        if {[catch {*createlistbypathpanel nodes 1 $prompt} pathErr]} {
             error [::HWFlow::txt \
-                "无法打开 node path 选择面板：$pathErr；备用面板错误：$listErr" \
-                "Could not open the node path selection panel: $pathErr; fallback error: $listErr"]
+                "无法打开节点列表选择面板：$listErr；备用 path 面板错误：$pathErr" \
+                "Could not open the node list selection panel: $listErr; fallback path panel error: $pathErr"]
         }
     }
     set nodes {}
@@ -311,7 +314,7 @@ proc ::MeshSeamWeld::pickNodes {} {
 
 proc ::MeshSeamWeld::pickComponents {} {
     ::MeshSeamWeld::clearComponentSelection
-    *createmarkpanel comps 1 [::HWFlow::txt "选择要投影到的目标网格组件" "Select target mesh components for projection"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择要投影到的目标网格组件" "Select target mesh components for projection"]
     set comps {}
     catch {set comps [hm_getmark comps 1]}
     ::MeshSeamWeld::clearComponentSelection
@@ -354,22 +357,27 @@ proc ::MeshSeamWeld::elemNodes {elemId} {
 }
 
 proc ::MeshSeamWeld::componentsHaveElements {compIds} {
+    set allCountsAvailable 1
     foreach compId $compIds {
-        if {[llength [info commands ::HWFlow::getCompEntityIds]] > 0} {
-            set elems [::HWFlow::getCompEntityIds $compId elems elems]
-        } else {
-            set elems {}
-            catch {*clearmark elems 2}
-            if {![catch {*createmark elems 2 "by comp id" $compId}]} {
-                catch {set elems [hm_getmark elems 2]}
+        set countAvailable 0
+        foreach dn {elements-count elementcount numelems} {
+            if {![catch {set count [hm_getvalue comps id=$compId dataname=$dn]}] &&
+                [string is integer -strict $count]} {
+                set countAvailable 1
+                if {$count > 0} {
+                    return 1
+                }
+                break
             }
-            catch {*clearmark elems 2}
         }
-        if {[llength $elems] > 0} {
-            return 1
+        if {!$countAvailable} {
+            set allCountsAvailable 0
         }
     }
-    return 0
+    # Older HyperMesh versions do not expose a cheap component element count.
+    # Let imprint validate those models instead of selecting every target
+    # element here and then processing the same elements again during imprint.
+    return [expr {!$allCountsAvailable}]
 }
 
 proc ::MeshSeamWeld::elemComponentId {elemId} {
@@ -426,6 +434,106 @@ proc ::MeshSeamWeld::nodeElementIds {nodeId} {
     return {}
 }
 
+proc ::MeshSeamWeld::adjacentElementsForNodes {nodeIds} {
+    set nodeIds [::MeshSeamWeld::uniq $nodeIds]
+    if {[llength $nodeIds] == 0} {
+        return {}
+    }
+
+    catch {*clearmark elems 2}
+    set marked 0
+    # Query all nodes in one operation.  The old per-node fallback caused
+    # HyperMesh to rebuild the element selection repeatedly.
+    foreach command {hm_createmark *createmark} {
+        if {![catch {eval $command elems 2 [list "by node id"] $nodeIds}]} {
+            set marked 1
+            break
+        }
+    }
+    set elems {}
+    if {$marked} {
+        catch {set elems [hm_getmark elems 2]}
+    }
+    catch {*clearmark elems 2}
+    return [::MeshSeamWeld::uniq $elems]
+}
+
+proc ::MeshSeamWeld::cacheNodeElementIncidence {elemIds {onlyNodeIds {}}} {
+    variable nodeElemsCache
+
+    array set wanted {}
+    foreach nodeId $onlyNodeIds {
+        set wanted($nodeId) 1
+        set nodeElemsCache($nodeId) {}
+    }
+    set filter [expr {[llength $onlyNodeIds] > 0}]
+
+    foreach elemId [::MeshSeamWeld::uniq $elemIds] {
+        foreach nodeId [::MeshSeamWeld::elemNodes $elemId] {
+            if {$filter && ![info exists wanted($nodeId)]} {
+                continue
+            }
+            if {![info exists nodeElemsCache($nodeId)]} {
+                set nodeElemsCache($nodeId) {}
+            }
+            lappend nodeElemsCache($nodeId) $elemId
+        }
+    }
+}
+
+proc ::MeshSeamWeld::primeSelectedNodeElements {nodeIds} {
+    variable nodeElemsCache
+    set missing {}
+    foreach nodeId [::MeshSeamWeld::uniq $nodeIds] {
+        if {![info exists nodeElemsCache($nodeId)]} {
+            lappend missing $nodeId
+        }
+    }
+    if {[llength $missing] == 0} {
+        return {}
+    }
+    set elemIds [::MeshSeamWeld::adjacentElementsForNodes $missing]
+    ::MeshSeamWeld::cacheNodeElementIncidence $elemIds $missing
+    return $elemIds
+}
+
+proc ::MeshSeamWeld::primeFreeEdgeComponent {seedNode} {
+    variable freeEdgePrimedComponents
+    set seedElems [::MeshSeamWeld::primeSelectedNodeElements [list $seedNode]]
+    if {[llength $seedElems] == 0} {
+        set seedElems [::MeshSeamWeld::nodeElementIds $seedNode]
+    }
+    set compIds {}
+    foreach elemId $seedElems {
+        set compId [::MeshSeamWeld::elemComponentId $elemId]
+        if {$compId ne ""} {
+            lappend compIds $compId
+        }
+    }
+
+    set componentElems {}
+    foreach compId [::MeshSeamWeld::uniq $compIds] {
+        if {[info exists freeEdgePrimedComponents($compId)]} {
+            continue
+        }
+        if {[llength [info commands ::HWFlow::getCompEntityIds]] > 0} {
+            set elems [::HWFlow::getCompEntityIds $compId elems elems]
+        } else {
+            set elems {}
+            catch {*clearmark elems 2}
+            if {![catch {*createmark elems 2 "by comp id" $compId}]} {
+                catch {set elems [hm_getmark elems 2]}
+            }
+            catch {*clearmark elems 2}
+        }
+        set componentElems [concat $componentElems $elems]
+        set freeEdgePrimedComponents($compId) 1
+    }
+    if {[llength $componentElems] > 0} {
+        ::MeshSeamWeld::cacheNodeElementIncidence $componentElems
+    }
+}
+
 proc ::MeshSeamWeld::elementContainsEdge {elemId a b} {
     set nodes [::MeshSeamWeld::elemNodes $elemId]
     set count [llength $nodes]
@@ -440,6 +548,31 @@ proc ::MeshSeamWeld::elementContainsEdge {elemId a b} {
         }
     }
     return 0
+}
+
+proc ::MeshSeamWeld::nodesShareElementEdge {a b} {
+    ::MeshSeamWeld::primeSelectedNodeElements [list $a $b]
+    foreach elemId [::MeshSeamWeld::nodeElementIds $a] {
+        if {[lsearch -exact [::MeshSeamWeld::nodeElementIds $b] $elemId] >= 0 &&
+            [::MeshSeamWeld::elementContainsEdge $elemId $a $b]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+proc ::MeshSeamWeld::selectedNodesFormContinuousPath {nodeIds} {
+    if {[llength $nodeIds] < 2} {
+        return 0
+    }
+    ::MeshSeamWeld::primeSelectedNodeElements $nodeIds
+    for {set i 1} {$i < [llength $nodeIds]} {incr i} {
+        if {![::MeshSeamWeld::nodesShareElementEdge \
+            [lindex $nodeIds [expr {$i - 1}]] [lindex $nodeIds $i]]} {
+            return 0
+        }
+    }
+    return 1
 }
 
 proc ::MeshSeamWeld::freeEdgeNeighbors {nodeId} {
@@ -543,7 +676,24 @@ proc ::MeshSeamWeld::closedFreeEdgeLoopFromNode {seedNode} {
     return $loop
 }
 
+proc ::MeshSeamWeld::closedFreeEdgeLoopsFromSeeds {seedNodes} {
+    set loops {}
+    array set seenLoops {}
+    foreach seedNode $seedNodes {
+        ::MeshSeamWeld::primeFreeEdgeComponent $seedNode
+        set loop [::MeshSeamWeld::closedFreeEdgeLoopFromNode $seedNode]
+        set signature [join [lsort -integer $loop] ,]
+        if {[info exists seenLoops($signature)]} {
+            continue
+        }
+        set seenLoops($signature) 1
+        lappend loops $loop
+    }
+    return $loops
+}
+
 proc ::MeshSeamWeld::componentIdsFromNodes {nodeIds} {
+    ::MeshSeamWeld::primeSelectedNodeElements $nodeIds
     set out {}
     foreach nodeId $nodeIds {
         foreach elemId [::MeshSeamWeld::nodeElementIds $nodeId] {
@@ -678,6 +828,155 @@ proc ::MeshSeamWeld::dist2 {a b} {
     return [::MeshSeamWeld::dot $d $d]
 }
 
+proc ::MeshSeamWeld::distanceBetweenNodes {a b} {
+    return [expr {sqrt([::MeshSeamWeld::dist2 \
+        [::MeshSeamWeld::nodeXYZ $a] [::MeshSeamWeld::nodeXYZ $b]])}]
+}
+
+proc ::MeshSeamWeld::nodePathLength {nodeIds {closedLoop 0}} {
+    set count [llength $nodeIds]
+    if {$count < 2} {
+        return 0.0
+    }
+    set length 0.0
+    for {set i 1} {$i < $count} {incr i} {
+        set length [expr {$length + [::MeshSeamWeld::distanceBetweenNodes \
+            [lindex $nodeIds [expr {$i - 1}]] [lindex $nodeIds $i]]}]
+    }
+    if {$closedLoop} {
+        set length [expr {$length + [::MeshSeamWeld::distanceBetweenNodes \
+            [lindex $nodeIds end] [lindex $nodeIds 0]]}]
+    }
+    return $length
+}
+
+proc ::MeshSeamWeld::meshDensityForLength {length meshSize {minimum 1}} {
+    if {$minimum < 1} {
+        set minimum 1
+    }
+    set density [expr {int(ceil(double($length) / double($meshSize)))}]
+    if {$density < $minimum} {
+        set density $minimum
+    }
+    return $density
+}
+
+proc ::MeshSeamWeld::shortestMeshBoundaryPath {elemIds startNode endNode} {
+    # Build the free-boundary graph of only the newly created weld elements.
+    # The short path between a source/target endpoint pair is the transverse
+    # automesh edge, while the alternative travels around the other three
+    # sides of the open strip.
+    array set edgeCount {}
+    array set edgeEnds {}
+    foreach elemId $elemIds {
+        set nodes [::MeshSeamWeld::elemNodes $elemId]
+        set count [llength $nodes]
+        if {$count < 3} {
+            continue
+        }
+        for {set i 0} {$i < $count} {incr i} {
+            set a [lindex $nodes $i]
+            set b [lindex $nodes [expr {($i + 1) % $count}]]
+            if {$a == $b} {
+                continue
+            }
+            if {$a < $b} {
+                set key "$a,$b"
+            } else {
+                set key "$b,$a"
+            }
+            if {![info exists edgeCount($key)]} {
+                set edgeCount($key) 0
+                set edgeEnds($key) [list $a $b]
+            }
+            incr edgeCount($key)
+        }
+    }
+
+    array set neighbors {}
+    foreach key [array names edgeCount] {
+        if {$edgeCount($key) != 1} {
+            continue
+        }
+        foreach {a b} $edgeEnds($key) break
+        lappend neighbors($a) $b
+        lappend neighbors($b) $a
+    }
+    if {![info exists neighbors($startNode)] || ![info exists neighbors($endNode)]} {
+        error [::HWFlow::txt \
+            "无法在焊缝网格边界上定位封口端点。" \
+            "Could not locate closure endpoints on the weld mesh boundary."]
+    }
+
+    set queue [list $startNode]
+    set head 0
+    array set visited [list $startNode 1]
+    array set parent {}
+    while {$head < [llength $queue]} {
+        set current [lindex $queue $head]
+        incr head
+        if {$current == $endNode} {
+            break
+        }
+        foreach next $neighbors($current) {
+            if {[info exists visited($next)]} {
+                continue
+            }
+            set visited($next) 1
+            set parent($next) $current
+            lappend queue $next
+        }
+    }
+    if {![info exists visited($endNode)]} {
+        error [::HWFlow::txt \
+            "焊缝横向边界不连续，无法创建闭环封口。" \
+            "The transverse weld boundary is discontinuous; closure cannot be created."]
+    }
+
+    set path [list $endNode]
+    set current $endNode
+    while {$current != $startNode} {
+        set current $parent($current)
+        set path [linsert $path 0 $current]
+    }
+    return $path
+}
+
+proc ::MeshSeamWeld::createClosedStripElements {elemIds sourceNodes targetNodes expectedDensity} {
+    set startCross [::MeshSeamWeld::shortestMeshBoundaryPath $elemIds \
+        [lindex $sourceNodes 0] [lindex $targetNodes 0]]
+    set endCross [::MeshSeamWeld::shortestMeshBoundaryPath $elemIds \
+        [lindex $sourceNodes end] [lindex $targetNodes end]]
+    set startDensity [expr {[llength $startCross] - 1}]
+    set endDensity [expr {[llength $endCross] - 1}]
+    if {$startDensity != $expectedDensity || $endDensity != $expectedDensity} {
+        error [::HWFlow::txt \
+            "闭环首尾横向网格层数异常（期望 $expectedDensity 层，首端 $startDensity 层，末端 $endDensity 层）。" \
+            "Unexpected closure density (expected $expectedDensity, start $startDensity, end $endDensity)."]
+    }
+
+    set created {}
+    for {set i 0} {$i < [llength $startCross] - 1} {incr i} {
+        set quadNodes [list \
+            [lindex $endCross $i] [lindex $startCross $i] \
+            [lindex $startCross [expr {$i + 1}]] [lindex $endCross [expr {$i + 1}]]]
+        if {[catch {
+            eval *createlist nodes 1 $quadNodes
+            *createelement 104 1 1 1
+        } err]} {
+            error [::HWFlow::txt \
+                "创建闭环封口第 [expr {$i + 1}] 层单元失败：$err" \
+                "Failed to create closure element layer [expr {$i + 1}]: $err"]
+        }
+        set elemId ""
+        catch {set elemId [hm_latestentityid elems]}
+        if {$elemId ne "" && $elemId != 0} {
+            lappend created $elemId
+        }
+    }
+    return $created
+}
+
 proc ::MeshSeamWeld::entityIdsCreatedAfter {entityType beforeId} {
     if {$beforeId eq ""} {
         error [::HWFlow::txt \
@@ -806,6 +1105,73 @@ proc ::MeshSeamWeld::targetPathNodesAfterImprint {sourceNodes imprintNodes} {
     return [::MeshSeamWeld::matchTargetPathNodes $sourceNodes $imprintNodes]
 }
 
+proc ::MeshSeamWeld::pathPairingCost {sourceNodes targetNodes} {
+    if {[llength $sourceNodes] != [llength $targetNodes]} {
+        return Inf
+    }
+    set cost 0.0
+    foreach sourceNode $sourceNodes targetNode $targetNodes {
+        set cost [expr {$cost + [::MeshSeamWeld::dist2 \
+            [::MeshSeamWeld::nodeXYZ $sourceNode] \
+            [::MeshSeamWeld::nodeXYZ $targetNode]]}]
+    }
+    return $cost
+}
+
+proc ::MeshSeamWeld::rotateList {items offset} {
+    set count [llength $items]
+    if {$count == 0} {
+        return {}
+    }
+    set offset [expr {(($offset % $count) + $count) % $count}]
+    if {$offset == 0} {
+        return $items
+    }
+    return [concat [lrange $items $offset end] [lrange $items 0 [expr {$offset - 1}]]]
+}
+
+proc ::MeshSeamWeld::alignTargetPathNodes {sourceNodes targetNodes {closedLoop 0}} {
+    if {[llength $sourceNodes] != [llength $targetNodes]} {
+        error [::HWFlow::txt "源 node path 与目标 node path 数量不一致。" "Source and target node path counts do not match."]
+    }
+    if {[llength $sourceNodes] < 2} {
+        return $targetNodes
+    }
+
+    if {!$closedLoop} {
+        set reversed [lreverse $targetNodes]
+        if {[::MeshSeamWeld::pathPairingCost $sourceNodes $reversed] <
+            [::MeshSeamWeld::pathPairingCost $sourceNodes $targetNodes]} {
+            return $reversed
+        }
+        return $targetNodes
+    }
+
+    # imprint may return a closed path with either direction and any start
+    # node.  Anchor both orientations at the target node closest to the first
+    # source node, then retain whichever complete pairing has the lower cost.
+    set firstPoint [::MeshSeamWeld::nodeXYZ [lindex $sourceNodes 0]]
+    set bestIndex 0
+    set bestD2 ""
+    for {set i 0} {$i < [llength $targetNodes]} {incr i} {
+        set d2 [::MeshSeamWeld::dist2 $firstPoint \
+            [::MeshSeamWeld::nodeXYZ [lindex $targetNodes $i]]]
+        if {$bestD2 eq "" || $d2 < $bestD2} {
+            set bestD2 $d2
+            set bestIndex $i
+        }
+    }
+    set forward [::MeshSeamWeld::rotateList $targetNodes $bestIndex]
+    set reverseBase [lreverse $targetNodes]
+    set reverseIndex [lsearch -exact $reverseBase [lindex $forward 0]]
+    set reversed [::MeshSeamWeld::rotateList $reverseBase $reverseIndex]
+    if {[::MeshSeamWeld::pathPairingCost $sourceNodes $reversed] <
+        [::MeshSeamWeld::pathPairingCost $sourceNodes $forward]} {
+        return $reversed
+    }
+    return $forward
+}
+
 proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes outputCompName {closedLoop 0}} {
     variable cfg
 
@@ -817,6 +1183,23 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
         set outputCompName $cfg(output_component)
     }
     ::MeshSeamWeld::ensureOutputComponent $outputCompName 11
+
+    set sourceLength [::MeshSeamWeld::nodePathLength $sourceNodes $closedLoop]
+    set targetLength [::MeshSeamWeld::nodePathLength $targetNodes $closedLoop]
+    set pathLength [expr {max($sourceLength, $targetLength)}]
+    set pathMinimum [expr {$closedLoop ? [llength $sourceNodes] : [llength $sourceNodes] - 1}]
+    set pathMinimum [expr {max($pathMinimum, $cfg(mesh_path_param))}]
+    set pathDensity [::MeshSeamWeld::meshDensityForLength \
+        $pathLength $cfg(weld_mesh_size) $pathMinimum]
+    set crossStartLength [::MeshSeamWeld::distanceBetweenNodes \
+        [lindex $sourceNodes 0] [lindex $targetNodes 0]]
+    set crossEndLength [::MeshSeamWeld::distanceBetweenNodes \
+        [lindex $sourceNodes end] [lindex $targetNodes end]]
+    set crossStartDensity [::MeshSeamWeld::meshDensityForLength \
+        $crossStartLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
+    set crossEndDensity [::MeshSeamWeld::meshDensityForLength \
+        $crossEndLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
+    set crossDensity [expr {max($crossStartDensity, $crossEndDensity)}]
 
     set beforeElem ""
     catch {set beforeElem [hm_latestentityid elems]}
@@ -832,15 +1215,22 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
         *startnotehistorystate {Create ruled surface and mesh}
         set historyStarted 1
 
+        # Keep the ruled surface open.  HyperMesh ignores a repeated first
+        # node in these lists, so relying on it for closure leaves exactly one
+        # longitudinal cell missing.  The transverse end-node chains are read
+        # from the accepted mesh and explicitly connected below.
         eval *createlist nodes 1 $sourceNodes
         eval *createlist nodes 2 $targetNodes
         *linearsurfacebetweennodes 1 2 1
 
         *set_meshfaceparams 0 $cfg(mesh_face_shape) $cfg(mesh_elem_type) 0 0 $cfg(mesh_smooth_method) $cfg(mesh_smooth_tol) $cfg(mesh_size_control) $cfg(mesh_skew_control)
-        *set_meshedgeparams 0 $cfg(mesh_path_param) $cfg(weld_mesh_size) 0 0 0 0 0 0 0
-        *set_meshedgeparams 1 $cfg(mesh_cross_param) $cfg(mesh_cross_size) 0 0 0 0 0 0 0
-        *set_meshedgeparams 2 $cfg(mesh_path_param) $cfg(weld_mesh_size) 0 0 0 0 0 0 0
-        *set_meshedgeparams 3 $cfg(mesh_cross_param) $cfg(mesh_cross_size) 0 0 0 0 0 0 0
+        # Signature: edge_index, element density, algorithm type, then bias
+        # and chordal controls.  Density is derived from physical edge length;
+        # passing mesh size directly here used to force a single cross layer.
+        *set_meshedgeparams 0 $pathDensity 1 0 0 0 0 0 0
+        *set_meshedgeparams 1 $crossDensity 1 0 0 0 0 0 0
+        *set_meshedgeparams 2 $pathDensity 1 0 0 0 0 0 0
+        *set_meshedgeparams 3 $crossDensity 1 0 0 0 0 0 0
         *automesh 0 1 2
         *storemeshtodatabase 0
     } err]
@@ -855,24 +1245,17 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
     }
 
     catch {*ameshclearsurface}
+    set openStripElems [::MeshSeamWeld::entityIdsCreatedAfter elems $beforeElem]
     if {$closedLoop} {
-        # A ruled node-list surface is open at its two list ends.  Closing the
-        # imprint alone therefore leaves one weld cell missing.  Create the
-        # final quad explicitly after accepting the automesh, using the same
-        # ordered source/target end pairs as the rest of the strip.
-        set closureNodes [list \
-            [lindex $sourceNodes end] [lindex $sourceNodes 0] \
-            [lindex $targetNodes 0] [lindex $targetNodes end]]
-        if {[catch {
-            eval *createlist nodes 1 $closureNodes
-            *createelement 104 1 1 1
-        } closureErr]} {
+        set closureCode [catch {
+            ::MeshSeamWeld::createClosedStripElements \
+                $openStripElems $sourceNodes $targetNodes $crossDensity
+        } closureErr]
+        if {$closureCode} {
             if {$historyStarted} {
                 catch {*endnotehistorystate {Create ruled surface and mesh}}
             }
-            error [::HWFlow::txt \
-                "闭环焊缝封口单元创建失败：$closureErr" \
-                "Failed to create the closed-loop weld closure element: $closureErr"]
+            error $closureErr
         }
     }
     if {$historyStarted} {
@@ -883,33 +1266,62 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
     return $elemIds
 }
 
+proc ::MeshSeamWeld::processWeldPath {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1}} {
+    set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
+    set relatedCompIds [::MeshSeamWeld::uniq [concat $sourceCompIds $targetComps]]
+    set seamCompName [::MeshSeamWeld::seamComponentForRelatedComps $relatedCompIds]
+
+    set basePct [expr {10.0 + 80.0 * ($pathIndex - 1) / double($pathTotal)}]
+    set spanPct [expr {80.0 / double($pathTotal)}]
+    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate $basePct \
+            [::HWFlow::txt "正在执行闭环 imprint" "Imprinting closed weld loop"] \
+            [::HWFlow::txt "闭合边界 $pathIndex/$pathTotal，源节点：[llength $sourceNodes]" "Closed boundary $pathIndex/$pathTotal; source nodes: [llength $sourceNodes]"] 1}
+    }
+
+    set beforeNode ""
+    catch {set beforeNode [hm_latestentityid nodes]}
+    ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $closedLoop
+
+    set targetNodes [::MeshSeamWeld::targetNodesFromImprintList $sourceNodes $beforeNode]
+    set imprintNodes $targetNodes
+    if {[llength $targetNodes] == 0} {
+        set imprintNodes [::MeshSeamWeld::entityIdsCreatedAfter nodes $beforeNode]
+        set targetNodes [::MeshSeamWeld::targetPathNodesAfterImprint $sourceNodes $imprintNodes]
+    }
+    set targetNodes [::MeshSeamWeld::alignTargetPathNodes $sourceNodes $targetNodes $closedLoop]
+
+    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
+        catch {::HWFlow::progressUpdate [expr {$basePct + 0.55 * $spanPct}] \
+            [::HWFlow::txt "正在创建多层焊缝网格" "Creating multilayer weld mesh"] \
+            [::HWFlow::txt "闭合边界 $pathIndex/$pathTotal，网格尺寸：$::MeshSeamWeld::cfg(weld_mesh_size)" "Closed boundary $pathIndex/$pathTotal; mesh size: $::MeshSeamWeld::cfg(weld_mesh_size)"] 1}
+    }
+    set weldElems [::MeshSeamWeld::createRuledMeshBetweenNodePaths \
+        $sourceNodes $targetNodes $seamCompName $closedLoop]
+    if {[llength $weldElems] == 0} {
+        error [::HWFlow::txt "automesh 未生成焊缝单元。" "automesh did not create weld elements."]
+    }
+    return [list \
+        sourceNodes $sourceNodes sourceCompIds $sourceCompIds \
+        seamCompName $seamCompName imprintNodes $imprintNodes \
+        targetNodes $targetNodes weldElems $weldElems]
+}
+
 proc ::MeshSeamWeld::runAction {} {
     variable cfg
     ::MeshSeamWeld::loadState
     ::MeshSeamWeld::resetRunCaches
     ::MeshSeamWeld::clearTransientSelections
 
-    set sourceNodes [::MeshSeamWeld::pickNodes]
-    if {[llength $sourceNodes] == 0} {
+    set selectedNodes [::MeshSeamWeld::pickNodes]
+    if {[llength $selectedNodes] == 0} {
         return
     }
-    set sourceSelectionMode "node path"
-    set closedSourceLoop 0
-    if {[llength $sourceNodes] == 1} {
-        set seedNode [lindex $sourceNodes 0]
-        set code [catch {
-            set sourceNodes [::MeshSeamWeld::closedFreeEdgeLoopFromNode $seedNode]
-        } err]
-        if {$code} {
-            tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $err
-            return
-        }
-        set sourceSelectionMode "single-node closed free-edge loop"
-        set closedSourceLoop 1
-        ::MeshSeamWeld::msg [::HWFlow::txt \
-            "单节点 $seedNode 已扩展为闭合自由边环，节点数：[llength $sourceNodes]。" \
-            "Single node $seedNode expanded to a closed free-edge loop with [llength $sourceNodes] nodes."]
-    }
+
+    set closedSeedMode [expr {[llength $selectedNodes] == 1 ||
+        ![::MeshSeamWeld::selectedNodesFormContinuousPath $selectedNodes]}]
+    set sourceSelectionMode [expr {$closedSeedMode ?
+        "closed free-edge seed nodes" : "open node path"}]
 
     set targetComps [::MeshSeamWeld::pickComponents]
     if {[llength $targetComps] == 0} {
@@ -919,41 +1331,72 @@ proc ::MeshSeamWeld::runAction {} {
         tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "目标组件中没有可用网格单元。" "Target components contain no usable mesh elements."]
         return
     }
+    if {$closedSeedMode && [llength $targetComps] != 1} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt \
+            "闭合边界批量任务只能选择一个目标组件，所有闭合边界将投影到同一组件。" \
+            "A closed-boundary batch must use exactly one target component; every loop is projected to that component."]
+        return
+    }
+
+    set progressOpened 0
+    if {$closedSeedMode && [llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "网格焊缝命令流" "Mesh Seam Weld Command Stream"] \
+            [::HWFlow::txt "正在准备闭合边界任务..." "Preparing closed-boundary jobs..."] 0]
+    }
 
     set code [catch {
-        set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
-        set relatedCompIds [::MeshSeamWeld::uniq [concat $sourceCompIds $targetComps]]
-        set seamCompName [::MeshSeamWeld::seamComponentForRelatedComps $relatedCompIds]
-        set beforeNode ""
-        catch {set beforeNode [hm_latestentityid nodes]}
-        ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $closedSourceLoop
-
-        # In supported HyperMesh versions imprint returns the ordered target
-        # path through list 2.  Reading that list bypasses a slow scan of every
-        # node ID created since the operation.  Preserve the old ID-scan plus
-        # coordinate matching as a safe fallback for installations where list 2
-        # is not populated by imprint.
-        set targetNodes [::MeshSeamWeld::targetNodesFromImprintList $sourceNodes $beforeNode]
-        set imprintNodes $targetNodes
-        if {[llength $targetNodes] == 0} {
-            set imprintNodes [::MeshSeamWeld::entityIdsCreatedAfter nodes $beforeNode]
-            set targetNodes [::MeshSeamWeld::targetPathNodesAfterImprint $sourceNodes $imprintNodes]
+        if {$closedSeedMode} {
+            set sourcePaths [::MeshSeamWeld::closedFreeEdgeLoopsFromSeeds $selectedNodes]
+            if {[llength $sourcePaths] == 0} {
+                error [::HWFlow::txt "没有识别到有效闭合自由边。" "No valid closed free-edge loop was found."]
+            }
+        } else {
+            set sourcePaths [list $selectedNodes]
         }
-        set weldElems [::MeshSeamWeld::createRuledMeshBetweenNodePaths $sourceNodes $targetNodes $seamCompName $closedSourceLoop]
-        if {[llength $weldElems] == 0} {
-            error [::HWFlow::txt "automesh 未生成焊缝单元。" "automesh did not create weld elements."]
+
+        set allSourceNodes {}
+        set allSourceCompIds {}
+        set allSeamCompNames {}
+        set allImprintNodes {}
+        set allTargetNodes {}
+        set allWeldElems {}
+        set pathTotal [llength $sourcePaths]
+        set pathIndex 0
+        foreach sourceNodes $sourcePaths {
+            incr pathIndex
+            set result [::MeshSeamWeld::processWeldPath $sourceNodes $targetComps \
+                $closedSeedMode $progressOpened $pathIndex $pathTotal]
+            foreach {key value} $result {
+                switch -- $key {
+                    sourceNodes { set allSourceNodes [concat $allSourceNodes $value] }
+                    sourceCompIds { set allSourceCompIds [concat $allSourceCompIds $value] }
+                    seamCompName { lappend allSeamCompNames $value }
+                    imprintNodes { set allImprintNodes [concat $allImprintNodes $value] }
+                    targetNodes { set allTargetNodes [concat $allTargetNodes $value] }
+                    weldElems { set allWeldElems [concat $allWeldElems $value] }
+                }
+            }
         }
     } err]
 
     if {$code} {
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "网格焊缝命令流失败。" "Mesh seam weld command stream failed."] 100.0}
+        }
         tk_messageBox -icon error -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $err
         return
     }
 
     catch {::HWFlow::refreshBrowser}
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "网格焊缝命令流已完成。" "Mesh seam weld command stream finished."] 100.0}
+    }
+    set sourceCompIds [::MeshSeamWeld::uniq $allSourceCompIds]
+    set seamCompNames [::MeshSeamWeld::uniq $allSeamCompNames]
     set msg [::HWFlow::txt \
-        "网格焊缝完成。\n源选择模式：$sourceSelectionMode\n源节点：[llength $sourceNodes]\n源组件：[llength $sourceCompIds]\n目标组件：[llength $targetComps]\n焊缝组件：$seamCompName\n焊缝网格尺寸：$cfg(weld_mesh_size)\nimprint 目标路径节点：[llength $imprintNodes]\n目标路径节点：[llength $targetNodes]\n新建焊缝单元：[llength $weldElems]" \
-        "Mesh seam weld finished.\nSource selection mode: $sourceSelectionMode\nSource nodes: [llength $sourceNodes]\nSource components: [llength $sourceCompIds]\nTarget components: [llength $targetComps]\nWeld component: $seamCompName\nWeld mesh size: $cfg(weld_mesh_size)\nImprint target path nodes: [llength $imprintNodes]\nTarget path nodes: [llength $targetNodes]\nNew weld elements: [llength $weldElems]"]
+        "网格焊缝完成。\n源选择模式：$sourceSelectionMode\n闭合边界/路径数：[llength $sourcePaths]\n源节点：[llength $allSourceNodes]\n源组件：[llength $sourceCompIds]\n目标组件：[llength $targetComps]\n焊缝组件：[join $seamCompNames {, }]\n焊缝网格尺寸：$cfg(weld_mesh_size)\nimprint 目标路径节点：[llength $allImprintNodes]\n目标路径节点：[llength $allTargetNodes]\n新建焊缝单元：[llength $allWeldElems]" \
+        "Mesh seam weld finished.\nSource selection mode: $sourceSelectionMode\nClosed boundaries/paths: [llength $sourcePaths]\nSource nodes: [llength $allSourceNodes]\nSource components: [llength $sourceCompIds]\nTarget components: [llength $targetComps]\nWeld components: [join $seamCompNames {, }]\nWeld mesh size: $cfg(weld_mesh_size)\nImprint target path nodes: [llength $allImprintNodes]\nTarget path nodes: [llength $allTargetNodes]\nNew weld elements: [llength $allWeldElems]"]
     tk_messageBox -icon info -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $msg
 }
 

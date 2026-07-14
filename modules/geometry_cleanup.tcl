@@ -389,7 +389,7 @@ proc ::GeomCleanup::clearWorkingMarks {} {
 
 proc ::GeomCleanup::selectedSurface {} {
     catch {*clearmark surfs 1}
-    *createmarkpanel surfs 1 [::HWFlow::txt "选择一个待清理面，中键执行；取消选择退出连续清洗" "Select one face and middle-click to execute; cancel to exit continuous cleanup"]
+    ::HWFlow::nativeMarkPanel surfs 1 [::HWFlow::txt "选择一个待清理面，中键执行；取消选择退出连续清洗" "Select one face and middle-click to execute; cancel to exit continuous cleanup"]
     set ids [hm_getmark surfs 1]
     catch {*clearmark surfs 1}
     if {[llength $ids] == 0} {

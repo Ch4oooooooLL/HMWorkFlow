@@ -335,7 +335,7 @@ proc ::RB2W::showPanel {{settingsOnly 0}} {
 proc ::RB2W::pickComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择用于创建垫圈孔 RIGIDS 的壳单元组件" "Select shell component(s) for washer-hole RIGIDS creation"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择用于创建垫圈孔 RIGIDS 的壳单元组件" "Select shell component(s) for washer-hole RIGIDS creation"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     if {[llength $comps] == 0} {

@@ -294,7 +294,7 @@ proc ::BatchMeshWasher::splitNumberList {text} {
 proc ::BatchMeshWasher::pickComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择钣金中面/壳网格组件" "Select sheet-metal midsurface/shell components"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择钣金中面/壳网格组件" "Select sheet-metal midsurface/shell components"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     set ui(selectedComps) [::BatchMeshWasher::uniq $comps]

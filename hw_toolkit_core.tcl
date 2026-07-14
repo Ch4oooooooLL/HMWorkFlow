@@ -90,6 +90,15 @@ namespace eval ::HWToolkit {
             proc     "::MeshSeamWeld::runAction"
             settings_proc "::MeshSeamWeld::runSettings"
         }
+        local_mesh_optimizer {
+            group    "Mesh"
+            label_zh "局部网格优化"
+            label_en "Local Mesh Optimizer"
+            desc_zh  "根据 criteria 文件，仅对不合格网格区域进行增量优化。"
+            desc_en  "Use criteria to incrementally optimize failed mesh regions only."
+            proc     "::LocalMeshOptimizer::runAction"
+            settings_proc "::LocalMeshOptimizer::runSettings"
+        }
         shell_washer_hole_rbe2 {
             group    "Connector"
             label_zh "壳孔 RIGIDS"
@@ -287,6 +296,7 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::SeamSurf::savePanelState}
     catch {::GeomCleanup::savePanelState}
     catch {::ContactSetup::savePanelState}
+    catch {::LocalMeshOptimizer::savePanelState}
 
     catch {set ::MidSurf::ui(ok) 0}
     catch {set ::AutoHoleRBE2::ui(ok) 0}
@@ -317,6 +327,8 @@ proc ::HWToolkit::clearExistingWindows {} {
         .mesh_seam_weld
         .hwshortcut_manager
         .hwshortcut_capture
+        .local_mesh_optimizer
+        .local_mesh_optimizer_advanced
         .seam_thickness
         .seam_pick
     } {

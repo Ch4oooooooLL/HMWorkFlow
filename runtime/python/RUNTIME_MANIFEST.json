@@ -1,0 +1,15 @@
+{
+  "distribution": "CPython embeddable package",
+  "version": "3.8.10",
+  "platform": "windows-x64",
+  "executable": "windows-x64/python.exe",
+  "windowless_executable": "windows-x64/pythonw.exe",
+  "standard_library": "windows-x64/python38.zip",
+  "third_party_packages": [],
+  "source_url": "https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip",
+  "source_md5": "3acb1d7d9bde5a79f840167b166bb633",
+  "source_sha256": "abbe314e9b41603dde0a823b76f5bbbe17b3de3e5ac4ef06b759da5466711271",
+  "python_exe_sha256": "5275c42f7359fa2c7ec473be3240e57d5ce5b9301a26bd2e98e89bb9db074581",
+  "pythonw_exe_sha256": "a409db42d754c311d19921fbbf458c1abadc5142330cdb7f3c6016e97fa1116d",
+  "standard_library_sha256": "613e0d63b54ed995273eda446eb09e51066e486f1e72b94f1c338a83dca3a021"
+}

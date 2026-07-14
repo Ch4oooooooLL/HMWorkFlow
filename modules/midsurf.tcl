@@ -177,7 +177,7 @@ proc ::MidSurf::pickComponents {} {
     variable ui
 
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择需要抽取中面的几何组件" "Select geometry components for midsurface extraction"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择需要抽取中面的几何组件" "Select geometry components for midsurface extraction"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
 

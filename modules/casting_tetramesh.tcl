@@ -310,7 +310,7 @@ proc ::CastingTetMesh::selectedElements {compIds} {
 proc ::CastingTetMesh::pickComponents {} {
     variable ui
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择铸件几何组件（含 solid/surf）" "Select casting geometry components (solid/surf)"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择铸件几何组件（含 solid/surf）" "Select casting geometry components (solid/surf)"]
     set comps [hm_getmark comps 1]
     catch {*clearmark comps 1}
     set ui(selectedComps) [::CastingTetMesh::uniq $comps]

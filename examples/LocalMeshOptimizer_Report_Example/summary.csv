@@ -1,0 +1,2 @@
+model_name,criteria_file,scope_type,checked_elements,failed_before,failed_after,failure_rate_before,failure_rate_after,regions_total,regions_success,regions_partial,regions_failed,elapsed_seconds,cancelled,output_model
+example_model.hm,example.criteria,components,1200,18,5,1.5,0.4166666667,3,1,1,1,42.8,False,example_model_local_optimized_20260714_142100.hm

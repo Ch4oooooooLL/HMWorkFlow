@@ -1,5 +1,5 @@
 # ============================================================================
-# RBE2_BoltConnector_v0_5.tcl
+# RBE2_BoltConnector_v0_6.tcl
 # HyperMesh 2019 oriented Tcl/Tk script
 #
 # Function:
@@ -36,7 +36,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::RB2Bolt {
-    variable VERSION "0.5"
+    variable VERSION "0.6"
 
     variable P
     array set P {
@@ -61,6 +61,7 @@ namespace eval ::RB2Bolt {
     variable compIdCache
     variable propIdCache
     variable matIdCache
+    variable beamSectIdCache
     variable currentOutputComp ""
     variable bulkCreateMode 0
     variable bulkTouchedOutputComps {}
@@ -284,12 +285,15 @@ proc ::RB2Bolt::showDialog {{settingsOnly 0}} {
         button $w.btn.unused -text [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -width 22 -command {set ::RB2Bolt::done 2}
         button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command {set ::RB2Bolt::done 1}
     } else {
+        button $w.btn.assignall -text [::HWFlow::txt "赋予所有螺栓属性" "Assign All Bolt Properties"] -width 22 -command {set ::RB2Bolt::done 3}
         button $w.btn.ok -text [::HWFlow::txt "保存设置" "Save Settings"] -width 12 -command {set ::RB2Bolt::done 1}
     }
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
     if {!$settingsOnly} {
         pack $w.btn.unused -side right -padx 4
+    } else {
+        pack $w.btn.assignall -side right -padx 4
     }
 
     bind $w <Return> {set ::RB2Bolt::done 1}
@@ -313,6 +317,7 @@ proc ::RB2Bolt::showDialog {{settingsOnly 0}} {
     }
     if {$done == 1} {return "create"}
     if {$done == 2} {return "findUnusedShellRBE2"}
+    if {$done == 3} {return "assignAllBoltProperties"}
     return ""
 }
 
@@ -542,7 +547,7 @@ proc ::RB2Bolt::selectedElementIds {} {
     ::RB2Bolt::clearSelectionMarks
 
     if {$P(selectMode) eq "components"} {
-        *createmarkpanel comps 1 [::HWFlow::txt "选择包含 RBE2 单元的组件" "Select components containing RBE2 elements"]
+        ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择包含 RBE2 单元的组件" "Select components containing RBE2 elements"]
         set comps [hm_getmark comps 1]
         catch {*clearmark comps 1}
         catch {*clearmark components 1}
@@ -552,7 +557,7 @@ proc ::RB2Bolt::selectedElementIds {} {
         }
         set out [::RB2Bolt::rbe2CandidatesFromComponents $comps]
     } else {
-        *createmarkpanel elems 1 [::HWFlow::txt "选择 RBE2 单元" "Select RBE2 elements"]
+        ::HWFlow::nativeMarkPanel elems 1 [::HWFlow::txt "选择 RBE2 单元" "Select RBE2 elements"]
         set selected [hm_getmark elems 1]
         set out [::RB2Bolt::rbe2CandidatesFromSelectedElements $selected]
     }
@@ -579,7 +584,7 @@ proc ::RB2Bolt::selectedElementIdsInteractive {} {
 
     set opened 0
     foreach entityType {entities entity} {
-        if {![catch {*createmarkpanel $entityType 1 $prompt}]} {
+        if {![catch {::HWFlow::nativeMarkPanel $entityType 1 $prompt}]} {
             set opened 1
             break
         }
@@ -938,8 +943,10 @@ proc ::RB2Bolt::ensureBoltMaterial {} {
     variable P
     variable matIdCache
 
-    set matName [safeName "${P(compPrefix)}_BOLT_STEEL_MAT1"]
-    if {$matName eq ""} {set matName BOLT_STEEL_MAT1}
+    # All generated and repaired bolt properties intentionally share one
+    # material.  Keep the name stable so repeated runs never create a second
+    # diameter- or prefix-specific steel material.
+    set matName steel
     if {[info exists matIdCache($matName)] && $matIdCache($matName) ne ""} {
         return [list $matName $matIdCache($matName)]
     }
@@ -1010,12 +1017,70 @@ proc ::RB2Bolt::circleSection {dia} {
     return [list $area $inertia $inertia 0.0 $torsion 0.0]
 }
 
-proc ::RB2Bolt::ensureBoltProperty {elemType dia} {
+proc ::RB2Bolt::beamSectionName {dia} {
+    variable P
+    if {[string is double -strict $dia] && $dia > 0} {
+        set d [format "%.12g" $dia]
+    } else {
+        set d UNKNOWN
+    }
+    return [safeName [format "%s_D%s_CIRCLE" $P(compPrefix) $d]]
+}
+
+proc ::RB2Bolt::ensureCircleBeamSection {dia} {
+    variable beamSectIdCache
+
+    if {![string is double -strict $dia] || $dia <= 0} {
+        error [::HWFlow::txt "无法为无效直径 $dia 创建梁截面。" "Cannot create a beam section for invalid diameter $dia."]
+    }
+    set name [::RB2Bolt::beamSectionName $dia]
+    if {[info exists beamSectIdCache($name)] && $beamSectIdCache($name) ne ""} {
+        return [list $name $beamSectIdCache($name)]
+    }
+
+    set id [::RB2Bolt::entityIdByName {beamsects beamsections} $name]
+    if {$id eq ""} {
+        set before ""
+        catch {set before [hm_latestentityid beamsects]}
+        set createCode [catch {*beamsectioncreatestandardsolver 11 0 HMCirc 0} createErr]
+        if {$createCode} {
+            # Some HyperMesh releases expose the historical solver/type
+            # argument order even though the command has the same name.
+            set createCode [catch {*beamsectioncreatestandardsolver 0 11 HMCirc 0} createErr2]
+            if {$createCode} {
+                error [::HWFlow::txt "无法创建圆形梁截面 $name：$createErr / $createErr2" "Cannot create circular beam section $name: $createErr / $createErr2"]
+            }
+        }
+        catch {set id [hm_latestentityid beamsects]}
+        if {$id eq "" || "$id" eq "$before"} {
+            error [::HWFlow::txt "创建圆形梁截面 $name 后无法读取其 ID。" "Cannot read the ID after creating circular beam section $name."]
+        }
+        foreach etype {beamsects beamsections} {
+            catch {*setvalue $etype id=$id name=$name}
+        }
+    }
+
+    set radius [expr {double($dia) / 2.0}]
+    set minRadius [expr {$radius / 1000.0}]
+    set maxRadius [expr {$radius * 1000.0}]
+    *createdoublearray 3 $radius $minRadius $maxRadius
+    if {[catch {*beamsectionsetdatastandard 1 3 $id 11 0 HMCirc} sectionErr]} {
+        error [::HWFlow::txt "无法设置圆形梁截面 $name 的半径：$sectionErr" "Cannot set the radius of circular beam section $name: $sectionErr"]
+    }
+    set beamSectIdCache($name) $id
+    return [list $name $id]
+}
+
+proc ::RB2Bolt::ensureBoltProperty {elemType dia {forceAuto 0}} {
     variable P
     variable propIdCache
 
-    set propName [::RB2Bolt::effectivePropertyName $elemType $dia]
-    if {$P(propName) ne ""} {
+    if {$forceAuto} {
+        set propName [::RB2Bolt::autoPropertyName $elemType $dia]
+    } else {
+        set propName [::RB2Bolt::effectivePropertyName $elemType $dia]
+    }
+    if {!$forceAuto && $P(propName) ne ""} {
         return $propName
     }
 
@@ -1026,6 +1091,8 @@ proc ::RB2Bolt::ensureBoltProperty {elemType dia} {
 
     set matInfo [::RB2Bolt::ensureBoltMaterial]
     set matId [lindex $matInfo 1]
+    set beamSectInfo [::RB2Bolt::ensureCircleBeamSection $dia]
+    set beamSectId [lindex $beamSectInfo 1]
 
     set id [::RB2Bolt::entityIdByName {props properties} $propName]
     if {$id eq ""} {
@@ -1046,6 +1113,16 @@ proc ::RB2Bolt::ensureBoltProperty {elemType dia} {
         catch {*setvalue props $selector cardimage=$card}
         catch {*setvalue properties $selector cardimage=$card}
         ::RB2Bolt::trySetEntityRef {props properties} $selector {materialid material.id material MID Mid mid} mats $matId
+        # OptiStruct/Nastran profiles store the HyperBeam reference in
+        # different template attributes for PBEAM and PBAR.
+        if {$card eq "PBAR"} {
+            catch {*setvalue props $selector STATUS=2 3179=$beamSectId}
+            catch {*setvalue properties $selector STATUS=2 3179=$beamSectId}
+        } else {
+            catch {*setvalue props $selector STATUS=2 3186=$beamSectId}
+            catch {*setvalue properties $selector STATUS=2 3186=$beamSectId}
+        }
+        ::RB2Bolt::trySetEntityRef {props properties} $selector {beamsectionid beamsection.id beamsectid beamsect.id sectionid section.id} beamsects $beamSectId
 
         set sec [::RB2Bolt::circleSection $dia]
         set area [lindex $sec 0]
@@ -1067,6 +1144,92 @@ proc ::RB2Bolt::ensureBoltProperty {elemType dia} {
 
     set propIdCache($propName) $id
     return $propName
+}
+
+proc ::RB2Bolt::allComponentIds {} {
+    set ids {}
+    foreach etype {comps components} {
+        catch {*clearmark $etype 1}
+        if {![catch {*createmark $etype 1 all}]} {
+            catch {set ids [hm_getmark $etype 1]}
+        }
+        catch {*clearmark $etype 1}
+        if {[llength $ids] > 0} {break}
+    }
+    return [lsort -integer -unique $ids]
+}
+
+proc ::RB2Bolt::componentNameById {compId} {
+    foreach etype {comps components} {
+        if {![catch {set name [hm_getvalue $etype id=$compId dataname=name]}] && $name ne ""} {
+            return $name
+        }
+    }
+    return ""
+}
+
+proc ::RB2Bolt::boltComponentInfo {compName} {
+    variable P
+    set prefix [safeName $P(compPrefix)]
+    if {$prefix eq ""} {set prefix BOLT}
+    if {![regexp -nocase -- [format {^%s_D([^_]+)_(CBEAM|CBAR)$} $prefix] $compName -> dia elemType]} {
+        return {}
+    }
+    if {![string is double -strict $dia] || $dia <= 0} {return {}}
+    return [list $dia [string toupper $elemType]]
+}
+
+proc ::RB2Bolt::runAssignAllBoltProperties {} {
+    variable propIdCache
+    variable matIdCache
+    variable beamSectIdCache
+
+    catch {unset propIdCache}; array set propIdCache {}
+    catch {unset matIdCache}; array set matIdCache {}
+    catch {unset beamSectIdCache}; array set beamSectIdCache {}
+
+    set boltComps 0
+    set assigned 0
+    set failed 0
+    set properties {}
+    foreach compId [::RB2Bolt::allComponentIds] {
+        set compName [::RB2Bolt::componentNameById $compId]
+        set info [::RB2Bolt::boltComponentInfo $compName]
+        if {[llength $info] != 2} {continue}
+        incr boltComps
+        set dia [lindex $info 0]
+        set elemType [lindex $info 1]
+        if {[catch {set propName [::RB2Bolt::ensureBoltProperty $elemType $dia 1]} err]} {
+            msg [::HWFlow::txt "组件 $compName 的螺栓属性创建失败：$err" "Failed to create bolt property for component $compName: $err"]
+            incr failed [llength [::RB2Bolt::getElemsByComp $compId]]
+            continue
+        }
+        lappend properties $propName
+        foreach eid [::RB2Bolt::getElemsByComp $compId] {
+            if {![::RB2Bolt::elemLooksLike1DConnector $eid $elemType]} {
+                set nodes {}
+                catch {set nodes [hm_getvalue elems id=$eid dataname=nodes]}
+                if {[llength $nodes] != 2} {continue}
+            }
+            if {[::RB2Bolt::assignBeamProperty $eid $propName]} {
+                incr assigned
+            } else {
+                incr failed
+            }
+        }
+    }
+
+    set propertyCount [llength [::RB2Bolt::uniqList $properties]]
+    if {$boltComps == 0} {
+        set txt [::HWFlow::txt "未找到由本模块创建的螺栓组件。" "No bolt components created by this module were found."]
+        tk_messageBox -icon warning -title [::HWFlow::txt "赋予所有螺栓属性" "Assign All Bolt Properties"] -message $txt
+        return
+    }
+    set txt [::HWFlow::txt \
+        "所有螺栓属性处理完成。\n\n螺栓组件：$boltComps\n圆形截面/属性：$propertyCount\n已赋予梁单元：$assigned\n失败：$failed\n材料：steel" \
+        "All bolt properties have been processed.\n\nBolt components: $boltComps\nCircular sections/properties: $propertyCount\nBeam elements assigned: $assigned\nFailed: $failed\nMaterial: steel"]
+    tk_messageBox -icon [expr {$failed > 0 ? "warning" : "info"}] -title [::HWFlow::txt "赋予所有螺栓属性" "Assign All Bolt Properties"] -message $txt
+    msg $txt
 }
 
 proc ::RB2Bolt::enableInteractiveBrowserUpdates {} {
@@ -1761,10 +1924,13 @@ proc ::RB2Bolt::createBolts {groups} {
     variable P
     variable propIdCache
     variable matIdCache
+    variable beamSectIdCache
     catch {unset propIdCache}
     array set propIdCache {}
     catch {unset matIdCache}
     array set matIdCache {}
+    catch {unset beamSectIdCache}
+    array set beamSectIdCache {}
 
     set created 0
     set skipped 0
@@ -1895,6 +2061,7 @@ proc ::RB2Bolt::createBoltsFast {groups} {
     variable compIdCache
     variable propIdCache
     variable matIdCache
+    variable beamSectIdCache
 
     catch {unset compIdCache}
     array set compIdCache {}
@@ -1902,6 +2069,8 @@ proc ::RB2Bolt::createBoltsFast {groups} {
     array set propIdCache {}
     catch {unset matIdCache}
     array set matIdCache {}
+    catch {unset beamSectIdCache}
+    array set beamSectIdCache {}
 
     set tPair0 [clock milliseconds]
     set pairInfo [::RB2Bolt::buildBoltPairList $groups]
@@ -2304,7 +2473,12 @@ proc ::RB2Bolt::runAction {} {
 }
 
 proc ::RB2Bolt::runSettings {} {
-    ::RB2Bolt::showDialog 1
+    set action [::RB2Bolt::showDialog 1]
+    if {$action eq "assignAllBoltProperties"} {
+        if {![::RB2Bolt::validateParams]} {return}
+        ::RB2Bolt::saveState
+        ::RB2Bolt::runAssignAllBoltProperties
+    }
 }
 
 proc ::RB2Bolt::run {} {

@@ -38,6 +38,8 @@ $IncludeItems = @(
     ".editorconfig",
     ".gitignore",
     "README.md",
+    "README_LocalMeshOptimizer.md",
+    "INTEGRATION_ANALYSIS.md",
     "使用教程.pdf",
     "config.yaml",
     "guide.html",
@@ -49,8 +51,41 @@ $IncludeItems = @(
     "build_package.sh",
     "config",
     "doc",
-    "modules"
+    "examples",
+    "modules",
+    "runtime"
 )
+
+$PortablePythonDir = Join-Path $ProjectRoot "runtime\python\windows-x64"
+$PortablePythonExe = Join-Path $PortablePythonDir "python.exe"
+$PortablePythonwExe = Join-Path $PortablePythonDir "pythonw.exe"
+$PortablePythonStdlib = Join-Path $PortablePythonDir "python38.zip"
+$PortablePythonLicense = Join-Path $PortablePythonDir "LICENSE.txt"
+
+foreach ($RequiredRuntimeFile in @($PortablePythonExe, $PortablePythonwExe, $PortablePythonStdlib, $PortablePythonLicense)) {
+    if (-not (Test-Path -LiteralPath $RequiredRuntimeFile -PathType Leaf)) {
+        throw "Portable Python runtime is incomplete. Missing: $RequiredRuntimeFile. See runtime/python/README.md."
+    }
+}
+
+$ExpectedPythonExeSha256 = "5275c42f7359fa2c7ec473be3240e57d5ce5b9301a26bd2e98e89bb9db074581"
+$ExpectedPythonwExeSha256 = "a409db42d754c311d19921fbbf458c1abadc5142330cdb7f3c6016e97fa1116d"
+$ExpectedPythonStdlibSha256 = "613e0d63b54ed995273eda446eb09e51066e486f1e72b94f1c338a83dca3a021"
+if ((Get-FileHash -LiteralPath $PortablePythonExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedPythonExeSha256) {
+    throw "Portable Python executable checksum mismatch: $PortablePythonExe"
+}
+if ((Get-FileHash -LiteralPath $PortablePythonwExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedPythonwExeSha256) {
+    throw "Portable windowless Python executable checksum mismatch: $PortablePythonwExe"
+}
+if ((Get-FileHash -LiteralPath $PortablePythonStdlib -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedPythonStdlibSha256) {
+    throw "Portable Python standard-library checksum mismatch: $PortablePythonStdlib"
+}
+
+$RuntimeSelfTest = Join-Path $ProjectRoot "modules\local_mesh_optimizer\python\runtime_self_test.py"
+& $PortablePythonExe $RuntimeSelfTest
+if ($LASTEXITCODE -ne 0) {
+    throw "Bundled Python runtime self-test failed with exit code $LASTEXITCODE."
+}
 
 try {
     New-Item -ItemType Directory -Path $TempProjectRoot -Force | Out-Null
@@ -74,6 +109,18 @@ try {
     if (Test-Path -LiteralPath $PackagedConfigDir) {
         Get-ChildItem -LiteralPath $PackagedConfigDir -Filter "*_state.txt" -File |
             Remove-Item -Force
+    }
+    Get-ChildItem -LiteralPath $TempProjectRoot -Directory -Recurse -Filter "__pycache__" |
+        Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $TempProjectRoot -File -Recurse -Include "*.pyc", "*.pyo" |
+        Remove-Item -Force
+
+    $StagedPythonDir = Join-Path $TempProjectRoot "runtime\python\windows-x64"
+    foreach ($RequiredName in @("python.exe", "pythonw.exe", "python38.zip", "LICENSE.txt")) {
+        $StagedFile = Join-Path $StagedPythonDir $RequiredName
+        if (-not (Test-Path -LiteralPath $StagedFile -PathType Leaf)) {
+            throw "Staged package is missing portable Python file: $StagedFile"
+        }
     }
 
     Compress-Archive -Path $TempProjectRoot -DestinationPath $ZipPath -CompressionLevel Optimal -Force

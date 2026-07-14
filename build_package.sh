@@ -107,6 +107,8 @@ INCLUDE_ITEMS=(
     ".editorconfig"
     ".gitignore"
     "README.md"
+    "README_LocalMeshOptimizer.md"
+    "INTEGRATION_ANALYSIS.md"
     "使用教程.pdf"
     "config.yaml"
     "guide.html"
@@ -118,8 +120,45 @@ INCLUDE_ITEMS=(
     "build_package.sh"
     "config"
     "doc"
+    "examples"
     "modules"
+    "runtime"
 )
+
+PORTABLE_PYTHON_DIR="${PROJECT_ROOT}/runtime/python/windows-x64"
+PORTABLE_PYTHON_EXE="${PORTABLE_PYTHON_DIR}/python.exe"
+PORTABLE_PYTHONW_EXE="${PORTABLE_PYTHON_DIR}/pythonw.exe"
+PORTABLE_PYTHON_ZIP="${PORTABLE_PYTHON_DIR}/python38.zip"
+PORTABLE_PYTHON_SHA256="abbe314e9b41603dde0a823b76f5bbbe17b3de3e5ac4ef06b759da5466711271"
+PORTABLE_PYTHON_EXE_SHA256="5275c42f7359fa2c7ec473be3240e57d5ce5b9301a26bd2e98e89bb9db074581"
+PORTABLE_PYTHONW_EXE_SHA256="a409db42d754c311d19921fbbf458c1abadc5142330cdb7f3c6016e97fa1116d"
+PORTABLE_PYTHON_STDLIB_SHA256="613e0d63b54ed995273eda446eb09e51066e486f1e72b94f1c338a83dca3a021"
+
+if [[ ! -f "$PORTABLE_PYTHON_EXE" || ! -f "$PORTABLE_PYTHONW_EXE" || ! -f "$PORTABLE_PYTHON_ZIP" ]]; then
+    echo "Portable Python runtime is incomplete: ${PORTABLE_PYTHON_DIR}" >&2
+    echo "Expected python.exe, pythonw.exe and python38.zip. See runtime/python/README.md." >&2
+    exit 1
+fi
+
+actual_exe_sha256="$(sha256sum "$PORTABLE_PYTHON_EXE" | awk '{print $1}')"
+actual_pythonw_sha256="$(sha256sum "$PORTABLE_PYTHONW_EXE" | awk '{print $1}')"
+actual_stdlib_sha256="$(sha256sum "$PORTABLE_PYTHON_ZIP" | awk '{print $1}')"
+if [[ "$actual_exe_sha256" != "$PORTABLE_PYTHON_EXE_SHA256" ||
+      "$actual_pythonw_sha256" != "$PORTABLE_PYTHONW_EXE_SHA256" ||
+      "$actual_stdlib_sha256" != "$PORTABLE_PYTHON_STDLIB_SHA256" ]]; then
+    echo "Portable Python runtime checksum mismatch." >&2
+    exit 1
+fi
+
+python3 "${PROJECT_ROOT}/modules/local_mesh_optimizer/python/runtime_self_test.py"
+
+if [[ -f "${PROJECT_ROOT}/runtime/python/python-3.8.10-embed-amd64.zip" ]]; then
+    actual_sha256="$(sha256sum "${PROJECT_ROOT}/runtime/python/python-3.8.10-embed-amd64.zip" | awk '{print $1}')"
+    if [[ "$actual_sha256" != "$PORTABLE_PYTHON_SHA256" ]]; then
+        echo "Portable Python source archive checksum mismatch." >&2
+        exit 1
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Create a unique temp directory and build the package structure there
@@ -158,6 +197,16 @@ done
 PACKAGED_CONFIG_DIR="${TEMP_PROJECT_ROOT}/config"
 if [[ -d "$PACKAGED_CONFIG_DIR" ]]; then
     find "$PACKAGED_CONFIG_DIR" -maxdepth 1 -type f -name '*_state.txt' -delete
+fi
+find "$TEMP_PROJECT_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} +
+find "$TEMP_PROJECT_ROOT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+
+if [[ ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python.exe" ||
+      ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/pythonw.exe" ||
+      ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python38.zip" ||
+      ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/LICENSE.txt" ]]; then
+    echo "Staged package is missing the portable Python runtime or license." >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------

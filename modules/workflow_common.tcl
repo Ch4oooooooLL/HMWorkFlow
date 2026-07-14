@@ -227,14 +227,6 @@ proc ::HWFlow::updateLabelWrap {labelWidget padding} {
     }
 }
 
-proc ::HWFlow::createTopLevel {w} {
-    toplevel $w
-    ::HWFlow::keepWindowTopmost $w
-    bind $w <Map> [list ::HWFlow::keepWindowTopmost $w]
-    after idle [list ::HWFlow::keepWindowTopmost $w]
-    return $w
-}
-
 proc ::HWFlow::uiFont {{role default}} {
     variable UI_FONT_FAMILY
     variable UI_FIXED_FONT_FAMILY
@@ -273,6 +265,40 @@ proc ::HWFlow::keepWindowTopmost {w} {
         return
     }
     catch {wm attributes $w -topmost 1}
+}
+
+# HyperMesh mark panels are native modal UI. A Tk toolbox window with the
+# topmost attribute can cover that panel and make HyperMesh appear frozen.
+# Temporarily hide mapped toolbox top levels while native selection is active,
+# then restore them even if the HyperMesh command raises an error.
+proc ::HWFlow::nativeMarkPanel {entityType markId prompt} {
+    set windows {}
+    if {[llength [info commands winfo]] > 0} {
+        foreach w [winfo children .] {
+            if {[catch {set class [winfo class $w]}] || $class ne "Toplevel"} { continue }
+            set mapped [winfo ismapped $w]
+            set topmost 0
+            catch {set topmost [wm attributes $w -topmost]}
+            lappend windows [list $w $mapped $topmost]
+            catch {wm attributes $w -topmost 0}
+            if {$mapped} { catch {wm withdraw $w} }
+        }
+        catch {set grabbed [grab current]}
+        if {[info exists grabbed] && $grabbed ne ""} { catch {grab release $grabbed} }
+        catch {update}
+    }
+
+    set code [catch {*createmarkpanel $entityType $markId $prompt} err opts]
+    foreach state $windows {
+        lassign $state w mapped topmost
+        if {![winfo exists $w]} { continue }
+        if {$mapped} { catch {wm deiconify $w} }
+        catch {wm attributes $w -topmost $topmost}
+        if {$mapped} { catch {raise $w} }
+    }
+    catch {update idletasks}
+    if {$code} { return -options $opts $err }
+    return [hm_getmark $entityType $markId]
 }
 
 proc ::HWFlow::createTopLevel {w} {
@@ -1508,6 +1534,29 @@ proc ::HWFlow::progressClose {{message ""} {percent 100.0}} {
         }
     }
     catch {update idletasks}
+}
+
+# Complete a task without destroying its progress window.  This avoids hiding
+# the only useful diagnostic text at the exact moment a background/native
+# command returns.  The former Cancel button becomes an explicit Close button.
+proc ::HWFlow::progressFinish {{message ""} {percent 100.0}} {
+    variable progressWin
+
+    if {$message ne ""} {
+        catch {::HWFlow::progressUpdate $percent $message "" 1}
+    }
+    if {[llength [info commands winfo]] == 0 || ![winfo exists $progressWin]} {
+        return 0
+    }
+    if {[winfo exists $progressWin.btn.cancel]} {
+        catch {$progressWin.btn.cancel configure \
+            -text [::HWFlow::txt "关闭" "Close"] \
+            -state normal \
+            -command [list destroy $progressWin]}
+    }
+    catch {wm protocol $progressWin WM_DELETE_WINDOW [list destroy $progressWin]}
+    catch {update idletasks}
+    return 1
 }
 
 proc ::HWFlow::backToHome {{window ""}} {

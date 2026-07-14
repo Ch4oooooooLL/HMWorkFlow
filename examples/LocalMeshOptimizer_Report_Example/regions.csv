@@ -1,0 +1,4 @@
+region_id,component_ids,initial_failed_count,expanded_element_count,final_failed_count,rounds,optimization_methods,elapsed_seconds,status,rollback_count,message
+Region_0001,10,8,52,0,1,smoothing,6.2,success,0,
+Region_0002,12,6,41,2,3,smoothing;element_quality,18.4,partial_success,1,Two elements require manual review
+Region_0003,15,4,37,3,2,smoothing,11.7,rolled_back,1,New failures detected; checkpoint restored

@@ -226,7 +226,7 @@ proc ::AutoHoleRBE2::pickComponents {} {
     variable ui
 
     catch {*clearmark comps 1}
-    *createmarkpanel comps 1 [::HWFlow::txt "选择实体网格组件" "Select solid mesh components"]
+    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "选择实体网格组件" "Select solid mesh components"]
     set comps [hm_getmark comps 1]
 
     if {[llength $comps] == 0} {
