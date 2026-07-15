@@ -106,9 +106,6 @@ fi
 INCLUDE_ITEMS=(
     ".editorconfig"
     ".gitignore"
-    "README.md"
-    "README_LocalMeshOptimizer.md"
-    "INTEGRATION_ANALYSIS.md"
     "使用教程.pdf"
     "config.yaml"
     "guide.html"

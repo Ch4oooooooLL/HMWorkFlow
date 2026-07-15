@@ -1744,7 +1744,7 @@ QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
             const contentContainer = tabsContainer.parentElement;
             const panes = contentContainer.querySelectorAll('.detail-tab-pane');
             panes.forEach(p => p.classList.remove('active'));
-            
+
             const targetPane = contentContainer.querySelector(`#${paneId}`);
             if (targetPane) {
                 targetPane.classList.add('active');
@@ -1769,7 +1769,7 @@ QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
                 const title = card.querySelector('.card-title').textContent.toLowerCase();
                 const desc = card.querySelector('.card-desc').textContent.toLowerCase();
                 const path = card.querySelector('.card-path').textContent.toLowerCase();
-                
+
                 if (title.includes(searchVal) || desc.includes(searchVal) || path.includes(searchVal)) {
                     card.style.display = 'flex';
                 } else {
@@ -1781,10 +1781,10 @@ QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
                 const secId = sec.getAttribute('id');
                 const moduleName = sec.getAttribute('data-module');
                 const textContent = sec.textContent.toLowerCase();
-                
+
                 // Match search input inside sections
                 let isMatch = textContent.includes(searchVal);
-                
+
                 if (isMatch || searchVal === '') {
                     sec.style.display = 'block';
                     // Show sidebar menu item
@@ -1808,7 +1808,7 @@ QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
         function copyCode(btn) {
             const container = btn.closest('.code-container');
             const codeBlock = container.querySelector('pre.code-block');
-            
+
             // Clipboard API (Offline secure browser compatible)
             navigator.clipboard.writeText(codeBlock.innerText).then(() => {
                 const originalText = btn.innerHTML;
@@ -1818,7 +1818,7 @@ QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
                 `;
                 btn.style.borderColor = '#10b981';
                 btn.style.color = '#10b981';
-                
+
                 setTimeout(() => {
                     btn.innerHTML = originalText;
                     btn.style.borderColor = '';
@@ -1849,7 +1849,7 @@ QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
             window.addEventListener('scroll', () => {
                 const scrollPos = window.scrollY + 100;
                 const sections = document.querySelectorAll('section');
-                
+
                 sections.forEach(sec => {
                     if (sec.style.display !== 'none' && scrollPos >= sec.offsetTop && scrollPos < sec.offsetTop + sec.offsetHeight) {
                         const secId = sec.getAttribute('id');

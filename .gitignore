@@ -6,6 +6,10 @@ config/*_state.txt
 # Local Codex/project memory
 AGENTS.md
 
+# Local documentation and generated task workspaces
+doc/
+runtime/tasks/
+
 # Packaged workflow archives
 dist/
 
@@ -36,6 +40,15 @@ __pycache__/
 
 # Local Mesh Optimizer runtime artifacts (models and reports are user data)
 temp/local_mesh_optimizer/
+temp/solid_seam/
 LocalMeshOptimizer_Report_*/
 !examples/LocalMeshOptimizer_Report_Example/
 !examples/LocalMeshOptimizer_Report_Example/**
+
+# Generated validation models and their manifests
+examples/MeshSeamWeld_ManyHoles/*.fem
+examples/MeshSeamWeld_ManyHoles/*_manifest.json
+examples/ShellWasher_RBE2_Bolt_Chain/*.fem
+examples/ShellWasher_RBE2_Bolt_Chain/*_manifest.json
+examples/SolidSeam_Validation/*.fem
+examples/SolidSeam_Validation/*_manifest.json

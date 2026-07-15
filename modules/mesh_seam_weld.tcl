@@ -14,6 +14,7 @@ if {![namespace exists ::HWFlow]} {
 
 namespace eval ::MeshSeamWeld {
     variable VERSION "0.10"
+    variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
     array set cfg {
@@ -1046,6 +1047,7 @@ proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 
 proc ::MeshSeamWeld::targetNodesFromImprintList {sourceNodes beforeNode} {
     set list2 {}
     catch {set list2 [hm_getlist nodes 2]}
+    ::HybridCore::log INFO "imprint list2 raw_count=[llength $list2] source_count=[llength $sourceNodes] before_node=$beforeNode"
     if {[llength $list2] != [llength $sourceNodes]} {
         return {}
     }
@@ -1053,17 +1055,74 @@ proc ::MeshSeamWeld::targetNodesFromImprintList {sourceNodes beforeNode} {
     if {[llength $list2] != [llength $sourceNodes]} {
         return {}
     }
-    # Retain the former safety condition: list 2 is trusted only when it is
-    # made of nodes created by this imprint, never nodes left by an earlier UI
-    # operation or source nodes reused by an unsupported runtime.
-    if {$beforeNode ne ""} {
-        foreach nodeId $list2 {
-            if {![string is integer -strict $nodeId] || $nodeId <= $beforeNode} {
-                return {}
-            }
+    # HyperMesh 2019 may remesh the target with new nodes, but it may also
+    # reuse target nodes that already existed before the imprint.  List 2 is
+    # cleared immediately before *imprint_nodelist, so an ID does not need to
+    # be greater than beforeNode to belong to this operation.
+    array set sourceSet {}
+    foreach nodeId $sourceNodes { set sourceSet($nodeId) 1 }
+    set reusedCount 0
+    foreach nodeId $list2 {
+        if {![string is integer -strict $nodeId] || [info exists sourceSet($nodeId)]} {
+            return {}
         }
+        if {[catch {::MeshSeamWeld::nodeXYZ $nodeId}]} {
+            return {}
+        }
+        if {$beforeNode ne "" && $nodeId <= $beforeNode} { incr reusedCount }
     }
+    ::HybridCore::log INFO "imprint list2 accepted count=[llength $list2] reused_count=$reusedCount"
     return $list2
+}
+
+proc ::MeshSeamWeld::componentNodeIds {compIds} {
+    set elemIds {}
+    foreach compId [::MeshSeamWeld::uniq $compIds] {
+        set elems {}
+        if {[llength [info commands ::HWFlow::getCompEntityIds]] > 0} {
+            catch {set elems [::HWFlow::getCompEntityIds $compId elems elems]}
+        }
+        if {[llength $elems] == 0} {
+            catch {*clearmark elems 2}
+            if {![catch {*createmark elems 2 "by comp id" $compId}]} {
+                catch {set elems [hm_getmark elems 2]}
+            }
+            catch {*clearmark elems 2}
+        }
+        set elemIds [concat $elemIds $elems]
+    }
+    set nodeIds {}
+    foreach elemId [::MeshSeamWeld::uniq $elemIds] {
+        set nodeIds [concat $nodeIds [::MeshSeamWeld::elemNodes $elemId]]
+    }
+    return [::MeshSeamWeld::uniq $nodeIds]
+}
+
+proc ::MeshSeamWeld::targetCandidatesAfterImprint {sourceNodes targetComps beforeNode} {
+    set listNodes [::MeshSeamWeld::targetNodesFromImprintList $sourceNodes $beforeNode]
+    if {[llength $listNodes] > 0} {
+        return $listNodes
+    }
+
+    set createdNodes [::MeshSeamWeld::entityIdsCreatedAfter nodes $beforeNode]
+    if {[llength $createdNodes] >= [llength $sourceNodes]} {
+        ::HybridCore::log INFO "imprint fallback=new_nodes count=[llength $createdNodes]"
+        return $createdNodes
+    }
+
+    # Some HM2019 imprint cases return no output list and create no node IDs:
+    # the target mesh is updated by reusing its existing boundary nodes.  In
+    # that case, obtain the target component nodes and reduce them to one
+    # nearest, unique candidate per source node before handing off to Python.
+    set componentNodes [::MeshSeamWeld::componentNodeIds $targetComps]
+    array set sourceSet {}
+    foreach nodeId $sourceNodes { set sourceSet($nodeId) 1 }
+    set candidates {}
+    foreach nodeId [::MeshSeamWeld::uniq [concat $createdNodes $componentNodes]] {
+        if {![info exists sourceSet($nodeId)]} { lappend candidates $nodeId }
+    }
+    ::HybridCore::log INFO "imprint fallback=target_components created_count=[llength $createdNodes] component_node_count=[llength $componentNodes] candidate_count=[llength $candidates]"
+    return [::MeshSeamWeld::matchTargetPathNodes $sourceNodes $candidates]
 }
 
 proc ::MeshSeamWeld::matchTargetPathNodes {sourceNodes candidateNodes} {
@@ -1264,47 +1323,6 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
     return $elemIds
 }
 
-proc ::MeshSeamWeld::processWeldPath {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1}} {
-    set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
-    set relatedCompIds [::MeshSeamWeld::uniq [concat $sourceCompIds $targetComps]]
-    set seamCompName [::MeshSeamWeld::seamComponentForRelatedComps $relatedCompIds]
-
-    set basePct [expr {10.0 + 80.0 * ($pathIndex - 1) / double($pathTotal)}]
-    set spanPct [expr {80.0 / double($pathTotal)}]
-    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
-        catch {::HWFlow::progressUpdate $basePct \
-            [::HWFlow::txt "正在执行闭环 imprint" "Imprinting closed weld loop"] \
-            [::HWFlow::txt "闭合边界 $pathIndex/$pathTotal，源节点：[llength $sourceNodes]" "Closed boundary $pathIndex/$pathTotal; source nodes: [llength $sourceNodes]"] 1}
-    }
-
-    set beforeNode ""
-    catch {set beforeNode [hm_latestentityid nodes]}
-    ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $closedLoop
-
-    set targetNodes [::MeshSeamWeld::targetNodesFromImprintList $sourceNodes $beforeNode]
-    set imprintNodes $targetNodes
-    if {[llength $targetNodes] == 0} {
-        set imprintNodes [::MeshSeamWeld::entityIdsCreatedAfter nodes $beforeNode]
-        set targetNodes [::MeshSeamWeld::targetPathNodesAfterImprint $sourceNodes $imprintNodes]
-    }
-    set targetNodes [::MeshSeamWeld::alignTargetPathNodes $sourceNodes $targetNodes $closedLoop]
-
-    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
-        catch {::HWFlow::progressUpdate [expr {$basePct + 0.55 * $spanPct}] \
-            [::HWFlow::txt "正在创建多层焊缝网格" "Creating multilayer weld mesh"] \
-            [::HWFlow::txt "闭合边界 $pathIndex/$pathTotal，网格尺寸：$::MeshSeamWeld::cfg(weld_mesh_size)" "Closed boundary $pathIndex/$pathTotal; mesh size: $::MeshSeamWeld::cfg(weld_mesh_size)"] 1}
-    }
-    set weldElems [::MeshSeamWeld::createRuledMeshBetweenNodePaths \
-        $sourceNodes $targetNodes $seamCompName $closedLoop]
-    if {[llength $weldElems] == 0} {
-        error [::HWFlow::txt "automesh 未生成焊缝单元。" "automesh did not create weld elements."]
-    }
-    return [list \
-        sourceNodes $sourceNodes sourceCompIds $sourceCompIds \
-        seamCompName $seamCompName imprintNodes $imprintNodes \
-        targetNodes $targetNodes weldElems $weldElems]
-}
-
 proc ::MeshSeamWeld::runAction {} {
     variable cfg
     ::MeshSeamWeld::loadState
@@ -1337,7 +1355,7 @@ proc ::MeshSeamWeld::runAction {} {
     }
 
     set progressOpened 0
-    if {$closedSeedMode && [llength [info commands ::HWFlow::progressOpen]] > 0} {
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
             [::HWFlow::txt "网格焊缝命令流" "Mesh Seam Weld Command Stream"] \
             [::HWFlow::txt "正在准备闭合边界任务..." "Preparing closed-boundary jobs..."] 0]
@@ -1400,4 +1418,8 @@ proc ::MeshSeamWeld::runAction {} {
 
 proc ::MeshSeamWeld::run {} {
     ::MeshSeamWeld::runAction
+}
+
+foreach hybridFile {bridge.tcl exporter.tcl executor.tcl workflow.tcl} {
+    source [file join $::MeshSeamWeld::MODULE_DIR tcl $hybridFile]
 }

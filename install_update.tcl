@@ -28,6 +28,15 @@ proc ::HWInstaller::run {} {
 
     ::HWShortcut::initialize
     ::HWShortcut::installAutoLoader
+
+    set hybridCoreInit [file join $ROOT modules hybrid_core tcl init.tcl]
+    if {![file exists $hybridCoreInit]} {
+        error "HMWorkFlow hybrid Python core not found: $hybridCoreInit"
+    }
+    if {[llength [info commands ::HybridCore::scheduleInstanceWorker]] == 0} {
+        source $hybridCoreInit
+    }
+    ::HybridCore::scheduleInstanceWorker
     if {![::HWShortcut::mainShortcutConfigured]} {
         ::HWShortcut::showInitialSetup
     }

@@ -136,6 +136,15 @@ namespace eval ::HWToolkit {
             proc     "::ContactSetup::runAction"
             settings_proc "::ContactSetup::runSettings"
         }
+        solid_seam_connector {
+            group    "Connector"
+            label_zh "实体焊缝"
+            label_en "Solid Seam Connector"
+            desc_zh  "从实体外表面边自动识别焊缝候选，并通过已验证的原生 seam connector profile 创建 PENTA + RBE3。"
+            desc_en  "Detect seam candidates on solid exterior edges and create PENTA + RBE3 through verified native connector profiles."
+            proc     "::SolidSeam::runAction"
+            settings_proc "::SolidSeam::runSettings"
+        }
     }
 }
 

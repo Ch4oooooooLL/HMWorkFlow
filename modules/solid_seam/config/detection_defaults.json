@@ -1,0 +1,14 @@
+{
+  "search_distance": 15.0,
+  "max_search_distance": 25.0,
+  "min_weld_length": 20.0,
+  "min_valid_ratio": 0.7,
+  "feature_angle_deg": 35.0,
+  "max_chain_turn_angle_deg": 60.0,
+  "gap_jump_limit": 5.0,
+  "allow_closed_loop": true,
+  "retain_short_candidates": false,
+  "detect_duplicates": true,
+  "high_confidence_threshold": 0.85,
+  "review_confidence_threshold": 0.6
+}

@@ -1,0 +1,14 @@
+{
+  "OptiStruct": {
+    "hypermesh_version": "2019",
+    "supported_realizations": ["PENTA_MIG", "PENTA_MIG_T", "PENTA_MIG_L", "PENTA_MIG_B"],
+    "penta_quality": {
+      "minimum_jacobian": 0.6,
+      "maximum_aspect_ratio": 10.0,
+      "minimum_angle_deg": 20.0,
+      "maximum_angle_deg": 160.0,
+      "minimum_volume": 1e-09,
+      "allow_negative_volume": false
+    }
+  }
+}

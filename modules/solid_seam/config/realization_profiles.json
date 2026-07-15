@@ -1,0 +1,46 @@
+{
+  "PENTA_MIG_DEFAULT": {
+    "realization_type": "PENTA_MIG",
+    "display_name": "penta (mig)",
+    "solver": "OptiStruct",
+    "hypermesh_version": "2019",
+    "default_width": 6.0,
+    "default_tolerance": 15.0,
+    "side_mode": "AUTO",
+    "command_profile": "hm2019_penta_mig",
+    "verified": true
+  },
+  "PENTA_MIG_T_DEFAULT": {
+    "realization_type": "PENTA_MIG_T",
+    "display_name": "penta (mig + T)",
+    "solver": "OptiStruct",
+    "hypermesh_version": "2019",
+    "default_width": 6.0,
+    "default_tolerance": 15.0,
+    "side_mode": "AUTO",
+    "command_profile": "hm2019_penta_mig_t",
+    "verified": true
+  },
+  "PENTA_MIG_L_DEFAULT": {
+    "realization_type": "PENTA_MIG_L",
+    "display_name": "penta (mig + L)",
+    "solver": "OptiStruct",
+    "hypermesh_version": "2019",
+    "default_width": 6.0,
+    "default_tolerance": 15.0,
+    "side_mode": "AUTO",
+    "command_profile": "hm2019_penta_mig_l",
+    "verified": true
+  },
+  "PENTA_MIG_B_DEFAULT": {
+    "realization_type": "PENTA_MIG_B",
+    "display_name": "penta (mig + B)",
+    "solver": "OptiStruct",
+    "hypermesh_version": "2019",
+    "default_width": 6.0,
+    "default_tolerance": 15.0,
+    "side_mode": "AUTO",
+    "command_profile": "hm2019_penta_mig_b",
+    "verified": true
+  }
+}
