@@ -37,9 +37,6 @@ $TempProjectRoot = Join-Path $TempRoot $ProjectName
 $IncludeItems = @(
     ".editorconfig",
     ".gitignore",
-    "README.md",
-    "README_LocalMeshOptimizer.md",
-    "INTEGRATION_ANALYSIS.md",
     "使用教程.pdf",
     "config.yaml",
     "guide.html",
@@ -112,7 +109,11 @@ try {
     }
     Get-ChildItem -LiteralPath $TempProjectRoot -Directory -Recurse -Filter "__pycache__" |
         Remove-Item -Recurse -Force
-    Get-ChildItem -LiteralPath $TempProjectRoot -File -Recurse -Include "*.pyc", "*.pyo" |
+    # `-Include` is unreliable with a literal directory path and can yield all
+    # files on Windows PowerShell 5.1, which previously emptied the staged
+    # package. Filter the enumerated files by extension explicitly.
+    Get-ChildItem -LiteralPath $TempProjectRoot -File -Recurse |
+        Where-Object { $_.Extension -in @(".pyc", ".pyo") } |
         Remove-Item -Force
 
     $StagedPythonDir = Join-Path $TempProjectRoot "runtime\python\windows-x64"

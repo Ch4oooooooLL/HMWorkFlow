@@ -25,6 +25,15 @@ if {[catch {
         source $shortcutFile
     }
     ::HWShortcut::initialize
+
+    set hybridCoreInit [file join $hmworkflowRoot "modules" "hybrid_core" "tcl" "init.tcl"]
+    if {![file exists $hybridCoreInit]} {
+        error "Hybrid Python core not found: $hybridCoreInit"
+    }
+    if {[llength [info commands ::HybridCore::scheduleInstanceWorker]] == 0} {
+        source $hybridCoreInit
+    }
+    ::HybridCore::scheduleInstanceWorker
 } hmworkflowShortcutError]} {
     catch {puts "HMWorkFlow shortcut initialization failed:"}
     catch {puts $hmworkflowShortcutError}

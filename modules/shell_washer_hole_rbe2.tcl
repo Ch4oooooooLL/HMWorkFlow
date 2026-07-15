@@ -30,6 +30,7 @@ if {![namespace exists ::HWFlow]} {
 
 namespace eval ::RB2W {
     variable VERSION "Release-1.3-Oval"
+    variable MODULE_DIR [file join [file dirname [file normalize [info script]]] shell_washer_hole_rbe2]
 
     # ---------------- Hole / washer parameters ----------------
     variable MIN_HOLE_DIAMETER           6.0
@@ -67,11 +68,10 @@ namespace eval ::RB2W {
     variable CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2   1
     variable OUTPUT_COMPONENT_SUFFIX_SCAN_LIMIT         999
 
-    # ---------------- Logging / progress / performance ----------------
+    # ---------------- Logging / progress ----------------
     variable VERBOSE                     1
     variable LOG_EACH_CREATED            0
     variable LOG_EACH_SKIPPED            0
-    variable PERFORMANCE_MODE            1
     variable USE_NODE_XYZ_CACHE          1
     variable USE_STATUS_PROGRESS         1
     variable PROGRESS_LOOP_STEP          50
@@ -107,7 +107,7 @@ proc ::RB2W::log {msg} {
     variable VERBOSE
     if {$VERBOSE} {
         set line "[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}] RB2W: $msg"
-        puts $line
+        catch {puts $line}
         if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
             catch {::HWFlow::progressAppend "RB2W: $msg"}
         }
@@ -117,10 +117,9 @@ proc ::RB2W::log {msg} {
 proc ::RB2W::status {msg {force 0}} {
     variable USE_STATUS_PROGRESS
     variable FORCE_STATUS_UPDATE
-    variable PERFORMANCE_MODE
     if {!$USE_STATUS_PROGRESS} { return }
     catch {hm_usermessage $msg}
-    if {$force || ($FORCE_STATUS_UPDATE && !$PERFORMANCE_MODE)} { catch {update idletasks} }
+    if {$force || $FORCE_STATUS_UPDATE} { catch {update idletasks} }
 }
 
 proc ::RB2W::resetOverallProgress {} {
@@ -143,7 +142,7 @@ proc ::RB2W::stateKeys {} {
         SHOW_OUTPUT_COMPONENTS FORCE_BROWSER_REFRESH
         SKIP_COMPONENT_IF_EXISTING_RBE2 CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2
         CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2 OUTPUT_COMPONENT_SUFFIX_SCAN_LIMIT
-        VERBOSE LOG_EACH_CREATED LOG_EACH_SKIPPED PERFORMANCE_MODE USE_NODE_XYZ_CACHE
+        VERBOSE LOG_EACH_CREATED LOG_EACH_SKIPPED USE_NODE_XYZ_CACHE
         USE_STATUS_PROGRESS PROGRESS_LOOP_STEP UI_UPDATE_STEP FORCE_STATUS_UPDATE
         STATUS_PERCENT_STEP STATUS_MIN_INTERVAL_MS FAST_RBE2_MARK_FILTER
     }
@@ -287,13 +286,11 @@ proc ::RB2W::showPanel {{settingsOnly 0}} {
     checkbutton $w.main.opt.src -text [::HWFlow::txt "检查源组件已有 RIGIDS" "Check source component"] -variable ::RB2W::ui(CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2)
     checkbutton $w.main.opt.out -text [::HWFlow::txt "检查输出组件已有 RIGIDS" "Check output components"] -variable ::RB2W::ui(CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2)
     checkbutton $w.main.opt.batch -text [::HWFlow::txt "批量归集 RIGIDS 到输出组件" "Batch organize RIGIDS elements"] -variable ::RB2W::ui(BATCH_ORGANIZE_RBE2)
-    checkbutton $w.main.opt.perf -text [::HWFlow::txt "性能模式" "Performance mode"] -variable ::RB2W::ui(PERFORMANCE_MODE)
     grid $w.main.opt.oval  -row 0 -column 0 -sticky w -pady 2
     grid $w.main.opt.skip  -row 0 -column 1 -sticky w -pady 2
     grid $w.main.opt.src   -row 1 -column 0 -sticky w -pady 2
     grid $w.main.opt.out   -row 1 -column 1 -sticky w -pady 2
     grid $w.main.opt.batch -row 2 -column 0 -sticky w -pady 2
-    grid $w.main.opt.perf  -row 2 -column 1 -sticky w -pady 2
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
@@ -405,7 +402,7 @@ proc ::RB2W::acceptPanel {{action create}} {
         MIN_HOLE_EDGE_NODES MAX_HOLE_EDGE_NODES INNER_WASHER_NODE_LOOPS
         RBE2_DOF ALLOW_OVAL_HOLES SKIP_COMPONENT_IF_EXISTING_RBE2
         CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2 CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2
-        BATCH_ORGANIZE_RBE2 PERFORMANCE_MODE FAST_RBE2_MARK_FILTER
+        BATCH_ORGANIZE_RBE2 FAST_RBE2_MARK_FILTER
     }
     foreach k $intKeys {
         if {![string is integer -strict $ui($k)]} {
@@ -579,81 +576,6 @@ proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex lo
         catch {::HWFlow::progressUpdate $overallPct $title $msg $force}
     }
     RB2W::status $msg $force
-}
-
-proc ::RB2W::beginPerformanceMode {} {
-    variable PERFORMANCE_MODE
-    variable USE_STATUS_PROGRESS
-    if {!$PERFORMANCE_MODE} { return }
-    RB2W::log [::HWFlow::txt "性能模式已开启。" "Performance mode ON."]
-    catch {*setoption entity_highlighting=0}
-    if {$USE_STATUS_PROGRESS} {
-        catch {*setoption block_messages=0}
-        catch {hm_blockmessages 0}
-    } else {
-        catch {*setoption block_messages=1}
-        catch {hm_blockmessages 1}
-    }
-    catch {*setoption block_redraw=1}
-    catch {hm_blockredraw 1}
-    catch {hwbrowsermanager view flush false}
-    catch {hmbr_signals buffer start}
-}
-
-proc ::RB2W::enableInteractiveBrowserUpdates {} {
-    if {[llength [info commands ::HWFlow::resetBrowserBlocks]] > 0} {
-        catch {::HWFlow::resetBrowserBlocks}
-    } else {
-        catch {hm_blockbrowserupdate 0}
-        catch {*setoption block_browser_update=0}
-        catch {hmbr_signals buffer stop}
-        catch {*setoption block_redraw=0}
-        catch {*setoption block_messages=0}
-        catch {hm_blockredraw 0}
-        catch {hm_blockmessages 0}
-        catch {hm_blockerrormessages 0}
-        catch {hm_commandfilestate 1}
-    }
-    catch {hwbrowsermanager view flush true}
-    catch {hm_setmouse 1}
-    catch {update idletasks}
-    catch {update}
-}
-
-proc ::RB2W::resumePerformanceModeAfterBrowserUpdate {} {
-    variable PERFORMANCE_MODE
-    variable USE_STATUS_PROGRESS
-    if {!$PERFORMANCE_MODE} { return }
-
-    if {$USE_STATUS_PROGRESS} {
-        catch {*setoption block_messages=0}
-        catch {hm_blockmessages 0}
-    } else {
-        catch {*setoption block_messages=1}
-        catch {hm_blockmessages 1}
-    }
-    catch {*setoption block_redraw=1}
-    catch {hm_blockredraw 1}
-    catch {hwbrowsermanager view flush false}
-    catch {hmbr_signals buffer start}
-}
-
-proc ::RB2W::endPerformanceMode {} {
-    variable PERFORMANCE_MODE
-    if {$PERFORMANCE_MODE} {
-        catch {*setoption block_redraw=0}
-        catch {*setoption block_messages=0}
-        catch {*setoption entity_highlighting=1}
-        catch {hm_blockredraw 0}
-        catch {hm_blockmessages 0}
-    }
-    RB2W::enableInteractiveBrowserUpdates
-    catch {hwbrowsermanager view flush true}
-    RB2W::showAllOutputComponents
-    RB2W::refreshBrowsersAndGraphics 1
-    if {$PERFORMANCE_MODE} {
-        RB2W::log [::HWFlow::txt "性能模式已关闭。" "Performance mode OFF."]
-    }
 }
 
 proc ::RB2W::clearNodeXYZCache {} {
@@ -1082,80 +1004,45 @@ proc ::RB2W::setCurrentComponent {compName} {
 }
 
 proc ::RB2W::createComponentByName {compName} {
-    variable PERFORMANCE_MODE
     if {[RB2W::componentExistsByName $compName]} {
         RB2W::setCurrentComponent $compName
-        catch {::HWFlow::syncComponentInBrowser $compName}
-        return
+        return [RB2W::componentIdByName $compName]
     }
 
-    if {$PERFORMANCE_MODE} {
-        RB2W::enableInteractiveBrowserUpdates
+    set color [expr {1 + int(rand() * 63)}]
+    if {$color >= 11} { incr color }
+    if {[llength [info commands ::HWFlow::randomComponentColor]] > 0} {
+        set color [::HWFlow::randomComponentColor]
+    }
+    set histName "Created Component $compName"
+    catch {*startnotehistorystate $histName}
+    set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
+    if {$createCode} {
+        set createCode [catch {*createentity components includeid=0 name=$compName} err1]
+    }
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
+    }
+    if {$createCode} {
+        set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
+    }
+    catch {*endnotehistorystate $histName}
+    if {$createCode} {
+        error [::HWFlow::txt "无法静默创建输出组件 $compName：$err1 / $err2" "Cannot silently create output component $compName: $err1 / $err2"]
     }
 
-    set code [catch {
-        if {[llength [info commands ::HWFlow::createComponent]] > 0} {
-            ::HWFlow::createComponent $compName
-        } else {
-            set color [expr {1 + int(rand() * 63)}]
-            if {$color >= 11} {incr color}
-            if {[llength [info commands ::HWFlow::randomComponentColor]] > 0} {
-                set color [::HWFlow::randomComponentColor]
-            }
-            set histName "Created Component $compName"
-            set histStarted 0
-            catch {*startnotehistorystate $histName}
-            set histStarted 1
-
-            set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
-            if {$createCode} {
-                set createCode [catch {*createentity components includeid=0 name=$compName} err1]
-            }
-            if {$createCode} {
-                set createCode [catch {*collectorcreateonly comps $compName "" $color} err2]
-            }
-            if {$createCode} {
-                set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
-            }
-            if {$createCode} {
-                if {$histStarted} { catch {*endnotehistorystate $histName} }
-                error [::HWFlow::txt "无法创建输出组件 $compName：$err1 / $err2" "Cannot create output component $compName: $err1 / $err2"]
-            }
-            if {$histStarted} { catch {*endnotehistorystate $histName} }
-            set compId ""
-            catch {set compId [hm_getvalue comps name=$compName dataname=id]}
-            if {$compId ne "" && $compId != 0} {
-                foreach etype {comps components} {
-                    catch {*setvalue $etype id=$compId color=$color}
-                }
-            }
-        }
-
-        RB2W::setCurrentComponent $compName
-        if {[llength [info commands ::HWFlow::syncComponentInBrowser]] > 0} {
-            ::HWFlow::syncComponentInBrowser $compName
-        } else {
-            catch {::HWFlow::activateAndShowComponent $compName 0}
-            RB2W::showOutputComponent $compName 1
-        }
-        if {![RB2W::componentExistsByName $compName]} {
-            error [::HWFlow::txt "输出组件 $compName 已创建但无法在模型中重新定位。" "Output component $compName was created but cannot be resolved in the model."]
-        }
-        catch {update idletasks}
-        catch {update}
-    } err opts]
-
-    if {$PERFORMANCE_MODE} {
-        RB2W::resumePerformanceModeAfterBrowserUpdate
+    set compId [RB2W::componentIdByName $compName]
+    if {$compId eq "" || $compId == 0} {
+        error [::HWFlow::txt "输出组件 $compName 已创建但无法在模型中重新定位。" "Output component $compName was created but cannot be resolved in the model."]
     }
-    if {$code} {
-        return -options $opts $err
-    }
+    foreach etype {comps components} { catch {*setvalue $etype id=$compId color=$color} }
+    RB2W::setCurrentComponent $compName
+    RB2W::log "Output component created silently: id=$compId name=$compName"
+    return $compId
 }
 
 proc ::RB2W::ensureOutputComponent {sourceCompId} {
     variable outputCompBySource
-    variable PERFORMANCE_MODE
     if {[info exists outputCompBySource($sourceCompId)]} {
         set outName $outputCompBySource($sourceCompId)
         RB2W::setCurrentComponent $outName
@@ -1166,9 +1053,6 @@ proc ::RB2W::ensureOutputComponent {sourceCompId} {
     set outName [RB2W::sanitizeNamePart $baseName "AUTO_RBE2"]
     RB2W::createComponentByName $outName
     set outputCompBySource($sourceCompId) $outName
-    if {!$PERFORMANCE_MODE} {
-        RB2W::showOutputComponent $outName 0
-    }
     RB2W::log "Output component created for source component $sourceCompId ($srcName): $outName"
     return $outName
 }
@@ -1989,157 +1873,6 @@ proc ::RB2W::validateWasherAndGetDepNodes {loopDict seedElems geom} {
     return [list 1 "ok" $info]
 }
 
-proc ::RB2W::processComponent {compId {compIndex 1} {compTotal 1}} {
-    variable RIGID_TYPE
-    variable LOG_EACH_CREATED
-    variable LOG_EACH_SKIPPED
-    variable PROGRESS_LOOP_STEP
-    variable UI_UPDATE_STEP
-    variable BATCH_ORGANIZE_RBE2
-    variable PERFORMANCE_MODE
-    set rigidType [string toupper $RIGID_TYPE]
-
-    RB2W::clearNodeXYZCache
-    array set reasons {}
-    set elems [RB2W::getElemsByComp $compId]
-    if {[llength $elems] == 0} {
-        RB2W::log "Component $compId: no elements found, skipped."
-        return [list 0 0 0 0]
-    }
-
-    set t0 [clock milliseconds]
-    RB2W::buildGraph $elems
-    set loops [RB2W::findFreeEdgeLoops]
-    set tGraph [expr {[clock milliseconds] - $t0}]
-    set tIndex 0
-    set tCreate 0
-
-    set created 0; set skipped 0; set candidateHoles 0
-    set createdRBE2Elems {}
-    set outComp ""
-    set outCompReady 0
-    set compName [RB2W::getComponentName $compId]
-    set loopTotal [llength $loops]
-    RB2W::log "Component $compId ($compName): elems=[llength $elems], freeEdgeLoops=$loopTotal, graphTime=${tGraph}ms"
-    set overallPct0 [expr {100.0 * (($compIndex - 1) / double($compTotal))}]
-    RB2W::overallStatus $overallPct0 $compIndex $compTotal $compName 0 $loopTotal $candidateHoles $created $skipped 1
-
-    set loopIndex 0
-    foreach loop $loops {
-        incr loopIndex
-        if {$loopIndex == 1 || ($PROGRESS_LOOP_STEP > 0 && ($loopIndex % $PROGRESS_LOOP_STEP) == 0) || $loopIndex == $loopTotal} {
-            if {$loopTotal > 0} { set compFrac [expr {$loopIndex / double($loopTotal)}] } else { set compFrac 1.0 }
-            set overallPct [expr {100.0 * (($compIndex - 1 + $compFrac) / double($compTotal))}]
-            RB2W::overallStatus $overallPct $compIndex $compTotal $compName $loopIndex $loopTotal $candidateHoles $created $skipped [expr {$loopIndex == $loopTotal}]
-        }
-        if {!$PERFORMANCE_MODE && $UI_UPDATE_STEP > 0 && ($loopIndex % $UI_UPDATE_STEP) == 0} { catch {update} }
-
-        set validInfo [RB2W::isValidHoleLoop $loop]
-        if {![lindex $validInfo 0]} {
-            incr skipped
-            RB2W::bumpReason reasons [lindex $validInfo 1]
-            if {$LOG_EACH_SKIPPED} { RB2W::log "Component $compId: skipped loop, reason=[lindex $validInfo 1]" }
-            continue
-        }
-        incr candidateHoles
-        set geom [lindex $validInfo 1]
-        set center [lindex $geom 0]
-        set radius [lindex $geom 1]
-        set rel [lindex $geom 2]
-        set innerShape [RB2W::loopShape $geom]
-        if {[dict exists $innerShape kind]} {
-            set shapeKind [dict get $innerShape kind]
-        } else {
-            set shapeKind circular
-        }
-        set innerAxisRatio [dict get $innerShape axisRatio]
-        set seedElems [RB2W::seedElemsFromLoop [dict get $loop edges]]
-        set washerInfo [RB2W::validateWasherAndGetDepNodes $loop $seedElems $geom]
-        if {![lindex $washerInfo 0]} {
-            incr skipped
-            RB2W::bumpReason reasons [lindex $washerInfo 1]
-            if {$LOG_EACH_SKIPPED} { RB2W::log "Component $compId: skipped candidate hole D=[format %.3f [expr {2.0*$radius}]], reason=[lindex $washerInfo 1]" }
-            continue
-        }
-        set wdict [lindex $washerInfo 2]
-        set depNodes [dict get $wdict depNodes]
-        set outerR [dict get $wdict outerR]
-        set outerRel [dict get $wdict outerRel]
-        set outerCount [dict get $wdict outerCount]
-        set outerAxisRatio [dict get $wdict outerAxisRatio]
-
-        if {$outComp eq ""} {
-            set outComp [RB2W::sanitizeNamePart [RB2W::sourceOutputBaseName $compId] "AUTO_RBE2"]
-            set tIdx0 [clock milliseconds]
-            set indexed [RB2W::initExistingRBE2IndexForSource $compId $outComp]
-            set tIndex [expr {$tIndex + ([clock milliseconds] - $tIdx0)}]
-            if {$indexed > 0} {
-                RB2W::log "Component $compId: indexed existing RIGIDS elements for object-level safety check: $indexed"
-            }
-        }
-        set existing [RB2W::existingRBE2ForDepNodes $depNodes]
-        if {[lindex $existing 0]} {
-            incr skipped
-            RB2W::bumpReason reasons "existing RIGIDS for washer hole"
-            if {$LOG_EACH_SKIPPED} {
-                RB2W::log "Component $compId: skipped existing RIGIDS element [lindex $existing 1] for candidate hole D=[format %.3f [expr {2.0*$radius}]]"
-            }
-            continue
-        }
-        if {!$outCompReady} {
-            set outComp [RB2W::ensureOutputComponent $compId]
-            set outCompReady 1
-        }
-        if {[catch {
-            set tCreate0 [clock milliseconds]
-            set cnode [RB2W::createCenterNode $center $outComp]
-            set rbeElems [RB2W::createRigidLink $cnode $depNodes $outComp]
-            set tCreate [expr {$tCreate + ([clock milliseconds] - $tCreate0)}]
-            RB2W::rememberRBE2ForDepNodes $depNodes $rbeElems
-            if {$BATCH_ORGANIZE_RBE2} {
-                foreach re $rbeElems { lappend createdRBE2Elems $re }
-            } else {
-                catch {*clearmark elems 1}
-                if {[llength $rbeElems] > 0} {
-                    eval *createmark elems 1 $rbeElems
-                    RB2W::moveMarkToComponent {elems elements} 1 $outComp
-                    catch {*clearmark elems 1}
-                }
-            }
-        } err]} {
-            incr skipped
-            RB2W::bumpReason reasons "create $rigidType failed"
-            RB2W::log "Component $compId: failed at D=[format %.3f [expr {2.0*$radius}]], reason=$err"
-            continue
-        }
-
-        incr created
-        if {$LOG_EACH_CREATED} {
-            RB2W::log "Component $compId: $rigidType #$created created in $outComp, centerNode=$cnode, rigidElems=$rbeElems, depNodes=[llength $depNodes], innerNodes=[llength [dict get $loop nodes]], outerNodes=$outerCount, shape=$shapeKind, innerD=[format %.3f [expr {2.0*$radius}]], outerD=[format %.3f [expr {2.0*$outerR}]], innerRel=[format %.4f $rel], outerRel=[format %.4f $outerRel], innerAxisRatio=[format %.4f $innerAxisRatio], outerAxisRatio=[format %.4f $outerAxisRatio]"
-        }
-    }
-
-    set organizeMoved 0; set tOrganize 0
-    if {$BATCH_ORGANIZE_RBE2 && [llength $createdRBE2Elems] > 0 && $outComp ne ""} {
-        set tOrg0 [clock milliseconds]
-        set organizeMoved [RB2W::organizeCreatedRBE2Elements $createdRBE2Elems $outComp]
-        set tOrganize [expr {[clock milliseconds] - $tOrg0}]
-        set needMove [llength [RB2W::uniq $createdRBE2Elems]]
-        if {$organizeMoved < $needMove} { RB2W::log "Warning: component $compId batch-organized $organizeMoved/$needMove RIGIDS element(s) into $outComp." }
-    }
-    if {!$PERFORMANCE_MODE && $outComp ne "" && $created > 0} {
-        RB2W::showOutputComponent $outComp 0
-    }
-
-    set totalTime [expr {[clock milliseconds] - $t0}]
-    set overallDone [expr {100.0 * ($compIndex / double($compTotal))}]
-    RB2W::overallStatus $overallDone $compIndex $compTotal $compName $loopTotal $loopTotal $candidateHoles $created $skipped 1
-    RB2W::log "Component $compId ($compName) summary: rigidType=$rigidType, candidates=$candidateHoles, created=$created, skipped=$skipped, existingIndexTime=${tIndex}ms, createTime=${tCreate}ms, organizedRIGIDS=$organizeMoved, organizeTime=${tOrganize}ms, graphTime=${tGraph}ms, totalTime=${totalTime}ms, skipReasons={[RB2W::formatReasonStats reasons]}"
-    RB2W::clearNodeXYZCache
-    if {$created > 0} { RB2W::resetRBE2CandidateCache }
-    return [list $created $skipped $candidateHoles $organizeMoved]
-}
-
 proc ::RB2W::printParameterLog {} {
     variable VERSION
     variable MIN_HOLE_DIAMETER; variable MAX_HOLE_DIAMETER; variable CIRCULARITY_TOL
@@ -2152,7 +1885,7 @@ proc ::RB2W::printParameterLog {} {
     variable BATCH_ORGANIZE_RBE2; variable ORGANIZE_BATCH_SIZE
     variable SHOW_OUTPUT_COMPONENTS; variable FORCE_BROWSER_REFRESH
     variable SKIP_COMPONENT_IF_EXISTING_RBE2; variable CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2; variable CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2
-    variable PERFORMANCE_MODE; variable USE_NODE_XYZ_CACHE; variable USE_STATUS_PROGRESS
+    variable USE_NODE_XYZ_CACHE; variable USE_STATUS_PROGRESS
     variable PROGRESS_LOOP_STEP; variable UI_UPDATE_STEP; variable FORCE_STATUS_UPDATE
     variable STATUS_PERCENT_STEP; variable STATUS_MIN_INTERVAL_MS
     variable FAST_RBE2_MARK_FILTER
@@ -2161,7 +1894,7 @@ proc ::RB2W::printParameterLog {} {
     RB2W::log "Version=$VERSION"
     RB2W::log "Parameters: diameter=${MIN_HOLE_DIAMETER}~${MAX_HOLE_DIAMETER}, innerCircTol=$CIRCULARITY_TOL, allowOval=$ALLOW_OVAL_HOLES, maxOvalAxisRatio=$MAX_OVAL_AXIS_RATIO, ovalRadialFitTol=$OVAL_RADIAL_FIT_TOL, edgeNodes=${MIN_HOLE_EDGE_NODES}~${MAX_HOLE_EDGE_NODES}, innerWasherNodeLoops=$INNER_WASHER_NODE_LOOPS, outerCircTol=$OUTER_RING_CIRCULARITY_TOL, outerOvalRadialFitTol=$OUTER_OVAL_RADIAL_FIT_TOL, outerOvalAxisRatioTol=$OUTER_OVAL_AXIS_RATIO_TOL, centerOffsetTol=$CENTER_OFFSET_TOL, minWasherWidthAbs=$MIN_WASHER_WIDTH_ABS, minWasherWidthRatio=$MIN_WASHER_WIDTH_RATIO, washerElemCountTol=$WASHER_ELEM_COUNT_TOL, rigidType=$RIGID_TYPE, dof=$RBE2_DOF, outputPrefix=$RBE2_COMPONENT_PREFIX, batchOrganizeRIGIDS=$BATCH_ORGANIZE_RBE2, organizeBatchSize=$ORGANIZE_BATCH_SIZE, showOutputComponents=$SHOW_OUTPUT_COMPONENTS, browserRefresh=$FORCE_BROWSER_REFRESH"
     RB2W::log "Safety: skipIfExistingRBE2=$SKIP_COMPONENT_IF_EXISTING_RBE2, checkSource=$CHECK_SOURCE_COMPONENT_FOR_EXISTING_RBE2, checkOutput=$CHECK_OUTPUT_COMPONENT_FOR_EXISTING_RBE2"
-    RB2W::log "Performance: performanceMode=$PERFORMANCE_MODE, nodeXYZCache=$USE_NODE_XYZ_CACHE, statusProgress=$USE_STATUS_PROGRESS, progressStep=$PROGRESS_LOOP_STEP, uiUpdateStep=$UI_UPDATE_STEP, forceStatusUpdate=$FORCE_STATUS_UPDATE, statusPercentStep=$STATUS_PERCENT_STEP, statusMinIntervalMs=$STATUS_MIN_INTERVAL_MS, fastRBE2MarkFilter=$FAST_RBE2_MARK_FILTER, logEachCreated=$LOG_EACH_CREATED, logEachSkipped=$LOG_EACH_SKIPPED"
+    RB2W::log "Runtime: nodeXYZCache=$USE_NODE_XYZ_CACHE, statusProgress=$USE_STATUS_PROGRESS, progressStep=$PROGRESS_LOOP_STEP, uiUpdateStep=$UI_UPDATE_STEP, forceStatusUpdate=$FORCE_STATUS_UPDATE, statusPercentStep=$STATUS_PERCENT_STEP, statusMinIntervalMs=$STATUS_MIN_INTERVAL_MS, fastRBE2MarkFilter=$FAST_RBE2_MARK_FILTER, logEachCreated=$LOG_EACH_CREATED, logEachSkipped=$LOG_EACH_SKIPPED"
 }
 
 proc ::RB2W::main {} {
@@ -2176,7 +1909,6 @@ proc ::RB2W::runCurrentSelection {} {
     variable currentComponentName
     variable RIGID_TYPE
     variable SKIP_COMPONENT_IF_EXISTING_RBE2
-    variable PERFORMANCE_MODE
     variable ui
 
     set currentComponentName ""
@@ -2198,17 +1930,15 @@ proc ::RB2W::runCurrentSelection {} {
 
     if {$action eq "merge_nodes"} {
         set procCode [catch {
-            RB2W::beginPerformanceMode
             set mergeStat [RB2W::mergeDuplicateRBE2ForSources $comps]
-            RB2W::endPerformanceMode
         } procErr procOpts]
         if {$procCode} {
-            catch {RB2W::endPerformanceMode}
             RB2W::log [::HWFlow::txt "合并重复节点失败：$procErr" "Merge duplicate nodes failed: $procErr"]
             tk_messageBox -icon error -title [::HWFlow::txt "Shell Washer-Hole RIGIDS" "Shell Washer-Hole RIGIDS"] -message [::HWFlow::txt "合并重复节点失败：\n$procErr" "Merge duplicate nodes failed:\n$procErr"]
             return -options $procOpts $procErr
         }
         set runMs [expr {[clock milliseconds] - $runStart}]
+        RB2W::refreshBrowsersAndGraphics 1
         set msg [::HWFlow::txt "合并重复节点完成。\n选择组件数：[llength $comps]\n扫描输出组件数：[dict get $mergeStat components]\n扫描 RIGIDS 数：[dict get $mergeStat scanned]\n删除重复 RIGIDS：[dict get $mergeStat duplicateElems]\n删除重复中心节点：[dict get $mergeStat duplicateNodes]\n运行时间：${runMs} ms" "Merge duplicate nodes finished.\nSelected components: [llength $comps]\nOutput components scanned: [dict get $mergeStat components]\nRIGIDS scanned: [dict get $mergeStat scanned]\nDuplicate RIGIDS deleted: [dict get $mergeStat duplicateElems]\nDuplicate center nodes deleted: [dict get $mergeStat duplicateNodes]\nRun time: ${runMs} ms"]
         RB2W::log [::HWFlow::txt "==== 合并重复节点完成：删除重复 RIGIDS=[dict get $mergeStat duplicateElems]，删除重复中心节点=[dict get $mergeStat duplicateNodes]，运行时间=${runMs}ms ====" "==== Merge duplicate nodes finished: duplicate RIGIDS deleted=[dict get $mergeStat duplicateElems], duplicate center nodes deleted=[dict get $mergeStat duplicateNodes], runtime=${runMs}ms ===="]
         RB2W::saveState
@@ -2228,7 +1958,6 @@ proc ::RB2W::runCurrentSelection {} {
             0]
     }
 
-    RB2W::beginPerformanceMode
     RB2W::resetOverallProgress
     set procCode [catch {
         if {$action eq "rebuild"} {
@@ -2257,10 +1986,14 @@ proc ::RB2W::runCurrentSelection {} {
             set totalSkipped [expr {$totalSkipped + [lindex $result 1]}]
             set totalCandidates [expr {$totalCandidates + [lindex $result 2]}]
             set totalOrganized [expr {$totalOrganized + [lindex $result 3]}]
-            if {!$PERFORMANCE_MODE} { catch {update} }
+            catch {update idletasks}
         }
     } procErr procOpts]
-    RB2W::endPerformanceMode
+
+    # Defer visibility and browser work until the batch ends.  This keeps
+    # component creation silent and avoids one browser refresh per source.
+    RB2W::showAllOutputComponents
+    RB2W::refreshBrowsersAndGraphics 1
 
     if {$procCode} {
         set runMs [expr {[clock milliseconds] - $runStart}]
@@ -2324,4 +2057,8 @@ proc ::RB2W::runAction {} {
 
 proc ::RB2W::runSettings {} {
     ::RB2W::showPanel 1
+}
+
+foreach hybridFile {bridge.tcl exporter.tcl executor.tcl workflow.tcl} {
+    source [file join $::RB2W::MODULE_DIR tcl $hybridFile]
 }

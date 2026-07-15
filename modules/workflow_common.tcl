@@ -1044,7 +1044,11 @@ proc ::HWFlow::createComponent {compName {color ""}} {
 
     ::HWFlow::resetBrowserBlocks
 
-    set compId [::HWFlow::createComponentThroughBrowser $compName]
+    # Never use the Model Browser create operation for automated component
+    # creation. In HyperMesh 2019 it opens the interactive Create Component
+    # dialog and blocks batch workflows. The command fallbacks below create
+    # the same collector without user interaction.
+    set compId ""
     if {$compId eq ""} {
         set histName "Created Component $compName"
         catch {*startnotehistorystate $histName}

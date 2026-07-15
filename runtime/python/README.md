@@ -1,14 +1,16 @@
 # Bundled Python Runtime
 
-HMWorkFlow bundles the official CPython 3.8.10 Windows x64 embeddable distribution for offline use by Local Mesh Optimizer.
+HMWorkFlow bundles the official CPython 3.8.10 Windows x64 embeddable distribution for offline use by its Python-backed modules.
 
 Runtime location:
 
 ```text
-runtime/python/windows-x64/pythonw.exe
+runtime/python/windows-x64/python.exe
 ```
 
-The Tcl module uses `pythonw.exe` automatically when `PYTHON_COMMAND` is empty, so no command-line window is shown. `python.exe` is retained for packaging checks and command-line diagnostics. A user-configured interpreter is mapped to its sibling `pythonw.exe`; interpreters without a windowless executable are rejected on Windows. System launchers are fallback candidates only when a matching windowless launcher is available.
+At HyperMesh startup, `shortcut_bootstrap.tcl` opens a bidirectional pipe to this executable and keeps one worker alive for that HyperMesh instance. The worker is therefore a direct child of HyperMesh in the Windows process tree. Starting another HyperMesh creates another worker and another private pipe; workers are never shared. Closing HyperMesh closes the pipe, causing its worker to exit.
+
+The hybrid core intentionally has no system-Python fallback. If this executable is missing or unusable, startup records a clear error under `runtime/instances/hm-<HyperMesh PID>/startup.log` instead of silently attaching a different Python installation.
 
 ## Contents
 

@@ -37,6 +37,7 @@ if {![namespace exists ::HWFlow]} {
 
 namespace eval ::RB2Bolt {
     variable VERSION "0.6"
+    variable MODULE_DIR [file join [file dirname [file normalize [info script]]] rbe2_bolt_connector]
 
     variable P
     array set P {
@@ -2393,78 +2394,6 @@ proc ::RB2Bolt::runFindUnusedShellRBE2 {} {
 }
 
 # ------------------------- entry point -------------------------------------
-proc ::RB2Bolt::runCreateFromSelection {} {
-    variable P
-    variable beamSegmentIndex
-
-    msg [::HWFlow::txt "RBE2 Bolt Connector 开始。若需要 CBEAM 输出，请确认 BAR2 单元类型已设置为 CBEAM。" "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."]
-
-    set elemIds [selectedElementIdsInteractive]
-    if {[llength $elemIds] == 0} {
-        ::RB2Bolt::clearSelectionMarks
-        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择范围内未找到 RBE2 候选单元。" "No RBE2 candidate elements were found in the selection scope."]
-        return
-    }
-
-    msg [::HWFlow::txt "RBE2 候选单元数：[llength $elemIds]" "RBE2 candidate elements: [llength $elemIds]"]
-    set progressOpened 0
-    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
-        set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] \
-            [::HWFlow::txt "准备读取 RBE2 单元..." "Preparing to read RBE2 elements..."] \
-            0]
-    }
-    set tRecords0 [clock milliseconds]
-    set records [collectRBE2Records $elemIds]
-    set tRecords1 [clock milliseconds]
-    if {[llength $records] < 2} {
-        ::RB2Bolt::clearSelectionMarks
-        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "可用 RBE2 记录不足。" "Not enough usable RBE2 records."] 100.0}
-        }
-        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "选择集中可用 RBE2 单元少于 2 个。" "Fewer than 2 usable RBE2 elements were found in the selection."]
-        return
-    }
-
-    msg [::HWFlow::txt "有效 RBE2 记录数：[llength $records]。正在建立分组..." "Valid RBE2 records: [llength $records]. Building groups..."]
-    if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0} {
-        catch {::HWFlow::progressUpdate 45.0 \
-            [::HWFlow::txt "RBE2 Bolt Connector 正在执行" "RBE2 Bolt Connector running"] \
-            [::HWFlow::txt "正在建立分组..." "Building groups..."] \
-            1}
-    }
-    set tGroups0 [clock milliseconds]
-    set groups [buildGroups $records]
-    set tGroups1 [clock milliseconds]
-    if {[llength $groups] == 0} {
-        ::RB2Bolt::clearSelectionMarks
-        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "没有匹配的 RBE2 分组。" "No matching RBE2 groups."] 100.0}
-        }
-        tk_messageBox -icon warning -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message [::HWFlow::txt "没有 RBE2 分组满足当前容差。可尝试增大轴向连接距离或横向中心偏移容差。" "No RBE2 groups matched the tolerances. Try increasing the axial connection distance or transverse center offset tolerance."]
-        return
-    }
-
-    catch {array unset beamSegmentIndex}
-    array set beamSegmentIndex {}
-    set result [createBoltsFast $groups]
-    set created [lindex $result 0]
-    set skipped [lindex $result 1]
-    set spatialOnlyGroups [lindex $result 3]
-    set skippedExisting [lindex $result 4]
-    set recordsMs [expr {$tRecords1 - $tRecords0}]
-    set groupsMs [expr {$tGroups1 - $tGroups0}]
-    msg [::HWFlow::txt "RBE2 records 读取耗时：$recordsMs ms；groups 建立耗时：$groupsMs ms。" "RBE2 records read time: $recordsMs ms; groups build time: $groupsMs ms."]
-
-    set txt [::HWFlow::txt "RBE2 Bolt Connector 已完成。\n\nRBE2 数量：[llength $records]\n分组数量：[llength $groups]\n已跳过的空间型 RBE2-only 分组：$spatialOnlyGroups\n已创建 $P(elemType)：$created\n已跳过既有 $P(elemType)：$skippedExisting\n跳过/失败：$skipped" "RBE2 Bolt Connector finished.\n\nRBE2 count: [llength $records]\nGroup count: [llength $groups]\nSpatial RBE2-only groups skipped: $spatialOnlyGroups\nCreated $P(elemType): $created\nSkipped existing $P(elemType): $skippedExisting\nSkipped/failed: $skipped"]
-    ::RB2Bolt::clearSelectionMarks
-    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt "RBE2 Bolt Connector 已完成。" "RBE2 Bolt Connector finished."] 100.0}
-    }
-    tk_messageBox -icon info -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message $txt
-    msg $txt
-}
-
 proc ::RB2Bolt::runAction {} {
     ::RB2Bolt::loadState
     if {![validateParams]} {return}
@@ -2562,4 +2491,8 @@ proc ::RB2Bolt::run {} {
     }
     tk_messageBox -icon info -title [::HWFlow::txt "RBE2 Bolt Connector" "RBE2 Bolt Connector"] -message $txt
     msg $txt
+}
+
+foreach hybridFile {bridge.tcl exporter.tcl executor.tcl workflow.tcl} {
+    source [file join $::RB2Bolt::MODULE_DIR tcl $hybridFile]
 }

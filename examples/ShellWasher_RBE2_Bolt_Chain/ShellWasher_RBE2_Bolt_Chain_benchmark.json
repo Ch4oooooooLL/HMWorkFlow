@@ -1,0 +1,52 @@
+{
+  "repeat_count": 5,
+  "stable_identical_results": true,
+  "result": {
+    "accepted_washer_holes": 768,
+    "analyzed_rbe2": 768,
+    "rejected_rbe2": 0,
+    "coaxial_groups": 192,
+    "planned_adjacent_bolts": 576,
+    "rejected_bolt_pairs": 0,
+    "bolt_lengths": [
+      20.0
+    ]
+  },
+  "timings": [
+    {
+      "build_model_seconds": 0.551005,
+      "washer_detection_seconds": 0.695404,
+      "bolt_planning_seconds": 0.411404,
+      "total_seconds": 1.657813
+    },
+    {
+      "build_model_seconds": 0.520965,
+      "washer_detection_seconds": 0.721934,
+      "bolt_planning_seconds": 0.408013,
+      "total_seconds": 1.650911
+    },
+    {
+      "build_model_seconds": 0.523439,
+      "washer_detection_seconds": 0.695219,
+      "bolt_planning_seconds": 0.392416,
+      "total_seconds": 1.611075
+    },
+    {
+      "build_model_seconds": 0.528859,
+      "washer_detection_seconds": 0.638789,
+      "bolt_planning_seconds": 0.382955,
+      "total_seconds": 1.550603
+    },
+    {
+      "build_model_seconds": 0.514995,
+      "washer_detection_seconds": 0.645919,
+      "bolt_planning_seconds": 0.378433,
+      "total_seconds": 1.539347
+    }
+  ],
+  "total_seconds_summary": {
+    "minimum": 1.539347,
+    "mean": 1.60195,
+    "maximum": 1.657813
+  }
+}
