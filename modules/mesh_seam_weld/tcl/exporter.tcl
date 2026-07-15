@@ -7,6 +7,7 @@ proc ::MeshSeamWeld::writeHybridPathRequest {dir runId mode sourceNodes candidat
 proc ::MeshSeamWeld::writeHybridPathMesh {dir mode sourceNodes candidates} {
     set elemIds {}
     if {$mode eq "source"} { foreach nid $sourceNodes { set elemIds [concat $elemIds [::MeshSeamWeld::nodeElementIds $nid]] } }
+    if {$mode eq "target"} { set elemIds [::MeshSeamWeld::adjacentElementsForNodes $candidates] }
     set elemIds [::MeshSeamWeld::uniq $elemIds]; set allNodes [concat $sourceNodes $candidates]; set erows {}
     foreach eid $elemIds { set nodes [::MeshSeamWeld::elemNodes $eid]; if {[llength $nodes] ni {3 4}} { continue }; set allNodes [concat $allNodes $nodes]; set type [expr {[llength $nodes]==3 ? "CTRIA3" : "CQUAD4"}]; lappend erows "    {\"element_id\": $eid, \"component_id\": 1, \"element_type\": \"$type\", \"node_ids\": [::HybridCore::jsonIntArray $nodes]}" }
     set nrows {}; foreach nid [lsort -integer -unique $allNodes] { set xyz [::MeshSeamWeld::nodeXYZ $nid]; lappend nrows "    \[$nid, [lindex $xyz 0], [lindex $xyz 1], [lindex $xyz 2]\]" }

@@ -1307,9 +1307,12 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             该模块主要用于处理车身结构件之间的焊缝面（Seam Surface）网格创建。它打破了传统几何 Ruled 面划分网格的低效率，采用了在已有网格上直接投影的流程：
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
-                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理；一个节点或彼此不连续的多个节点分别作为闭合自由边种子，可在一次任务中创建多个闭环焊缝。批量闭环任务只允许一个目标组件。</li>
+                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理；自由边上的单节点作为对应闭环种子；组件内部的单节点表示处理该组件上的全部闭合自由边；彼此不连续的多个节点仍分别作为闭环种子。</li>
                             <li><strong>印记区网格重构 (Remeshing)</strong>：在印记边界内，自动计算重构范围，并将投影线与目标网格强行对齐重划分。</li>
                             <li><strong>自动生成 Ruled 连接带</strong>：自动利用两组特征点对齐，生成两个零件之间均匀的 shell 网格连接带，并将新生成的焊缝网格归类至指定组件。</li>
+                            <li><strong>局部失败隔离</strong>：某个闭环无法完整投影或创建焊缝时，只回滚并跳过该闭环；整批完成后在 <code>MESH_SEAM_WELD_FAILED_MARKERS</code> 中创建临时节点标记失败位置。</li>
+                            <li><strong>批量加速</strong>：所有源闭环一次性准备，并为目标网格建立空间索引；每个闭环只对附近的局部目标 elements 执行 imprint，再在 Tcl 内存中完成目标匹配、方向校正和连续性检查，避免整 component 重复扫描以及逐闭环导出文件。</li>
+                            <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
                         </ul>
                     </div>
 
@@ -1324,17 +1327,17 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">2</span>
                                 <div class="step-title">选择源 node path</div>
-                                <div class="step-detail">多选连续节点时使用所选开放路径；选择一个或多个彼此不连续、且分别位于闭合自由边上的节点时，每个节点自动扩展为对应闭环。重复选择同一闭环上的种子会自动去重。</div>
+                                <div class="step-detail">多选连续节点时使用所选开放路径；自由边上的单节点自动扩展为对应闭环；组件内部的单节点自动枚举该组件的全部闭合自由边；多个不连续种子仍逐环处理并自动去重。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">3</span>
                                 <div class="step-title">选择目标组件</div>
-                                <div class="step-detail">选择需要焊缝投影的目标面组件（Components）。批量闭环任务必须且只能选择一个目标组件。</div>
+                                <div class="step-detail">选择需要焊缝投影的一个或多个目标面组件（Components）。每个闭环独立尝试向所选目标组件投影。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">4</span>
                                 <div class="step-title">配置生成参数</div>
-                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序执行 <code>imprint_nodelist</code>，校正目标路径方向及闭环起点，再以 ruled surface 自动生成多层连接带；闭环会读取首尾横向分层节点并逐层补齐封口单元。</div>
+                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐闭环执行 <code>imprint_nodelist</code>、目标路径连续性校验和 ruled 网格创建。单个闭环失败会回滚后继续；结束时请检查失败统计及临时标记节点。</div>
                             </div>
                         </div>
                     </div>
