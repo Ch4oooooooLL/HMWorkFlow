@@ -195,6 +195,12 @@ PACKAGED_CONFIG_DIR="${TEMP_PROJECT_ROOT}/config"
 if [[ -d "$PACKAGED_CONFIG_DIR" ]]; then
     find "$PACKAGED_CONFIG_DIR" -maxdepth 1 -type f -name '*_state.txt' -delete
 fi
+# Keep reproducible example generators and documentation, but omit generated
+# solver model payloads from release archives.
+PACKAGED_EXAMPLES_DIR="${TEMP_PROJECT_ROOT}/examples"
+if [[ -d "$PACKAGED_EXAMPLES_DIR" ]]; then
+    find "$PACKAGED_EXAMPLES_DIR" -type f -iname '*.fem' -delete
+fi
 find "$TEMP_PROJECT_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$TEMP_PROJECT_ROOT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 

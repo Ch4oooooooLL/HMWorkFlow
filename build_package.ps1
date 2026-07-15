@@ -107,6 +107,14 @@ try {
         Get-ChildItem -LiteralPath $PackagedConfigDir -Filter "*_state.txt" -File |
             Remove-Item -Force
     }
+    # Example generators and documentation are distributable source assets,
+    # while generated solver models are large reproducible outputs.
+    $PackagedExamplesDir = Join-Path $TempProjectRoot "examples"
+    if (Test-Path -LiteralPath $PackagedExamplesDir) {
+        Get-ChildItem -LiteralPath $PackagedExamplesDir -File -Recurse |
+            Where-Object { $_.Extension -ieq ".fem" } |
+            Remove-Item -Force
+    }
     Get-ChildItem -LiteralPath $TempProjectRoot -Directory -Recurse -Filter "__pycache__" |
         Remove-Item -Recurse -Force
     # `-Include` is unreliable with a literal directory path and can yield all

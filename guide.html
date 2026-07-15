@@ -965,6 +965,12 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#mod-weld-integrity-check" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M9,2V4H4V6H5V20A2,2 0 0,0 7,22H17A2,2 0 0,0 19,20V6H20V4H15V2H9M7,6H17V20H7V6M9,8V18H11V8H9M13,8V18H15V8H13Z"/></svg>
+                        网格焊缝完整性检查
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#mod-shell-washer-rbe2" class="nav-link" onclick="activateLink(this)">
                         <svg viewBox="0 0 24 24"><path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/></svg>
                         壳孔 RIGIDS
@@ -1010,7 +1016,7 @@
                     <svg viewBox="0 0 24 24"><path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"/></svg>
                     <div class="alert-content">
                         <h4>提示：关于已隐藏的模块说明</h4>
-                        <p>本项目包含部分底层与准备工作流模块（例如 Component 分类、材料分配、中面提取、自动 Washer 划分、铸件网格等），这些模块由于仅在开发或快捷键中隐式调用，在主面板中已被设为隐藏，使用本指南时无需关注。您只需处理主面板上可见的 6 大核心模块。</p>
+                        <p>本项目包含部分底层与准备工作流模块（例如 Component 分类、材料分配、中面提取、自动 Washer 划分、铸件网格等），这些模块由于仅在开发或快捷键中隐式调用，在主面板中已被设为隐藏，使用本指南时无需关注。您只需处理主面板上可见的 7 大核心模块。</p>
                     </div>
                 </div>
 
@@ -1401,6 +1407,39 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                     <div class="detail-tab-pane" id="weld-safety">
                         <div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>会重构目标组件的局部网格</h4><p>此模块并非只创建新单元：<code>imprint_nodelist</code> 会在目标组件写入节点路径并进行局部重划分。请先保存模型，并在生成后检查印记区域的单元质量、法向和连接关系。</p></div></div>
                         <ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>闭环种子仅接受唯一、无自交、每个节点恰有两条自由边的闭合流形；多个种子必须对应可识别的闭环。</li><li>连续多节点严格按开放路径处理；imprint 后会比较正反方向，闭环还会校正起点，避免首尾交叉连接。</li><li>批量闭环任务只允许一个目标组件，并通过命令流进度窗口逐环提示。</li><li>输出组件为空、焊缝尺寸非正、扩展层数或网格枚举参数为负时会被拒绝。</li></ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Module: Weld Integrity Check -->
+            <section id="mod-weld-integrity-check" class="module-section" data-module="weld_integrity_check">
+                <h1 class="section-title">网格焊缝完整性检查 (Mesh Weld Integrity Check)</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge mesh">网格</span><span>网格后遗漏焊缝候选审查</span></div><div class="detail-path-badge">modules/weld_integrity_check.tcl</div></div>
+                    <div class="detail-tabs-nav">
+                        <button class="detail-tab-btn active" onclick="switchTab(this, 'wic-desc')">用途与范围</button>
+                        <button class="detail-tab-btn" onclick="switchTab(this, 'wic-steps')">操作步骤</button>
+                        <button class="detail-tab-btn" onclick="switchTab(this, 'wic-params')">参数与限制</button>
+                    </div>
+                    <div class="detail-tab-pane active" id="wic-desc">
+                        <p style="font-size:14px; color:var(--text-secondary);">模块在主要网格和连接完成后，自动缩小人工漏焊检查范围。首版只分析 <strong>Shell–Shell</strong>：Python 从壳拓扑推导自由边，经过 Component AABB 粗筛、空间哈希近邻搜索和连续边区域过滤，按 Component Pair 汇总候选。它不会判断某处必须焊接，也不会创建焊缝或修改模型。</p>
+                    </div>
+                    <div class="detail-tab-pane" id="wic-steps">
+                        <div class="step-list">
+                            <div class="step-item"><span class="step-num">1</span><div class="step-title">定义检查范围</div><div class="step-detail">选择至少两个待检查 Component，或使用当前可见组件；可另选排除组件。</div></div>
+                            <div class="step-item"><span class="step-num">2</span><div class="step-title">执行检测</div><div class="step-detail">设置距离、最短连续长度和连续节点数后开始。结果按候选总长度排序。</div></div>
+                            <div class="step-item"><span class="step-num">3</span><div class="step-title">逐组审查</div><div class="step-detail">使用孤立、高亮区域、上/下区域定位候选；完成后自动进入下一条待检查 Pair。</div></div>
+                            <div class="step-item"><span class="step-num">4</span><div class="step-title">恢复与继续</div><div class="step-detail">完成项可在状态筛选中重新打开。恢复按钮和关闭报告都会还原进入模块前的 Component 显示集合；再次进入可继续上次审查。</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-tab-pane" id="wic-params">
+                        <div class="param-table-container"><table class="param-table"><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody>
+                            <tr><td>最大搜索距离</td><td>自由边节点与另一 Component 网格节点的最大允许距离，单位跟随模型。</td></tr>
+                            <tr><td>最小有效接近长度</td><td>连续候选自由边链累计长度低于该值时过滤。</td></tr>
+                            <tr><td>最小连续节点数</td><td>过滤单角点和少量零散近邻。</td></tr>
+                            <tr><td>忽略共节点组件对</td><td>共享节点达到连续节点阈值时，认为已经直接连接并跳过。</td></tr>
+                        </tbody></table></div>
+                        <div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>候选必须人工确认</h4><p>首版使用自由边节点到目标网格节点的距离近似，不做 CAD 曲面投影。粗网格、错位网格或目标面内部节点稀疏时可能漏报；Shell–Solid、Solid–Solid 和自动建焊缝尚未实现。</p></div></div>
                     </div>
                 </div>
             </section>

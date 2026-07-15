@@ -100,6 +100,15 @@ namespace eval ::HWToolkit {
             proc     "::LocalMeshOptimizer::runAction"
             settings_proc "::LocalMeshOptimizer::runSettings"
         }
+        weld_integrity_check {
+            group    "Mesh"
+            label_zh "网格焊缝完整性检查"
+            label_en "Mesh Weld Integrity Check"
+            desc_zh  "网格完成后识别可能遗漏焊缝的 Shell Component Pair，并逐组孤立、定位和审查。"
+            desc_en  "Detect shell component pairs that may have missing welds, then isolate, locate, and review them."
+            proc     "::WeldIntegrityCheck::runAction"
+            settings_proc "::WeldIntegrityCheck::runSettings"
+        }
         shell_washer_hole_rbe2 {
             group    "Connector"
             label_zh "壳孔 RIGIDS"
@@ -307,6 +316,7 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::GeomCleanup::savePanelState}
     catch {::ContactSetup::savePanelState}
     catch {::LocalMeshOptimizer::savePanelState}
+    catch {::WeldIntegrityCheck::saveConfig}
 
     catch {set ::MidSurf::ui(ok) 0}
     catch {set ::AutoHoleRBE2::ui(ok) 0}
