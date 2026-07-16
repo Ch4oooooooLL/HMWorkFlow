@@ -24,7 +24,7 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pandoc wkhtmltopdf fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends pandoc wkhtmltopdf xvfb fonts-noto-cjk
 
       - name: Build user guide PDF
         shell: bash
@@ -48,7 +48,8 @@ jobs:
             '}' \
             > user-guide.css
 
-          pandoc README.md \
+          xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" \
+            pandoc README.md \
             --standalone \
             --metadata title="使用教程" \
             --pdf-engine=wkhtmltopdf \
