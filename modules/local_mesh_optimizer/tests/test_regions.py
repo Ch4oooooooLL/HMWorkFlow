@@ -184,6 +184,47 @@ class RegionTests(unittest.TestCase):
         self.assertNotIn("HM2019_PROFILE", source)
         self.assertNotIn("hm2019_recorded", source)
 
+    def test_tcl_python_runtime_path_handling_is_directory_aware(self):
+        source = (Path(__file__).resolve().parents[2] / "local_mesh_optimizer.tcl").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("proc ::LocalMeshOptimizer::appendPythonCommandCandidates", source)
+        self.assertIn("proc ::LocalMeshOptimizer::appendPythonPathCandidate", source)
+        self.assertIn("if {[file isdirectory $clean]}", source)
+        self.assertIn("foreach name {pythonw.exe python.exe pythonw python}", source)
+        self.assertIn("set runtime(pythonCommand) \"\"", source)
+
+    def test_tcl_python_command_accepts_portable_python_directory(self):
+        try:
+            import tkinter
+        except ModuleNotFoundError:
+            self.skipTest("tkinter Tcl interpreter is not available")
+
+        module = Path(__file__).resolve().parents[2] / "local_mesh_optimizer.tcl"
+        with tempfile.TemporaryDirectory() as directory:
+            runtime_dir = Path(directory) / "Portable Python"
+            runtime_dir.mkdir()
+            pythonw = runtime_dir / "pythonw.exe"
+            pythonw.write_text("#!/bin/sh\nmarker=\"$3\"\nprintf '3.8' > \"$marker\"\n", encoding="utf-8")
+            pythonw.chmod(pythonw.stat().st_mode | 0o111)
+            task_dir = Path(directory) / "task"
+            task_dir.mkdir()
+
+            interp = tkinter.Tcl()
+            interp.eval(f"source {{{module}}}")
+            original_platform = interp.eval("set ::tcl_platform(platform)")
+            try:
+                interp.eval("set ::tcl_platform(platform) windows")
+                interp.eval(f"set ::LocalMeshOptimizer::ui(PYTHON_COMMAND) {{{runtime_dir}}}")
+                interp.eval(f"set ::LocalMeshOptimizer::runtime(taskDir) {{{task_dir}}}")
+                resolved = interp.eval("lindex [::LocalMeshOptimizer::resolvePython] 0")
+            finally:
+                interp.eval(f"set ::tcl_platform(platform) {{{original_platform}}}")
+
+            self.assertEqual(Path(resolved), pythonw)
+            cached = interp.eval("lindex $::LocalMeshOptimizer::runtime(pythonCommand) 0")
+            self.assertEqual(Path(cached), pythonw)
+
     def test_controller_writes_atomic_completion_status(self):
         with tempfile.TemporaryDirectory() as directory:
             task_dir = Path(directory)

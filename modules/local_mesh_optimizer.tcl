@@ -274,9 +274,11 @@ proc ::LocalMeshOptimizer::flushLog {{force 0}} {
 proc ::LocalMeshOptimizer::loadState {} {
     variable DEFAULTS
     variable ui
+    variable runtime
     catch {array unset ui}
     foreach key [array names DEFAULTS] { set ui($key) $DEFAULTS($key) }
     ::HWFlow::applyStateToArray local_mesh_optimizer ::LocalMeshOptimizer::ui
+    set runtime(pythonCommand) ""
     ::LocalMeshOptimizer::updateCriteriaStatus
 }
 
@@ -287,10 +289,12 @@ proc ::LocalMeshOptimizer::stateKeys {} {
 
 proc ::LocalMeshOptimizer::saveState {} {
     variable ui
+    variable runtime
     set state [dict create]
     foreach key [::LocalMeshOptimizer::stateKeys] {
         if {[info exists ui($key)]} { dict set state $key $ui($key) }
     }
+    set runtime(pythonCommand) ""
     ::HWFlow::saveState local_mesh_optimizer $state
 }
 
@@ -826,11 +830,82 @@ proc ::LocalMeshOptimizer::writeTask {scopeIds failedIds} {
     return $path
 }
 
+proc ::LocalMeshOptimizer::stripPythonPathQuotes {value} {
+    set text [string trim $value]
+    if {[string length $text] >= 2} {
+        set first [string index $text 0]
+        set last [string index $text end]
+        if {($first eq "\"" && $last eq "\"") || ($first eq "'" && $last eq "'")} {
+            return [string range $text 1 end-1]
+        }
+    }
+    return $text
+}
+
+proc ::LocalMeshOptimizer::appendPythonPathCandidate {candidatesVar path {arguments {}}} {
+    upvar 1 $candidatesVar candidates
+    set clean [::LocalMeshOptimizer::stripPythonPathQuotes $path]
+    if {$clean eq ""} { return }
+    if {[file isdirectory $clean]} {
+        foreach name {pythonw.exe python.exe pythonw python} {
+            set executable [file normalize [file join $clean $name]]
+            if {[file isfile $executable]} { lappend candidates [concat [list $executable] $arguments] }
+        }
+        return
+    }
+    if {[file isfile $clean]} {
+        lappend candidates [concat [list [file normalize $clean]] $arguments]
+    } else {
+        lappend candidates [concat [list $clean] $arguments]
+    }
+}
+
+proc ::LocalMeshOptimizer::appendPythonCommandCandidates {candidatesVar commandText} {
+    upvar 1 $candidatesVar candidates
+    set text [string trim $commandText]
+    if {$text eq ""} { return }
+
+    set unquoted [::LocalMeshOptimizer::stripPythonPathQuotes $text]
+    if {$unquoted ne $text && ([file isdirectory $unquoted] || [file isfile $unquoted])} {
+        ::LocalMeshOptimizer::appendPythonPathCandidate candidates $unquoted
+        return
+    }
+    if {[file isdirectory $text] || [file isfile $text]} {
+        ::LocalMeshOptimizer::appendPythonPathCandidate candidates $text
+        return
+    }
+    if {[regexp {^"([^"]+)"\s*(.*)$} $text -> executable rest] ||
+        [regexp {^'([^']+)'\s*(.*)$} $text -> executable rest]} {
+        set arguments {}
+        if {[string trim $rest] ne "" && ![catch {set arguments [lrange $rest 0 end]}]} {
+            ::LocalMeshOptimizer::appendPythonPathCandidate candidates $executable $arguments
+            return
+        }
+        ::LocalMeshOptimizer::appendPythonPathCandidate candidates $executable
+        return
+    }
+    if {[regexp -nocase {^(.*?(?:pythonw?\.exe|pyw?\.exe))(?:\s+(.*))?$} $text -> executable rest] &&
+        [file isfile [string trim $executable]]} {
+        set arguments {}
+        if {[string trim $rest] ne "" && ![catch {set arguments [lrange $rest 0 end]}]} {
+            ::LocalMeshOptimizer::appendPythonPathCandidate candidates [string trim $executable] $arguments
+            return
+        }
+        ::LocalMeshOptimizer::appendPythonPathCandidate candidates [string trim $executable]
+        return
+    }
+    if {![catch {set words [lrange $text 0 end]}] && [llength $words] > 0} {
+        lappend candidates $words
+        return
+    }
+    ::LocalMeshOptimizer::appendPythonPathCandidate candidates $text
+}
+
 proc ::LocalMeshOptimizer::pythonCandidates {} {
     variable SCRIPT_DIR
     variable ui
     set candidates {}
-    if {[string trim $ui(PYTHON_COMMAND)] ne ""} { lappend candidates [list $ui(PYTHON_COMMAND)] }
+    ::LocalMeshOptimizer::appendPythonCommandCandidates candidates $ui(PYTHON_COMMAND)
     if {$::tcl_platform(platform) eq "windows"} {
         set bundled [file normalize [file join $SCRIPT_DIR .. runtime python windows-x64 python.exe]]
         if {[file isfile $bundled]} { lappend candidates [list $bundled] }
@@ -844,6 +919,13 @@ proc ::LocalMeshOptimizer::windowlessPythonCommand {candidate} {
     if {$::tcl_platform(platform) ne "windows"} { return $candidate }
     set executable [lindex $candidate 0]
     set arguments [lrange $candidate 1 end]
+    if {[file isdirectory $executable]} {
+        foreach name {pythonw.exe pythonw python.exe python} {
+            set path [file join $executable $name]
+            if {[file isfile $path]} { return [concat [list [file normalize $path]] $arguments] }
+        }
+        return ""
+    }
     set tail [string tolower [file tail $executable]]
     if {$tail in {pythonw.exe pythonw pyw.exe pyw}} { return $candidate }
     if {$tail in {py.exe py}} {
