@@ -48,7 +48,7 @@ jobs:
             '}' \
             > user-guide.css
 
-          pandoc doc/README.md \
+          pandoc README.md \
             --standalone \
             --metadata title="使用教程" \
             --pdf-engine=wkhtmltopdf \
