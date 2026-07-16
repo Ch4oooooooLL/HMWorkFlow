@@ -13,6 +13,7 @@ proc ::HybridCore::probePython {candidate} {
 
 proc ::HybridCore::resolvePython {} {
     variable cachedPython
+    variable ROOT_DIR
     if {$cachedPython ne ""} { return $cachedPython }
     foreach candidate [::HybridCore::pythonCandidates] {
         if {[::HybridCore::probePython $candidate]} {

@@ -29,5 +29,16 @@ class ComponentCreationPolicyTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+class HybridCoreTclPolicyTests(unittest.TestCase):
+    def test_resolve_python_declares_root_dir(self):
+        path = ROOT / "modules" / "hybrid_core" / "tcl" / "python_runtime.tcl"
+        text = path.read_text(encoding="utf-8")
+        start = text.index("proc ::HybridCore::resolvePython {} {")
+        end = text.index("\nproc ::HybridCore::pythonVersion", start)
+        body = text[start:end]
+        self.assertIn("variable ROOT_DIR", body)
+        self.assertIn("file join $ROOT_DIR runtime python windows-x64 python.exe", body)
+
+
 if __name__ == "__main__":
     unittest.main()
