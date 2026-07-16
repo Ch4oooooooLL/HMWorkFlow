@@ -1,36 +1,9 @@
 proc ::RB2Bolt::maxEntityId {entityTypes} {
-    set best 0
-    foreach entityType $entityTypes {
-        set value 0
-        if {[catch {set value [hm_entitymaxid $entityType]}]} {
-            catch {set value [hm_latestentityid $entityType]}
-        }
-        if {[string is integer -strict $value] && $value > $best} { set best $value }
-    }
-    return $best
+    return [::HybridCore::maxEntityId $entityTypes]
 }
 
 proc ::RB2Bolt::entityNameRegistryJson {entityTypes} {
-    set ids {}
-    foreach entityType $entityTypes {
-        catch {*clearmark $entityType 2}
-        if {![catch {*createmark $entityType 2 all}]} {
-            catch {set ids [hm_getmark $entityType 2]}
-        }
-        catch {*clearmark $entityType 2}
-        if {[llength $ids] > 0} { break }
-    }
-    set rows {}
-    foreach id [lsort -integer -unique $ids] {
-        set name ""
-        foreach entityType $entityTypes {
-            if {![catch {set name [hm_getvalue $entityType id=$id dataname=name]}] && $name ne ""} { break }
-        }
-        if {$name ne ""} {
-            lappend rows "      [::HybridCore::jsonString $name]: $id"
-        }
-    }
-    return [join $rows ,\n]
+    return [::HybridCore::entityNameRegistryJson $entityTypes]
 }
 
 proc ::RB2Bolt::writeHybridRequest {dir runId} {
@@ -40,14 +13,8 @@ proc ::RB2Bolt::writeHybridRequest {dir runId} {
         if {$key in {axisMode elemType compPrefix propName}} { set v [::HybridCore::jsonString $P($key)] } elseif {$key eq "dryRun"} { set v [::HybridCore::jsonBool $P($key)] } else { set v [::HybridCore::jsonNumber $P($key)] }
         lappend rows "    [::HybridCore::jsonString $key]: $v"
     }
-    set props [::RB2Bolt::entityNameRegistryJson {props properties}]
-    set mats [::RB2Bolt::entityNameRegistryJson {mats materials}]
-    set comps [::RB2Bolt::entityNameRegistryJson {comps components}]
-    set maxElem [::RB2Bolt::maxEntityId {elems elements}]
-    set maxProp [::RB2Bolt::maxEntityId {props properties}]
-    set maxMat [::RB2Bolt::maxEntityId {mats materials}]
-    set maxComp [::RB2Bolt::maxEntityId {comps components}]
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"rbe2_bolt_connector\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": \[\],\n  \"settings\": {\n[join $rows ,\n]\n  },\n  \"id_state\": {\"max_element_id\": $maxElem, \"max_property_id\": $maxProp, \"max_material_id\": $maxMat, \"max_component_id\": $maxComp},\n  \"entity_registry\": {\n    \"properties\": {\n$props\n    },\n    \"materials\": {\n$mats\n    },\n    \"components\": {\n$comps\n    }\n  },\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
+    set modelState [::HybridCore::incrementalModelStateJson]
+    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"rbe2_bolt_connector\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": \[\],\n  \"settings\": {\n[join $rows ,\n]\n  },\n$modelState,\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
     return [::HybridCore::writeTextFile [file join $dir request.json] $json]
 }
 

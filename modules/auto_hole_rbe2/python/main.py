@@ -15,6 +15,7 @@ for directory in (str(MODULE_DIR), str(COMMON_DIR)):
         sys.path.insert(0, directory)
 
 from duplicate_detector import annotate, build_index
+from fem_delta import write_rigid_incremental_fem
 from face_segmentation import segment_faces
 from hole_evaluator import evaluate
 from logging_utils import close_logger, create_logger
@@ -86,6 +87,7 @@ def main(argv=None):
     parser.add_argument("--request", required=True, type=Path)
     parser.add_argument("--mesh", required=True, type=Path)
     parser.add_argument("--existing", required=True, type=Path)
+    parser.add_argument("--delta", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--tcl-output", required=True, type=Path)
     parser.add_argument("--log", required=True, type=Path)
@@ -116,8 +118,11 @@ def main(argv=None):
         result["performance"]["read_seconds"] = round(read_seconds, 6)
         result["performance"]["detect_seconds"] = round(detect_seconds, 6)
         write_started = time.perf_counter()
-        write_result(args.output, args.tcl_output, "::AutoHoleRBE2::pythonResult", result)
+        manifest = write_rigid_incremental_fem(args.delta, candidates, request)
+        result["summary"].update(manifest)
         write_seconds = time.perf_counter() - write_started
+        result["performance"]["write_seconds"] = round(write_seconds, 6)
+        write_result(args.output, args.tcl_output, "::AutoHoleRBE2::pythonResult", result)
         logger.info(
             "complete candidates=%d rejected=%d write_seconds=%.6f",
             len(candidates), rejection_summary["count"], write_seconds,

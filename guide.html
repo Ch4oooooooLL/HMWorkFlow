@@ -1313,11 +1313,11 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             该模块主要用于处理车身结构件之间的焊缝面（Seam Surface）网格创建。它打破了传统几何 Ruled 面划分网格的低效率，采用了在已有网格上直接投影的流程：
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
-                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理；自由边上的单节点作为对应闭环种子；组件内部的单节点表示处理该组件上的全部闭合自由边；彼此不连续的多个节点仍分别作为闭环种子。</li>
+                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理；自由边上的单节点仍作为对应闭环种子；彼此不连续的多个节点分别作为闭环种子。多个种子都位于普通闭合自由边时，由 Tcl 直接局部追踪并去重，不再导出源/目标 component；分叉、开放或非流形边才回退 Python。仅当恰好选择一个内部节点时，模块使用 HyperMesh 原生选择导出将该节点所在 source component 写为 FEM，Python 一次识别该节点所在连通壳区域的全部闭合自由边，再将有序节点路径一次性返回 Tcl。</li>
                             <li><strong>印记区网格重构 (Remeshing)</strong>：在印记边界内，自动计算重构范围，并将投影线与目标网格强行对齐重划分。</li>
                             <li><strong>自动生成 Ruled 连接带</strong>：自动利用两组特征点对齐，生成两个零件之间均匀的 shell 网格连接带，并将新生成的焊缝网格归类至指定组件。</li>
-                            <li><strong>局部失败隔离</strong>：某个闭环无法完整投影或创建焊缝时，只回滚并跳过该闭环；整批完成后在 <code>MESH_SEAM_WELD_FAILED_MARKERS</code> 中创建临时节点标记失败位置。</li>
-                            <li><strong>批量加速</strong>：所有源闭环一次性准备，并为目标网格建立空间索引；每个闭环只对附近的局部目标 elements 执行 imprint，再在 Tcl 内存中完成目标匹配、方向校正和连续性检查，避免整 component 重复扫描以及逐闭环导出文件。</li>
+                            <li><strong>局部失败隔离</strong>：闭环首次按开放节点列表对局部目标 patch 执行 imprint；若目标节点无法唯一匹配，则回滚并对同一局部 patch 以 <code>close_node_list=1</code> 重试一次，不再扫描或 imprint 整个目标 component。第二次仍失败时只回滚并跳过该闭环；整批完成后在 <code>MESH_SEAM_WELD_FAILED_MARKERS</code> 中创建临时节点标记失败位置。</li>
+                            <li><strong>批量加速</strong>：多个简单边界种子直接由 Tcl 按一环邻接追踪所选闭环，避免构造 component 二进制快照；复杂边界才使用 Python component plan。内部单节点分支仍通过原生 <code>*feoutput_select</code> 导出一次 FEM，由 Python 返回全部源闭环。随后为目标网格建立空间索引，每个闭环只对附近的局部目标 elements 执行 imprint，再在 Tcl 内存中完成目标匹配、方向校正和连续性检查；失败重试也保持相同的局部 elements 范围。</li>
                             <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
                         </ul>
                     </div>
@@ -1333,7 +1333,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">2</span>
                                 <div class="step-title">选择源 node path</div>
-                                <div class="step-detail">多选连续节点时使用所选开放路径；自由边上的单节点自动扩展为对应闭环；组件内部的单节点自动枚举该组件的全部闭合自由边；多个不连续种子仍逐环处理并自动去重。</div>
+                                <div class="step-detail">多选连续节点时使用所选开放路径；自由边上的单节点自动扩展为对应闭环；多个不连续的简单边界种子由 Tcl 逐环追踪并自动去重，复杂拓扑自动回退 Python。仅选择一个内部节点时，原生导出其 source component，Python 自动枚举该节点所在连通壳区域的全部闭合自由边。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">3</span>
@@ -1343,7 +1343,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">4</span>
                                 <div class="step-title">配置生成参数</div>
-                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐闭环执行 <code>imprint_nodelist</code>、目标路径连续性校验和 ruled 网格创建。单个闭环失败会回滚后继续；结束时请检查失败统计及临时标记节点。</div>
+                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐闭环执行 <code>imprint_nodelist</code>、目标路径连续性校验和 ruled 网格创建。首次局部开放 imprint 失败时，会在同一局部 patch 上闭合重试；再次失败则回滚、跳过并继续下一个。结束时请检查失败统计及临时标记节点。</div>
                             </div>
                         </div>
                     </div>

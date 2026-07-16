@@ -13,7 +13,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.16"
+    variable VERSION "0.19"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -167,8 +167,8 @@ proc ::MeshSeamWeld::showPanel {} {
     }
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "连续节点直接作为开放路径执行；单节点或彼此不连续的节点作为闭合边界种子，相关源/目标 component 会一次性以二进制发送给 Python 规划，投影与连接仍由 HyperMesh 执行。" \
-        "Continuous nodes execute directly as an open path. One node or disconnected nodes are closed-boundary seeds; related source/target components are sent once to Python as binary mesh data, while HyperMesh still performs imprint and connection."]
+        "连续节点直接作为开放路径执行；自由边单节点及不连续节点保持原闭环种子流程；内部单节点通过 HyperMesh 原生 FEM 导出交给 Python，一次识别其连通壳区域的全部闭合边界。投影与连接仍由 HyperMesh 执行。" \
+        "Continuous nodes execute directly as an open path. Free-edge single nodes and disconnected seeds retain the original loop workflow. One internal node uses a native HyperMesh FEM export so Python can find every closed boundary on its connected shell region in one pass. HyperMesh still performs imprint and connection."]
     grid $w.main.note -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -861,6 +861,41 @@ proc ::MeshSeamWeld::closedFreeEdgeLoopsFromSeeds {seedNodes} {
     return $loops
 }
 
+proc ::MeshSeamWeld::selectedNodesAreSimpleFreeEdgeSeeds {nodeIds} {
+    if {[llength $nodeIds] < 2} {
+        return 0
+    }
+    # One bulk query is enough to classify the selected seeds.  Do not export
+    # either source or target components merely to decide whether these nodes
+    # lie on ordinary manifold boundaries.
+    ::MeshSeamWeld::primeSelectedNodeElements $nodeIds
+    foreach nodeId [::MeshSeamWeld::uniq $nodeIds] {
+        if {[llength [::MeshSeamWeld::freeEdgeNeighbors $nodeId]] != 2} {
+            return 0
+        }
+    }
+    return 1
+}
+
+proc ::MeshSeamWeld::closedFreeEdgeLoopsFromSeedsLocal {seedNodes} {
+    # Trace only the loops touched by the selected seeds.  Nodes encountered
+    # while walking the loop query their one-ring lazily, so this path scales
+    # with the selected boundaries instead of the full source component.
+    ::MeshSeamWeld::primeSelectedNodeElements $seedNodes
+    set loops {}
+    array set seenLoops {}
+    foreach seedNode [::MeshSeamWeld::uniq $seedNodes] {
+        set loop [::MeshSeamWeld::closedFreeEdgeLoopFromNode $seedNode]
+        set signature [join [lsort -integer $loop] ,]
+        if {[info exists seenLoops($signature)]} {
+            continue
+        }
+        set seenLoops($signature) 1
+        lappend loops $loop
+    }
+    return $loops
+}
+
 proc ::MeshSeamWeld::componentIdsFromNodes {nodeIds} {
     ::MeshSeamWeld::primeSelectedNodeElements $nodeIds
     set out {}
@@ -1420,21 +1455,14 @@ proc ::MeshSeamWeld::targetCandidatesAfterImprint {sourceNodes targetComps befor
     } closestErr]} {
         return $closestNodes
     }
-    ::HybridCore::log WARN "closest-node target matching unavailable; using component-node fallback error=$closestErr"
-
-    # Some HM2019 imprint cases return no output list and create no node IDs:
-    # the target mesh is updated by reusing its existing boundary nodes.  In
-    # that case, obtain the target component nodes and reduce them to one
-    # nearest, unique candidate per source node before handing off to Python.
-    set componentNodes [::MeshSeamWeld::componentNodeIds $targetComps]
-    array set sourceSet {}
-    foreach nodeId $sourceNodes { set sourceSet($nodeId) 1 }
-    set candidates {}
-    foreach nodeId [::MeshSeamWeld::uniq $componentNodes] {
-        if {![info exists sourceSet($nodeId)]} { lappend candidates $nodeId }
-    }
-    ::HybridCore::log INFO "imprint fallback=target_components component_node_count=[llength $componentNodes] candidate_count=[llength $candidates]"
-    return [::MeshSeamWeld::matchTargetPathNodes $sourceNodes $candidates]
+    # Never recover by enumerating every node in the target components.  That
+    # Tcl-side scan becomes progressively slower as imprint grows the target
+    # mesh.  Let the isolated path transaction roll back so the caller can
+    # retry the same local patch with close_node_list=1.
+    ::HybridCore::log WARN "closest-node target matching failed; cancelling local attempt without component-wide fallback error=$closestErr"
+    error [::HWFlow::txt \
+        "局部 imprint 后无法唯一匹配目标节点：$closestErr" \
+        "Could not uniquely match target nodes after the local imprint: $closestErr"]
 }
 
 proc ::MeshSeamWeld::matchTargetPathNodes {sourceNodes candidateNodes} {
@@ -1745,7 +1773,7 @@ proc ::MeshSeamWeld::idsAddedToCollection {beforeIds afterIds} {
     return [::MeshSeamWeld::uniq $added]
 }
 
-proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}} {
+proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0} {knownSourceCompIds {}}} {
     set jobs {}
     array set seamByRelated {}
     ::MeshSeamWeld::buildTargetElementIndex $targetComps
@@ -1756,7 +1784,11 @@ proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}
     set pathIndex 0
     foreach sourceNodes $sourcePaths {
         incr pathIndex
-        set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
+        if {[llength $knownSourceCompIds] > 0} {
+            set sourceCompIds $knownSourceCompIds
+        } else {
+            set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
+        }
         set related [lsort -integer -unique [concat $sourceCompIds $targetComps]]
         set relatedKey [join $related ,]
         if {![info exists seamByRelated($relatedKey)]} {
@@ -2047,10 +2079,18 @@ proc ::MeshSeamWeld::runAction {} {
 
     set closedSeedMode [expr {[llength $selectedNodes] == 1 ||
         ![::MeshSeamWeld::selectedNodesFormContinuousPath $selectedNodes]}]
+    set internalSingleNode 0
+    if {[llength $selectedNodes] == 1} {
+        ::MeshSeamWeld::primeSelectedNodeElements $selectedNodes
+        set internalSingleNode [expr {
+            [llength [::MeshSeamWeld::freeEdgeNeighbors [lindex $selectedNodes 0]]] == 0}]
+    }
     set sourceSelectionMode [expr {$closedSeedMode ?
         "closed free-edge seed nodes" : "open node path"}]
     if {[llength $selectedNodes] == 1} {
-        set sourceSelectionMode "single node -> boundary loop or all component loops"
+        set sourceSelectionMode [expr {$internalSingleNode ?
+            "single internal node -> all closed boundaries on its shell region" :
+            "single free-edge node -> its boundary loop"}]
     }
 
     set targetComps [::MeshSeamWeld::pickComponents]
@@ -2087,8 +2127,58 @@ proc ::MeshSeamWeld::runAction {} {
                     "源 component 与目标 component 不能重叠。" \
                     "Source and target component selections must not overlap."]
             }
-            set planRun [::MeshSeamWeld::runPythonComponentPlan \
-                $selectedNodes $sourceComponentIds $targetComps 2.0 12.0]
+            set tclBoundaryFastPath 0
+            set tclBoundaryFallbackReason ""
+            if {!$internalSingleNode && [llength $selectedNodes] > 1} {
+                set boundaryTraceStarted [clock milliseconds]
+                set simpleBoundarySeeds 0
+                if {[catch {
+                    set simpleBoundarySeeds [::MeshSeamWeld::selectedNodesAreSimpleFreeEdgeSeeds $selectedNodes]
+                } topologyErr]} {
+                    set tclBoundaryFallbackReason "boundary topology check failed: $topologyErr"
+                } elseif {!$simpleBoundarySeeds} {
+                    set tclBoundaryFallbackReason "one or more selected nodes are not on a simple manifold free edge"
+                } elseif {[catch {
+                    set sourcePaths [::MeshSeamWeld::closedFreeEdgeLoopsFromSeedsLocal $selectedNodes]
+                } traceErr]} {
+                    set tclBoundaryFallbackReason "local boundary trace failed: $traceErr"
+                } elseif {[llength $sourcePaths] == 0} {
+                    set tclBoundaryFallbackReason "local boundary trace returned no closed loop"
+                } else {
+                    set boundaryTraceMs [expr {[clock milliseconds] - $boundaryTraceStarted}]
+                    set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
+                    set batchTaskDir [dict get $batchWorkspace task_dir]
+                    set batchLogPath [file join $batchTaskDir operation.log]
+                    set targetPrepareStarted [clock milliseconds]
+                    set weldJobs [::MeshSeamWeld::prepareWeldJobs \
+                        $sourcePaths $targetComps $progressOpened]
+                    set targetPrepareMs [expr {[clock milliseconds] - $targetPrepareStarted}]
+                    set normalizedJobs {}
+                    foreach job $weldJobs {
+                        dict set job closed_loop 1
+                        dict set job imprint_closed_loop 0
+                        lappend normalizedJobs $job
+                    }
+                    set weldJobs $normalizedJobs
+                    set tclBoundaryFastPath 1
+                    set sourceSelectionMode "multiple free-edge seeds -> Tcl boundary loops"
+                    ::HybridCore::log INFO "PERF mesh_seam_weld planning_mode=tcl_boundary seeds=[llength $selectedNodes] paths=[llength $sourcePaths] boundary_trace_ms=$boundaryTraceMs target_prepare_ms=$targetPrepareMs"
+                }
+            }
+
+            if {!$tclBoundaryFastPath} {
+            if {$internalSingleNode} {
+                if {[llength $sourceComponentIds] != 1} {
+                    error [::HWFlow::txt \
+                        "内部种子节点必须唯一属于一个源 component。" \
+                        "The internal seed node must belong to exactly one source component."]
+                }
+                set planRun [::MeshSeamWeld::runPythonInternalComponentPlan \
+                    [lindex $selectedNodes 0] [lindex $sourceComponentIds 0] 2.0 12.0]
+            } else {
+                set planRun [::MeshSeamWeld::runPythonComponentPlan \
+                    $selectedNodes $sourceComponentIds $targetComps 2.0 12.0]
+            }
             set batchTaskDir [dict get $planRun task_dir]
             set batchLogPath [file join $batchTaskDir operation.log]
             set payload [dict get $planRun payload]
@@ -2101,21 +2191,45 @@ proc ::MeshSeamWeld::runAction {} {
             }
             set sourcePaths {}
             set weldJobs {}
-            foreach plan [dict get [lindex $candidates 0] weld_plans] {
-                foreach key {source_node_ids source_component_ids target_component_ids target_element_ids closed_loop} {
-                    if {![dict exists $plan $key]} { error "Python weld plan is missing $key" }
+            if {$internalSingleNode} {
+                foreach plan [dict get [lindex $candidates 0] weld_plans] {
+                    foreach key {source_node_ids source_component_ids closed_loop} {
+                        if {![dict exists $plan $key]} { error "Python internal component plan is missing $key" }
+                    }
+                    lappend sourcePaths [dict get $plan source_node_ids]
                 }
-                set sourceNodes [dict get $plan source_node_ids]
-                set sourceCompIds [dict get $plan source_component_ids]
-                set jobTargetComps [dict get $plan target_component_ids]
-                set related [::MeshSeamWeld::uniq [concat $sourceCompIds $jobTargetComps]]
-                lappend sourcePaths $sourceNodes
-                lappend weldJobs [dict create source_nodes $sourceNodes \
-                    source_component_ids $sourceCompIds target_components $jobTargetComps \
-                    seam_component [::MeshSeamWeld::seamComponentForRelatedComps $related] \
-                    target_elements [dict get $plan target_element_ids] \
-                    closed_loop [dict get $plan closed_loop] imprint_closed_loop 0 \
-                    center [::MeshSeamWeld::pathCenter $sourceNodes]]
+                set weldJobs [::MeshSeamWeld::prepareWeldJobs $sourcePaths $targetComps \
+                    $progressOpened $sourceComponentIds]
+                set normalizedJobs {}
+                foreach job $weldJobs {
+                    dict set job closed_loop 1
+                    dict set job imprint_closed_loop 0
+                    lappend normalizedJobs $job
+                }
+                set weldJobs $normalizedJobs
+            } else {
+                foreach plan [dict get [lindex $candidates 0] weld_plans] {
+                    foreach key {source_node_ids source_component_ids target_component_ids target_element_ids closed_loop} {
+                        if {![dict exists $plan $key]} { error "Python weld plan is missing $key" }
+                    }
+                    set sourceNodes [dict get $plan source_node_ids]
+                    set sourceCompIds [dict get $plan source_component_ids]
+                    set jobTargetComps [dict get $plan target_component_ids]
+                    set related [::MeshSeamWeld::uniq [concat $sourceCompIds $jobTargetComps]]
+                    lappend sourcePaths $sourceNodes
+                    lappend weldJobs [dict create source_nodes $sourceNodes \
+                        source_component_ids $sourceCompIds target_components $jobTargetComps \
+                        seam_component [::MeshSeamWeld::seamComponentForRelatedComps $related] \
+                        target_elements [dict get $plan target_element_ids] \
+                        closed_loop [dict get $plan closed_loop] imprint_closed_loop 0 \
+                        center [::MeshSeamWeld::pathCenter $sourceNodes]]
+                }
+            }
+                if {$tclBoundaryFallbackReason ne ""} {
+                    set fallbackLog [string map [list "\r" "" "\n" " | "] $tclBoundaryFallbackReason]
+                    ::HybridCore::log WARN "planning_mode=python_fallback reason=$fallbackLog"
+                    set sourceSelectionMode "multiple boundary seeds -> Python topology fallback"
+                }
             }
             if {[llength $weldJobs] == 0} {
                 error [::HWFlow::txt "没有识别到有效闭合自由边。" "No valid closed free-edge loop was found."]
@@ -2159,14 +2273,14 @@ proc ::MeshSeamWeld::runAction {} {
                 $jobClosedLoop $progressOpened $pathIndex $pathTotal \
                 [dict get $job source_component_ids] [dict get $job seam_component] \
                 [dict get $job center] [dict get $job target_elements] $jobImprintClosedLoop]
-            if {![dict get $isolated ok] && \
+            if {![dict get $isolated ok] && $jobClosedLoop && \
                 [llength [dict get $job target_elements]] > 0 && \
                 [dict exists $isolated rollback_ok] && [dict get $isolated rollback_ok]} {
-                ::HybridCore::log WARN "local target patch failed path=$pathIndex/$pathTotal; retrying this loop once against the selected target components"
+                ::HybridCore::log WARN "local target patch failed path=$pathIndex/$pathTotal; retrying the same local patch once with close_node_list=1"
                 set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
                     $jobClosedLoop $progressOpened $pathIndex $pathTotal \
                     [dict get $job source_component_ids] [dict get $job seam_component] \
-                    [dict get $job center] {} $jobClosedLoop]
+                    [dict get $job center] [dict get $job target_elements] 1]
             }
             if {![dict get $isolated ok]} {
                 set failure [dict create path_index $pathIndex source_nodes $sourceNodes \

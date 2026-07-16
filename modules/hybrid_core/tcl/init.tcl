@@ -38,6 +38,8 @@ foreach fileName {
     data_writer.tcl
     binary_codec.tcl
     hm_bulk_reader.tcl
+    model_state.tcl
+    incremental_import.tcl
     bridge_logger.tcl
     task_workspace.tcl
     python_runtime.tcl

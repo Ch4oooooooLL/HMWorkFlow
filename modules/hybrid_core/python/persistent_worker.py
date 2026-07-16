@@ -13,6 +13,13 @@ import traceback
 from pathlib import Path
 from typing import Dict
 
+# The embedded Windows Python runtime is intentionally isolated and does not
+# add the executed script directory to sys.path.  Bootstrap the worker's own
+# helpers explicitly before importing them.
+_WORKER_DIR = Path(__file__).resolve().parent
+if str(_WORKER_DIR) not in sys.path:
+    sys.path.insert(0, str(_WORKER_DIR))
+
 import worker_cache as _worker_cache
 
 
@@ -120,9 +127,18 @@ def _run(request):
     original_path = list(sys.path)
     _worker_cache.begin_request(request.get("input_fingerprints", {}))
     try:
-        for directory in (entry.parent, entry.parents[2] / "hybrid_core" / "python" if len(entry.parents) > 2 else None):
-            if directory is not None and directory.is_dir() and str(directory) not in sys.path:
-                sys.path.insert(0, str(directory))
+        common_directory = entry.parents[2] / "hybrid_core" / "python" if len(entry.parents) > 2 else None
+        # Keep the shared directory ahead of the module directory.  The worker
+        # itself already added that shared directory during bootstrap; merely
+        # checking membership would otherwise leave a module-local schema.py
+        # ahead of the shared schema and trigger a circular import.
+        for directory in (entry.parent, common_directory):
+            if directory is None or not directory.is_dir():
+                continue
+            text = str(directory)
+            while text in sys.path:
+                sys.path.remove(text)
+            sys.path.insert(0, text)
         with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open("w", encoding="utf-8") as stderr_file:
             with contextlib.redirect_stdout(stdout_file), contextlib.redirect_stderr(stderr_file):
                 try:

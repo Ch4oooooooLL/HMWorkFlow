@@ -104,6 +104,51 @@ def _closed_free_edge_loops(elements):
     return loops
 
 
+def _connected_elements_at_node(elements, selected_node_id):
+    """Return the shell island containing the selected node."""
+    by_id = {element.element_id: element for element in elements}
+    node_to_elements = defaultdict(set)
+    for element in elements:
+        for node_id in element.node_ids:
+            node_to_elements[node_id].add(element.element_id)
+    seeds = set(node_to_elements.get(selected_node_id, ()))
+    if not seeds:
+        raise ValueError("selected internal node is not present in the exported shell component")
+    visited = set()
+    queue = deque(sorted(seeds))
+    while queue:
+        element_id = queue.popleft()
+        if element_id in visited:
+            continue
+        visited.add(element_id)
+        for node_id in by_id[element_id].node_ids:
+            queue.extend(node_to_elements[node_id] - visited)
+    return [by_id[element_id] for element_id in sorted(visited)]
+
+
+def plan_internal_component_boundaries(model, source_component_id, selected_node_id):
+    """Find every closed free boundary on the selected node's shell island."""
+    source_component_id = int(source_component_id)
+    selected_node_id = int(selected_node_id)
+    component_elements = [
+        element for element in model.elements.values()
+        if element.component_id == source_component_id and len(element.node_ids) in (3, 4)
+    ]
+    if not component_elements:
+        raise ValueError("exported source component contains no shell elements")
+    region_elements = _connected_elements_at_node(component_elements, selected_node_id)
+    loops = _closed_free_edge_loops(region_elements)
+    if not loops:
+        raise ValueError("selected node's shell region contains no closed free-edge boundaries")
+    return [{
+        "plan_id": "I{:06d}".format(index),
+        "source_node_ids": loop,
+        "source_component_ids": [source_component_id],
+        "closed_loop": True,
+        "projection_mode": "TCL_LOCAL_TARGET",
+    } for index, loop in enumerate(loops, 1)]
+
+
 def _expanded_patch(seed_elements, component_id, layers, elements, node_to_elements):
     visited = set(seed_elements)
     frontier = set(seed_elements)

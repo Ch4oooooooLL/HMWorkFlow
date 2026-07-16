@@ -1,10 +1,33 @@
-proc ::AutoHoleRBE2::executePythonCandidates {payload} {
+proc ::AutoHoleRBE2::executePythonCandidatesLegacy {payload} {
     variable cfg
     ::AutoHoleRBE2::beginBulkCreate
     set code [catch {set result [::AutoHoleRBE2::executePythonCandidatesBulk $payload]} err opts]
     ::AutoHoleRBE2::endBulkCreate $cfg(resultCompName)
     if {$code} { return -options $opts $err }
     return $result
+}
+
+proc ::AutoHoleRBE2::executePythonCandidates {payload} {
+    variable cfg
+    variable stat
+    set summary [dict get $payload summary]
+    set candidates [dict get $payload candidates]
+    set skipped 0
+    foreach row $candidates {
+        if {[dict get $row recommended_action] ne "CREATE"} { incr skipped }
+    }
+    if {[catch {
+        set imported [::HybridCore::importRigidDelta "Solid Through-Hole RIGIDS" $summary \
+            [list ::AutoHoleRBE2::rigidCenterNode] [list ::AutoHoleRBE2::elemNodes] 70.0 96.0]
+    } importError]} {
+        ::HybridCore::log WARN "incremental RIGIDS import failed; using legacy Tcl creation: $importError"
+        return [::AutoHoleRBE2::executePythonCandidatesLegacy $payload]
+    }
+    set created [dict get $imported created]
+    set stat(created) $created
+    set stat(skippedExisting) $skipped
+    catch {::AutoHoleRBE2::refreshComponentBrowser $cfg(resultCompName)}
+    return [dict create created $created skipped $skipped failed 0 incremental_fem [dict get $summary incremental_fem]]
 }
 
 proc ::AutoHoleRBE2::executePythonCandidatesBulk {payload} {

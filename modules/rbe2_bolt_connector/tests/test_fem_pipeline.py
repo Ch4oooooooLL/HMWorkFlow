@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import tempfile
 import unittest
@@ -44,6 +45,7 @@ def request(**overrides):
     data = {
         "settings": settings,
         "id_state": {
+            "max_node_id": 100,
             "max_element_id": 1000,
             "max_property_id": 2000,
             "max_material_id": 3000,
@@ -92,7 +94,7 @@ class IncrementalFemTests(unittest.TestCase):
         plans, _ = plan(groups, settings)
         return plans
 
-    def test_writes_only_incremental_material_property_and_cbeam_cards(self):
+    def test_writes_existing_endpoint_grids_and_cbeam_cards(self):
         plans = self._plans()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "bolt_import.fem"
@@ -100,10 +102,22 @@ class IncrementalFemTests(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
         self.assertIn("MAT1,3001,210000", text)
         self.assertIn("PBEAM,2001,3001", text)
+        self.assertIn("GRID,1,,0,0,0", text)
+        self.assertIn("GRID,10,,0,0,20", text)
         self.assertIn("CBEAM,1001,2001,1,10", text)
-        self.assertNotIn("GRID,", text)
         self.assertNotIn("RBE2,", text)
         self.assertEqual(manifest["created_element_ids"], [1001])
+        self.assertEqual(manifest["temporary_node_ids"], [])
+        self.assertEqual(manifest["endpoint_replacements"], [])
+        self.assertTrue(manifest["reuse_existing_node_ids"])
+        self.assertEqual(manifest["expected_segments"][0]["node_1"], 1)
+        self.assertEqual(manifest["expected_segments"][0]["node_2"], 10)
+        assignment = manifest["property_assignments"][0]
+        self.assertEqual(assignment["component_name"], "BOLT_D10_CBEAM")
+        self.assertEqual(assignment["property_name"], "BOLT_D10_PBEAM")
+        self.assertEqual(assignment["beam_section_name"], "BOLT_D10_SOLID_CIRCLE")
+        self.assertEqual(assignment["element_ids"], [1001])
+        self.assertTrue(assignment["create_solid_circle"])
 
     def test_reuses_registered_property_without_emitting_property_or_material(self):
         plans = self._plans()
@@ -140,6 +154,32 @@ class IncrementalFemTests(unittest.TestCase):
         self.assertNotIn('$HMNAME COMP 66', text)
         self.assertEqual(manifest["reused_component_ids"], [66])
 
+    def test_shared_endpoint_emits_one_existing_grid_card(self):
+        plans = self._plans()
+        duplicate = dict(plans[0])
+        duplicate["candidate_id"] = "duplicate"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "bolt_import.fem"
+            manifest = write_incremental_fem(output, [plans[0], duplicate], request())
+            text = output.read_text(encoding="utf-8")
+        self.assertEqual(manifest["temporary_node_ids"], [])
+        self.assertEqual(sum(line.startswith("GRID,") for line in text.splitlines()), 2)
+        self.assertEqual(len(manifest["created_element_ids"]), 2)
+
+    def test_coincident_distinct_endpoints_keep_their_original_ids(self):
+        plans = self._plans()
+        second = copy.deepcopy(plans[0])
+        second["candidate_id"] = "coincident-distinct"
+        second["node_1"] = 999
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = write_incremental_fem(
+                Path(directory) / "bolt_import.fem", [plans[0], second], request()
+            )
+            text = (Path(directory) / "bolt_import.fem").read_text(encoding="utf-8")
+        self.assertIn("GRID,1,,0,0,0", text)
+        self.assertIn("GRID,999,,0,0,0", text)
+        self.assertEqual(manifest["endpoint_replacements"], [])
+
     def test_custom_property_must_exist_in_current_hypermesh_model(self):
         plans = self._plans()
         req = request(settings={"propName": "PROJECT_BOLT"})
@@ -147,6 +187,14 @@ class IncrementalFemTests(unittest.TestCase):
             output = Path(directory) / "bolt_import.fem"
             with self.assertRaisesRegex(IncrementalFemError, "PROJECT_BOLT.*not present"):
                 write_incremental_fem(output, plans, req)
+
+    def test_existing_endpoint_reuse_does_not_require_max_node_id(self):
+        plans = self._plans()
+        req = request()
+        del req["id_state"]["max_node_id"]
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = write_incremental_fem(Path(directory) / "bolt_import.fem", plans, req)
+        self.assertTrue(manifest["reuse_existing_node_ids"])
 
     def test_dry_run_writes_no_import_file(self):
         plans = self._plans()
@@ -204,11 +252,34 @@ class TclImportContractTests(unittest.TestCase):
         self.assertIn("INCREMENTAL_IMPORT_FAILED", source)
         self.assertIn("incremental_fem", source)
         self.assertIn("expected_element_ids", source)
+        self.assertIn("cleanupIncrementalBoltImport", source)
+        self.assertIn("created_property_ids", source)
+        self.assertIn("created_material_ids", source)
+        self.assertIn("reuse_existing_node_ids", source)
+        self.assertIn("*feinputwithdata2 $reader [file nativename $incrementalFem] 1", source)
+        self.assertNotIn("*equivalence nodes", source)
+        self.assertIn("configureImportedBoltAssignments", source)
+        self.assertIn("property_assignments", source)
         workflow = (Path(__file__).resolve().parents[1] / "tcl" / "workflow.tcl").read_text(
             encoding="utf-8"
         )
         self.assertIn("tk_messageBox -icon error", workflow)
         self.assertIn("task workspace", workflow)
+
+    def test_hm2019_node_replacement_uses_positional_target_location(self):
+        full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        start = full_source.index("proc ::RB2Bolt::nodeEntityExists")
+        end = full_source.index("\nproc ::RB2Bolt::nodeDistanceById", start)
+        body = full_source[start:end]
+        self.assertIn("*replacenodes $sourceNode $targetNode 1 0", body)
+        self.assertNotIn("source_node=", body)
+        self.assertNotIn("source_list=", body)
+        self.assertIn("$value == 0", body)
+        self.assertIn("SOLID_CIRCLE", full_source)
+        self.assertIn("*beamsectioncreatestandardsolver 11 0 HMCirc 0", full_source)
+        self.assertIn("$attributeId=[list beamsects $beamSectId]", full_source)
 
     def test_default_selection_mode_is_components(self):
         source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(

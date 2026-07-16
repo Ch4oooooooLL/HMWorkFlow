@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Generate a configurable, large OptiStruct FEM for washer-hole RBE2 tests.
+
+The deck intentionally contains shell elements only.  Running the
+shell_washer_hole_rbe2 module should create exactly one RBE2 per hole; the JSON
+manifest records that expected count for automated result comparison.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+from typing import Dict, Tuple
+
+
+PRESETS = {
+    "smoke": (4, 3, 1),
+    "large": (32, 24, 4),
+    "extreme": (50, 40, 4),
+}
+
+# Representative diameters strictly inside the four washer bands in
+# config/washer_rules.txt.  Each tuple is: ID, diameter, edge density, widths.
+STANDARD_WASHERS = (
+    {"case_id": "D07P5_W04_W06", "diameter": 7.5, "segments": 8, "widths": (4.0, 6.0)},
+    {"case_id": "D11_W04_W06", "diameter": 11.0, "segments": 10, "widths": (4.0, 6.0)},
+    {"case_id": "D16_W06_W08", "diameter": 16.0, "segments": 12, "widths": (6.0, 8.0)},
+    {"case_id": "D25_W08_W08", "diameter": 25.0, "segments": 16, "widths": (8.0, 8.0)},
+)
+
+
+def load_mesh_engine():
+    source = Path(__file__).resolve().parents[1] / "ShellWasher_RBE2_Bolt_Chain" / "generate_fem.py"
+    spec = importlib.util.spec_from_file_location("rbe2_washer_stress_mesh_engine", str(source))
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load mesh engine: {}".format(source))
+    module = importlib.util.module_from_spec(spec)
+    # Python 3.8 dataclasses resolve the defining module through sys.modules.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    directory = Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--preset", choices=sorted(PRESETS), default="large")
+    parser.add_argument("--columns", type=positive_int, help="override preset columns")
+    parser.add_argument("--rows", type=positive_int, help="override preset rows")
+    parser.add_argument("--planes", type=positive_int, help="override preset shell-plane count")
+    parser.add_argument("--cell-size", type=float, default=120.0, help="hole pitch/cell size in mm")
+    parser.add_argument("--plane-gap", type=float, default=20.0, help="Z spacing between planes in mm")
+    parser.add_argument("--fast-validation", action="store_true", help="skip connectivity and mesh-quality scans")
+    parser.add_argument("--full-manifest", action="store_true", help="include node/element IDs for every hole")
+    parser.add_argument("--output", type=Path, default=directory / "RBE2_Washer_Stress.fem")
+    parser.add_argument("--manifest", type=Path, default=directory / "RBE2_Washer_Stress_manifest.json")
+    return parser.parse_args()
+
+
+def configure(engine, args: argparse.Namespace) -> Tuple[int, int, int]:
+    preset_columns, preset_rows, preset_planes = PRESETS[args.preset]
+    columns = args.columns or preset_columns
+    rows = args.rows or preset_rows
+    planes = args.planes or preset_planes
+    if args.cell_size <= 0 or args.plane_gap <= 0:
+        raise ValueError("cell-size and plane-gap must be greater than zero")
+    largest_outer_radius = 25.0 / 2.0 + 8.0 + 8.0
+    if args.cell_size / 2.0 <= largest_outer_radius + engine.SUPPORT_FIRST_STEP + engine.SUPPORT_SECOND_STEP:
+        raise ValueError("cell-size is too small for the largest washer and support rings")
+
+    engine.PLATE_COLUMNS = columns
+    engine.PLATE_ROWS = rows
+    engine.PLANE_Z = tuple(index * args.plane_gap for index in range(planes))
+    engine.CELL_SIZE = float(args.cell_size)
+    engine.WASHER_CASES = STANDARD_WASHERS
+    return columns, rows, planes
+
+
+def quick_stats(engine, model) -> Dict[str, object]:
+    card_counts = Counter(item.card for item in model.elements.values())
+    return {
+        "component_count": len(model.components),
+        "node_count": len(model.nodes),
+        "element_count": len(model.elements),
+        "cquad4_count": card_counts["CQUAD4"],
+        "ctria3_count": card_counts["CTRIA3"],
+        "washer_hole_count": len(model.holes),
+        "holes_per_plane": engine.PLATE_ROWS * engine.PLATE_COLUMNS,
+        "expected_rbe2_count": len(model.holes),
+    }
+
+
+def rename_components(model) -> None:
+    for index, component in enumerate(sorted(model.components.values(), key=lambda item: item.component_id), 1):
+        component.name = "RBE2_STRESS_PLANE_{:02d}".format(index)
+
+
+def write_fem(model, output: Path) -> None:
+    lines = [
+        "$ Large mixed-washer shell model for RBE2 creation stress tests",
+        "$ No RBE2 cards are pre-created. Units: mm, N, MPa.",
+        "$ Generated by examples/RBE2_Washer_Stress/generate_fem.py",
+        "BEGIN BULK",
+        '$HMNAME MAT 1 "RBE2_STRESS_STEEL"',
+        "MAT1,1,210000.0,,0.3,7.85E-9",
+        "$ PROPERTIES AND COMPONENTS",
+    ]
+    components = sorted(model.components.values(), key=lambda item: item.component_id)
+    for component in components:
+        lines.extend((
+            '$HMNAME PROP {} "{}_PSHELL"'.format(component.property_id, component.name),
+            "PSHELL,{},1,1.0".format(component.property_id),
+            '$HMNAME COMP {} "{}"'.format(component.component_id, component.name),
+            "$HWCOLOR COMP {} {}".format(component.component_id, component.color),
+        ))
+    lines.append("$ NODES")
+    for node_id, point in sorted(model.nodes.items()):
+        lines.append("GRID,{},,{:.9g},{:.9g},{:.9g}".format(node_id, *point))
+    lines.append("$ SHELL ELEMENTS GROUPED BY HYPERMESH COMPONENT")
+    for component in components:
+        lines.extend(("$HMCOMP ID {}".format(component.component_id), "$ " + component.name))
+        for element_id in component.element_ids:
+            element = model.elements[element_id]
+            fields = [element.card, str(element.element_id), str(element.property_id)]
+            fields.extend(str(node_id) for node_id in element.node_ids)
+            lines.append(",".join(fields))
+    lines.extend(("ENDDATA", ""))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(lines), encoding="utf-8")
+
+
+def build_manifest(engine, model, stats, args, columns: int, rows: int, planes: int, elapsed: float):
+    by_case = Counter(str(hole["case_id"]) for hole in model.holes)
+    result = {
+        "schema_version": "1.0",
+        "generator": "examples/RBE2_Washer_Stress/generate_fem.py",
+        "purpose": "mixed-size washer-hole RBE2 creation pressure test",
+        "units": "mm, N, MPa",
+        "preset": args.preset,
+        "layout": {
+            "columns": columns,
+            "rows": rows,
+            "planes": planes,
+            "cell_size": args.cell_size,
+            "plane_gap": args.plane_gap,
+            "plate_size_xy": [columns * args.cell_size, rows * args.cell_size],
+        },
+        "statistics": stats,
+        "expected": {
+            "accepted_washer_holes": stats["washer_hole_count"],
+            "created_rbe2": stats["expected_rbe2_count"],
+            "rbe2_by_case": dict(sorted(by_case.items())),
+            "precreated_rbe2": 0,
+        },
+        "washer_cases": list(STANDARD_WASHERS),
+        "component_names": [item.name for item in sorted(model.components.values(), key=lambda item: item.component_id)],
+        "generation_seconds": round(elapsed, 3),
+        "validation": "fast" if args.fast_validation else "full",
+        "recommended_settings": {
+            "minimum_hole_diameter": 6.0,
+            "maximum_hole_diameter": 30.0,
+            "inner_washer_node_loops": 2,
+            "rigid_type": "RBE2",
+        },
+    }
+    if args.full_manifest:
+        result["holes"] = model.holes
+    return result
+
+
+def main() -> int:
+    args = parse_args()
+    engine = load_mesh_engine()
+    columns, rows, planes = configure(engine, args)
+    expected = columns * rows * planes
+    print("Generating {} x {} x {} = {} mixed washer holes...".format(columns, rows, planes, expected), flush=True)
+    started = time.perf_counter()
+    model = engine.build_model()
+    rename_components(model)
+    stats = quick_stats(engine, model) if args.fast_validation else engine.validate(model)
+    if stats["expected_rbe2_count"] != expected:
+        raise ValueError("expected {} holes, generated {}".format(expected, stats["expected_rbe2_count"]))
+    output = args.output.resolve()
+    manifest_path = args.manifest.resolve()
+    write_fem(model, output)
+    engine.validate_written_fem(output, stats)
+    elapsed = time.perf_counter() - started
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(build_manifest(engine, model, stats, args, columns, rows, planes, elapsed), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps({"fem": str(output), "manifest": str(manifest_path), **stats, "seconds": round(elapsed, 3)}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

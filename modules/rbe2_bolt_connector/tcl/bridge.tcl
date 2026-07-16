@@ -1,4 +1,10 @@
-if {![namespace exists ::HybridCore]} { source [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] hybrid_core tcl init.tcl] }
+set hybridCoreTclDir [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] hybrid_core tcl]
+if {![namespace exists ::HybridCore]} {
+    source [file join $hybridCoreTclDir init.tcl]
+} else {
+    source [file join $hybridCoreTclDir incremental_import.tcl]
+}
+unset hybridCoreTclDir
 proc ::RB2Bolt::runPythonPlanning {elemIds {progressStart 10.0} {progressEnd 65.0}} {
     variable MODULE_DIR
     set ws [::HybridCore::createTaskWorkspace rbe2_bolt_connector]; set dir [dict get $ws task_dir]; set runId [dict get $ws run_id]

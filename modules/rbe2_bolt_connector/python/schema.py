@@ -11,7 +11,7 @@ def validate_request(data):
     settings["minGroupSize"]=int(settings["minGroupSize"]); settings["dryRun"]=bool(settings["dryRun"])
     if settings["gapTol"] <= settings["minBeamLength"] or settings["offsetTol"] <= 0: raise SchemaError("invalid grouping tolerances")
     state=data.get("id_state",{})
-    for key in ("max_element_id","max_property_id","max_material_id","max_component_id"):
+    for key in ("max_node_id","max_element_id","max_property_id","max_material_id","max_component_id"):
         state[key]=int(state.get(key,0))
         if state[key] < 0: raise SchemaError("id_state.{} must not be negative".format(key))
     registry=data.get("entity_registry",{})

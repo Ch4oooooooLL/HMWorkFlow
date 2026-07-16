@@ -22,6 +22,14 @@ def load_worker():
     return module
 
 
+class EmbeddedWorkerBootstrapTests(unittest.TestCase):
+    def test_worker_bootstraps_its_own_module_directory_before_worker_cache_import(self):
+        source = (PYTHON_DIR / "persistent_worker.py").read_text(encoding="utf-8")
+        path_insert = source.index("sys.path.insert(0, str(_WORKER_DIR))")
+        cache_import = source.index("import worker_cache as _worker_cache")
+        self.assertLess(path_insert, cache_import)
+
+
 class PersistentWorkerTests(unittest.TestCase):
     def test_entry_and_its_imports_are_executed_only_once(self):
         worker = load_worker()

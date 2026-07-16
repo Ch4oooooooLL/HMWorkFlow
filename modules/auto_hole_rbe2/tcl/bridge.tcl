@@ -1,6 +1,10 @@
+set hybridCoreTclDir [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] hybrid_core tcl]
 if {![namespace exists ::HybridCore]} {
-    source [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] hybrid_core tcl init.tcl]
+    source [file join $hybridCoreTclDir init.tcl]
+} else {
+    source [file join $hybridCoreTclDir incremental_import.tcl]
 }
+unset hybridCoreTclDir
 
 proc ::AutoHoleRBE2::runPythonRecognition {} {
     variable MODULE_DIR
@@ -19,6 +23,7 @@ proc ::AutoHoleRBE2::runPythonRecognition {} {
         --request [dict get $paths request] \
         --mesh [dict get $paths mesh] \
         --existing [dict get $paths existing] \
+        --delta [dict get $paths delta] \
         --output $resultPath \
         --tcl-output $resultPath \
         --log [file join $taskDir operation.log]] $taskDir

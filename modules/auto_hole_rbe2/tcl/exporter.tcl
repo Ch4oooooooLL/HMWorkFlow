@@ -18,7 +18,11 @@ proc ::AutoHoleRBE2::writeHybridRequest {taskDir runId} {
         lappend settings "    [::HybridCore::jsonString $key]: [::HybridCore::jsonNumber $cfg($key)]"
     }
     lappend settings "    \"requireInnerNormal\": [::HybridCore::jsonBool $cfg(requireInnerNormal)]"
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"auto_hole_rbe2\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": [::HybridCore::jsonIntArray $ui(selectedComps)],\n  \"settings\": {\n[join $settings ,\n]\n  },\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
+    lappend settings "    \"rigidType\": [::HybridCore::jsonString $cfg(rigidType)]"
+    lappend settings "    \"dof\": [::HybridCore::jsonString $cfg(dof)]"
+    lappend settings "    \"outputComponentName\": [::HybridCore::jsonString $cfg(resultCompName)]"
+    set modelState [::HybridCore::incrementalModelStateJson]
+    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"auto_hole_rbe2\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": [::HybridCore::jsonIntArray $ui(selectedComps)],\n  \"settings\": {\n[join $settings ,\n]\n  },\n$modelState,\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
     return [::HybridCore::writeTextFile [file join $taskDir request.json] $json]
 }
 
@@ -232,5 +236,5 @@ proc ::AutoHoleRBE2::exportHybridInputs {taskDir runId} {
     set request [::AutoHoleRBE2::writeHybridRequest $taskDir $runId]
     set mesh [::AutoHoleRBE2::writeHybridMesh $taskDir $faceRecords]
     set existing [::AutoHoleRBE2::writeHybridExisting $taskDir]
-    return [dict create request $request mesh $mesh existing $existing]
+    return [dict create request $request mesh $mesh existing $existing delta [file join $taskDir rigid_import.fem]]
 }

@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
+HYBRID_CORE = ROOT / "modules" / "hybrid_core"
 
 
 class ComponentCreationPolicyTests(unittest.TestCase):
@@ -38,6 +39,27 @@ class HybridCoreTclPolicyTests(unittest.TestCase):
         body = text[start:end]
         self.assertIn("variable ROOT_DIR", body)
         self.assertIn("file join $ROOT_DIR runtime python windows-x64 python.exe", body)
+
+    def test_incremental_import_has_conflict_verification_and_cleanup(self):
+        source = (HYBRID_CORE / "tcl" / "incremental_import.tcl").read_text(encoding="utf-8")
+        self.assertIn("proc ::HybridCore::importRigidDelta", source)
+        self.assertIn("incremental IDs are already occupied", source)
+        self.assertIn("verifyRigidManifest", source)
+        self.assertIn("organizeRigidManifest", source)
+        organize_body = source.split("proc ::HybridCore::organizeRigidManifest", 1)[1].split(
+            "proc ::HybridCore::componentEntityCount", 1
+        )[0]
+        self.assertIn("moveIdsToComponent {elems elements}", organize_body)
+        self.assertNotIn("moveIdsToComponent {nodes}", organize_body)
+        self.assertNotIn("dict lappend byComponent", organize_body)
+        self.assertIn("lappend elementIds [dict get $row element_id]", organize_body)
+        self.assertIn("deleteEmptyNewComponents", source)
+        delete_body = source.split("proc ::HybridCore::deleteEmptyNewComponents", 1)[1].split(
+            "proc ::HybridCore::importRigidDelta", 1
+        )[0]
+        self.assertIn("componentEntityCount $componentId elems", delete_body)
+        self.assertNotIn("componentEntityCount $componentId nodes", delete_body)
+        self.assertIn("cleanupIncrementalEntities", source)
 
 
 if __name__ == "__main__":

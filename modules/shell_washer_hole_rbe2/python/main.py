@@ -8,6 +8,7 @@ for directory in (str(MODULE_DIR), str(COMMON_DIR)):
     if directory not in sys.path: sys.path.insert(0, directory)
 
 from free_edge_loops import find
+from fem_delta import write_rigid_incremental_fem
 from hybrid_schema import new_result
 from logging_utils import close_logger, create_logger
 from mesh_model import load_json, read_mesh
@@ -50,12 +51,13 @@ def detect(request, model, existing, logger):
 
 def main(argv=None):
     p=argparse.ArgumentParser();
-    for name in ("request","mesh","existing","output","tcl-output","log"): p.add_argument("--"+name, required=True, type=Path)
+    for name in ("request","mesh","existing","delta","output","tcl-output","log"): p.add_argument("--"+name, required=True, type=Path)
     a=p.parse_args(argv); logger=create_logger("shell_washer_hole_rbe2", a.log)
     try:
         started=time.perf_counter(); request=MOD.validate_request(load_json(a.request)); model=read_mesh(a.mesh); existing=MOD.validate_existing(load_json(a.existing)); read_time=time.perf_counter()-started
         started=time.perf_counter(); candidates,rejected=detect(request,model,existing,logger); detect_time=time.perf_counter()-started
-        result=new_result("shell_washer_hole_rbe2",request["run_id"]); result["candidates"]=candidates; result["summary"]={"candidate_count":len(candidates),"rejected_count":len(rejected),"rejected":rejected,"duplicate_groups":duplicate_groups(existing)}; result["performance"]["read_seconds"]=round(read_time,6); result["performance"]["detect_seconds"]=round(detect_time,6)
+        started=time.perf_counter(); manifest=write_rigid_incremental_fem(a.delta,candidates,request); write_time=time.perf_counter()-started
+        result=new_result("shell_washer_hole_rbe2",request["run_id"]); result["candidates"]=candidates; result["summary"]={"candidate_count":len(candidates),"rejected_count":len(rejected),"rejected":rejected,"duplicate_groups":duplicate_groups(existing),**manifest}; result["performance"]["read_seconds"]=round(read_time,6); result["performance"]["detect_seconds"]=round(detect_time,6); result["performance"]["write_seconds"]=round(write_time,6)
         write_result(a.output,getattr(a,"tcl_output"),"::RB2W::pythonResult",result); return 0
     except Exception as exc: logger.exception("washer detection failed"); print("ERROR: {}".format(exc),file=sys.stderr); return 2
     finally: close_logger(logger)

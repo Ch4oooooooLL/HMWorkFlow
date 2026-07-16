@@ -9,11 +9,17 @@ AGENTS.md
 # Local documentation and generated task workspaces
 doc/
 runtime/tasks/
+# Locally unpacked embedded standard library; python38.zip is the source asset.
+runtime/python/windows-x64/python38/
 
 # Packaged workflow archives
 dist/
 
 # HyperMesh / solver result and session outputs
+/command.tcl
+/optistruct.msg
+/runtime/hm_source_modules.ok
+/temp/
 *.h3d
 *.op2
 *.odb
@@ -50,5 +56,7 @@ examples/MeshSeamWeld_ManyHoles/*.fem
 examples/MeshSeamWeld_ManyHoles/*_manifest.json
 examples/ShellWasher_RBE2_Bolt_Chain/*.fem
 examples/ShellWasher_RBE2_Bolt_Chain/*_manifest.json
+examples/RBE2_Washer_Stress/*.fem
+examples/RBE2_Washer_Stress/*_manifest.json
 examples/SolidSeam_Validation/*.fem
 examples/SolidSeam_Validation/*_manifest.json

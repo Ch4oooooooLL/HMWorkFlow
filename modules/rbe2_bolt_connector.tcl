@@ -1026,7 +1026,7 @@ proc ::RB2Bolt::beamSectionName {dia} {
     } else {
         set d UNKNOWN
     }
-    return [safeName [format "%s_D%s_CIRCLE" $P(compPrefix) $d]]
+    return [safeName [format "%s_D%s_SOLID_CIRCLE" $P(compPrefix) $d]]
 }
 
 proc ::RB2Bolt::ensureCircleBeamSection {dia} {
@@ -1057,8 +1057,15 @@ proc ::RB2Bolt::ensureCircleBeamSection {dia} {
         if {$id eq "" || "$id" eq "$before"} {
             error [::HWFlow::txt "创建圆形梁截面 $name 后无法读取其 ID。" "Cannot read the ID after creating circular beam section $name."]
         }
+        set renamed 0
         foreach etype {beamsects beamsections} {
-            catch {*setvalue $etype id=$id name=$name}
+            if {![catch {*setvalue $etype id=$id name=$name}]} {
+                set renamed 1
+                break
+            }
+        }
+        if {!$renamed} {
+            error [::HWFlow::txt "无法命名圆形梁截面 $name。" "Cannot name circular beam section $name."]
         }
     }
 
@@ -1071,6 +1078,55 @@ proc ::RB2Bolt::ensureCircleBeamSection {dia} {
     }
     set beamSectIdCache($name) $id
     return [list $name $id]
+}
+
+proc ::RB2Bolt::linkBeamSectionToProperty {propId propName card beamSectId} {
+    set cardImage $card
+    catch {set cardImage [hm_getcardimagename props $propId -byid]}
+    set attributeId 0
+    catch {set attributeId [hm_getcardimageoptions props $cardImage beamsection_attrib]}
+    if {![string is integer -strict $attributeId] || $attributeId <= 0} {
+        set attributeId [expr {[string toupper $card] eq "PBAR" ? 3179 : 3186}]
+    }
+
+    # Beam-section attributes are entity references, not scalar IDs. HM2019
+    # requires the typed value {beamsects ID}; assigning only ID is rejected.
+    foreach entityType {props properties} {
+        catch {*setvalue $entityType id=$propId $attributeId=[list beamsects $beamSectId]}
+    }
+    foreach dataName [list $attributeId engineering=beamsec beamsectionid beamsection.id] {
+        set actual ""
+        if {![catch {set actual [hm_getvalue props id=$propId dataname=$dataName]}] && "$actual" eq "$beamSectId"} {
+            return 1
+        }
+    }
+    return 0
+}
+
+proc ::RB2Bolt::assignPropertyToComponent {componentId propertyId propertyName} {
+    set assigned 0
+    foreach selector [list "id=$componentId"] {
+        if {[::RB2Bolt::trySetEntityRef {comps components} $selector \
+            {propertyid property.id property PID pid} props $propertyId]} {
+            set assigned 1
+        }
+    }
+    catch {*clearmark comps 1}
+    if {![catch {*createmark comps 1 $componentId}]} {
+        if {![catch {*propertyupdate comps 1 $propertyName}]} {set assigned 1}
+    }
+    catch {*clearmark comps 1}
+    return $assigned
+}
+
+proc ::RB2Bolt::entityHasProperty {entityType entityId propertyId propertyName} {
+    foreach dataName {property.id propertyid property prop.id} {
+        set value ""
+        if {[catch {set value [hm_getvalue $entityType id=$entityId dataname=$dataName]}]} {continue}
+        if {$value eq "" || ([string is double -strict $value] && $value == 0)} {continue}
+        if {"$value" eq "$propertyId" || [string equal -nocase "$value" $propertyName]} {return 1}
+    }
+    return 0
 }
 
 proc ::RB2Bolt::ensureBoltProperty {elemType dia {forceAuto 0}} {
@@ -1142,6 +1198,10 @@ proc ::RB2Bolt::ensureBoltProperty {elemType dia {forceAuto 0}} {
         foreach f {NSM NSM(A) NSMA} {::RB2Bolt::trySetValue {props properties} $selector $f $nsm}
         foreach f {K1 K1(A) K1A} {::RB2Bolt::trySetValue {props properties} $selector $f 1.0}
         foreach f {K2 K2(A) K2A} {::RB2Bolt::trySetValue {props properties} $selector $f 1.0}
+    }
+
+    if {![::RB2Bolt::linkBeamSectionToProperty $id $propName $card $beamSectId]} {
+        error [::HWFlow::txt "无法将梁截面关联到属性 $propName。" "Cannot link the beam section to property $propName."]
     }
 
     set propIdCache($propName) $id
@@ -1644,28 +1704,28 @@ proc ::RB2Bolt::createdBeamNodeIds {elemId} {
     return {}
 }
 
+proc ::RB2Bolt::nodeEntityExists {nodeId} {
+    if {$nodeId eq ""} {return 0}
+    set value ""
+    if {[catch {set value [hm_getvalue nodes id=$nodeId dataname=id]}]} {return 0}
+    if {$value eq ""} {return 0}
+    if {[string is double -strict $value] && $value == 0} {return 0}
+    return 1
+}
+
 proc ::RB2Bolt::replaceOneNode {sourceNode targetNode} {
-    if {$sourceNode eq "" || $targetNode eq "" || "$sourceNode" eq "$targetNode"} {
-        return 1
+    if {$sourceNode eq "" || $targetNode eq ""} {return 0}
+    if {"$sourceNode" eq "$targetNode"} {return [::RB2Bolt::nodeEntityExists $targetNode]}
+    if {![::RB2Bolt::nodeEntityExists $sourceNode] || ![::RB2Bolt::nodeEntityExists $targetNode]} {
+        return 0
     }
-    catch {*createlist nodes 1}
-    catch {*createlist nodes 2}
-    set ok 0
-    if {![catch {*replacenodes source_node=$sourceNode target_node=$targetNode equiv=1 midpoint=0 collapse_check=2}]} {
-        set ok 1
-    }
-    if {!$ok} {
-        if {![catch {*createlist nodes 1 $sourceNode}]} {
-            if {![catch {*createlist nodes 2 $targetNode}]} {
-                if {![catch {*replacenodes source_list=1 target_list=2 equiv=1 midpoint=0 collapse_check=2}]} {
-                    set ok 1
-                }
-            }
-        }
-    }
-    catch {*createlist nodes 1}
-    catch {*createlist nodes 2}
-    return $ok
+
+    # HyperMesh 2019 uses the positional form.  location=0 moves source to the
+    # target; location=1 would move both nodes to their midpoint.  Name/value
+    # arguments were introduced only in newer HyperMesh releases and can be
+    # silently interpreted as zeros by HM2019.
+    if {[catch {*replacenodes $sourceNode $targetNode 1 0}]} {return 0}
+    return [expr {![::RB2Bolt::nodeEntityExists $sourceNode] && [::RB2Bolt::nodeEntityExists $targetNode]}]
 }
 
 proc ::RB2Bolt::nodeDistanceById {a b} {

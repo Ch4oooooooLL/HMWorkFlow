@@ -1,6 +1,6 @@
 proc ::RB2W::hybridNodeExists {nid} { return [expr {![catch {set v [hm_getvalue nodes id=$nid dataname=id]}] && $v ne ""}] }
 
-proc ::RB2W::executePythonCandidates {compId payload {progressStart 60.0} {progressEnd 95.0}} {
+proc ::RB2W::executePythonCandidatesLegacy {compId payload {progressStart 60.0} {progressEnd 95.0}} {
     variable BATCH_ORGANIZE_RBE2
     set created 0; set skipped 0; set failed 0; set organized 0; set outComp ""; set made {}
     ::RB2W::initExistingRBE2IndexForSource $compId [::RB2W::sourceOutputBaseName $compId]
@@ -28,4 +28,19 @@ proc ::RB2W::executePythonCandidates {compId payload {progressStart 60.0} {progr
     }
     if {$BATCH_ORGANIZE_RBE2 && [llength $made] > 0} { set organized [::RB2W::organizeCreatedRBE2Elements $made $outComp] }
     return [list $created [expr {$skipped+$failed}] [llength [dict get $payload candidates]] $organized]
+}
+
+proc ::RB2W::executePythonCandidates {compId payload {progressStart 60.0} {progressEnd 95.0}} {
+    set summary [dict get $payload summary]
+    set total [llength [dict get $payload candidates]]
+    set planned [dict get $summary planned_create_count]
+    if {[catch {
+        set imported [::HybridCore::importRigidDelta "Shell Washer-Hole RIGIDS" $summary \
+            [list ::RB2W::rigidCenterNode] [list ::RB2W::getElemNodes] $progressStart $progressEnd]
+    } importError]} {
+        ::HybridCore::log WARN "incremental RIGIDS import failed; using legacy Tcl creation: $importError"
+        return [::RB2W::executePythonCandidatesLegacy $compId $payload $progressStart $progressEnd]
+    }
+    set created [dict get $imported created]
+    return [list $created [expr {$total-$planned}] $total $created]
 }

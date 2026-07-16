@@ -47,18 +47,31 @@ proc ::HybridCore::workerStatus {} {
 }
 
 proc ::HybridCore::startPersistentWorker {} {
-    variable workerChannel; variable workerPid; variable workerPython; variable MODULE_DIR
+    variable workerChannel; variable workerPid; variable workerPython; variable MODULE_DIR; variable instanceLogDir
     if {[::HybridCore::workerAlive]} { return $workerChannel }
     ::HybridCore::stopPersistentWorker
     set python [::HybridCore::resolvePython]
     set worker [file join $MODULE_DIR python persistent_worker.py]
     if {![file isfile $worker]} { error "Persistent Python worker not found: $worker" }
     set command [concat $python [list -u $worker --owner-pid [pid] --instance-id $::HybridCore::instanceId]]
-    if {[catch {set channel [open [concat | $command] r+]} err]} { error "Cannot start persistent Python worker: $err" }
+    file mkdir $instanceLogDir
+    set diagnosticPath [file join $instanceLogDir persistent_worker_stderr.log]
+    if {[file exists $diagnosticPath]} { catch {file delete -force $diagnosticPath} }
+    if {[catch {set channel [open [concat | $command [list 2> $diagnosticPath]] r+]} err]} { error "Cannot start persistent Python worker: $err" }
     fconfigure $channel -blocking 0 -buffering line -encoding utf-8 -translation lf
     set workerChannel $channel; set workerPid [pid $channel]; set workerPython [lindex $python 0]
     ::HybridCore::log INFO "persistent worker started pid=$workerPid executable=$workerPython"
     return $workerChannel
+}
+
+proc ::HybridCore::workerDiagnostic {} {
+    variable instanceLogDir
+    set path [file join $instanceLogDir persistent_worker_stderr.log]
+    set detail ""
+    if {[file isfile $path]} { catch {set detail [string trim [::HybridCore::readTextFile $path]]} }
+    if {$detail eq ""} { return "diagnostic_log=$path (empty)" }
+    if {[string length $detail] > 4000} { set detail [string range $detail end-3999 end] }
+    return "diagnostic_log=$path detail={$detail}"
 }
 
 proc ::HybridCore::workerFileFingerprint {path} {
@@ -147,8 +160,9 @@ proc ::HybridCore::runPersistentProcess {entry arguments taskDir} {
     if {$workerProgressAfter ne ""} { after cancel $workerProgressAfter; set workerProgressAfter "" }
     if {$workerWaitError ne ""} {
         set waitError $workerWaitError
+        set diagnostic [::HybridCore::workerDiagnostic]
         ::HybridCore::stopPersistentWorker
-        error "$waitError. Log: $stderrPath"
+        error "$waitError. $diagnostic task_log=$stderrPath"
     }
     set response $workerWaitResponse
     set fields [split $response "\t"]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 import importlib.util
+import json
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -9,6 +11,7 @@ from pathlib import Path
 from duplicate_detector import annotate, build_index
 from face_segmentation import segment_faces
 from hole_evaluator import evaluate
+from main import main as cli_main
 from mesh_model import Component, Element, MeshModel
 from solid_surface import Face, extract
 
@@ -193,6 +196,17 @@ class TclWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("hybridNodeExists $nodeId", executor)
         self.assertNotIn("rbe2DependentNodeKey $elementId", executor)
 
+    def test_python_delta_import_is_primary_and_legacy_creation_is_fallback(self):
+        main_source = self.source("python/main.py")
+        bridge = self.source("tcl/bridge.tcl")
+        exporter = self.source("tcl/exporter.tcl")
+        executor = self.source("tcl/executor.tcl")
+        self.assertIn("write_rigid_incremental_fem", main_source)
+        self.assertIn("--delta", bridge)
+        self.assertIn("incrementalModelStateJson", exporter)
+        self.assertIn("importRigidDelta", executor)
+        self.assertIn("executePythonCandidatesLegacy", executor)
+
     def test_creation_failure_has_explicit_rollback(self):
         source = self.source("../auto_hole_rbe2.tcl")
         self.assertIn("proc ::AutoHoleRBE2::cleanupFailedRBE2", source)
@@ -211,6 +225,41 @@ class TclWorkflowContractTests(unittest.TestCase):
         self.assertIn("MAX_REJECT_SAMPLES", source)
         self.assertIn("reject_reason_counts", source)
         self.assertEqual(source.count("write_result("), 1)
+
+
+class IncrementalCliIntegrationTests(unittest.TestCase):
+    def test_surface_mesh_cli_writes_grid_and_rbe2_delta(self):
+        model, faces = tube_faces()
+        settings = dict(DEFAULTS)
+        settings.update({"rigidType": "RBE2", "dof": "123456", "outputComponentName": "RBE2_HOLE_AUTO"})
+        request = {
+            "schema_version": "1.0", "module": "auto_hole_rbe2",
+            "run_id": "solid-hole-integration", "hypermesh_version": "2019",
+            "selected_component_ids": [1], "settings": settings,
+            "id_state": {"max_node_id": max(model.nodes), "max_element_id": max(face.element_id for face in faces), "max_component_id": 1},
+            "entity_registry": {"components": {}, "properties": {}, "materials": {}},
+            "options": {"debug": False, "keep_runtime_files": True},
+        }
+        mesh = {
+            "schema_version": "1.0",
+            "components": [{"component_id": 1, "component_name": "SOLID", "mesh_class": "SOLID"}],
+            "nodes": [[node_id, *xyz] for node_id, xyz in model.nodes.items()],
+            "elements": [{"element_id": index, "component_id": 1, "element_type": "CQUAD4", "node_ids": list(face.node_ids)} for index, face in enumerate(faces, 1)],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request_path = root / "request.json"; mesh_path = root / "mesh.json"; existing_path = root / "existing.json"
+            delta_path = root / "rigids.fem"; result_path = root / "result.json"; tcl_path = root / "result.tcl"; log_path = root / "operation.log"
+            request_path.write_text(json.dumps(request), encoding="utf-8")
+            mesh_path.write_text(json.dumps(mesh), encoding="utf-8")
+            existing_path.write_text(json.dumps({"rbe2": []}), encoding="utf-8")
+            code = cli_main(["--request", str(request_path), "--mesh", str(mesh_path), "--existing", str(existing_path), "--delta", str(delta_path), "--output", str(result_path), "--tcl-output", str(tcl_path), "--log", str(log_path)])
+            self.assertEqual(code, 0)
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["summary"]["planned_create_count"], 1)
+            delta = delta_path.read_text(encoding="utf-8")
+            self.assertIn("GRID,", delta)
+            self.assertIn("RBE2,", delta)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
-import importlib.util, math, unittest
+import importlib.util, json, math, tempfile, unittest
 from pathlib import Path
 from free_edge_loops import find
 from loop_geometry import calculate
 from mesh_model import Component, Element, MeshModel
+from main import main as cli_main
 from rbe2_duplicate_detector import annotate, duplicate_groups, index
 from shell_topology import build
 from washer_detector import validate_hole, validate_washer
@@ -53,6 +54,57 @@ class WasherTests(unittest.TestCase):
         model,_=annulus(); incidence,neighbors,nodes=build(model.elements.values()); loop=max(find(incidence),key=lambda r:calculate(model,r["nodes"])["mean_radius"]); geom,_=validate_hole(model,loop,self.settings()); washer,reason=validate_washer(model,loop,geom,incidence,neighbors,nodes,self.settings()); self.assertIsNone(washer); self.assertEqual(reason,"WASHER_WIDTH")
     def test_duplicate_group_plan(self):
         rows=[{"element_id":9,"dependent_node_ids":[1,2,3]},{"element_id":7,"dependent_node_ids":[3,2,1]}]; group=duplicate_groups(rows)[0]; self.assertEqual(group["keep_element_id"],7); self.assertEqual(group["delete_element_ids"],[9])
+
+
+class IncrementalImportContractTests(unittest.TestCase):
+    def source(self, relative_path):
+        return (Path(__file__).resolve().parents[1] / relative_path).read_text(encoding="utf-8")
+
+    def test_python_generates_rigid_delta_and_bridge_passes_it(self):
+        main = self.source("python/main.py")
+        bridge = self.source("tcl/bridge.tcl")
+        exporter = self.source("tcl/exporter.tcl")
+        self.assertIn("write_rigid_incremental_fem", main)
+        self.assertIn('"delta"', main)
+        self.assertIn("--delta", bridge)
+        self.assertIn("incrementalModelStateJson", exporter)
+        self.assertIn("rigid_import.fem", exporter)
+
+    def test_tcl_prefers_verified_import_and_retains_legacy_fallback(self):
+        executor = self.source("tcl/executor.tcl")
+        self.assertIn("importRigidDelta", executor)
+        self.assertIn("executePythonCandidatesLegacy", executor)
+        self.assertIn("using legacy Tcl creation", executor)
+
+    def test_cli_writes_importable_rigid_delta_and_manifest(self):
+        model, _ = annulus()
+        settings = dict(MOD.DEFAULTS)
+        settings.update({"rigidType": "RBE2", "dof": "123456", "outputComponentName": "AUTO_RBE2_SHELL"})
+        request = {
+            "schema_version": "1.0", "module": "shell_washer_hole_rbe2",
+            "run_id": "washer-integration", "hypermesh_version": "2019",
+            "selected_component_ids": [1], "settings": settings,
+            "id_state": {"max_node_id": max(model.nodes), "max_element_id": max(model.elements), "max_component_id": 1},
+            "entity_registry": {"components": {}, "properties": {}, "materials": {}},
+            "options": {"debug": False, "keep_runtime_files": True},
+        }
+        mesh = {
+            "schema_version": "1.0",
+            "components": [{"component_id": 1, "component_name": "SHELL", "mesh_class": "SHELL"}],
+            "nodes": [[node_id, *xyz] for node_id, xyz in model.nodes.items()],
+            "elements": [{"element_id": element.element_id, "component_id": 1, "element_type": element.element_type, "node_ids": list(element.node_ids)} for element in model.elements.values()],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = {name: root / name for name in ("request.json", "mesh.json", "existing.json", "rigids.fem", "result.json", "result.tcl", "operation.log")}
+            paths["request.json"].write_text(json.dumps(request), encoding="utf-8")
+            paths["mesh.json"].write_text(json.dumps(mesh), encoding="utf-8")
+            paths["existing.json"].write_text(json.dumps({"rbe2": []}), encoding="utf-8")
+            code = cli_main(["--request", str(paths["request.json"]), "--mesh", str(paths["mesh.json"]), "--existing", str(paths["existing.json"]), "--delta", str(paths["rigids.fem"]), "--output", str(paths["result.json"]), "--tcl-output", str(paths["result.tcl"]), "--log", str(paths["operation.log"])])
+            self.assertEqual(code, 0)
+            result = json.loads(paths["result.json"].read_text(encoding="utf-8"))
+            self.assertGreater(result["summary"]["planned_create_count"], 0)
+            self.assertIn("RBE2,", paths["rigids.fem"].read_text(encoding="utf-8"))
 
 
 if __name__=="__main__": unittest.main()

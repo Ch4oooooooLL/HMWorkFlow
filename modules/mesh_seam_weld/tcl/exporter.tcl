@@ -75,3 +75,73 @@ proc ::MeshSeamWeld::exportComponentPlanInputs {dir runId selectedNodes sourceCo
         mesh [::MeshSeamWeld::writeComponentPlanMesh $dir $sourceComponentIds $targetComponentIds] \
         existing $existing]
 }
+
+proc ::MeshSeamWeld::writeInternalComponentPlanRequest {dir runId selectedNode sourceComponentId} {
+    variable cfg
+    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"mesh_seam_weld\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": [::HybridCore::jsonIntArray [list $sourceComponentId]],\n  \"settings\": {\"mode\": \"internal_component_plan\", \"selected_node_ids\": [::HybridCore::jsonIntArray [list $selectedNode]], \"source_component_ids\": [::HybridCore::jsonIntArray [list $sourceComponentId]], \"target_component_ids\": \[\], \"weld_mesh_size\": [::HybridCore::jsonNumber $cfg(weld_mesh_size)], \"patch_expand_layers\": [::HybridCore::jsonNumber $cfg(patch_expand_layers)]},\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
+    return [::HybridCore::writeTextFile [file join $dir request.json] $json]
+}
+
+proc ::MeshSeamWeld::optistructExportTemplate {} {
+    set candidates {}
+    if {![catch {set templatesDir [hm_info -appinfo SPECIFIEDPATH TEMPLATES_DIR]}] &&
+        [string trim $templatesDir] ne ""} {
+        lappend candidates [file join $templatesDir feoutput optistruct optistruct]
+    }
+    if {![catch {set executableDir [hm_info -appinfo EXECUTABLEDIR]}] &&
+        [string trim $executableDir] ne ""} {
+        lappend candidates [file join $executableDir .. .. .. templates feoutput optistruct optistruct]
+    }
+    foreach candidate $candidates {
+        set normalized [file normalize $candidate]
+        if {[file isfile $normalized]} { return $normalized }
+    }
+    error [::HWFlow::txt \
+        "找不到 HyperMesh OptiStruct FEM 导出模板。" \
+        "Could not locate the HyperMesh OptiStruct FEM export template."]
+}
+
+proc ::MeshSeamWeld::exportInternalComponentFem {dir sourceComponentId} {
+    set outputPath [file join $dir source_component.fem]
+    set exportTemplate [::MeshSeamWeld::optistructExportTemplate]
+    catch {*clearmark elems 1}
+    catch {*clearmark nodes 1}
+    set code [catch {
+        *createmark elems 1 "by component id" $sourceComponentId
+        *createmark nodes 1 "by component id" $sourceComponentId
+        set elemCount [llength [hm_getmark elems 1]]
+        set nodeCount [llength [hm_getmark nodes 1]]
+        if {$elemCount == 0 || $nodeCount == 0} {
+            error "Source component $sourceComponentId has no exportable shell mesh."
+        }
+        *feoutput_select $exportTemplate $outputPath 1 0 0
+    } err opts]
+    catch {*clearmark elems 1}
+    catch {*clearmark nodes 1}
+    if {$code} { return -options $opts $err }
+    if {![file isfile $outputPath] || [file size $outputPath] == 0} {
+        error "HyperMesh did not create the selected component FEM export: $outputPath"
+    }
+    # The task path is unique and was just written by HyperMesh.  Register a
+    # cheap identity so the persistent-worker bridge does not reread and hash
+    # a multi-megabyte FEM on Tcl's single thread before Python starts.
+    set normalized [file normalize $outputPath]
+    if {![info exists ::HybridCore::workerFileFingerprints]} {
+        set ::HybridCore::workerFileFingerprints [dict create]
+    }
+    dict set ::HybridCore::workerFileFingerprints $normalized \
+        "mesh-fem-v1:[file size $normalized]:[clock clicks -milliseconds]"
+    return $outputPath
+}
+
+proc ::MeshSeamWeld::exportInternalComponentPlanInputs {dir runId selectedNode sourceComponentId} {
+    set request [::MeshSeamWeld::writeInternalComponentPlanRequest \
+        $dir $runId $selectedNode $sourceComponentId]
+    set exportStarted [clock milliseconds]
+    set mesh [::MeshSeamWeld::exportInternalComponentFem $dir $sourceComponentId]
+    set exportMs [expr {[clock milliseconds] - $exportStarted}]
+    ::HybridCore::log INFO "PERF mesh_seam_weld native_fem_export component=$sourceComponentId bytes=[file size $mesh] export_ms=$exportMs"
+    set existing [::HybridCore::writeTextFile [file join $dir existing_entities.json] \
+        "{\n  \"schema_version\": \"1.0\"\n}\n"]
+    return [dict create request $request mesh $mesh existing $existing export_ms $exportMs]
+}

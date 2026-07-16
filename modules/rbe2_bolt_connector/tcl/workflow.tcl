@@ -13,6 +13,9 @@ proc ::RB2Bolt::runCreateFromSelection {} {
         set run [::RB2Bolt::runPythonPlanning $elemIds 8.0 65.0]
         set stat [::RB2Bolt::executePythonPlans [dict get $run payload] 65.0 96.0]
     } err opts]
+    if {$code} {
+        catch {::HybridCore::log ERROR "RBE2 Bolt Connector failed error={$err}"}
+    }
     ::HybridCore::closeLog
     ::RB2Bolt::clearSelectionMarks
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {

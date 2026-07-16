@@ -7,13 +7,20 @@ proc ::RB2W::hybridShellType {eid nodes} {
 }
 
 proc ::RB2W::writeHybridRequest {taskDir runId compId} {
+    variable RIGID_TYPE
+    variable RBE2_DOF
     set settings {}
     foreach key {MIN_HOLE_DIAMETER MAX_HOLE_DIAMETER CIRCULARITY_TOL ALLOW_OVAL_HOLES MAX_OVAL_AXIS_RATIO OVAL_RADIAL_FIT_TOL MIN_HOLE_EDGE_NODES MAX_HOLE_EDGE_NODES INNER_WASHER_NODE_LOOPS OUTER_RING_CIRCULARITY_TOL OUTER_OVAL_RADIAL_FIT_TOL OUTER_OVAL_AXIS_RATIO_TOL CENTER_OFFSET_TOL MIN_WASHER_WIDTH_ABS MIN_WASHER_WIDTH_RATIO WASHER_ELEM_COUNT_TOL MIN_OUTER_NODE_RATIO MAX_OUTER_NODE_RATIO} {
         upvar #0 ::RB2W::$key value
         if {$key eq "ALLOW_OVAL_HOLES"} { set encoded [::HybridCore::jsonBool $value] } else { set encoded [::HybridCore::jsonNumber $value] }
         lappend settings "    [::HybridCore::jsonString $key]: $encoded"
     }
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"shell_washer_hole_rbe2\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": \[$compId\],\n  \"settings\": {\n[join $settings ,\n]\n  },\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
+    set outputName [::RB2W::sanitizeNamePart [::RB2W::sourceOutputBaseName $compId] "AUTO_RBE2"]
+    lappend settings "    \"rigidType\": [::HybridCore::jsonString $RIGID_TYPE]"
+    lappend settings "    \"dof\": [::HybridCore::jsonString $RBE2_DOF]"
+    lappend settings "    \"outputComponentName\": [::HybridCore::jsonString $outputName]"
+    set modelState [::HybridCore::incrementalModelStateJson]
+    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"shell_washer_hole_rbe2\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": \[$compId\],\n  \"settings\": {\n[join $settings ,\n]\n  },\n$modelState,\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
     return [::HybridCore::writeTextFile [file join $taskDir request.json] $json]
 }
 
@@ -58,5 +65,5 @@ proc ::RB2W::writeHybridExisting {taskDir compId} {
 }
 
 proc ::RB2W::exportHybridInputs {taskDir runId compId} {
-    return [dict create request [::RB2W::writeHybridRequest $taskDir $runId $compId] mesh [::RB2W::writeHybridMesh $taskDir $compId] existing [::RB2W::writeHybridExisting $taskDir $compId]]
+    return [dict create request [::RB2W::writeHybridRequest $taskDir $runId $compId] mesh [::RB2W::writeHybridMesh $taskDir $compId] existing [::RB2W::writeHybridExisting $taskDir $compId] delta [file join $taskDir rigid_import.fem]]
 }
