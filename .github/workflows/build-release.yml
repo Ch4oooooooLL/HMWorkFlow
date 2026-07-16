@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-release:
     name: Package and publish release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -24,7 +24,7 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pandoc weasyprint fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends pandoc wkhtmltopdf fonts-noto-cjk
 
       - name: Build user guide PDF
         shell: bash
@@ -51,7 +51,7 @@ jobs:
           pandoc README.md \
             --standalone \
             --metadata title="使用教程" \
-            --pdf-engine=weasyprint \
+            --pdf-engine=wkhtmltopdf \
             --css user-guide.css \
             -o "使用教程.pdf"
 
