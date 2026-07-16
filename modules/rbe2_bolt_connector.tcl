@@ -13,8 +13,9 @@
 #     normal axis. They are no longer searched/connected in their own plane.
 #   - Groups containing spatial RBE2 records only are previewed/skipped and do
 #     not create CBEAM elements.
-#   - CBEAM creation still uses the HyperMesh 2019 compatible
-#     *barelementcreatewithoffsets workflow from v0.4.
+#   - The selected RBE2 scope is exported as a compact FEM snapshot. Python
+#     writes an incremental solver deck which is imported back into the same
+#     HyperMesh session and verified by endpoint ID.
 #
 # Notes:
 #   - Radius/diameter estimation uses the inner ring of dependent nodes:
@@ -41,7 +42,7 @@ namespace eval ::RB2Bolt {
 
     variable P
     array set P {
-        selectMode       elements
+        selectMode       components
         axisMode         AUTO
         gapTol           100.0
         offsetTol        5.0

@@ -1944,7 +1944,7 @@ proc ::MeshSeamWeld::invalidateTargetCaches {targetComps beforeNode beforeElem {
     }
 }
 
-proc ::MeshSeamWeld::processWeldPathIsolated {sourceNodes targetComps closedLoop progressOpened pathIndex pathTotal {sourceCompIds {}} {seamComp ""} {preparedCenter {}} {targetElemIds {}}} {
+proc ::MeshSeamWeld::processWeldPathIsolated {sourceNodes targetComps closedLoop progressOpened pathIndex pathTotal {sourceCompIds {}} {seamComp ""} {preparedCenter {}} {targetElemIds {}} {imprintClosedLoop ""}} {
     set isolatedStarted [clock milliseconds]
     set historyName "Mesh seam weld path $pathIndex/$pathTotal"
     set failureCenter $preparedCenter
@@ -1968,7 +1968,7 @@ proc ::MeshSeamWeld::processWeldPathIsolated {sourceNodes targetComps closedLoop
     }
     set code [catch {
         ::MeshSeamWeld::processWeldPath $sourceNodes $targetComps \
-            $closedLoop $progressOpened $pathIndex $pathTotal $sourceCompIds $seamComp $targetElemIds
+            $closedLoop $progressOpened $pathIndex $pathTotal $sourceCompIds $seamComp $targetElemIds $imprintClosedLoop
     } result opts]
     if {$historyStarted} { catch {*endnotehistorystate $historyName} }
     if {$code} {
@@ -2114,6 +2114,7 @@ proc ::MeshSeamWeld::runAction {} {
                     source_component_ids $sourceCompIds target_components $jobTargetComps \
                     seam_component [::MeshSeamWeld::seamComponentForRelatedComps $related] \
                     target_elements [dict get $plan target_element_ids] \
+                    closed_loop [dict get $plan closed_loop] imprint_closed_loop 0 \
                     center [::MeshSeamWeld::pathCenter $sourceNodes]]
             }
             if {[llength $weldJobs] == 0} {
@@ -2128,6 +2129,7 @@ proc ::MeshSeamWeld::runAction {} {
         }
         set prepareMs [expr {[clock milliseconds] - $prepareStarted}]
         ::HybridCore::log INFO "PERF mesh_seam_weld prepare paths=[llength $sourcePaths] source_nodes=[llength [::MeshSeamWeld::uniq [concat {*}$sourcePaths]]] prepare_ms=$prepareMs"
+        set executionStarted [clock milliseconds]
 
         set allSourceNodes {}
         set allSourceCompIds {}
@@ -2142,21 +2144,29 @@ proc ::MeshSeamWeld::runAction {} {
             incr pathIndex
             set sourceNodes [dict get $job source_nodes]
             set jobTargetComps $targetComps
+            set jobClosedLoop $closedSeedMode
+            set jobImprintClosedLoop $jobClosedLoop
             if {[dict exists $job target_components]} {
                 set jobTargetComps [dict get $job target_components]
             }
+            if {[dict exists $job closed_loop]} {
+                set jobClosedLoop [dict get $job closed_loop]
+            }
+            if {[dict exists $job imprint_closed_loop]} {
+                set jobImprintClosedLoop [dict get $job imprint_closed_loop]
+            }
             set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
-                $closedSeedMode $progressOpened $pathIndex $pathTotal \
+                $jobClosedLoop $progressOpened $pathIndex $pathTotal \
                 [dict get $job source_component_ids] [dict get $job seam_component] \
-                [dict get $job center] [dict get $job target_elements]]
+                [dict get $job center] [dict get $job target_elements] $jobImprintClosedLoop]
             if {![dict get $isolated ok] && \
                 [llength [dict get $job target_elements]] > 0 && \
                 [dict exists $isolated rollback_ok] && [dict get $isolated rollback_ok]} {
                 ::HybridCore::log WARN "local target patch failed path=$pathIndex/$pathTotal; retrying this loop once against the selected target components"
                 set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
-                    $closedSeedMode $progressOpened $pathIndex $pathTotal \
+                    $jobClosedLoop $progressOpened $pathIndex $pathTotal \
                     [dict get $job source_component_ids] [dict get $job seam_component] \
-                    [dict get $job center] {}]
+                    [dict get $job center] {} $jobClosedLoop]
             }
             if {![dict get $isolated ok]} {
                 set failure [dict create path_index $pathIndex source_nodes $sourceNodes \
@@ -2180,9 +2190,10 @@ proc ::MeshSeamWeld::runAction {} {
                 }
             }
         }
+        set executionMs [expr {[clock milliseconds] - $executionStarted}]
         set failureMarkerNodes [::MeshSeamWeld::createFailureMarkerNodes $failureRecords]
         set batchElapsedMs [expr {[clock milliseconds] - $batchStarted}]
-        ::HybridCore::log INFO "PERF mesh_seam_weld batch paths=$pathTotal success=[expr {$pathTotal-[llength $failureRecords]}] failed=[llength $failureRecords] prepare_ms=$prepareMs total_ms=$batchElapsedMs"
+        ::HybridCore::log INFO "PERF mesh_seam_weld batch paths=$pathTotal success=[expr {$pathTotal-[llength $failureRecords]}] failed=[llength $failureRecords] prepare_ms=$prepareMs execution_ms=$executionMs total_ms=$batchElapsedMs"
     } err]
 
     if {$code} {
@@ -2207,8 +2218,8 @@ proc ::MeshSeamWeld::runAction {} {
         "网格焊缝完成。\n源选择模式：$sourceSelectionMode\n闭合边界/路径数：[llength $sourcePaths]\n源节点：[llength $allSourceNodes]\n源组件：[llength $sourceCompIds]\n目标组件：[llength $targetComps]\n焊缝组件：[join $seamCompNames {, }]\n焊缝网格尺寸：$cfg(weld_mesh_size)\nimprint 目标路径节点：[llength $allImprintNodes]\n目标路径节点：[llength $allTargetNodes]\n新建焊缝单元：[llength $allWeldElems]" \
         "Mesh seam weld finished.\nSource selection mode: $sourceSelectionMode\nClosed boundaries/paths: [llength $sourcePaths]\nSource nodes: [llength $allSourceNodes]\nSource components: [llength $sourceCompIds]\nTarget components: [llength $targetComps]\nWeld components: [join $seamCompNames {, }]\nWeld mesh size: $cfg(weld_mesh_size)\nImprint target path nodes: [llength $allImprintNodes]\nTarget path nodes: [llength $allTargetNodes]\nNew weld elements: [llength $allWeldElems]"]
     append msg [::HWFlow::txt \
-        "\n成功路径：$successCount\n跳过路径：$failedCount\n失败标记节点：[llength $failureMarkerNodes]\n总耗时：[format %.3f [expr {$batchElapsedMs/1000.0}]] 秒" \
-        "\nSuccessful paths: $successCount\nSkipped paths: $failedCount\nFailure marker nodes: [llength $failureMarkerNodes]\nElapsed: [format %.3f [expr {$batchElapsedMs/1000.0}]] s"]
+        "\n成功路径：$successCount\n跳过路径：$failedCount\n失败标记节点：[llength $failureMarkerNodes]\n组件导出及 Python 规划耗时：[format %.3f [expr {$prepareMs/1000.0}]] 秒\nPython 返回后的 Tcl/HM 执行耗时：[format %.3f [expr {$executionMs/1000.0}]] 秒\n总耗时：[format %.3f [expr {$batchElapsedMs/1000.0}]] 秒" \
+        "\nSuccessful paths: $successCount\nSkipped paths: $failedCount\nFailure marker nodes: [llength $failureMarkerNodes]\nComponent export and Python planning: [format %.3f [expr {$prepareMs/1000.0}]] s\nTcl/HM execution after Python returned: [format %.3f [expr {$executionMs/1000.0}]] s\nElapsed: [format %.3f [expr {$batchElapsedMs/1000.0}]] s"]
     if {$failedCount > 0} {
         append msg [::HWFlow::txt \
             "\n\n未成功部分已在 MESH_SEAM_WELD_FAILED_MARKERS 中放置临时节点，请检查这些位置。" \

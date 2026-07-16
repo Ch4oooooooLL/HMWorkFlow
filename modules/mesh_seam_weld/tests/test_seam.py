@@ -75,6 +75,22 @@ class SeamTests(unittest.TestCase):
         self.assertNotIn("sourcePathsForSingleNode",run_action)
         self.assertNotIn("closedFreeEdgeLoopsFromSeeds",run_action)
         self.assertIn("processWeldPathIsolated",run_action)
+    def test_auto_closed_plan_uses_manual_open_imprint_fast_path(self):
+        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
+        run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
+        executor=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"executor.tcl").read_text(encoding="utf-8")
+        workflow=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"workflow.tcl").read_text(encoding="utf-8")
+        self.assertIn("closed_loop [dict get $plan closed_loop]",run_action)
+        self.assertIn("imprint_closed_loop 0",run_action)
+        self.assertIn("imprintClosedLoop",workflow)
+        self.assertIn("imprintClosedLoop",executor)
+        tcl_executor=executor.split("proc ::MeshSeamWeld::processWeldPathTcl",1)[1]
+        imprint_call=tcl_executor.split("runImprintNodeList",1)[1].split("\n",1)[0]
+        self.assertIn("$imprintClosedLoop",imprint_call)
+        mesh_call=tcl_executor.split("createRuledMeshBetweenNodePaths",1)[1].split("if {[llength",1)[0]
+        self.assertIn("$closedLoop",mesh_call)
+        self.assertIn("execution_ms=$executionMs",run_action)
+        self.assertIn("Python 返回后的 Tcl/HM 执行耗时",run_action)
     def test_component_exporter_writes_combined_binary_mesh(self):
         exporter=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"exporter.tcl").read_text(encoding="utf-8")
         self.assertIn("writeComponentPlanMesh",exporter)

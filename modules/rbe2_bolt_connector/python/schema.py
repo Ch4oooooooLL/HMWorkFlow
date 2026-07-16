@@ -10,7 +10,16 @@ def validate_request(data):
     for key in ("gapTol","offsetTol","minBeamLength","planeAbsTol","planeFlatRatio","radialAbsTol","radialRelTol"): settings[key]=float(settings[key])
     settings["minGroupSize"]=int(settings["minGroupSize"]); settings["dryRun"]=bool(settings["dryRun"])
     if settings["gapTol"] <= settings["minBeamLength"] or settings["offsetTol"] <= 0: raise SchemaError("invalid grouping tolerances")
-    data["settings"]=settings; return data
+    state=data.get("id_state",{})
+    for key in ("max_element_id","max_property_id","max_material_id","max_component_id"):
+        state[key]=int(state.get(key,0))
+        if state[key] < 0: raise SchemaError("id_state.{} must not be negative".format(key))
+    registry=data.get("entity_registry",{})
+    for key in ("properties","materials","components"):
+        values=registry.get(key,{})
+        if not isinstance(values,dict): raise SchemaError("entity_registry.{} must be an object".format(key))
+        registry[key]={str(name):int(value) for name,value in values.items()}
+    data["id_state"]=state; data["entity_registry"]=registry; data["settings"]=settings; return data
 
 def validate_existing(data):
     rows=data.get("beam_segments",[]) if isinstance(data,dict) else []

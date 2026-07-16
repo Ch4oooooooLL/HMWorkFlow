@@ -19,7 +19,11 @@ proc ::RB2Bolt::runCreateFromSelection {} {
         catch {::HWFlow::progressClose [expr {$code ? "RBE2 Bolt Connector failed." : "RBE2 Bolt Connector finished."}] 100.0}
     }
     if {$code} {
-        return -options $opts $err
+        set diagnostic "$err\n\nThe task workspace is retained under runtime/tasks for debugging. Inspect selection.fem, bolt_import.fem, request.json, and operation.log when present."
+        ::RB2Bolt::msg $diagnostic
+        catch {tk_messageBox -icon error -title "RBE2 Bolt Connector" -message $diagnostic}
+        dict set opts -errorinfo "$diagnostic\n[dict get $opts -errorinfo]"
+        return -options $opts $diagnostic
     }
     ::RB2Bolt::msg "Python bolt planning finished: pairs=[dict get $stat pair_count], created=[dict get $stat created], existing=[dict get $stat skipped_existing], failed=[dict get $stat skipped]"
     return $stat

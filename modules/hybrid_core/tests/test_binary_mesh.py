@@ -97,7 +97,6 @@ class BinaryMeshContractTests(unittest.TestCase):
     def test_hybrid_exporters_use_binary_mesh_data_plane(self):
         exporters = (
             ROOT / "modules" / "auto_hole_rbe2" / "tcl" / "exporter.tcl",
-            ROOT / "modules" / "rbe2_bolt_connector" / "tcl" / "exporter.tcl",
             ROOT / "modules" / "shell_washer_hole_rbe2" / "tcl" / "exporter.tcl",
             ROOT / "modules" / "mesh_seam_weld" / "tcl" / "exporter.tcl",
         )
@@ -106,6 +105,13 @@ class BinaryMeshContractTests(unittest.TestCase):
             with self.subTest(exporter=exporter.parent.parent.name):
                 self.assertIn("::HybridCore::writeBinaryMesh", source)
                 self.assertIn("mesh.hmwf", source)
+
+    def test_bolt_exporter_uses_the_solver_fem_data_plane(self):
+        exporter = ROOT / "modules" / "rbe2_bolt_connector" / "tcl" / "exporter.tcl"
+        source = exporter.read_text(encoding="utf-8")
+        self.assertIn("writeSelectionFem", source)
+        self.assertIn("selection.fem", source)
+        self.assertIn("RBE2,$eid", source)
 
     def test_hybrid_bridges_use_single_binary_result(self):
         bridges = (

@@ -22,8 +22,9 @@ proc ::MeshSeamWeld::shouldUpdatePathProgress {pathIndex pathTotal} {
     return 1
 }
 
-proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1} {sourceCompIds {}} {seamComp ""} {targetElemIds {}}} {
+proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1} {sourceCompIds {}} {seamComp ""} {targetElemIds {}} {imprintClosedLoop ""}} {
     set totalStarted [clock milliseconds]
+    if {$imprintClosedLoop eq ""} { set imprintClosedLoop $closedLoop }
     if {[llength $sourceCompIds] == 0} {
         set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
     }
@@ -39,7 +40,7 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
     }
 
     set imprintStarted [clock milliseconds]
-    ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $closedLoop $targetElemIds
+    ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $imprintClosedLoop $targetElemIds
     set imprintNodes [::MeshSeamWeld::targetCandidatesAfterImprint $sourceNodes $targetComps {}]
     set imprintMs [expr {[clock milliseconds] - $imprintStarted}]
 
@@ -63,7 +64,7 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
     }
     set meshMs [expr {[clock milliseconds] - $meshStarted}]
     set totalMs [expr {[clock milliseconds] - $totalStarted}]
-    ::HybridCore::log INFO "PERF mesh_seam_weld path=$pathIndex/$pathTotal nodes=[llength $sourceNodes] local_target_elems=[llength $targetElemIds] imprint_ms=$imprintMs target_match_ms=$targetMs automesh_ms=$meshMs total_ms=$totalMs"
+    ::HybridCore::log INFO "PERF mesh_seam_weld path=$pathIndex/$pathTotal nodes=[llength $sourceNodes] closed_loop=$closedLoop imprint_closed_loop=$imprintClosedLoop local_target_elems=[llength $targetElemIds] imprint_ms=$imprintMs target_match_ms=$targetMs automesh_ms=$meshMs total_ms=$totalMs"
 
     if {$reportProgress || $pathIndex == $pathTotal} {
         set percent [expr {10.0 + 80.0 * $pathIndex / double(max(1, $pathTotal))}]
