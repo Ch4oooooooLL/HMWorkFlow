@@ -59,6 +59,17 @@ class AlgorithmTests(unittest.TestCase):
         )
         self.assertTrue(EdgeGraph([(1, 2), (2, 3), (2, 4)]).ordered_paths()[0]["branched"])
 
+    def test_long_closed_boundary_traversal_is_linear(self):
+        node_count = 20000
+        edges = [(node, node + 1) for node in range(1, node_count)] + [(node_count, 1)]
+
+        started = time.perf_counter()
+        paths = EdgeGraph(edges).ordered_paths()
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(len(paths[0]["nodes"]), node_count)
+        self.assertLess(elapsed, 0.5)
+
     def test_spatial_index_and_statistics(self):
         index = PointGrid([(1, (0, 0, 0)), (2, (2, 0, 0))], 1.0)
         self.assertEqual(index.query_radius((0, 0, 0), 1.0), [1])

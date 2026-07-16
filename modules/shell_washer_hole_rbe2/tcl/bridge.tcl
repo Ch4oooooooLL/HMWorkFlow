@@ -10,12 +10,13 @@ proc ::RB2W::runPythonRecognition {compId {progressStart 10.0} {progressEnd 60.0
     ::HybridCore::progressUpdate $progressStart "Shell Washer-Hole RIGIDS" "Exporting component $compId mesh and existing RIGIDS..." 1
     set paths [::RB2W::exportHybridInputs $taskDir $runId $compId]
     ::HybridCore::clearTaskOutputs $taskDir
+    set resultPath [file join $taskDir result.hmwfr]
     ::HybridCore::setProgressRange [expr {$progressStart+0.10*($progressEnd-$progressStart)}] $progressEnd "Shell Washer-Hole RIGIDS" "Python free-edge, hole and washer analysis for component $compId"
     ::HybridCore::runPythonEntry [file join $MODULE_DIR python main.py] [list \
         --request [dict get $paths request] --mesh [dict get $paths mesh] \
-        --existing [dict get $paths existing] --output [file join $taskDir result.json] \
-        --tcl-output [file join $taskDir result.tcl] --log [file join $taskDir operation.log]] $taskDir
-    set payload [::HybridCore::loadResultSidecar [file join $taskDir result.tcl] ::RB2W::pythonResult shell_washer_hole_rbe2 $runId]
+        --existing [dict get $paths existing] --output $resultPath \
+        --tcl-output $resultPath --log [file join $taskDir operation.log]] $taskDir
+    set payload [::HybridCore::loadBinaryResult $resultPath shell_washer_hole_rbe2 $runId]
     ::HybridCore::progressUpdate $progressEnd "Shell Washer-Hole RIGIDS" "Candidates loaded for component $compId" 1
     return [dict create payload $payload task_dir $taskDir run_id $runId]
 }

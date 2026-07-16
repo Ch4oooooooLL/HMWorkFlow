@@ -9,18 +9,21 @@ proc ::RB2Bolt::writeHybridRequest {dir runId} {
     return [::HybridCore::writeTextFile [file join $dir request.json] $json]
 }
 proc ::RB2Bolt::writeHybridMesh {dir elemIds} {
-    set erows {}; set allNodes {}
+    set elementRecords {}; set allNodes {}
     foreach eid $elemIds {
         if {![::RB2Bolt::isRigidLink $eid]} { continue }
         set inode ""; catch {set inode [hm_getvalue elems id=$eid dataname=independentnode.id]}; if {$inode eq ""} { continue }
         set nodes {}; catch {set nodes [hm_getvalue elems id=$eid dataname=nodes]}; set ordered [list $inode]
         foreach n $nodes { if {$n != $inode} { lappend ordered $n } }
         if {[llength $ordered] < 3} { continue }; set allNodes [concat $allNodes $ordered]
-        lappend erows "    {\"element_id\": $eid, \"component_id\": 1, \"element_type\": \"RBE2\", \"node_ids\": [::HybridCore::jsonIntArray $ordered]}"
+        lappend elementRecords [dict create element_id $eid component_id 1 element_type RBE2 node_ids $ordered]
     }
-    set nrows {}; foreach nid [lsort -integer -unique $allNodes] { set xyz [::RB2Bolt::nodeXYZ $nid]; lappend nrows "    \[$nid, [lindex $xyz 0], [lindex $xyz 1], [lindex $xyz 2]\]" }
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"components\": \[{\"component_id\": 1, \"component_name\": \"RBE2_SELECTION\", \"mesh_class\": \"RIGID\"}\],\n  \"nodes\": \[\n[join $nrows ,\n]\n  \],\n  \"elements\": \[\n[join $erows ,\n]\n  \]\n}\n"
-    return [::HybridCore::writeTextFile [file join $dir mesh.json] $json]
+    set uniqueNodes [lsort -integer -unique $allNodes]
+    set coordinateMap [::HybridCore::readNodeCoordinatesBulk $uniqueNodes [list ::RB2Bolt::nodeXYZ]]
+    set nodeRecords {}; foreach nid $uniqueNodes { set xyz [dict get $coordinateMap $nid]; lappend nodeRecords [list $nid [lindex $xyz 0] [lindex $xyz 1] [lindex $xyz 2]] }
+    set componentRecords [list [dict create component_id 1 component_name RBE2_SELECTION mesh_class RIGID]]
+    return [::HybridCore::writeBinaryMesh [file join $dir mesh.hmwf] \
+        $componentRecords $nodeRecords $elementRecords]
 }
 proc ::RB2Bolt::writeHybridExisting {dir} {
     variable P

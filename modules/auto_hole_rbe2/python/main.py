@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -31,23 +32,40 @@ SPEC.loader.exec_module(AUTO_SCHEMA)
 validate_existing = AUTO_SCHEMA.validate_existing
 validate_request = AUTO_SCHEMA.validate_request
 
+MAX_REJECT_SAMPLES = 100
+MAX_REJECT_FACE_IDS = 50
+
 
 def detect(request, model, existing, logger):
     settings = request["settings"]
     faces, warnings = extract(model, request["selected_component_ids"], settings["eps"])
     segments, _ = segment_faces(faces, settings["featureAngleDeg"])
     faces_by_id = {face.face_id: face for face in faces}
-    candidates, rejected = [], []
+    candidates, rejected_samples = [], []
+    rejected_count = 0
+    reject_reason_counts = Counter()
     duplicate_index = build_index(existing)
+
+    def record_rejection(segment, reason):
+        nonlocal rejected_count
+        rejected_count += 1
+        reject_reason_counts[reason] += 1
+        if len(rejected_samples) < MAX_REJECT_SAMPLES:
+            rejected_samples.append({
+                "segment_face_ids": list(segment[:MAX_REJECT_FACE_IDS]),
+                "segment_face_count": len(segment),
+                "reject_reasons": [reason],
+            })
+
     for segment in segments:
         try:
             candidate, reason = evaluate(model, segment, faces_by_id, settings)
         except Exception as exc:
-            logger.exception("segment evaluation failed faces=%s", segment)
-            rejected.append({"segment_face_ids": segment, "reject_reasons": ["ERROR:{}".format(exc)]})
+            logger.exception("segment evaluation failed face_count=%d sample=%s", len(segment), segment[:10])
+            record_rejection(segment, "ERROR:{}".format(exc))
             continue
         if candidate is None:
-            rejected.append({"segment_face_ids": segment, "reject_reasons": [reason]})
+            record_rejection(segment, reason)
             continue
         candidate["candidate_id"] = "H{:04d}".format(len(candidates) + 1)
         component_ids = sorted({model.elements[faces_by_id[face_id].element_id].component_id for face_id in segment})
@@ -55,7 +73,12 @@ def detect(request, model, existing, logger):
         annotate(candidate, duplicate_index)
         candidates.append(candidate)
     validate(candidates, model)
-    return faces, segments, candidates, rejected, warnings
+    rejection_summary = {
+        "count": rejected_count,
+        "samples": rejected_samples,
+        "reason_counts": dict(sorted(reject_reason_counts.items())),
+    }
+    return faces, segments, candidates, rejection_summary, warnings
 
 
 def main(argv=None):
@@ -75,7 +98,7 @@ def main(argv=None):
         existing = validate_existing(load_json(args.existing))
         read_seconds = time.perf_counter() - read_started
         detect_started = time.perf_counter()
-        faces, segments, candidates, rejected, warnings = detect(request, model, existing, logger)
+        faces, segments, candidates, rejection_summary, warnings = detect(request, model, existing, logger)
         detect_seconds = time.perf_counter() - detect_started
         result = new_result("auto_hole_rbe2", request["run_id"])
         result["summary"] = {
@@ -84,8 +107,9 @@ def main(argv=None):
             "candidate_count": len(candidates),
             "create_count": sum(row["recommended_action"] == "CREATE" for row in candidates),
             "existing_count": sum(row["recommended_action"] == "SKIP_EXISTING" for row in candidates),
-            "rejected_count": len(rejected),
-            "rejected": rejected,
+            "rejected_count": rejection_summary["count"],
+            "reject_reason_counts": rejection_summary["reason_counts"],
+            "rejected": rejection_summary["samples"],
         }
         result["candidates"] = candidates
         result["warnings"] = warnings
@@ -93,10 +117,11 @@ def main(argv=None):
         result["performance"]["detect_seconds"] = round(detect_seconds, 6)
         write_started = time.perf_counter()
         write_result(args.output, args.tcl_output, "::AutoHoleRBE2::pythonResult", result)
-        result["performance"]["write_seconds"] = round(time.perf_counter() - write_started, 6)
-        # Rewrite once to persist measured write time.
-        write_result(args.output, args.tcl_output, "::AutoHoleRBE2::pythonResult", result)
-        logger.info("complete candidates=%d rejected=%d", len(candidates), len(rejected))
+        write_seconds = time.perf_counter() - write_started
+        logger.info(
+            "complete candidates=%d rejected=%d write_seconds=%.6f",
+            len(candidates), rejection_summary["count"], write_seconds,
+        )
         return 0
     except Exception as exc:
         logger.exception("auto_hole_rbe2 failed")

@@ -21,6 +21,10 @@ namespace eval ::HybridCore {
     variable cachedPython ""
     variable workerStartScheduled 0
     variable workerStartupError ""
+    variable workerFileFingerprints {}
+    variable workerCacheHits 0
+    variable workerCacheMisses 0
+    variable workerCacheEntries 0
     variable instanceId "hm-[pid]"
     variable instanceLogDir [file join $ROOT_DIR runtime instances "hm-[pid]"]
     variable progressRangeStart 0.0
@@ -32,6 +36,8 @@ namespace eval ::HybridCore {
 
 foreach fileName {
     data_writer.tcl
+    binary_codec.tcl
+    hm_bulk_reader.tcl
     bridge_logger.tcl
     task_workspace.tcl
     python_runtime.tcl

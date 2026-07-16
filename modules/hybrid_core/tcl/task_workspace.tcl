@@ -42,7 +42,7 @@ proc ::HybridCore::taskFile {taskDir fileName} {
 }
 
 proc ::HybridCore::clearTaskOutputs {taskDir} {
-    foreach fileName {result.json result.tcl python_stdout.log python_stderr.log comparison.json} {
+    foreach fileName {result.json result.tcl result.hmwfr python_stdout.log python_stderr.log comparison.json} {
         set path [::HybridCore::taskFile $taskDir $fileName]
         if {[file exists $path]} { file delete -force $path }
     }

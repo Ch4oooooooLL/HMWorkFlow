@@ -61,10 +61,36 @@ proc ::HybridCore::startPersistentWorker {} {
     return $workerChannel
 }
 
+proc ::HybridCore::workerFileFingerprint {path} {
+    variable workerFileFingerprints
+    set normalized [file normalize $path]
+    if {[info exists workerFileFingerprints] && [dict exists $workerFileFingerprints $normalized]} {
+        return [dict get $workerFileFingerprints $normalized]
+    }
+    set channel [open $normalized r]
+    fconfigure $channel -encoding binary -translation binary
+    set code [catch {read $channel} data opts]
+    catch {close $channel}
+    if {$code} { return -options $opts $data }
+    return [::HybridCore::workerContentFingerprint $data]
+}
+
+proc ::HybridCore::workerInputFingerprints {arguments} {
+    set rows {}
+    for {set index 0} {$index < [llength $arguments] - 1} {incr index} {
+        if {[lindex $arguments $index] ne "--mesh"} { continue }
+        set path [file normalize [lindex $arguments [incr index]]]
+        if {![file isfile $path]} { continue }
+        lappend rows "[::HybridCore::jsonString $path]: [::HybridCore::jsonString [::HybridCore::workerFileFingerprint $path]]"
+    }
+    return "{[join $rows ,]}"
+}
+
 proc ::HybridCore::workerRequestJson {requestId entry arguments taskDir} {
     set encoded {}
     foreach value $arguments { lappend encoded [::HybridCore::jsonString $value] }
-    return "{\"request_id\": [::HybridCore::jsonString $requestId], \"entry\": [::HybridCore::jsonString $entry], \"arguments\": \[[join $encoded ,]\], \"task_dir\": [::HybridCore::jsonString $taskDir]}"
+    set fingerprints [::HybridCore::workerInputFingerprints $arguments]
+    return "{\"request_id\": [::HybridCore::jsonString $requestId], \"entry\": [::HybridCore::jsonString $entry], \"arguments\": \[[join $encoded ,]\], \"task_dir\": [::HybridCore::jsonString $taskDir], \"input_fingerprints\": $fingerprints}"
 }
 
 proc ::HybridCore::workerReadable {channel requestId} {
@@ -98,6 +124,7 @@ proc ::HybridCore::workerTimeout {} {
 proc ::HybridCore::runPersistentProcess {entry arguments taskDir} {
     variable workerSequence; variable workerRequestTimeoutMs; variable workerChannel
     variable workerWaitDone; variable workerWaitResponse; variable workerWaitError; variable workerProgressAfter
+    variable workerCacheHits; variable workerCacheMisses; variable workerCacheEntries
     set channel [::HybridCore::startPersistentWorker]
     incr workerSequence
     set requestId "[pid]-$workerSequence-[clock milliseconds]"
@@ -126,6 +153,11 @@ proc ::HybridCore::runPersistentProcess {entry arguments taskDir} {
     set response $workerWaitResponse
     set fields [split $response "\t"]
     set state [lindex $fields 2]; set exitCode [lindex $fields 3]; set elapsed [lindex $fields 4]
+    if {[llength $fields] >= 8} {
+        set workerCacheHits [lindex $fields 5]
+        set workerCacheMisses [lindex $fields 6]
+        set workerCacheEntries [lindex $fields 7]
+    }
     if {$state ne "OK" || $exitCode != 0} {
         set detail ""
         if {[file isfile $stderrPath]} { catch {set detail [::HybridCore::readTextFile $stderrPath]} }
@@ -134,8 +166,8 @@ proc ::HybridCore::runPersistentProcess {entry arguments taskDir} {
             "Python worker task failed (exit $exitCode).\n$detail\nLog: $stderrPath"
     }
     ::HybridCore::completeProgressRange
-    ::HybridCore::log INFO "process complete mode=persistent request_id=$requestId elapsed=$elapsed"
-    return [dict create stdout $stdoutPath stderr $stderrPath elapsed_seconds $elapsed mode persistent worker_pid [pid $channel]]
+    ::HybridCore::log INFO "process complete mode=persistent request_id=$requestId elapsed=$elapsed cache_hits=$workerCacheHits cache_misses=$workerCacheMisses cache_entries=$workerCacheEntries"
+    return [dict create stdout $stdoutPath stderr $stderrPath elapsed_seconds $elapsed mode persistent worker_pid [pid $channel] cache_hits $workerCacheHits cache_misses $workerCacheMisses cache_entries $workerCacheEntries]
 }
 
 proc ::HybridCore::runPythonEntry {entry arguments taskDir} {

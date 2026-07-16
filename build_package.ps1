@@ -1,10 +1,58 @@
 [CmdletBinding()]
 param(
     [string]$OutputDir = "dist",
-    [string]$PackageName = ""
+    [string]$PackageName = "",
+    [string]$PythonExe = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-LocalPythonCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [string[]]$Arguments = @()
+    )
+
+    try {
+        & $Executable @Arguments -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)" *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Resolve-LocalPythonCommand {
+    param([string]$RequestedExecutable = "")
+
+    $Candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($RequestedExecutable)) {
+        $Candidates += [pscustomobject]@{ Name = $RequestedExecutable; Arguments = @() }
+    } else {
+        if (-not [string]::IsNullOrWhiteSpace($env:PYTHON)) {
+            $Candidates += [pscustomobject]@{ Name = $env:PYTHON; Arguments = @() }
+        }
+        $Candidates += [pscustomobject]@{ Name = "python"; Arguments = @() }
+        $Candidates += [pscustomobject]@{ Name = "python3"; Arguments = @() }
+        $Candidates += [pscustomobject]@{ Name = "py"; Arguments = @("-3") }
+    }
+
+    foreach ($Candidate in $Candidates) {
+        $Command = Get-Command -Name $Candidate.Name -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($null -eq $Command) { continue }
+        if (Test-LocalPythonCommand -Executable $Command.Source -Arguments $Candidate.Arguments) {
+            return [pscustomobject]@{
+                Executable = $Command.Source
+                Arguments = @($Candidate.Arguments)
+            }
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedExecutable)) {
+        throw "The requested local Python is missing or unusable: $RequestedExecutable"
+    }
+    throw "No usable local Python 3.8+ was found. Install Python, set the PYTHON environment variable, or pass -PythonExe."
+}
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectName = Split-Path -Leaf $ProjectRoot
@@ -57,9 +105,10 @@ $PortablePythonDir = Join-Path $ProjectRoot "runtime\python\windows-x64"
 $PortablePythonExe = Join-Path $PortablePythonDir "python.exe"
 $PortablePythonwExe = Join-Path $PortablePythonDir "pythonw.exe"
 $PortablePythonStdlib = Join-Path $PortablePythonDir "python38.zip"
+$PortablePythonPathFile = Join-Path $PortablePythonDir "python38._pth"
 $PortablePythonLicense = Join-Path $PortablePythonDir "LICENSE.txt"
 
-foreach ($RequiredRuntimeFile in @($PortablePythonExe, $PortablePythonwExe, $PortablePythonStdlib, $PortablePythonLicense)) {
+foreach ($RequiredRuntimeFile in @($PortablePythonExe, $PortablePythonwExe, $PortablePythonStdlib, $PortablePythonPathFile, $PortablePythonLicense)) {
     if (-not (Test-Path -LiteralPath $RequiredRuntimeFile -PathType Leaf)) {
         throw "Portable Python runtime is incomplete. Missing: $RequiredRuntimeFile. See runtime/python/README.md."
     }
@@ -77,11 +126,20 @@ if ((Get-FileHash -LiteralPath $PortablePythonwExe -Algorithm SHA256).Hash.ToLow
 if ((Get-FileHash -LiteralPath $PortablePythonStdlib -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedPythonStdlibSha256) {
     throw "Portable Python standard-library checksum mismatch: $PortablePythonStdlib"
 }
+$PythonPathEntries = Get-Content -LiteralPath $PortablePythonPathFile |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -and -not $_.StartsWith("#") }
+if ($PythonPathEntries -notcontains "python38") {
+    throw "Portable Python path configuration must include the unpacked python38 directory: $PortablePythonPathFile"
+}
 
 $RuntimeSelfTest = Join-Path $ProjectRoot "modules\local_mesh_optimizer\python\runtime_self_test.py"
-& $PortablePythonExe $RuntimeSelfTest
+$LocalPython = Resolve-LocalPythonCommand -RequestedExecutable $PythonExe
+$LocalPythonArgs = @($LocalPython.Arguments)
+Write-Host "Using local Python for package self-test: $($LocalPython.Executable) $($LocalPythonArgs -join ' ')"
+& $LocalPython.Executable @LocalPythonArgs $RuntimeSelfTest
 if ($LASTEXITCODE -ne 0) {
-    throw "Bundled Python runtime self-test failed with exit code $LASTEXITCODE."
+    throw "Local Python runtime self-test failed with exit code $LASTEXITCODE."
 }
 
 try {
@@ -125,7 +183,11 @@ try {
         Remove-Item -Force
 
     $StagedPythonDir = Join-Path $TempProjectRoot "runtime\python\windows-x64"
-    foreach ($RequiredName in @("python.exe", "pythonw.exe", "python38.zip", "LICENSE.txt")) {
+    $StagedUnpackedStdlib = Join-Path $StagedPythonDir "python38"
+    if (Test-Path -LiteralPath $StagedUnpackedStdlib) {
+        Remove-Item -LiteralPath $StagedUnpackedStdlib -Recurse -Force
+    }
+    foreach ($RequiredName in @("python.exe", "pythonw.exe", "python38.zip", "python38._pth", "LICENSE.txt")) {
         $StagedFile = Join-Path $StagedPythonDir $RequiredName
         if (-not (Test-Path -LiteralPath $StagedFile -PathType Leaf)) {
             throw "Staged package is missing portable Python file: $StagedFile"

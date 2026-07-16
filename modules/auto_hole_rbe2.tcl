@@ -542,10 +542,8 @@ proc ::AutoHoleRBE2::vnormalize {a} {
 }
 
 proc ::AutoHoleRBE2::nodeXYZ {nodeId} {
-    if {![catch {hm_getvalue nodes id=$nodeId dataname=x} x] &&
-        ![catch {hm_getvalue nodes id=$nodeId dataname=y} y] &&
-        ![catch {hm_getvalue nodes id=$nodeId dataname=z} z]} {
-        return [list $x $y $z]
+    if {![catch {set coordinates [hm_getvalue nodes id=$nodeId dataname=coordinates]}] && [llength $coordinates] >= 3} {
+        return [lrange $coordinates 0 2]
     }
 
     if {![catch {hm_nodevalue $nodeId} val]} {
@@ -553,6 +551,12 @@ proc ::AutoHoleRBE2::nodeXYZ {nodeId} {
             set val [lindex $val 0]
         }
         return [list [lindex $val 0] [lindex $val 1] [lindex $val 2]]
+    }
+
+    if {![catch {hm_getvalue nodes id=$nodeId dataname=x} x] &&
+        ![catch {hm_getvalue nodes id=$nodeId dataname=y} y] &&
+        ![catch {hm_getvalue nodes id=$nodeId dataname=z} z]} {
+        return [list $x $y $z]
     }
 
     error [::HWFlow::txt "无法读取节点 $nodeId 的坐标。" "Cannot read coordinates for node $nodeId."]
@@ -1010,7 +1014,7 @@ proc ::AutoHoleRBE2::enableInteractiveBrowserUpdates {} {
     catch {update idletasks}
 }
 
-proc ::AutoHoleRBE2::ensureComponent {compName} {
+proc ::AutoHoleRBE2::ensureComponent {compName {refreshBrowser 1}} {
     catch {*createmark comps 2 "by name only" $compName}
     set ids {}
     catch {set ids [hm_getmark comps 2]}
@@ -1054,8 +1058,10 @@ proc ::AutoHoleRBE2::ensureComponent {compName} {
 
     catch {*currentcollector component $compName}
     catch {*currentcollector components $compName}
-    catch {::HWFlow::activateAndShowComponent $compName 0}
-    ::AutoHoleRBE2::refreshComponentBrowser $compName
+    if {$refreshBrowser} {
+        catch {::HWFlow::activateAndShowComponent $compName 0}
+        ::AutoHoleRBE2::refreshComponentBrowser $compName
+    }
 }
 
 proc ::AutoHoleRBE2::markComponentByName {compName markId} {
@@ -1213,8 +1219,69 @@ proc ::AutoHoleRBE2::rememberCreatedRBE2 {wallNodes elemId} {
     set existingRBE2ByWallNodes([::HWFlow::nodeSetKey $wallNodes]) $elemId
 }
 
+proc ::AutoHoleRBE2::deleteEntityById {entityType entityId} {
+    if {$entityId eq "" || $entityId == 0} { return }
+    catch {*clearmark $entityType 2}
+    if {![catch {*createmark $entityType 2 $entityId}]} {
+        catch {*deletemark $entityType 2}
+    }
+    catch {*clearmark $entityType 2}
+}
+
+proc ::AutoHoleRBE2::latestCreatedEntityIds {entityTypes markId} {
+    foreach entityType $entityTypes {
+        catch {*clearmark $entityType $markId}
+        if {![catch {*createmark $entityType $markId -1}]} {
+            set ids {}
+            if {![catch {set ids [hm_getmark $entityType $markId]}] && [llength $ids] > 0} {
+                catch {*clearmark $entityType $markId}
+                return $ids
+            }
+        }
+        catch {*clearmark $entityType $markId}
+    }
+    return {}
+}
+
+proc ::AutoHoleRBE2::cleanupFailedRBE2 {centerNode elemId} {
+    # Delete the rigid first so its independent node is no longer referenced.
+    if {$centerNode ne "" && $elemId ne "" && [::AutoHoleRBE2::rigidCenterNode $elemId] eq $centerNode} {
+        ::AutoHoleRBE2::deleteEntityById elems $elemId
+    }
+    ::AutoHoleRBE2::deleteEntityById nodes $centerNode
+}
+
+proc ::AutoHoleRBE2::beginBulkCreate {} {
+    catch {hm_blockbrowserupdate 1}
+    catch {*setoption block_browser_update=1}
+    catch {*setoption block_redraw=1}
+    catch {*setoption block_messages=1}
+    catch {hm_blockredraw 1}
+    catch {hm_blockmessages 1}
+    catch {hm_blockerrormessages 1}
+    catch {hm_commandfilestate 0}
+}
+
+proc ::AutoHoleRBE2::endBulkCreate {resultCompName} {
+    catch {hm_commandfilestate 1}
+    catch {hm_blockerrormessages 0}
+    catch {hm_blockmessages 0}
+    catch {hm_blockredraw 0}
+    catch {*setoption block_messages=0}
+    catch {*setoption block_redraw=0}
+    catch {*setoption block_browser_update=0}
+    catch {hm_blockbrowserupdate 0}
+    if {$resultCompName ne ""} { catch {::AutoHoleRBE2::refreshComponentBrowser $resultCompName} }
+    catch {hm_redraw}
+    catch {update idletasks}
+}
+
 proc ::AutoHoleRBE2::createRBE2 {wallNodes center} {
     variable cfg
+
+    set wallNodes [::AutoHoleRBE2::uniq $wallNodes]
+    if {[llength $wallNodes] < 3} { error "RIGIDS creation requires at least three unique wall nodes" }
+    if {[llength $center] != 3} { error "RIGIDS center must contain three coordinates" }
 
     set rigidType [string toupper $cfg(rigidType)]
     set x [lindex $center 0]
@@ -1222,29 +1289,86 @@ proc ::AutoHoleRBE2::createRBE2 {wallNodes center} {
     set z [lindex $center 2]
 
     set beforeElem ""
+    set beforeNode ""
     catch {set beforeElem [hm_latestentityid elems]}
-    *createnode $x $y $z 0 0 0
-    set centerNode [hm_latestentityid nodes]
-
-    eval *createmark nodes 2 $wallNodes
-    if {$rigidType eq "RBE3"} {
-        set dofs {}
-        set weights {}
-        foreach n $wallNodes {
-            lappend dofs $cfg(dof)
-            lappend weights 1.0
-        }
-        eval *createarray [llength $dofs] $dofs
-        eval *createdoublearray [llength $weights] $weights
-        *rbe3 2 1 [llength $wallNodes] 1 [llength $wallNodes] $centerNode $cfg(dof) 1.0
-    } else {
-        *rigidlink $centerNode 2 $cfg(dof)
+    catch {set beforeNode [hm_latestentityid nodes]}
+    if {[catch {*createnode $x $y $z 0 0 0} nodeErr]} {
+        error "Failed to create RIGIDS center node: $nodeErr"
     }
+    set centerNode ""
+    set latestNode ""
+    catch {set latestNode [hm_latestentityid nodes]}
+    if {$latestNode ne "" && $latestNode != 0 && $latestNode ne $beforeNode && [::AutoHoleRBE2::hybridNodeExists $latestNode]} {
+        set centerNode $latestNode
+    }
+    if {$centerNode eq ""} {
+        foreach nodeId [::AutoHoleRBE2::latestCreatedEntityIds {nodes} 1] {
+            if {$nodeId ne $beforeNode && [::AutoHoleRBE2::hybridNodeExists $nodeId]} {
+                set centerNode $nodeId
+                break
+            }
+        }
+    }
+    if {$centerNode eq ""} {
+        error "HyperMesh did not return a valid new center node"
+    }
+
+    catch {*clearmark nodes 2}
+    if {[catch {eval *createmark nodes 2 $wallNodes} markErr]} {
+        ::AutoHoleRBE2::cleanupFailedRBE2 $centerNode ""
+        error "Failed to mark wall nodes: $markErr"
+    }
+    set markedNodes {}
+    catch {set markedNodes [hm_getmark nodes 2]}
+    if {[::HWFlow::nodeSetKey $markedNodes] ne [::HWFlow::nodeSetKey $wallNodes]} {
+        catch {*clearmark nodes 2}
+        ::AutoHoleRBE2::cleanupFailedRBE2 $centerNode ""
+        error "Wall-node mark validation failed before RIGIDS creation"
+    }
+
+    set createCode [catch {
+        if {$rigidType eq "RBE3"} {
+            set dofs {}
+            set weights {}
+            foreach n $wallNodes {
+                lappend dofs $cfg(dof)
+                lappend weights 1.0
+            }
+            eval *createarray [llength $dofs] $dofs
+            eval *createdoublearray [llength $weights] $weights
+            *rbe3 2 1 [llength $wallNodes] 1 [llength $wallNodes] $centerNode $cfg(dof) 1.0
+        } else {
+            *rigidlink $centerNode 2 $cfg(dof)
+        }
+    } createErr]
     catch {*clearmark nodes 2}
 
     set elemId ""
     if {![catch {set latestElem [hm_latestentityid elems]}] && $latestElem ne "" && $latestElem != 0 && $latestElem ne $beforeElem} {
-        set elemId $latestElem
+        if {[::AutoHoleRBE2::rigidCenterNode $latestElem] eq $centerNode} { set elemId $latestElem }
+    }
+    if {$elemId eq ""} {
+        foreach candidateId [::AutoHoleRBE2::latestCreatedEntityIds {elems elements} 1] {
+            if {$candidateId ne $beforeElem && [::AutoHoleRBE2::rigidCenterNode $candidateId] eq $centerNode} {
+                set elemId $candidateId
+                break
+            }
+        }
+    }
+    if {$createCode} {
+        ::AutoHoleRBE2::cleanupFailedRBE2 $centerNode $elemId
+        error "Failed to create $rigidType: $createErr"
+    }
+    if {$elemId eq ""} {
+        ::AutoHoleRBE2::cleanupFailedRBE2 $centerNode ""
+        error "HyperMesh reported no new $rigidType element"
+    }
+
+    set expected [::HWFlow::nodeSetKey $wallNodes]
+    set actual [::AutoHoleRBE2::rbe2DependentNodeKey $elemId]
+    if {$actual ne $expected} {
+        ::AutoHoleRBE2::cleanupFailedRBE2 $centerNode $elemId
+        error "Created $rigidType validation failed: expected=$expected actual=$actual"
     }
 
     return [list $centerNode $elemId]
@@ -1292,13 +1416,17 @@ proc ::AutoHoleRBE2::runCurrentSelection {} {
     }
 
     if {!$failed} {
-        set msg [::HWFlow::txt "Solid Through-Hole RIGIDS v$VERSION finished.\n\n刚性类型：$rigidType\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 $rigidType：$stat(created)\n已跳过既有 RIGIDS：$stat(skippedExisting)" "Solid Through-Hole RIGIDS v$VERSION finished.\n\nRigid type: $rigidType\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated $rigidType: $stat(created)\nSkipped existing RIGIDS: $stat(skippedExisting)"]
+        set msg [::HWFlow::txt "Solid Through-Hole RIGIDS v$VERSION finished.\n\n刚性类型：$rigidType\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 $rigidType：$stat(created)\n已跳过既有 RIGIDS：$stat(skippedExisting)\n创建失败：$stat(failed)" "Solid Through-Hole RIGIDS v$VERSION finished.\n\nRigid type: $rigidType\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated $rigidType: $stat(created)\nSkipped existing RIGIDS: $stat(skippedExisting)\nCreation failures: $stat(failed)"]
 
         if {$cfg(logFile) ne ""} {
             append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
         }
 
-        ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 $rigidType 单元，跳过既有 $stat(skippedExisting) 个。" "Finished: created $stat(created) $rigidType element(s), skipped $stat(skippedExisting) existing."]
+        if {$stat(failed) > 0} {
+            ::AutoHoleRBE2::warning [::HWFlow::txt "完成但有失败：已创建 $stat(created) 个，失败 $stat(failed) 个；失败项已回滚。" "Finished with failures: created $stat(created), failed $stat(failed); failed items were rolled back."]
+        } else {
+            ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 $rigidType 单元，跳过既有 $stat(skippedExisting) 个。" "Finished: created $stat(created) $rigidType element(s), skipped $stat(skippedExisting) existing."]
+        }
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
             catch {::HWFlow::progressClose [::HWFlow::txt "Solid Through-Hole RIGIDS finished." "Solid Through-Hole RIGIDS finished."] 100.0}
         }

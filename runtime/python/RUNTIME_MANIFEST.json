@@ -5,6 +5,8 @@
   "executable": "windows-x64/python.exe",
   "windowless_executable": "windows-x64/pythonw.exe",
   "standard_library": "windows-x64/python38.zip",
+  "runtime_path_entry": "windows-x64/python38",
+  "corporate_install_step": "Manually extract python38.zip as the sibling python38 directory before launching HyperMesh.",
   "third_party_packages": [],
   "source_url": "https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip",
   "source_md5": "3acb1d7d9bde5a79f840167b166bb633",

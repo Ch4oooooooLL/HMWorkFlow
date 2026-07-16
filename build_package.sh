@@ -126,14 +126,16 @@ PORTABLE_PYTHON_DIR="${PROJECT_ROOT}/runtime/python/windows-x64"
 PORTABLE_PYTHON_EXE="${PORTABLE_PYTHON_DIR}/python.exe"
 PORTABLE_PYTHONW_EXE="${PORTABLE_PYTHON_DIR}/pythonw.exe"
 PORTABLE_PYTHON_ZIP="${PORTABLE_PYTHON_DIR}/python38.zip"
+PORTABLE_PYTHON_PTH="${PORTABLE_PYTHON_DIR}/python38._pth"
 PORTABLE_PYTHON_SHA256="abbe314e9b41603dde0a823b76f5bbbe17b3de3e5ac4ef06b759da5466711271"
 PORTABLE_PYTHON_EXE_SHA256="5275c42f7359fa2c7ec473be3240e57d5ce5b9301a26bd2e98e89bb9db074581"
 PORTABLE_PYTHONW_EXE_SHA256="a409db42d754c311d19921fbbf458c1abadc5142330cdb7f3c6016e97fa1116d"
 PORTABLE_PYTHON_STDLIB_SHA256="613e0d63b54ed995273eda446eb09e51066e486f1e72b94f1c338a83dca3a021"
 
-if [[ ! -f "$PORTABLE_PYTHON_EXE" || ! -f "$PORTABLE_PYTHONW_EXE" || ! -f "$PORTABLE_PYTHON_ZIP" ]]; then
+if [[ ! -f "$PORTABLE_PYTHON_EXE" || ! -f "$PORTABLE_PYTHONW_EXE" ||
+      ! -f "$PORTABLE_PYTHON_PTH" || ! -f "$PORTABLE_PYTHON_ZIP" ]]; then
     echo "Portable Python runtime is incomplete: ${PORTABLE_PYTHON_DIR}" >&2
-    echo "Expected python.exe, pythonw.exe and python38.zip. See runtime/python/README.md." >&2
+    echo "Expected python.exe, pythonw.exe, python38._pth and python38.zip. See runtime/python/README.md." >&2
     exit 1
 fi
 
@@ -144,6 +146,11 @@ if [[ "$actual_exe_sha256" != "$PORTABLE_PYTHON_EXE_SHA256" ||
       "$actual_pythonw_sha256" != "$PORTABLE_PYTHONW_EXE_SHA256" ||
       "$actual_stdlib_sha256" != "$PORTABLE_PYTHON_STDLIB_SHA256" ]]; then
     echo "Portable Python runtime checksum mismatch." >&2
+    exit 1
+fi
+
+if ! grep -Fxq 'python38' "$PORTABLE_PYTHON_PTH"; then
+    echo "Portable Python path configuration must include the unpacked python38 directory." >&2
     exit 1
 fi
 
@@ -204,8 +211,14 @@ fi
 find "$TEMP_PROJECT_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$TEMP_PROJECT_ROOT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
+STAGED_UNPACKED_STDLIB="${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python38"
+if [[ -e "$STAGED_UNPACKED_STDLIB" ]]; then
+    rm -rf "$STAGED_UNPACKED_STDLIB"
+fi
+
 if [[ ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python.exe" ||
       ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/pythonw.exe" ||
+      ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python38._pth" ||
       ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python38.zip" ||
       ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/LICENSE.txt" ]]; then
     echo "Staged package is missing the portable Python runtime or license." >&2

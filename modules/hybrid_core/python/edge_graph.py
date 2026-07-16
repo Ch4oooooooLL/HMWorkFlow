@@ -22,8 +22,9 @@ class EdgeGraph:
     def components(self) -> List[List[int]]:
         pending = set(self.adjacency)
         result = []
-        while pending:
-            start = min(pending)
+        for start in sorted(self.adjacency):
+            if start not in pending:
+                continue
             queue = deque([start])
             seen = {start}
             while queue:
@@ -50,6 +51,7 @@ class EdgeGraph:
             ordered = [start]
             previous = None
             current = start
+            ordered_set = {start}
             while True:
                 choices = sorted(node for node in self.adjacency[current] if node != previous)
                 if not choices:
@@ -57,9 +59,10 @@ class EdgeGraph:
                 following = choices[0]
                 if closed and following == start:
                     break
-                if following in ordered:
+                if following in ordered_set:
                     break
                 ordered.append(following)
+                ordered_set.add(following)
                 previous, current = current, following
             paths.append({"nodes": ordered, "closed": closed, "branched": False})
         return paths

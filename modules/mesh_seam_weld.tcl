@@ -13,7 +13,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.15"
+    variable VERSION "0.16"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -167,8 +167,8 @@ proc ::MeshSeamWeld::showPanel {} {
     }
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "连续节点按开放 node path 处理；彼此不连续的节点分别作为闭合边界种子，并共用一个目标 component。imprint 后会校正目标路径方向，再按焊缝网格尺寸生成多层连接带。" \
-        "Continuous nodes form an open node path. Disconnected nodes are closed-boundary seeds sharing one target component. After imprint, target-path orientation is aligned and a multilayer strip is meshed at the weld mesh size."]
+        "连续节点直接作为开放路径执行；单节点或彼此不连续的节点作为闭合边界种子，相关源/目标 component 会一次性以二进制发送给 Python 规划，投影与连接仍由 HyperMesh 执行。" \
+        "Continuous nodes execute directly as an open path. One node or disconnected nodes are closed-boundary seeds; related source/target components are sent once to Python as binary mesh data, while HyperMesh still performs imprint and connection."]
     grid $w.main.note -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -2070,25 +2070,62 @@ proc ::MeshSeamWeld::runAction {} {
     }
 
     set code [catch {
-        set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
-        set batchTaskDir [dict get $batchWorkspace task_dir]
-        set batchLogPath [file join $batchTaskDir operation.log]
+        set batchTaskDir ""
+        set batchLogPath ""
         set batchStarted [clock milliseconds]
+        set prepareStarted [clock milliseconds]
         if {$closedSeedMode} {
-            if {[llength $selectedNodes] == 1} {
-                set sourcePaths [::MeshSeamWeld::sourcePathsForSingleNode [lindex $selectedNodes 0]]
-            } else {
-                set sourcePaths [::MeshSeamWeld::closedFreeEdgeLoopsFromSeeds $selectedNodes]
+            set sourceComponentIds [::MeshSeamWeld::componentIdsFromNodes $selectedNodes]
+            if {[llength $sourceComponentIds] == 0} {
+                error [::HWFlow::txt \
+                    "所选节点不属于包含壳网格的源 component。" \
+                    "Selected nodes do not belong to a source component containing shell mesh."]
             }
-            if {[llength $sourcePaths] == 0} {
+            if {[llength [::MeshSeamWeld::uniq [concat $sourceComponentIds $targetComps]]] <
+                [expr {[llength [::MeshSeamWeld::uniq $sourceComponentIds]] + [llength [::MeshSeamWeld::uniq $targetComps]]}]} {
+                error [::HWFlow::txt \
+                    "源 component 与目标 component 不能重叠。" \
+                    "Source and target component selections must not overlap."]
+            }
+            set planRun [::MeshSeamWeld::runPythonComponentPlan \
+                $selectedNodes $sourceComponentIds $targetComps 2.0 12.0]
+            set batchTaskDir [dict get $planRun task_dir]
+            set batchLogPath [file join $batchTaskDir operation.log]
+            set payload [dict get $planRun payload]
+            set candidates [dict get $payload candidates]
+            if {[llength $candidates] != 1 ||
+                ![dict exists [lindex $candidates 0] weld_plans]} {
+                error [::HWFlow::txt \
+                    "Python 未返回有效的 component 焊缝计划。" \
+                    "Python did not return a valid component weld plan."]
+            }
+            set sourcePaths {}
+            set weldJobs {}
+            foreach plan [dict get [lindex $candidates 0] weld_plans] {
+                foreach key {source_node_ids source_component_ids target_component_ids target_element_ids closed_loop} {
+                    if {![dict exists $plan $key]} { error "Python weld plan is missing $key" }
+                }
+                set sourceNodes [dict get $plan source_node_ids]
+                set sourceCompIds [dict get $plan source_component_ids]
+                set jobTargetComps [dict get $plan target_component_ids]
+                set related [::MeshSeamWeld::uniq [concat $sourceCompIds $jobTargetComps]]
+                lappend sourcePaths $sourceNodes
+                lappend weldJobs [dict create source_nodes $sourceNodes \
+                    source_component_ids $sourceCompIds target_components $jobTargetComps \
+                    seam_component [::MeshSeamWeld::seamComponentForRelatedComps $related] \
+                    target_elements [dict get $plan target_element_ids] \
+                    center [::MeshSeamWeld::pathCenter $sourceNodes]]
+            }
+            if {[llength $weldJobs] == 0} {
                 error [::HWFlow::txt "没有识别到有效闭合自由边。" "No valid closed free-edge loop was found."]
             }
         } else {
+            set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
+            set batchTaskDir [dict get $batchWorkspace task_dir]
+            set batchLogPath [file join $batchTaskDir operation.log]
             set sourcePaths [list $selectedNodes]
+            set weldJobs [::MeshSeamWeld::prepareWeldJobs $sourcePaths $targetComps $progressOpened]
         }
-
-        set prepareStarted [clock milliseconds]
-        set weldJobs [::MeshSeamWeld::prepareWeldJobs $sourcePaths $targetComps $progressOpened]
         set prepareMs [expr {[clock milliseconds] - $prepareStarted}]
         ::HybridCore::log INFO "PERF mesh_seam_weld prepare paths=[llength $sourcePaths] source_nodes=[llength [::MeshSeamWeld::uniq [concat {*}$sourcePaths]]] prepare_ms=$prepareMs"
 
@@ -2104,7 +2141,11 @@ proc ::MeshSeamWeld::runAction {} {
         foreach job $weldJobs {
             incr pathIndex
             set sourceNodes [dict get $job source_nodes]
-            set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $targetComps \
+            set jobTargetComps $targetComps
+            if {[dict exists $job target_components]} {
+                set jobTargetComps [dict get $job target_components]
+            }
+            set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
                 $closedSeedMode $progressOpened $pathIndex $pathTotal \
                 [dict get $job source_component_ids] [dict get $job seam_component] \
                 [dict get $job center] [dict get $job target_elements]]
@@ -2112,7 +2153,7 @@ proc ::MeshSeamWeld::runAction {} {
                 [llength [dict get $job target_elements]] > 0 && \
                 [dict exists $isolated rollback_ok] && [dict get $isolated rollback_ok]} {
                 ::HybridCore::log WARN "local target patch failed path=$pathIndex/$pathTotal; retrying this loop once against the selected target components"
-                set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $targetComps \
+                set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
                     $closedSeedMode $progressOpened $pathIndex $pathTotal \
                     [dict get $job source_component_ids] [dict get $job seam_component] \
                     [dict get $job center] {}]

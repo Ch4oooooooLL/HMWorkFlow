@@ -15,13 +15,22 @@ The hybrid core intentionally has no system-Python fallback. If this executable 
 ## Contents
 
 - CPython interpreter and runtime DLLs;
-- `python38.zip`, containing the Python standard library;
+- `python38.zip`, containing the Python standard library source for manual deployment;
 - standard extension modules required by CPython;
 - the original `LICENSE.txt` from the distribution.
 
 Local Mesh Optimizer uses only the standard library. No pip packages, network downloads, `site-packages`, or administrator installation are required.
 
 The controller explicitly adds its own script directory to `sys.path` because the embeddable distribution runs with the restrictive `python38._pth` configuration.
+
+## Corporate endpoint compatibility
+
+The target corporate environment automatically encrypts ZIP files. On those
+computers, manually extract `python38.zip` beside `python.exe` as the directory
+`python38/` before launching HyperMesh. The committed `python38._pth` already
+points to that directory, so later updates do not restore the incompatible ZIP
+path. The unpacked directory is a local deployment artifact and must not be
+included in release packages; both packaging scripts remove it from staging.
 
 ## Source and integrity
 

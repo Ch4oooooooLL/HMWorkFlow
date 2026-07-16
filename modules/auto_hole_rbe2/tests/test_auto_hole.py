@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import importlib.util
+import time
 import unittest
 from pathlib import Path
 
@@ -108,6 +109,23 @@ class HoleEvaluationTests(unittest.TestCase):
 
 
 class SolidSurfaceTests(unittest.TestCase):
+    def test_precomputed_shell_faces_are_consumed_directly(self):
+        model, faces = tube_faces()
+        shell_elements = {
+            index: Element(index, 1, "CQUAD4", face.node_ids)
+            for index, face in enumerate(faces, 1)
+        }
+        surface_model = MeshModel(model.components, model.nodes, shell_elements)
+
+        extracted, warnings = extract(surface_model, [1], 1.0e-9)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(extracted), len(faces))
+        self.assertEqual(
+            {tuple(face.node_ids) for face in extracted},
+            {tuple(face.node_ids) for face in faces},
+        )
+
     def test_cpenta_and_ctetra_are_supported(self):
         components = {1: Component(1, "MIX", "SOLID")}
         nodes = {
@@ -122,6 +140,77 @@ class SolidSurfaceTests(unittest.TestCase):
         faces, warnings = extract(MeshModel(components, nodes, elements), [1], 1.0e-9)
         self.assertEqual(warnings, [])
         self.assertGreaterEqual(len(faces), 7)
+
+
+class SurfaceSegmentationPerformanceTests(unittest.TestCase):
+    def test_many_disconnected_surface_faces_do_not_degrade_quadratically(self):
+        count = 20000
+        faces = [
+            Face(
+                "S{:06d}".format(index),
+                index + 1,
+                (3 * index + 1, 3 * index + 2, 3 * index + 3),
+                (0.0, 0.0, 1.0),
+            )
+            for index in range(count)
+        ]
+
+        started = time.perf_counter()
+        segments, _ = segment_faces(faces, 78.0)
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(len(segments), count)
+        self.assertLess(elapsed, 2.0)
+
+
+class TclWorkflowContractTests(unittest.TestCase):
+    def source(self, relative_path):
+        return (Path(__file__).resolve().parents[1] / relative_path).read_text(encoding="utf-8")
+
+    def test_export_collects_free_face_node_ids_before_writing_mesh(self):
+        source = self.source("tcl/exporter.tcl")
+        self.assertIn("proc ::AutoHoleRBE2::collectHybridSurfaceFaces", source)
+        self.assertIn("proc ::AutoHoleRBE2::bulkFaceNodeMap", source)
+        self.assertIn("mark=2 dataname=nodes", source)
+        self.assertIn("proc ::AutoHoleRBE2::bulkNodeCoordinateMap", source)
+        self.assertIn("mark=2 dataname=coordinates", source)
+        self.assertNotIn("concat $allNodes", source)
+        self.assertNotIn('"by comps on mark"', source)
+        export_body = source[source.index("proc ::AutoHoleRBE2::exportHybridInputs"):]
+        self.assertLess(
+            export_body.index("collectHybridSurfaceFaces"),
+            export_body.index("writeHybridMesh"),
+        )
+
+    def test_candidate_creation_uses_bulk_ui_mode_and_single_validation(self):
+        main_source = self.source("../auto_hole_rbe2.tcl")
+        executor = self.source("tcl/executor.tcl")
+
+        self.assertIn("proc ::AutoHoleRBE2::beginBulkCreate", main_source)
+        self.assertIn("proc ::AutoHoleRBE2::endBulkCreate", main_source)
+        self.assertIn("beginBulkCreate", executor)
+        self.assertIn("endBulkCreate", executor)
+        self.assertNotIn("hybridNodeExists $nodeId", executor)
+        self.assertNotIn("rbe2DependentNodeKey $elementId", executor)
+
+    def test_creation_failure_has_explicit_rollback(self):
+        source = self.source("../auto_hole_rbe2.tcl")
+        self.assertIn("proc ::AutoHoleRBE2::cleanupFailedRBE2", source)
+        self.assertIn("proc ::AutoHoleRBE2::latestCreatedEntityIds", source)
+        create_body = source[source.index("proc ::AutoHoleRBE2::createRBE2"):]
+        self.assertIn("cleanupFailedRBE2", create_body)
+        self.assertIn("latestCreatedEntityIds", create_body)
+
+    def test_workflow_populates_completion_statistics(self):
+        source = self.source("tcl/workflow.tcl")
+        for field in ("sourceElems", "freeFaces", "validFaces", "segments", "failed"):
+            self.assertIn("stat({})".format(field), source)
+
+    def test_python_result_caps_rejection_details_and_writes_once(self):
+        source = self.source("python/main.py")
+        self.assertIn("MAX_REJECT_SAMPLES", source)
+        self.assertIn("reject_reason_counts", source)
+        self.assertEqual(source.count("write_result("), 1)
 
 
 if __name__ == "__main__":

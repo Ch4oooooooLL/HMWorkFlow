@@ -1,4 +1,4 @@
-import unittest
+import tempfile,unittest
 from pathlib import Path
 try:
     import tkinter
@@ -10,8 +10,11 @@ from path_aligner import align,cost
 from path_matcher import match
 from path_validator import validate_ordered
 from seam_planner import plan
+from component_planner import plan_component_welds
 from main import calculate
 from mesh_model import Component,Element,MeshModel
+from hybrid_schema import new_result
+from result_writer import write_binary_result
 ROOT=Path(__file__).resolve().parents[3]
 
 class SeamTests(unittest.TestCase):
@@ -64,6 +67,51 @@ class SeamTests(unittest.TestCase):
         body=workflow.split("proc ::MeshSeamWeld::processWeldPath",1)[1]
         self.assertIn("processWeldPathTcl",body)
         self.assertNotIn("processWeldPathPython",body)
+    def test_component_workflow_uses_one_binary_python_plan(self):
+        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
+        run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
+        self.assertIn("pickNodes",run_action)
+        self.assertIn("runPythonComponentPlan",run_action)
+        self.assertNotIn("sourcePathsForSingleNode",run_action)
+        self.assertNotIn("closedFreeEdgeLoopsFromSeeds",run_action)
+        self.assertIn("processWeldPathIsolated",run_action)
+    def test_component_exporter_writes_combined_binary_mesh(self):
+        exporter=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"exporter.tcl").read_text(encoding="utf-8")
+        self.assertIn("writeComponentPlanMesh",exporter)
+        self.assertIn("writeBinaryMesh",exporter)
+        self.assertIn("sourceComponentIds",exporter)
+        self.assertIn("targetComponentIds",exporter)
+        self.assertNotIn("mesh.json",exporter)
+    def test_component_bridge_loads_binary_result(self):
+        bridge=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"bridge.tcl").read_text(encoding="utf-8")
+        self.assertIn("runPythonComponentPlan",bridge)
+        self.assertIn("result.hmwfr",bridge)
+        self.assertIn("loadBinaryResult",bridge)
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_nested_component_plan_round_trips_through_tcl_binary_decoder(self):
+        payload=new_result("mesh_seam_weld","run-1")
+        payload["candidates"]=[{"candidate_id":"B0001","mode":"component_plan","weld_plans":[{
+            "source_node_ids":[1,2,3,4],"source_component_ids":[1],
+            "target_component_ids":[2],"target_element_ids":[201],"closed_loop":True,
+        }]}]
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"result.hmwfr"; write_binary_result(path,payload)
+            interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+            interp.eval("source {{{}}}".format(module.as_posix()))
+            interp.eval("set p [::HybridCore::readBinaryResultFile {{{}}}]".format(path.as_posix()))
+            interp.eval("set c [lindex [dict get $p candidates] 0]; set w [lindex [dict get $c weld_plans] 0]")
+            self.assertEqual(interp.eval("dict get $w target_component_ids"),"2")
+    def test_component_planner_single_boundary_seed_limits_result_to_its_loop(self):
+        components={1:Component(1,"SOURCE","SHELL"),2:Component(2,"TARGET","SHELL")}
+        nodes={
+            1:(0,0,1),2:(1,0,1),3:(1,1,1),4:(0,1,1),
+            5:(10,0,1),6:(11,0,1),7:(11,1,1),8:(10,1,1),
+            11:(0,0,0),12:(11,0,0),13:(11,1,0),14:(0,1,0),
+        }
+        elements={101:Element(101,1,"CQUAD4",(1,2,3,4)),102:Element(102,1,"CQUAD4",(5,6,7,8)),201:Element(201,2,"CQUAD4",(11,12,13,14))}
+        plans=plan_component_welds(MeshModel(components,nodes,elements),[1],[2],8.0,2,[6])
+        self.assertEqual(len(plans),1)
+        self.assertEqual(set(plans[0]["source_node_ids"]),{5,6,7,8})
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_local_imprint_uses_element_target(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
@@ -137,4 +185,51 @@ class SeamTests(unittest.TestCase):
         with self.assertRaises(ValueError):plan([1,2],[1,12],False)
     def test_free_edges_from_shell(self):
         m=MeshModel({1:Component(1,"S","SHELL")},self.coords(),{1:Element(1,1,"CQUAD4",(1,2,3,4))}); self.assertEqual(len([k for k,v in edges(m.elements.values()).items() if len(v)==1]),4)
+
+    def test_component_planner_returns_binary_execution_plan(self):
+        components={1:Component(1,"SOURCE","SHELL"),2:Component(2,"TARGET","SHELL")}
+        nodes={
+            1:(0,0,1),2:(1,0,1),3:(1,1,1),4:(0,1,1),
+            11:(0,0,0),12:(1,0,0),13:(1,1,0),14:(0,1,0),
+        }
+        elements={
+            101:Element(101,1,"CQUAD4",(1,2,3,4)),
+            201:Element(201,2,"CQUAD4",(11,12,13,14)),
+        }
+        plans=plan_component_welds(MeshModel(components,nodes,elements),[1],[2],8.0,2)
+        self.assertEqual(len(plans),1)
+        self.assertEqual(plans[0]["source_node_ids"],[1,2,3,4])
+        self.assertEqual(plans[0]["source_component_ids"],[1])
+        self.assertEqual(plans[0]["target_component_ids"],[2])
+        self.assertEqual(plans[0]["target_element_ids"],[201])
+        self.assertTrue(plans[0]["closed_loop"])
+        self.assertEqual(plans[0]["projection_mode"],"LOCAL_ELEMENTS")
+
+    def test_component_planner_assigns_each_loop_to_nearest_target_component(self):
+        components={
+            1:Component(1,"SOURCE_A","SHELL"),2:Component(2,"SOURCE_B","SHELL"),
+            10:Component(10,"TARGET_A","SHELL"),20:Component(20,"TARGET_B","SHELL"),
+        }
+        nodes={
+            1:(0,0,1),2:(1,0,1),3:(1,1,1),4:(0,1,1),
+            5:(100,0,1),6:(101,0,1),7:(101,1,1),8:(100,1,1),
+            11:(0,0,0),12:(1,0,0),13:(1,1,0),14:(0,1,0),
+            21:(100,0,0),22:(101,0,0),23:(101,1,0),24:(100,1,0),
+        }
+        elements={
+            101:Element(101,1,"CQUAD4",(1,2,3,4)),102:Element(102,2,"CQUAD4",(5,6,7,8)),
+            201:Element(201,10,"CQUAD4",(11,12,13,14)),202:Element(202,20,"CQUAD4",(21,22,23,24)),
+        }
+        plans=plan_component_welds(MeshModel(components,nodes,elements),[1,2],[10,20],8.0,0)
+        self.assertEqual([p["target_component_ids"] for p in plans],[[10],[20]])
+
+    def test_component_mode_calculate_returns_all_plans_in_one_result(self):
+        components={1:Component(1,"SOURCE","SHELL"),2:Component(2,"TARGET","SHELL")}
+        nodes={1:(0,0,1),2:(1,0,1),3:(1,1,1),4:(0,1,1),11:(0,0,0),12:(1,0,0),13:(1,1,0),14:(0,1,0)}
+        elements={101:Element(101,1,"CQUAD4",(1,2,3,4)),201:Element(201,2,"CQUAD4",(11,12,13,14))}
+        req={"selected_component_ids":[1],"settings":{"mode":"component_plan","source_component_ids":[1],"target_component_ids":[2],"weld_mesh_size":8.0,"patch_expand_layers":2}}
+        result=calculate(req,MeshModel(components,nodes,elements))
+        self.assertEqual(result["mode"],"component_plan")
+        self.assertEqual(len(result["weld_plans"]),1)
+        self.assertEqual(result["weld_plans"][0]["target_component_ids"],[2])
 if __name__=="__main__":unittest.main()

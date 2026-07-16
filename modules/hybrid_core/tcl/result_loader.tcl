@@ -40,3 +40,9 @@ proc ::HybridCore::loadResultSidecar {path variableName expectedModule expectedR
     set payload [uplevel #0 [list set $variableName]]
     return [::HybridCore::validateResultDict $payload $expectedModule $expectedRunId]
 }
+
+proc ::HybridCore::loadBinaryResult {path expectedModule expectedRunId} {
+    if {![file isfile $path]} { error "Python binary result not found: $path" }
+    set payload [::HybridCore::readBinaryResultFile $path]
+    return [::HybridCore::validateResultDict $payload $expectedModule $expectedRunId]
+}

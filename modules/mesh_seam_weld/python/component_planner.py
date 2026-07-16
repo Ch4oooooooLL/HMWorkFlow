@@ -1,0 +1,191 @@
+"""Plan component-level seam welds without HyperMesh/Tcl topology traversal."""
+from __future__ import annotations
+
+from collections import Counter, defaultdict, deque
+
+
+def _centroid(node_ids, coordinates):
+    count = float(len(node_ids))
+    return tuple(sum(coordinates[node_id][axis] for node_id in node_ids) / count for axis in range(3))
+
+
+class _KdNode:
+    __slots__ = ("point", "element_id", "component_id", "axis", "left", "right")
+
+    def __init__(self, row, axis, left, right):
+        self.point, self.element_id, self.component_id = row
+        self.axis, self.left, self.right = axis, left, right
+
+
+def _build_kd(rows, depth=0):
+    if not rows:
+        return None
+    axis = depth % 3
+    rows.sort(key=lambda row: (row[0][axis], row[1]))
+    middle = len(rows) // 2
+    return _KdNode(
+        rows[middle], axis,
+        _build_kd(rows[:middle], depth + 1),
+        _build_kd(rows[middle + 1 :], depth + 1),
+    )
+
+
+def _nearest(root, point, allowed_component=None):
+    best = [None, float("inf")]
+
+    def visit(node):
+        if node is None:
+            return
+        distance = sum((point[index] - node.point[index]) ** 2 for index in range(3))
+        if (allowed_component is None or node.component_id == allowed_component) and distance < best[1]:
+            best[:] = [node, distance]
+        delta = point[node.axis] - node.point[node.axis]
+        first, second = (node.left, node.right) if delta <= 0 else (node.right, node.left)
+        visit(first)
+        if delta * delta < best[1] or best[0] is None:
+            visit(second)
+
+    visit(root)
+    if best[0] is None:
+        raise ValueError("no target shell element is available for projection")
+    return best[0], best[1]
+
+
+def _closed_free_edge_loops(elements):
+    owners = defaultdict(int)
+    ends = {}
+    for element in elements:
+        node_ids = element.node_ids
+        if len(node_ids) < 3:
+            continue
+        for first, second in zip(node_ids, node_ids[1:] + node_ids[:1]):
+            key = tuple(sorted((first, second)))
+            owners[key] += 1
+            ends[key] = (first, second)
+    graph = defaultdict(set)
+    for key, owner_count in owners.items():
+        if owner_count == 1:
+            first, second = ends[key]
+            graph[first].add(second)
+            graph[second].add(first)
+
+    loops = []
+    visited = set()
+    for seed in sorted(graph):
+        if seed in visited:
+            continue
+        region = []
+        queue = deque([seed])
+        while queue:
+            node_id = queue.popleft()
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            region.append(node_id)
+            queue.extend(graph[node_id] - visited)
+        if len(region) < 3 or any(len(graph[node_id]) != 2 for node_id in region):
+            continue
+        start = min(region)
+        path = [start]
+        previous = None
+        current = start
+        while True:
+            choices = sorted(node_id for node_id in graph[current] if node_id != previous)
+            next_node = choices[0]
+            if next_node == start:
+                break
+            if next_node in path:
+                path = []
+                break
+            path.append(next_node)
+            previous, current = current, next_node
+        if len(path) >= 3:
+            loops.append(path)
+    return loops
+
+
+def _expanded_patch(seed_elements, component_id, layers, elements, node_to_elements):
+    visited = set(seed_elements)
+    frontier = set(seed_elements)
+    for _ in range(max(0, int(layers)) + 3):
+        following = set()
+        for element_id in frontier:
+            for node_id in elements[element_id].node_ids:
+                following.update(
+                    candidate for candidate in node_to_elements[node_id]
+                    if elements[candidate].component_id == component_id and candidate not in visited
+                )
+        visited.update(following)
+        frontier = following
+        if not frontier:
+            break
+    return sorted(visited)
+
+
+def plan_component_welds(model, source_component_ids, target_component_ids, weld_mesh_size, patch_expand_layers, selected_node_ids=None):
+    del weld_mesh_size  # Reserved for distance filtering without changing the wire protocol.
+    source_ids = sorted(set(int(value) for value in source_component_ids))
+    target_ids = sorted(set(int(value) for value in target_component_ids))
+    selected_nodes = set(int(value) for value in (selected_node_ids or []))
+    if not source_ids or not target_ids:
+        raise ValueError("source and target component selections must not be empty")
+    if set(source_ids) & set(target_ids):
+        raise ValueError("source and target components must be different")
+
+    source_elements = defaultdict(list)
+    target_elements = []
+    node_to_target_elements = defaultdict(set)
+    kd_rows = []
+    for element in model.elements.values():
+        if element.component_id in source_ids:
+            source_elements[element.component_id].append(element)
+        if element.component_id in target_ids and len(element.node_ids) in (3, 4):
+            target_elements.append(element)
+            center = _centroid(element.node_ids, model.nodes)
+            kd_rows.append((center, element.element_id, element.component_id))
+            for node_id in element.node_ids:
+                node_to_target_elements[node_id].add(element.element_id)
+    if not kd_rows:
+        raise ValueError("selected target components contain no shell elements")
+    tree = _build_kd(kd_rows)
+
+    plans = []
+    for source_component_id in source_ids:
+        component_elements = source_elements[source_component_id]
+        component_nodes = {node_id for element in component_elements for node_id in element.node_ids}
+        component_seeds = selected_nodes & component_nodes
+        component_loops = _closed_free_edge_loops(component_elements)
+        if component_seeds:
+            matched_loops = [loop for loop in component_loops if component_seeds & set(loop)]
+            seeds_on_loops = {seed for loop in matched_loops for seed in component_seeds if seed in loop}
+            if seeds_on_loops == component_seeds:
+                component_loops = matched_loops
+        for source_nodes in component_loops:
+            nearest_rows = [_nearest(tree, model.nodes[node_id]) for node_id in source_nodes]
+            component_votes = Counter(row[0].component_id for row in nearest_rows)
+            target_component_id = min(
+                component_votes,
+                key=lambda component_id: (-component_votes[component_id], sum(
+                    distance for node, distance in nearest_rows if node.component_id == component_id
+                ), component_id),
+            )
+            target_seeds = {
+                _nearest(tree, model.nodes[node_id], target_component_id)[0].element_id
+                for node_id in source_nodes
+            }
+            target_patch = _expanded_patch(
+                target_seeds, target_component_id, patch_expand_layers,
+                model.elements, node_to_target_elements,
+            )
+            plans.append({
+                "plan_id": "W{:06d}".format(len(plans) + 1),
+                "source_node_ids": source_nodes,
+                "source_component_ids": [source_component_id],
+                "target_component_ids": [target_component_id],
+                "target_element_ids": target_patch,
+                "closed_loop": True,
+                "projection_mode": "LOCAL_ELEMENTS",
+            })
+    if not plans:
+        raise ValueError("selected source components contain no closed free-edge loops")
+    return plans

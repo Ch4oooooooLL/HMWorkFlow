@@ -1,8 +1,13 @@
-proc ::AutoHoleRBE2::hybridNodeExists {nodeId} {
-    return [expr {![catch {set value [hm_getvalue nodes id=$nodeId dataname=id]}] && $value ne ""}]
+proc ::AutoHoleRBE2::executePythonCandidates {payload} {
+    variable cfg
+    ::AutoHoleRBE2::beginBulkCreate
+    set code [catch {set result [::AutoHoleRBE2::executePythonCandidatesBulk $payload]} err opts]
+    ::AutoHoleRBE2::endBulkCreate $cfg(resultCompName)
+    if {$code} { return -options $opts $err }
+    return $result
 }
 
-proc ::AutoHoleRBE2::executePythonCandidates {payload} {
+proc ::AutoHoleRBE2::executePythonCandidatesBulk {payload} {
     variable cfg; variable stat
     set created 0; set skipped 0; set failed 0; set resultCompReady 0
     set candidates [dict get $payload candidates]
@@ -20,26 +25,19 @@ proc ::AutoHoleRBE2::executePythonCandidates {payload} {
             continue
         }
         set wallNodes [dict get $candidate wall_node_ids]
-        set missing {}
-        foreach nodeId $wallNodes { if {![::AutoHoleRBE2::hybridNodeExists $nodeId]} { lappend missing $nodeId } }
-        if {[llength $missing] > 0} {
-            incr failed
-            ::HybridCore::log ERROR "candidate=$candidateId missing_nodes=$missing"
-            continue
-        }
+        set centerNode ""; set elementId ""
         set code [catch {
             if {!$resultCompReady} {
-                ::AutoHoleRBE2::ensureComponent $cfg(resultCompName)
+                ::AutoHoleRBE2::ensureComponent $cfg(resultCompName) 0
                 set resultCompReady 1
             }
             set info [::AutoHoleRBE2::createRBE2 $wallNodes [dict get $candidate center]]
+            set centerNode [lindex $info 0]
             set elementId [lindex $info 1]
             ::AutoHoleRBE2::rememberCreatedRBE2 $wallNodes $elementId
-            set actual [::AutoHoleRBE2::rbe2DependentNodeKey $elementId]
-            set expected [::HWFlow::nodeSetKey $wallNodes]
-            if {$actual ne $expected} { error "created RBE2 dependent-node validation failed: expected=$expected actual=$actual" }
         } err]
         if {$code} {
+            ::AutoHoleRBE2::cleanupFailedRBE2 $centerNode $elementId
             incr failed
             ::HybridCore::log ERROR "candidate=$candidateId create_failed=$err"
         } else {
@@ -49,6 +47,5 @@ proc ::AutoHoleRBE2::executePythonCandidates {payload} {
     }
     set stat(created) $created
     set stat(skippedExisting) $skipped
-    if {$created > 0 || $skipped > 0} { ::AutoHoleRBE2::refreshComponentBrowser $cfg(resultCompName) }
     return [dict create created $created skipped $skipped failed $failed]
 }

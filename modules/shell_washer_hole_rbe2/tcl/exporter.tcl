@@ -18,23 +18,27 @@ proc ::RB2W::writeHybridRequest {taskDir runId compId} {
 }
 
 proc ::RB2W::writeHybridMesh {taskDir compId} {
-    set erows {}; set allNodes {}
+    set elementRecords {}; set allNodes {}
     foreach eid [::RB2W::getElemsByComp $compId] {
         if {[::RB2W::elemLooksLikeRBE2 $eid]} { continue }
         set nodes [::RB2W::getElemNodes $eid]
         if {[llength $nodes] ni {3 4}} { continue }
         set allNodes [concat $allNodes $nodes]
-        lappend erows "    {\"element_id\": $eid, \"component_id\": $compId, \"element_type\": [::HybridCore::jsonString [::RB2W::hybridShellType $eid $nodes]], \"node_ids\": [::HybridCore::jsonIntArray $nodes]}"
+        lappend elementRecords [dict create element_id $eid component_id $compId \
+            element_type [::RB2W::hybridShellType $eid $nodes] node_ids $nodes]
     }
-    set nrows {}
-    foreach nid [lsort -integer -unique $allNodes] {
-        set xyz [::RB2W::getNodeXYZ $nid]
-        lappend nrows "    \[$nid, [lindex $xyz 0], [lindex $xyz 1], [lindex $xyz 2]\]"
+    set nodeRecords {}
+    set uniqueNodes [lsort -integer -unique $allNodes]
+    set coordinateMap [::HybridCore::readNodeCoordinatesBulk $uniqueNodes [list ::RB2W::getNodeXYZ]]
+    foreach nid $uniqueNodes {
+        set xyz [dict get $coordinateMap $nid]
+        lappend nodeRecords [list $nid [lindex $xyz 0] [lindex $xyz 1] [lindex $xyz 2]]
     }
     set cname [::RB2W::getComponentName $compId]
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"components\": \[\n    {\"component_id\": $compId, \"component_name\": [::HybridCore::jsonString $cname], \"mesh_class\": \"SHELL\"}\n  \],\n  \"nodes\": \[\n[join $nrows ,\n]\n  \],\n  \"elements\": \[\n[join $erows ,\n]\n  \]\n}\n"
-    ::HybridCore::log INFO "mesh export component=$compId elements=[llength $erows] nodes=[llength $nrows]"
-    return [::HybridCore::writeTextFile [file join $taskDir mesh.json] $json]
+    set componentRecords [list [dict create component_id $compId component_name $cname mesh_class SHELL]]
+    ::HybridCore::log INFO "binary mesh export component=$compId elements=[llength $elementRecords] nodes=[llength $nodeRecords]"
+    return [::HybridCore::writeBinaryMesh [file join $taskDir mesh.hmwf] \
+        $componentRecords $nodeRecords $elementRecords]
 }
 
 proc ::RB2W::writeHybridExisting {taskDir compId} {

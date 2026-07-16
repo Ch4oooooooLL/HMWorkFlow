@@ -3,10 +3,19 @@ from __future__ import annotations
 
 from collections import defaultdict
 from topology import edge_incidence, shell_corner_nodes
+from worker_cache import get_adjacency
 
 
 def build(elements):
     elements = list(elements)
+    key = (
+        "shell_washer_hole_rbe2",
+        tuple(elements),
+    )
+    return get_adjacency(key, lambda: _build(elements))
+
+
+def _build(elements):
     incidence = edge_incidence(elements)
     neighbors = defaultdict(set)
     for attached in incidence.values():

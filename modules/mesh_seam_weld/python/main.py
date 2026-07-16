@@ -15,9 +15,13 @@ from path_validator import validate_ordered
 from result_validator import validate
 from result_writer import write_result
 from seam_planner import plan
+from component_planner import plan_component_welds
 SPEC=importlib.util.spec_from_file_location("seam_schema",str(MODULE_DIR/"schema.py")); MOD=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(MOD)
 def calculate(req,model):
     s=req["settings"]
+    if s["mode"]=="component_plan":
+        weld_plans=plan_component_welds(model,s["source_component_ids"],s["target_component_ids"],s["weld_mesh_size"],s["patch_expand_layers"],s.get("selected_node_ids",[]))
+        return {"candidate_id":"B0001","mode":"component_plan","weld_plans":weld_plans,"path_count":len(weld_plans),"warnings":[],"recommended_action":"EXECUTE_BINARY_PLAN"}
     if s["mode"]=="source":
         graph=adjacency(edges(model.elements.values()),free_only=s["closed_loop"]); selected=s["selected_node_ids"]
         path=closed_loop(selected[0],graph) if s["closed_loop"] and len(selected)==1 else validate_ordered(selected,graph,s["closed_loop"])
@@ -31,7 +35,7 @@ def main(argv=None):
     a=p.parse_args(argv); logger=create_logger("mesh_seam_weld",a.log)
     try:
         t=time.perf_counter(); req=MOD.validate_request(load_json(a.request)); model=read_mesh(a.mesh); read=time.perf_counter()-t; t=time.perf_counter(); candidate=calculate(req,model); detect=time.perf_counter()-t
-        result=new_result("mesh_seam_weld",req["run_id"]); result["candidates"]=[candidate]; result["summary"]={"mode":candidate["mode"],"path_node_count":len(candidate.get("path_node_ids",candidate.get("target_node_ids",[])))}; result["performance"]["read_seconds"]=round(read,6); result["performance"]["detect_seconds"]=round(detect,6); write_result(a.output,getattr(a,"tcl_output"),"::MeshSeamWeld::pythonResult",result); return 0
+        result=new_result("mesh_seam_weld",req["run_id"]); result["candidates"]=[candidate]; result["summary"]={"mode":candidate["mode"],"path_node_count":len(candidate.get("path_node_ids",candidate.get("target_node_ids",[]))),"path_count":candidate.get("path_count",1)}; result["performance"]["read_seconds"]=round(read,6); result["performance"]["detect_seconds"]=round(detect,6); write_result(a.output,getattr(a,"tcl_output"),"::MeshSeamWeld::pythonResult",result); return 0
     except Exception as exc:logger.exception("seam planning failed"); print("ERROR: {}".format(exc),file=sys.stderr); return 2
     finally:close_logger(logger)
 if __name__=="__main__":raise SystemExit(main())

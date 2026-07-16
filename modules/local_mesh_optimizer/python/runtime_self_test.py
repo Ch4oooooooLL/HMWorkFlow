@@ -51,7 +51,7 @@ def main() -> int:
             if not (report_dir / name).is_file():
                 raise RuntimeError("Report smoke test did not create {}".format(name))
 
-    print("HMWorkFlow bundled Python self-test passed: {}".format(sys.version.split()[0]))
+    print("HMWorkFlow Python self-test passed: {}".format(sys.version.split()[0]))
     return 0
 
 

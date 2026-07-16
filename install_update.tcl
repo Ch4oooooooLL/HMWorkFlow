@@ -12,6 +12,38 @@ namespace eval ::HWInstaller {
     variable ROOT [file dirname $SCRIPT_FILE]
 }
 
+proc ::HWInstaller::reloadHybridCore {} {
+    variable ROOT
+    set hybridCoreInit [file join $ROOT modules hybrid_core tcl init.tcl]
+    if {![file isfile $hybridCoreInit]} {
+        error "HMWorkFlow hybrid Python core not found: $hybridCoreInit"
+    }
+
+    # A HyperMesh process can retain the namespace, cached Python path and
+    # persistent worker created from the previous project location.  Updating
+    # the loader alone only fixes the next HyperMesh launch, so explicitly
+    # dispose of the live session before loading the core from this installer.
+    if {[namespace exists ::HybridCore]} {
+        catch {after cancel ::HybridCore::initializeInstanceWorkerSafely}
+        if {[llength [info commands ::HybridCore::stopPersistentWorker]] > 0} {
+            catch {::HybridCore::stopPersistentWorker}
+        }
+        namespace delete ::HybridCore
+    }
+
+    source $hybridCoreInit
+    if {[llength [info commands ::HybridCore::scheduleInstanceWorker]] == 0} {
+        error "HMWorkFlow hybrid Python core did not initialize: $hybridCoreInit"
+    }
+
+    set expectedRoot [file normalize $ROOT]
+    set loadedRoot [file normalize $::HybridCore::ROOT_DIR]
+    if {![string equal -nocase $expectedRoot $loadedRoot]} {
+        error "HMWorkFlow hybrid Python root mismatch: expected $expectedRoot, loaded $loadedRoot"
+    }
+    ::HybridCore::scheduleInstanceWorker
+}
+
 proc ::HWInstaller::run {} {
     variable ROOT
     set coreFile [file join $ROOT hw_toolkit_core.tcl]
@@ -29,14 +61,7 @@ proc ::HWInstaller::run {} {
     ::HWShortcut::initialize
     ::HWShortcut::installAutoLoader
 
-    set hybridCoreInit [file join $ROOT modules hybrid_core tcl init.tcl]
-    if {![file exists $hybridCoreInit]} {
-        error "HMWorkFlow hybrid Python core not found: $hybridCoreInit"
-    }
-    if {[llength [info commands ::HybridCore::scheduleInstanceWorker]] == 0} {
-        source $hybridCoreInit
-    }
-    ::HybridCore::scheduleInstanceWorker
+    ::HWInstaller::reloadHybridCore
     if {![::HWShortcut::mainShortcutConfigured]} {
         ::HWShortcut::showInitialSetup
     }

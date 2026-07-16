@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 
 from geometry import cross, norm, normalize, subtract
 from mesh_model import MeshModel
-from topology import exterior_faces, solid_faces
+from topology import exterior_faces, shell_corner_nodes, solid_faces
 
 
 @dataclass(frozen=True)
@@ -29,19 +29,37 @@ def face_normal(model: MeshModel, node_ids: Tuple[int, ...], epsilon: float):
 def extract(model: MeshModel, component_ids, epsilon: float) -> Tuple[List[Face], List[str]]:
     elements = model.elements_for_components(component_ids)
     warnings = []
-    supported = []
+    solid_elements = []
+    shell_elements = []
     for element in elements:
         try:
             solid_faces(element)
-            supported.append(element)
+            solid_elements.append(element)
         except ValueError:
-            warnings.append("UNSUPPORTED_ELEMENT:{}:{}".format(element.element_id, element.element_type))
+            try:
+                shell_corner_nodes(element)
+                shell_elements.append(element)
+            except ValueError:
+                warnings.append("UNSUPPORTED_ELEMENT:{}:{}".format(element.element_id, element.element_type))
+
+    # HyperMesh can provide the exterior shell faces directly.  Consuming
+    # those cached face-node IDs avoids rebuilding every solid face in Python
+    # and, more importantly, avoids exporting the entire solid mesh from Tcl.
+    faces = [
+        Face(
+            "S{}".format(element.element_id),
+            element.element_id,
+            shell_corner_nodes(element),
+            face_normal(model, shell_corner_nodes(element), epsilon),
+        )
+        for element in shell_elements
+    ]
+
     index_by_key = {}
-    for element in supported:
+    for element in solid_elements:
         for face_index, nodes in enumerate(solid_faces(element), 1):
             index_by_key[(element.element_id, tuple(nodes))] = face_index
-    faces = []
-    for element_id, nodes in exterior_faces(supported):
+    for element_id, nodes in exterior_faces(solid_elements):
         face_index = index_by_key[(element_id, tuple(nodes))]
         faces.append(Face(
             "E{}F{}".format(element_id, face_index),
