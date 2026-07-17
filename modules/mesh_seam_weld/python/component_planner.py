@@ -144,6 +144,7 @@ def plan_internal_component_boundaries(model, source_component_id, selected_node
         "plan_id": "I{:06d}".format(index),
         "source_node_ids": loop,
         "source_component_ids": [source_component_id],
+        "center": list(_centroid(loop, model.nodes)),
         "closed_loop": True,
         "projection_mode": "TCL_LOCAL_TARGET",
     } for index, loop in enumerate(loops, 1)]

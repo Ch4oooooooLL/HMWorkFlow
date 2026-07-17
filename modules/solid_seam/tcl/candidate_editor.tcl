@@ -42,7 +42,7 @@ proc ::SolidSeam::acceptAllCandidates {} {
     }
     set candidateRows $updatedRows
     ::SolidSeam::log INFO "accepted all candidates count=$changed"
-    ::SolidSeam::refreshCandidateList
+    catch {::SolidSeam::refreshCandidateList}
 }
 
 proc ::SolidSeam::rejectAll {} {

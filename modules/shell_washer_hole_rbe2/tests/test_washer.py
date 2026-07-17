@@ -1,4 +1,4 @@
-import importlib.util, json, math, tempfile, unittest
+import importlib.util, json, math, tempfile, tkinter, unittest
 from pathlib import Path
 from free_edge_loops import find
 from loop_geometry import calculate
@@ -105,6 +105,142 @@ class IncrementalImportContractTests(unittest.TestCase):
             result = json.loads(paths["result.json"].read_text(encoding="utf-8"))
             self.assertGreater(result["summary"]["planned_create_count"], 0)
             self.assertIn("RBE2,", paths["rigids.fem"].read_text(encoding="utf-8"))
+
+
+class UnusedRBE2CleanupTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.source_path = Path(__file__).resolve().parents[2] / "shell_washer_hole_rbe2.tcl"
+        cls.interp = tkinter.Tcl()
+        cls.interp.eval("source {%s}" % cls.source_path.as_posix())
+
+    def test_only_center_nodes_without_any_other_element_are_unused(self):
+        result = self.interp.eval(
+            "set rows [list "
+            "[dict create eid 10 center 100] "
+            "[dict create eid 20 center 200] "
+            "[dict create eid 30 center 300]]; "
+            "set incidence [dict create "
+            "100 {10} "
+            "200 {20 99} "
+            "300 {30 31}]; "
+            "::RB2W::unusedRBE2IdsFromIncidence $rows $incidence"
+        )
+        self.assertEqual(self.interp.splitlist(result), ("10",))
+
+    def test_unknown_center_or_incidence_is_never_a_delete_candidate(self):
+        result = self.interp.eval(
+            "set rows [list "
+            "[dict create eid 10 center {}] "
+            "[dict create eid 20 center 200]]; "
+            "set incidence [dict create]; "
+            "::RB2W::unusedRBE2IdsFromIncidence $rows $incidence"
+        )
+        self.assertEqual(self.interp.splitlist(result), ())
+
+    def test_cleanup_is_exposed_only_from_shell_rbe2_subpage(self):
+        shell_source = self.source_path.read_text(encoding="utf-8")
+        bolt_source = (self.source_path.parent / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'button $w.btn.unused -text [::HWFlow::txt "检测未使用 RBE2"',
+            shell_source,
+        )
+        self.assertIn("::RB2W::elementIncidenceForNode", shell_source)
+        self.assertIn("::RB2W::queueUnusedRBE2DeletePanel", shell_source)
+        self.assertNotIn("button $w.btn.unused", bolt_source)
+
+    def test_settings_window_closes_before_cleanup_and_progress_closes_before_delete(self):
+        source = self.source_path.read_text(encoding="utf-8")
+        dialog_start = source.index("proc ::RB2W::showPanel")
+        dialog_end = source.index("\nproc ::RB2W::pickComponents", dialog_start)
+        dialog = source[dialog_start:dialog_end]
+        self.assertIn('-command "::RB2W::requestUnusedRBE2Cleanup"', dialog)
+        self.assertNotIn('-command "::RB2W::runFindUnusedRBE2FromSettings"', dialog)
+
+        request_start = source.index("proc ::RB2W::requestUnusedRBE2Cleanup")
+        request_end = source.index("\nproc ", request_start + 5)
+        request = source[request_start:request_end]
+        self.assertIn("set ui(action) find_unused_rbe2", request)
+        self.assertIn("destroy .rb2w_panel", request)
+
+        settings_start = source.index("proc ::RB2W::runSettings")
+        settings_end = source.index("\nforeach hybridFile", settings_start)
+        settings = source[settings_start:settings_end]
+        self.assertLess(settings.index("::RB2W::showPanel 1"), settings.index("::RB2W::runFindUnusedRBE2FromSettings"))
+
+        cleanup_start = source.index("proc ::RB2W::runFindUnusedRBE2FromSettings")
+        cleanup_end = source.index("\nproc ", cleanup_start + 5)
+        cleanup = source[cleanup_start:cleanup_end]
+        self.assertIn("::HWFlow::progressOpen", cleanup)
+        self.assertLess(cleanup.rindex("::HWFlow::progressClose"), cleanup.index("RB2W::queueUnusedRBE2DeletePanel"))
+
+    def test_delete_panel_handoff_is_deferred_and_rebuilds_marks(self):
+        source = self.source_path.read_text(encoding="utf-8")
+        queue_start = source.index("proc ::RB2W::queueUnusedRBE2DeletePanel")
+        queue_end = source.index("\nproc ", queue_start + 5)
+        queue = source[queue_start:queue_end]
+        self.assertIn("after idle ::RB2W::openPendingUnusedRBE2DeletePanel", queue)
+
+        open_start = source.index("proc ::RB2W::openPendingUnusedRBE2DeletePanel")
+        open_end = source.index("\nproc ", open_start + 5)
+        open_pending = source[open_start:open_end]
+        self.assertLess(
+            open_pending.index("RB2W::markUnusedRBE2ForDelete"),
+            open_pending.index("hm_callpanel"),
+        )
+        self.assertIn(
+            "after idle [list ::RB2W::restoreUnusedRBE2DeleteMark $elemIds]",
+            open_pending,
+        )
+        self.assertIn("*marktousermark", source[source.index("proc ::RB2W::markUnusedRBE2ForDelete"):open_start])
+
+    def test_solver_ids_are_resolved_through_hm_id_pools_before_marking(self):
+        interp = tkinter.Tcl()
+        interp.eval("source {%s}" % self.source_path.as_posix())
+        interp.eval(
+            "proc hm_getidpools {entityType returnType} {return {RIGID_IDPOOL}}; "
+            "proc hm_getinternalid {pool solverId searchType} {"
+            "if {$solverId == 100} {return 501}; "
+            "if {$solverId == 200} {return 502}; "
+            "error {not found}}; "
+            "rename ::RB2W::elemIsRBE2 ::RB2W::elemIsRBE2_original; "
+            "proc ::RB2W::elemIsRBE2 {eid} {expr {$eid == 501 || $eid == 502}}"
+        )
+        result = interp.eval("::RB2W::resolveUnusedRBE2InternalIds {100 200 999}")
+        self.assertEqual(interp.splitlist(interp.eval("dict get {%s} internal_ids" % result)), ("501", "502"))
+        self.assertEqual(interp.splitlist(interp.eval("dict get {%s} unresolved_solver_ids" % result)), ("999",))
+
+    def test_solver_id_resolution_falls_back_to_database_rbe2_records(self):
+        interp = tkinter.Tcl()
+        interp.eval("source {%s}" % self.source_path.as_posix())
+        interp.eval(
+            "proc hm_getidpools {args} {error {pool API unavailable}}; "
+            "proc hm_getinternalid {args} {error {pool API unavailable}}; "
+            "proc hm_getsolverid {entityType internalId searchType} {"
+            "if {$internalId == 701} {return {300 RIGID_IDPOOL}}; "
+            "if {$internalId == 702} {return {400 RIGID_IDPOOL}}; "
+            "error {not found}}; "
+            "rename ::RB2W::markRigidLinkCandidates ::RB2W::markRigidLinkCandidates_original; "
+            "proc ::RB2W::markRigidLinkCandidates {markId} {return {1 {701 702} {by config 55}}}"
+        )
+        result = interp.eval("::RB2W::resolveUnusedRBE2InternalIds {300 999}")
+        self.assertEqual(interp.splitlist(interp.eval("dict get {%s} internal_ids" % result)), ("701",))
+        self.assertEqual(interp.splitlist(interp.eval("dict get {%s} unresolved_solver_ids" % result)), ("999",))
+
+    def test_equal_solver_and_internal_ids_do_not_scan_all_rbe2(self):
+        interp = tkinter.Tcl()
+        interp.eval("source {%s}" % self.source_path.as_posix())
+        interp.eval(
+            "proc hm_getidpools {args} {return {}}; "
+            "rename ::RB2W::elemIsRBE2 ::RB2W::elemIsRBE2_original; "
+            "proc ::RB2W::elemIsRBE2 {eid} {expr {$eid == 801}}; "
+            "rename ::RB2W::markRigidLinkCandidates ::RB2W::markRigidLinkCandidates_original; "
+            "proc ::RB2W::markRigidLinkCandidates {markId} {error {full RBE2 scan must not run}}"
+        )
+        result = interp.eval("::RB2W::resolveUnusedRBE2InternalIds {801}")
+        self.assertEqual(interp.splitlist(interp.eval("dict get {%s} internal_ids" % result)), ("801",))
 
 
 if __name__=="__main__": unittest.main()

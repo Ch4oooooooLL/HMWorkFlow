@@ -57,6 +57,19 @@ def validate_request(data: Dict[str, Any]) -> Dict[str, Any]:
     require_version(data, "request")
     if not str(data.get("run_id", "")).strip():
         raise SchemaError("request.run_id is required")
+    # New FEM-first requests deliberately contain no Tcl-side mesh
+    # classification. Python fills these fields after reading the deck.
+    if "mode" not in data:
+        selected = int_list(data.get("selected_component_ids"), "selected_component_ids")
+        primary = int_list(data.get("primary_component_ids", selected), "primary_component_ids")
+        secondary = int_list(data.get("secondary_component_ids", []), "secondary_component_ids")
+        if len(selected) < 2 or set(primary + secondary) != set(selected):
+            raise SchemaError("selection groups are inconsistent")
+        if secondary and not (len(primary) == 1 and len(secondary) == 1):
+            raise SchemaError("a second selection is only valid after one primary component")
+        if not isinstance(data.get("settings"), dict):
+            raise SchemaError("request.settings must be an object")
+        return data
     mode = data.get("mode")
     if mode not in {"SOLID_SOLID_PAIR", "SOLID_SHELL_PAIR", "MULTI_SOLID_SHELL"}:
         raise SchemaError(f"unsupported request.mode: {mode!r}")

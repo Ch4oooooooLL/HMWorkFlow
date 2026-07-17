@@ -5,9 +5,13 @@ namespace eval ::SolidSeam {
     variable runId ""
     variable candidateRows {}
     variable selectedComponentIds {}
+    variable primaryComponentIds {}
+    variable secondaryComponentIds {}
     variable solidComponentIds {}
     variable shellComponentIds {}
     variable mode ""
+    variable detectedMode ""
+    variable requiresReview 0
     variable cancelled 0
     variable ui
     array set ui {

@@ -279,7 +279,83 @@ class TclImportContractTests(unittest.TestCase):
         self.assertIn("$value == 0", body)
         self.assertIn("SOLID_CIRCLE", full_source)
         self.assertIn("*beamsectioncreatestandardsolver 11 0 HMCirc 0", full_source)
-        self.assertIn("$attributeId=[list beamsects $beamSectId]", full_source)
+        self.assertIn("3186=[list beamsects $beamSectId]", full_source)
+
+    def test_solid_circle_uses_hypermesh_standard_section_update_contract(self):
+        full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        start = full_source.index("proc ::RB2Bolt::ensureCircleBeamSection")
+        end = full_source.index("\nproc ::RB2Bolt::linkBeamSectionToProperty", start)
+        body = full_source[start:end]
+        self.assertIn("*beamsectioncreatestandardsolver 11 0 HMCirc 0", body)
+        self.assertNotIn("*beamsectioncreatestandardsolver 0 11 HMCirc 0", body)
+        root_index = body.index("*beamsectionsetdataroot")
+        data_index = body.index("*beamsectionsetdatastandard 1 3 $id 11 0 HMCirc")
+        self.assertLess(root_index, data_index)
+
+    def test_pbeam_and_pbar_links_use_hm2019_card_specific_attributes_and_sync(self):
+        full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        start = full_source.index("proc ::RB2Bolt::linkBeamSectionToProperty")
+        end = full_source.index("\nproc ::RB2Bolt::assignPropertyToComponent", start)
+        body = full_source[start:end]
+        self.assertIn("3186=[list beamsects $beamSectId]", body)
+        self.assertIn("3179=$beamSectId", body)
+        self.assertIn("*syncpropertybeamsectionvalues 1", body)
+
+    def test_create_and_assign_all_paths_share_the_same_section_linker(self):
+        full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        ensure_start = full_source.index("proc ::RB2Bolt::ensureBoltProperty")
+        ensure_end = full_source.index("\nproc ::RB2Bolt::allComponentIds", ensure_start)
+        self.assertIn(
+            "::RB2Bolt::linkBeamSectionToProperty",
+            full_source[ensure_start:ensure_end],
+        )
+        executor = (Path(__file__).resolve().parents[1] / "tcl" / "executor.tcl").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("::RB2Bolt::linkBeamSectionToProperty", executor)
+
+    def test_assign_all_updates_the_bolt_component_as_well_as_its_elements(self):
+        full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        start = full_source.index("proc ::RB2Bolt::runAssignAllBoltProperties")
+        end = full_source.index("\nproc ::RB2Bolt::enableInteractiveBrowserUpdates", start)
+        body = full_source[start:end]
+        self.assertIn("::RB2Bolt::assignPropertyToComponent", body)
+        self.assertIn("::RB2Bolt::entityHasProperty comps", body)
+        self.assertIn("::RB2Bolt::assignPropertyToElements", body)
+        self.assertNotIn("foreach eid", body)
+
+    def test_assign_all_reports_scan_component_and_completion_progress(self):
+        full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        start = full_source.index("proc ::RB2Bolt::runAssignAllBoltProperties")
+        end = full_source.index("\nproc ::RB2Bolt::enableInteractiveBrowserUpdates", start)
+        body = full_source[start:end]
+        self.assertIn("::HWFlow::progressOpen", body)
+        self.assertIn("::HWFlow::progressUpdate", body)
+        self.assertIn("::HWFlow::progressClose", body)
+        self.assertIn("正在扫描螺栓组件", body)
+        self.assertIn("正在处理螺栓组件", body)
+        self.assertIn("Property 和 Solid circle 截面", body)
+
+    def test_bulk_property_assignment_uses_one_mark_update_per_component(self):
+        full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
+            encoding="utf-8"
+        )
+        start = full_source.index("proc ::RB2Bolt::assignPropertyToElements")
+        end = full_source.index("\nproc ::RB2Bolt::runAssignAllBoltProperties", start)
+        body = full_source[start:end]
+        self.assertIn("eval *createmark elems 1 $elementIds", body)
+        self.assertIn("*propertyupdate elems 1 $propertyName", body)
+        self.assertEqual(body.count("*propertyupdate"), 1)
 
     def test_default_selection_mode_is_components(self):
         source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(

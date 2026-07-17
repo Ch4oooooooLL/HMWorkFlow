@@ -284,7 +284,6 @@ proc ::RB2Bolt::showDialog {{settingsOnly 0}} {
 
     button $w.btn.cancel -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command {set ::RB2Bolt::done -2}
     if {!$settingsOnly} {
-        button $w.btn.unused -text [::HWFlow::txt "检测未用 Shell RBE2" "Find Unused Shell RBE2"] -width 22 -command {set ::RB2Bolt::done 2}
         button $w.btn.ok -text [::HWFlow::txt "确定" "OK"] -width 10 -command {set ::RB2Bolt::done 1}
     } else {
         button $w.btn.assignall -text [::HWFlow::txt "赋予所有螺栓属性" "Assign All Bolt Properties"] -width 22 -command {set ::RB2Bolt::done 3}
@@ -292,9 +291,7 @@ proc ::RB2Bolt::showDialog {{settingsOnly 0}} {
     }
     pack $w.btn.cancel -side right -padx 4
     pack $w.btn.ok -side right -padx 4
-    if {!$settingsOnly} {
-        pack $w.btn.unused -side right -padx 4
-    } else {
+    if {$settingsOnly} {
         pack $w.btn.assignall -side right -padx 4
     }
 
@@ -318,7 +315,6 @@ proc ::RB2Bolt::showDialog {{settingsOnly 0}} {
         return ""
     }
     if {$done == 1} {return "create"}
-    if {$done == 2} {return "findUnusedShellRBE2"}
     if {$done == 3} {return "assignAllBoltProperties"}
     return ""
 }
@@ -1044,14 +1040,8 @@ proc ::RB2Bolt::ensureCircleBeamSection {dia} {
     if {$id eq ""} {
         set before ""
         catch {set before [hm_latestentityid beamsects]}
-        set createCode [catch {*beamsectioncreatestandardsolver 11 0 HMCirc 0} createErr]
-        if {$createCode} {
-            # Some HyperMesh releases expose the historical solver/type
-            # argument order even though the command has the same name.
-            set createCode [catch {*beamsectioncreatestandardsolver 0 11 HMCirc 0} createErr2]
-            if {$createCode} {
-                error [::HWFlow::txt "无法创建圆形梁截面 $name：$createErr / $createErr2" "Cannot create circular beam section $name: $createErr / $createErr2"]
-            }
+        if {[catch {*beamsectioncreatestandardsolver 11 0 HMCirc 0} createErr]} {
+            error [::HWFlow::txt "无法通过 Create Standard Section / HyperMesh / Solid circle 创建截面 $name：$createErr" "Cannot create section $name through Create Standard Section / HyperMesh / Solid circle: $createErr"]
         }
         catch {set id [hm_latestentityid beamsects]}
         if {$id eq "" || "$id" eq "$before"} {
@@ -1072,6 +1062,26 @@ proc ::RB2Bolt::ensureCircleBeamSection {dia} {
     set radius [expr {double($dia) / 2.0}]
     set minRadius [expr {$radius / 1000.0}]
     set maxRadius [expr {$radius * 1000.0}]
+    set collectorId ""
+    foreach dataName {setid collector.id collectorid collector} {
+        if {![catch {set collectorId [hm_getvalue beamsects id=$id dataname=$dataName]}] &&
+            [string is integer -strict $collectorId] && $collectorId > 0} {
+            break
+        }
+        set collectorId ""
+    }
+    if {$collectorId eq ""} {
+        error [::HWFlow::txt "无法读取圆形梁截面 $name 的 Beam Section Collector。" "Cannot read the Beam Section Collector for circular section $name."]
+    }
+
+    # HyperMesh standard sections must be reset through the root-data command
+    # before their dimensional data is written.  Without this step HM2019 can
+    # retain a stale/default section configuration even though setdata returns.
+    if {[catch {
+        *beamsectionsetdataroot $id $collectorId 0 2 7 1 0 1.0 1.0 0 0 0 0
+    } rootErr]} {
+        error [::HWFlow::txt "无法初始化圆形梁截面 $name：$rootErr" "Cannot initialize circular beam section $name: $rootErr"]
+    }
     *createdoublearray 3 $radius $minRadius $maxRadius
     if {[catch {*beamsectionsetdatastandard 1 3 $id 11 0 HMCirc} sectionErr]} {
         error [::HWFlow::txt "无法设置圆形梁截面 $name 的半径：$sectionErr" "Cannot set the radius of circular beam section $name: $sectionErr"]
@@ -1081,26 +1091,37 @@ proc ::RB2Bolt::ensureCircleBeamSection {dia} {
 }
 
 proc ::RB2Bolt::linkBeamSectionToProperty {propId propName card beamSectId} {
-    set cardImage $card
-    catch {set cardImage [hm_getcardimagename props $propId -byid]}
-    set attributeId 0
-    catch {set attributeId [hm_getcardimageoptions props $cardImage beamsection_attrib]}
-    if {![string is integer -strict $attributeId] || $attributeId <= 0} {
-        set attributeId [expr {[string toupper $card] eq "PBAR" ? 3179 : 3186}]
-    }
-
-    # Beam-section attributes are entity references, not scalar IDs. HM2019
-    # requires the typed value {beamsects ID}; assigning only ID is rejected.
+    # HM2019 stores the PBAR and PBEAM references differently.  These are the
+    # exact commands recorded by the Property Editor: PBAR uses scalar 3179;
+    # PBEAM uses entity-reference 3186.  Treating both alike silently leaves an
+    # invalid/undefined Beam Section in one of the card images.
+    set linked 0
     foreach entityType {props properties} {
-        catch {*setvalue $entityType id=$propId $attributeId=[list beamsects $beamSectId]}
-    }
-    foreach dataName [list $attributeId engineering=beamsec beamsectionid beamsection.id] {
-        set actual ""
-        if {![catch {set actual [hm_getvalue props id=$propId dataname=$dataName]}] && "$actual" eq "$beamSectId"} {
-            return 1
+        if {[string toupper $card] eq "PBAR"} {
+            if {![catch {*setvalue $entityType id=$propId STATUS=2 3179=$beamSectId}]} {
+                set linked 1
+                break
+            }
+        } else {
+            if {![catch {*setvalue $entityType id=$propId STATUS=2 3186=[list beamsects $beamSectId]}]} {
+                set linked 1
+                break
+            }
         }
     }
-    return 0
+    if {!$linked} {return 0}
+
+    # Selecting a HyperBeam section does not itself copy A/I/J and the other
+    # calculated values into PBAR/PBEAM.  Synchronizing is what prevents the
+    # Property Editor from showing a field full of "undefined" values.
+    catch {*clearmark props 1}
+    if {[catch {*createmark props 1 $propId}] ||
+        [catch {*syncpropertybeamsectionvalues 1}]} {
+        catch {*clearmark props 1}
+        return 0
+    }
+    catch {*clearmark props 1}
+    return 1
 }
 
 proc ::RB2Bolt::assignPropertyToComponent {componentId propertyId propertyName} {
@@ -1171,17 +1192,9 @@ proc ::RB2Bolt::ensureBoltProperty {elemType dia {forceAuto 0}} {
         catch {*setvalue props $selector cardimage=$card}
         catch {*setvalue properties $selector cardimage=$card}
         ::RB2Bolt::trySetEntityRef {props properties} $selector {materialid material.id material MID Mid mid} mats $matId
-        # OptiStruct/Nastran profiles store the HyperBeam reference in
-        # different template attributes for PBEAM and PBAR.
-        if {$card eq "PBAR"} {
-            catch {*setvalue props $selector STATUS=2 3179=$beamSectId}
-            catch {*setvalue properties $selector STATUS=2 3179=$beamSectId}
-        } else {
-            catch {*setvalue props $selector STATUS=2 3186=$beamSectId}
-            catch {*setvalue properties $selector STATUS=2 3186=$beamSectId}
-        }
-        ::RB2Bolt::trySetEntityRef {props properties} $selector {beamsectionid beamsection.id beamsectid beamsect.id sectionid section.id} beamsects $beamSectId
-
+        # Section values are populated from the linked HyperBeam Solid circle
+        # below via *syncpropertybeamsectionvalues.  Avoid writing competing
+        # raw section references here; those create undefined fields in HM2019.
         set sec [::RB2Bolt::circleSection $dia]
         set area [lindex $sec 0]
         set i1 [lindex $sec 1]
@@ -1241,6 +1254,21 @@ proc ::RB2Bolt::boltComponentInfo {compName} {
     return [list $dia [string toupper $elemType]]
 }
 
+proc ::RB2Bolt::assignPropertyToElements {elementIds propertyName} {
+    if {[llength $elementIds] == 0} {return 0}
+    catch {*clearmark elems 1}
+    if {[catch {eval *createmark elems 1 $elementIds} markErr]} {
+        catch {*clearmark elems 1}
+        error "could not select [llength $elementIds] bolt elements: $markErr"
+    }
+    if {[catch {*propertyupdate elems 1 $propertyName} propertyErr]} {
+        catch {*clearmark elems 1}
+        error "could not assign property $propertyName to [llength $elementIds] bolt elements: $propertyErr"
+    }
+    catch {*clearmark elems 1}
+    return [llength $elementIds]
+}
+
 proc ::RB2Bolt::runAssignAllBoltProperties {} {
     variable propIdCache
     variable matIdCache
@@ -1250,47 +1278,135 @@ proc ::RB2Bolt::runAssignAllBoltProperties {} {
     catch {unset matIdCache}; array set matIdCache {}
     catch {unset beamSectIdCache}; array set beamSectIdCache {}
 
-    set boltComps 0
-    set assigned 0
-    set failed 0
-    set properties {}
-    foreach compId [::RB2Bolt::allComponentIds] {
+    set title [::HWFlow::txt "赋予所有螺栓属性" "Assign All Bolt Properties"]
+    set started [clock milliseconds]
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen $title \
+            [::HWFlow::txt "正在扫描螺栓组件..." "Scanning bolt components..."] 0]
+    }
+
+    set allCompIds [::RB2Bolt::allComponentIds]
+    set allCompCount [llength $allCompIds]
+    set boltRows {}
+    set scanIndex 0
+    foreach compId $allCompIds {
+        incr scanIndex
         set compName [::RB2Bolt::componentNameById $compId]
         set info [::RB2Bolt::boltComponentInfo $compName]
-        if {[llength $info] != 2} {continue}
-        incr boltComps
-        set dia [lindex $info 0]
-        set elemType [lindex $info 1]
+        if {[llength $info] == 2} {
+            lappend boltRows [list $compId $compName [lindex $info 0] [lindex $info 1]]
+        }
+        if {$progressOpened && ($scanIndex == 1 || $scanIndex == $allCompCount || [expr {$scanIndex % 100}] == 0)} {
+            set pct [expr {$allCompCount > 0 ? 5.0 + 15.0 * $scanIndex / double($allCompCount) : 20.0}]
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "正在扫描螺栓组件..." "Scanning bolt components..."] \
+                [::HWFlow::txt "已扫描 $scanIndex / $allCompCount，找到 [llength $boltRows] 个螺栓组件。" "Scanned $scanIndex / $allCompCount; found [llength $boltRows] bolt components."] \
+                1}
+        }
+    }
+
+    set boltComps [llength $boltRows]
+    if {$boltComps == 0} {
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "扫描完成，未找到螺栓组件。" "Scan complete; no bolt components found."] 100.0}
+        }
+        set txt [::HWFlow::txt \
+            "未找到名称符合 BOLT_D直径_CBEAM/CBAR 规则的螺栓组件。\n\n请确认组件名称及当前“输出组件前缀”设置一致。" \
+            "No bolt components matching BOLT_Ddiameter_CBEAM/CBAR were found.\n\nCheck that component names match the current output-component prefix."]
+        tk_messageBox -icon warning -title $title -message $txt
+        return
+    }
+
+    set assigned 0
+    set failed 0
+    set failedCompNames {}
+    set emptyComps 0
+    set totalElements 0
+    set properties {}
+    set failureDetails {}
+    set compIndex 0
+    foreach row $boltRows {
+        incr compIndex
+        lassign $row compId compName dia elemType
+        set elementIds [::RB2Bolt::getElemsByComp $compId]
+        set elementCount [llength $elementIds]
+        incr totalElements $elementCount
+        set pct [expr {20.0 + 75.0 * ($compIndex - 1) / double($boltComps)}]
+        if {$progressOpened} {
+            catch {::HWFlow::progressUpdate $pct \
+                [::HWFlow::txt "正在处理螺栓组件 $compIndex / $boltComps：$compName" "Processing bolt component $compIndex / $boltComps: $compName"] \
+                [::HWFlow::txt "正在创建或更新 Property 和 Solid circle 截面；组件内梁单元：$elementCount。" "Creating or updating the Property and Solid circle section; beam elements in component: $elementCount."] \
+                1}
+        }
+        if {$elementCount == 0} {
+            incr emptyComps
+            if {$progressOpened} {
+                catch {::HWFlow::progressAppend [::HWFlow::txt "$compName：空组件，已跳过。" "$compName: empty component, skipped."] 1}
+            }
+            continue
+        }
+
         if {[catch {set propName [::RB2Bolt::ensureBoltProperty $elemType $dia 1]} err]} {
-            msg [::HWFlow::txt "组件 $compName 的螺栓属性创建失败：$err" "Failed to create bolt property for component $compName: $err"]
-            incr failed [llength [::RB2Bolt::getElemsByComp $compId]]
+            set detail [::HWFlow::txt "$compName：Property/截面创建失败：$err" "$compName: Property/section creation failed: $err"]
+            lappend failureDetails $detail
+            if {$progressOpened} {catch {::HWFlow::progressAppend $detail 1}}
+            incr failed $elementCount
+            if {$compName ni $failedCompNames} {lappend failedCompNames $compName}
             continue
         }
         lappend properties $propName
-        foreach eid [::RB2Bolt::getElemsByComp $compId] {
-            if {![::RB2Bolt::elemLooksLike1DConnector $eid $elemType]} {
-                set nodes {}
-                catch {set nodes [hm_getvalue elems id=$eid dataname=nodes]}
-                if {[llength $nodes] != 2} {continue}
-            }
-            if {[::RB2Bolt::assignBeamProperty $eid $propName]} {
-                incr assigned
-            } else {
-                incr failed
+        set propId [::RB2Bolt::entityIdByName {props properties} $propName]
+        if {$propId eq "" ||
+            ![::RB2Bolt::assignPropertyToComponent $compId $propId $propName] ||
+            ![::RB2Bolt::entityHasProperty comps $compId $propId $propName]} {
+            set detail [::HWFlow::txt "$compName：组件无法关联 Property $propName。" "$compName: component could not be linked to Property $propName."]
+            lappend failureDetails $detail
+            if {$progressOpened} {catch {::HWFlow::progressAppend $detail 1}}
+            if {$compName ni $failedCompNames} {lappend failedCompNames $compName}
+        }
+
+        if {$progressOpened} {
+            catch {::HWFlow::progressUpdate [expr {$pct + 60.0 / double($boltComps)}] \
+                [::HWFlow::txt "正在处理螺栓组件 $compIndex / $boltComps：$compName" "Processing bolt component $compIndex / $boltComps: $compName"] \
+                [::HWFlow::txt "Property $propName 已准备，正在一次性赋予 $elementCount 个梁单元..." "Property $propName is ready; assigning it to $elementCount beam elements in one batch..."] \
+                1}
+        }
+        if {[catch {set assignedCount [::RB2Bolt::assignPropertyToElements $elementIds $propName]} err]} {
+            set detail [::HWFlow::txt "$compName：批量赋予 Property 失败：$err" "$compName: bulk Property assignment failed: $err"]
+            lappend failureDetails $detail
+            if {$progressOpened} {catch {::HWFlow::progressAppend $detail 1}}
+            incr failed $elementCount
+            if {$compName ni $failedCompNames} {lappend failedCompNames $compName}
+        } else {
+            incr assigned $assignedCount
+            if {$progressOpened} {
+                catch {::HWFlow::progressAppend [::HWFlow::txt \
+                    "$compName：完成，$assignedCount 个梁单元 -> $propName。" \
+                    "$compName: complete, $assignedCount beam elements -> $propName."] 1}
             }
         }
     }
 
     set propertyCount [llength [::RB2Bolt::uniqList $properties]]
-    if {$boltComps == 0} {
-        set txt [::HWFlow::txt "未找到由本模块创建的螺栓组件。" "No bolt components created by this module were found."]
-        tk_messageBox -icon warning -title [::HWFlow::txt "赋予所有螺栓属性" "Assign All Bolt Properties"] -message $txt
-        return
+    set failedComps [llength $failedCompNames]
+    set elapsed [expr {([clock milliseconds] - $started) / 1000.0}]
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt \
+            "处理完成：$assigned / $totalElements 个梁单元已赋予 Property。" \
+            "Complete: $assigned / $totalElements beam elements assigned a Property."] 100.0}
     }
     set txt [::HWFlow::txt \
-        "所有螺栓属性处理完成。\n\n螺栓组件：$boltComps\n圆形截面/属性：$propertyCount\n已赋予梁单元：$assigned\n失败：$failed\n材料：steel" \
-        "All bolt properties have been processed.\n\nBolt components: $boltComps\nCircular sections/properties: $propertyCount\nBeam elements assigned: $assigned\nFailed: $failed\nMaterial: steel"]
-    tk_messageBox -icon [expr {$failed > 0 ? "warning" : "info"}] -title [::HWFlow::txt "赋予所有螺栓属性" "Assign All Bolt Properties"] -message $txt
+        "所有螺栓属性处理完成。\n\n螺栓组件：$boltComps（空组件：$emptyComps）\nProperty / Solid circle 截面：$propertyCount\n组件内梁单元：$totalElements\n成功赋予：$assigned\n赋予失败：$failed\n异常组件：$failedComps\n材料：steel\n耗时：[format %.2f $elapsed] 秒" \
+        "All bolt properties have been processed.\n\nBolt components: $boltComps (empty: $emptyComps)\nProperty / Solid circle sections: $propertyCount\nBeam elements in components: $totalElements\nAssigned: $assigned\nAssignment failures: $failed\nComponents with errors: $failedComps\nMaterial: steel\nElapsed: [format %.2f $elapsed] s"]
+    if {[llength $failureDetails] > 0} {
+        set preview [lrange $failureDetails 0 4]
+        append txt [::HWFlow::txt "\n\n失败详情：\n[join $preview \n]" "\n\nFailure details:\n[join $preview \n]"]
+        if {[llength $failureDetails] > 5} {
+            append txt [::HWFlow::txt "\n……另有 [expr {[llength $failureDetails] - 5}] 项。" "\n...and [expr {[llength $failureDetails] - 5}] more."]
+        }
+    }
+    tk_messageBox -icon [expr {$failed > 0 || $failedComps > 0 ? "warning" : "info"}] -title $title -message $txt
     msg $txt
 }
 
@@ -2481,11 +2597,6 @@ proc ::RB2Bolt::run {} {
     }
     if {![validateParams]} {return}
     ::RB2Bolt::saveState
-    if {$action eq "findUnusedShellRBE2"} {
-        ::RB2Bolt::runFindUnusedShellRBE2
-        return
-    }
-
     msg [::HWFlow::txt "RBE2 Bolt Connector 开始。若需要 CBEAM 输出，请确认 BAR2 单元类型已设置为 CBEAM。" "RBE2 Bolt Connector started. Make sure BAR2 element type is set to CBEAM if CBEAM output is required."]
 
     set elemIds [selectedElementIds]

@@ -19,7 +19,7 @@ class SolidEdge:
     face_normals: Tuple[Tuple[float, float, float], ...]
 
 
-def extract_candidate_edges(model: MeshModel, faces: List[SurfaceFace], feature_angle_deg: float) -> List[SolidEdge]:
+def extract_candidate_edges(model: MeshModel, faces: List[SurfaceFace], feature_angle_deg: float, edge_prefix="SOLID") -> List[SolidEdge]:
     refs: Dict[Tuple[int, int], list] = defaultdict(list)
     for face in faces:
         for index, first in enumerate(face.node_ids):
@@ -29,9 +29,9 @@ def extract_candidate_edges(model: MeshModel, faces: List[SurfaceFace], feature_
     for edge, adjacent in refs.items():
         edge_class = "IGNORE"
         if len(adjacent) == 1:
-            edge_class = "SOLID_BOUNDARY_EDGE"
+            edge_class = f"{edge_prefix}_BOUNDARY_EDGE"
         elif len(adjacent) == 2 and angle_deg(adjacent[0].normal, adjacent[1].normal) >= feature_angle_deg:
-            edge_class = "SOLID_FEATURE_EDGE"
+            edge_class = f"{edge_prefix}_FEATURE_EDGE"
         if edge_class != "IGNORE":
             result.append(SolidEdge(edge, edge_class, distance(model.nodes[edge[0]], model.nodes[edge[1]]), tuple(face.face_id for face in adjacent), tuple(face.normal for face in adjacent)))
     return result

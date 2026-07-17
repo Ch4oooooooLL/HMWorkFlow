@@ -1,8 +1,6 @@
 # Lightweight contact setup defaults.
 key|value|note
-contact_type|SLIDE|
+contact_type|STICK|
 main_side|AUTO|
-friction|0.20|
 result_prefix|AUTO_CONTACT|
-keep_face_components|1|
 try_group|1|

@@ -387,7 +387,7 @@ proc ::HWFlow::keepWindowTopmost {w} {
 # owned by this toolkit, rather than every Tcl toplevel in the HyperMesh
 # process.  This preserves compatibility with HM2019 selection panels while
 # avoiding the former permanent-topmost focus conflict.
-proc ::HWFlow::nativeMarkPanel {entityType markId prompt} {
+proc ::HWFlow::nativeMarkPanel {entityType markId prompt args} {
     set windows {}
     if {[llength [info commands winfo]] > 0} {
         foreach w [::HWFlow::managedWindows] {
@@ -400,7 +400,7 @@ proc ::HWFlow::nativeMarkPanel {entityType markId prompt} {
         catch {update}
     }
 
-    set code [catch {*createmarkpanel $entityType $markId $prompt} err opts]
+    set code [catch {*createmarkpanel $entityType $markId $prompt {*}$args} err opts]
     foreach state $windows {
         lassign $state w mapped
         if {![winfo exists $w]} { continue }
@@ -410,6 +410,79 @@ proc ::HWFlow::nativeMarkPanel {entityType markId prompt} {
     catch {update idletasks}
     if {$code} { return -options $opts $err }
     return [hm_getmark $entityType $markId]
+}
+
+proc ::HWFlow::nativePanelSessionBegin {} {
+    set windows {}
+    if {[llength [info commands winfo]] > 0} {
+        foreach w [::HWFlow::managedWindows] {
+            set mapped [winfo ismapped $w]
+            lappend windows [list $w $mapped]
+            if {$mapped} { catch {wm withdraw $w} }
+        }
+        catch {set grabbed [grab current]}
+        if {[info exists grabbed] && $grabbed ne ""} { catch {grab release $grabbed} }
+        catch {update}
+    }
+    return $windows
+}
+
+proc ::HWFlow::nativePanelSessionEnd {windows} {
+    foreach state $windows {
+        lassign $state w mapped
+        if {![winfo exists $w]} { continue }
+        if {$mapped} { catch {wm deiconify $w} }
+        if {$mapped} { catch {raise $w} }
+    }
+    catch {update idletasks}
+}
+
+proc ::HWFlow::nativeMarkPanelInSession {entityType markId prompt args} {
+    catch {*clearmark $entityType $markId}
+    *createmarkpanel $entityType $markId $prompt {*}$args
+    return [hm_getmark $entityType $markId]
+}
+
+# Run consecutive native selection panels while toolkit windows remain hidden.
+# Restoring/raising a modal toolkit window between panels can steal focus from
+# the second HyperMesh push panel, especially in HM2019.
+proc ::HWFlow::nativeMarkPanelSequence {requests} {
+    set windows {}
+    if {[llength [info commands winfo]] > 0} {
+        foreach w [::HWFlow::managedWindows] {
+            set mapped [winfo ismapped $w]
+            lappend windows [list $w $mapped]
+            if {$mapped} { catch {wm withdraw $w} }
+        }
+        catch {set grabbed [grab current]}
+        if {[info exists grabbed] && $grabbed ne ""} { catch {grab release $grabbed} }
+        catch {update}
+    }
+
+    set selections {}
+    set code [catch {
+        foreach request $requests {
+            set entityType [lindex $request 0]
+            set markId [lindex $request 1]
+            set prompt [lindex $request 2]
+            set panelArgs [lrange $request 3 end]
+            catch {*clearmark $entityType $markId}
+            *createmarkpanel $entityType $markId $prompt {*}$panelArgs
+            set selected [hm_getmark $entityType $markId]
+            lappend selections $selected
+            if {[llength $selected] == 0} { break }
+        }
+    } err opts]
+
+    foreach state $windows {
+        lassign $state w mapped
+        if {![winfo exists $w]} { continue }
+        if {$mapped} { catch {wm deiconify $w} }
+        if {$mapped} { catch {raise $w} }
+    }
+    catch {update idletasks}
+    if {$code} { return -options $opts $err }
+    return $selections
 }
 
 proc ::HWFlow::createTopLevel {w {role module}} {

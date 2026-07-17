@@ -1,48 +1,47 @@
-proc ::SolidSeam::componentName {componentId} {
-    if {[llength [info commands ::HWFlow::componentName]] > 0} { return [::HWFlow::componentName $componentId] }
-    if {![catch {set value [hm_getvalue comps id=$componentId dataname=name]}]} { return $value }
-    return "COMP_$componentId"
+proc ::SolidSeam::optistructExportTemplate {} {
+    set candidates {}
+    if {![catch {set path [hm_info -appinfo SPECIFIEDPATH TEMPLATES_DIR]}] && [string trim $path] ne ""} {
+        lappend candidates [file join $path feoutput optistruct optistruct]
+    }
+    if {![catch {set path [hm_info -appinfo EXECUTABLEDIR]}] && [string trim $path] ne ""} {
+        lappend candidates [file join $path .. .. .. templates feoutput optistruct optistruct]
+    }
+    foreach candidate $candidates {
+        set normalized [file normalize $candidate]
+        if {[file isfile $normalized]} { return $normalized }
+    }
+    error [::SolidSeam::txt "找不到 HyperMesh OptiStruct FEM 导出模板。" "Could not locate the HyperMesh OptiStruct FEM export template."]
 }
 
-proc ::SolidSeam::elementTypeForExport {elementId} {
-    set config [::SolidSeam::elementConfig $elementId]
-    set elementType [::SolidSeam::elementTypeFromConfig $config]
-    if {$elementType ne ""} { return $elementType }
-    error "Unsupported HM element config '$config' for element $elementId"
-}
-
-proc ::SolidSeam::exportMeshData {classificationRows} {
+proc ::SolidSeam::exportSelectedFem {} {
     variable runtimeDir; variable selectedComponentIds
-    set componentJson {}; set elementJson {}; set allNodes {}
-    foreach row $classificationRows {
-        set componentId [dict get $row component_id]
-        lappend componentJson "    {\"component_id\": $componentId, \"component_name\": [::SolidSeam::jsonString [::SolidSeam::componentName $componentId]], \"mesh_class\": [::SolidSeam::jsonString [dict get $row mesh_class]]}"
-        catch {*clearmark elems 1}
-        eval *createmark elems 1 "by comp id" $componentId
-        foreach elementId [hm_getmark elems 1] {
-            set nodes [hm_getvalue elems id=$elementId dataname=nodes]
-            set allNodes [concat $allNodes $nodes]
-            lappend elementJson "    {\"element_id\": $elementId, \"component_id\": $componentId, \"element_type\": [::SolidSeam::jsonString [::SolidSeam::elementTypeForExport $elementId]], \"node_ids\": [::SolidSeam::jsonIntArray $nodes]}"
-        }
+    set paths {}; set template [::SolidSeam::optistructExportTemplate]
+    foreach componentId $selectedComponentIds {
+        set path [file join $runtimeDir "component_${componentId}.fem"]
+        catch {*clearmark elems 1}; catch {*clearmark nodes 1}
+        set code [catch {
+            *createmark elems 1 "by comp id" $componentId
+            *createmark nodes 1 "by comp id" $componentId
+            if {[llength [hm_getmark elems 1]] == 0 || [llength [hm_getmark nodes 1]] == 0} {
+                error [::SolidSeam::txt "Component $componentId 中没有可导出的网格。" "Component $componentId contains no exportable mesh."]
+            }
+            *feoutput_select $template $path 1 0 0
+        } err opts]
+        catch {*clearmark elems 1}; catch {*clearmark nodes 1}
+        if {$code} { return -options $opts $err }
+        if {![file isfile $path] || [file size $path] == 0} { error "HyperMesh did not create component_${componentId}.fem" }
+        lappend paths $path
+        ::SolidSeam::log INFO "fem exported component=$componentId bytes=[file size $path]"
     }
-    set nodeJson {}
-    foreach nodeId [lsort -integer -unique $allNodes] {
-        set x [hm_getvalue nodes id=$nodeId dataname=x]; set y [hm_getvalue nodes id=$nodeId dataname=y]; set z [hm_getvalue nodes id=$nodeId dataname=z]
-        lappend nodeJson "    {\"node_id\": $nodeId, \"xyz\": \[$x, $y, $z\]}"
+    if {[llength $paths] != [llength $selectedComponentIds]} {
+        error [::SolidSeam::txt "部分 Components 未能导出为 FEM。" "Some selected components were not exported to FEM."]
     }
-    # Existing connector export varies across HM profiles. Keep the contract
-    # explicit and log the limitation until the target command file confirms
-    # the connector datanames for this installation.
-    ::SolidSeam::log WARNING "existing_connectors export is empty pending HM2019 dataname verification"
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"components\": \[\n[join $componentJson ,\n]\n  \],\n  \"nodes\": \[\n[join $nodeJson ,\n]\n  \],\n  \"elements\": \[\n[join $elementJson ,\n]\n  \],\n  \"existing_connectors\": \[\]\n}\n"
-    set path [file join $runtimeDir mesh_data.json]
-    ::HWFlow::writeTextFile $path $json
-    ::SolidSeam::log INFO "mesh exported components=[llength $componentJson] elements=[llength $elementJson] nodes=[llength $nodeJson]"
-    return $path
+    return $paths
 }
 
 proc ::SolidSeam::writeRequest {} {
-    variable runtimeDir; variable runId; variable mode; variable selectedComponentIds; variable solidComponentIds; variable shellComponentIds; variable ui
+    variable runtimeDir; variable runId; variable selectedComponentIds
+    variable primaryComponentIds; variable secondaryComponentIds; variable ui
     set settings [join [list \
         "    \"search_distance\": $ui(search_distance)," \
         "    \"max_search_distance\": $ui(max_search_distance)," \
@@ -57,7 +56,7 @@ proc ::SolidSeam::writeRequest {} {
         "    \"high_confidence_threshold\": $ui(high_confidence_threshold)," \
         "    \"review_confidence_threshold\": $ui(review_confidence_threshold)" \
     ] "\n"]
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"run_id\": [::SolidSeam::jsonString $runId],\n  \"mode\": [::SolidSeam::jsonString $mode],\n  \"selected_component_ids\": [::SolidSeam::jsonIntArray $selectedComponentIds],\n  \"solid_component_ids\": [::SolidSeam::jsonIntArray $solidComponentIds],\n  \"shell_component_ids\": [::SolidSeam::jsonIntArray $shellComponentIds],\n  \"settings\": {\n$settings\n  }\n}\n"
+    set json "{\n  \"schema_version\": \"1.0\",\n  \"run_id\": [::SolidSeam::jsonString $runId],\n  \"selected_component_ids\": [::SolidSeam::jsonIntArray $selectedComponentIds],\n  \"primary_component_ids\": [::SolidSeam::jsonIntArray $primaryComponentIds],\n  \"secondary_component_ids\": [::SolidSeam::jsonIntArray $secondaryComponentIds],\n  \"settings\": {\n$settings\n  }\n}\n"
     set path [file join $runtimeDir request.json]
     ::HWFlow::writeTextFile $path $json
     return $path

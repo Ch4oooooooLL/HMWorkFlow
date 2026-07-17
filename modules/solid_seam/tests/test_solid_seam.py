@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT / "python"))
 from edge_chain_builder import build_chains
 from duplicate_detector import classify as classify_duplicate
 from joint_classifier import classify as classify_joint
-from main import component_pairs, detect, main as cli_main
+from fem_mesh_reader import read_fem
+from main import classify_workflow, component_pairs, detect, main as cli_main
 from mesh_reader import read_mesh
 from schema import validate_request
 from solid_edge_extractor import extract_candidate_edges
@@ -64,6 +65,84 @@ class SolidSeamTests(unittest.TestCase):
     def test_pair_rules_never_add_multiselect_solid_pairs(self):
         request = {"mode": "MULTI_SOLID_SHELL", "solid_component_ids": [1, 2], "shell_component_ids": [3, 4]}
         self.assertEqual([(1, 3), (1, 4), (2, 3), (2, 4)], component_pairs(request))
+
+    def test_native_fem_is_classified_by_python(self):
+        fem = """$HMNAME COMP                  10\"SOLID_A\"\n$HMNAME COMP                  20\"SHELL_B\"\nBEGIN BULK\nGRID,1,,0.,0.,0.\nGRID,2,,1.,0.,0.\nGRID,3,,0.,1.,0.\nGRID,4,,0.,0.,1.\nGRID,5,,2.,0.,0.\nCTETRA,100,10,1,2,3,4\nCTRIA3,200,20,2,5,3\nENDDATA\n"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selection.fem"
+            path.write_text(fem, encoding="utf-8")
+            model = read_fem(path)
+        self.assertEqual("SOLID", model.components[10].mesh_class)
+        self.assertEqual("SHELL", model.components[20].mesh_class)
+        self.assertEqual("SOLID_A", model.components[10].component_name)
+
+    def test_per_component_fem_override_ignores_solver_property_id(self):
+        fem = """$HMNAME COMP                  10\"SOLID_A\"\nBEGIN BULK\nGRID,1,,0.,0.,0.\nGRID,2,,1.,0.,0.\nGRID,3,,0.,1.,0.\nGRID,4,,0.,0.,1.\nCTETRA,100,999,1,2,3,4\nENDDATA\n"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "component_10.fem"
+            path.write_text(fem, encoding="utf-8")
+            model = read_fem(path, component_id=10)
+        self.assertEqual({10}, set(model.components))
+        self.assertEqual(10, model.elements[0].component_id)
+
+    def test_two_solid_selection_is_direct_and_preserves_source_order(self):
+        model = MeshModel(
+            {1: Component(1, "FIRST", "SOLID"), 2: Component(2, "SECOND", "SOLID")},
+            {}, [], [],
+        )
+        request = validate_request({"schema_version": "1.0", "run_id": "x", "selected_component_ids": [1, 2], "primary_component_ids": [1], "secondary_component_ids": [2], "settings": {}})
+        classified = classify_workflow(request, model)
+        self.assertEqual("SOLID_SOLID_PAIR", classified["mode"])
+        self.assertFalse(classified["requires_review"])
+        self.assertEqual([(1, 2)], component_pairs(classified))
+
+    def test_two_shell_selection_is_direct(self):
+        model = MeshModel(
+            {1: Component(1, "FIRST", "SHELL"), 2: Component(2, "SECOND", "SHELL")},
+            {}, [], [],
+        )
+        request = validate_request({"schema_version": "1.0", "run_id": "x", "selected_component_ids": [1, 2], "primary_component_ids": [1], "secondary_component_ids": [2], "settings": {}})
+        classified = classify_workflow(request, model)
+        self.assertEqual("SHELL_SHELL_PAIR", classified["mode"])
+        self.assertFalse(classified["requires_review"])
+        self.assertEqual([(1, 2)], component_pairs(classified))
+
+    def test_two_shells_detect_source_boundary_nodes(self):
+        payload = {
+            "schema_version": "1.0",
+            "components": [
+                {"component_id": 1, "component_name": "SOURCE", "mesh_class": "SHELL"},
+                {"component_id": 2, "component_name": "TARGET", "mesh_class": "SHELL"},
+            ],
+            "nodes": [
+                {"node_id": 1, "xyz": [0, 0, 0]}, {"node_id": 2, "xyz": [10, 0, 0]},
+                {"node_id": 3, "xyz": [10, 10, 0]}, {"node_id": 4, "xyz": [0, 10, 0]},
+                {"node_id": 11, "xyz": [0, -2, 0]}, {"node_id": 12, "xyz": [10, -2, 0]},
+                {"node_id": 13, "xyz": [10, -12, 0]}, {"node_id": 14, "xyz": [0, -12, 0]},
+            ],
+            "elements": [
+                {"element_id": 1, "component_id": 1, "element_type": "CQUAD4", "node_ids": [1, 2, 3, 4]},
+                {"element_id": 2, "component_id": 2, "element_type": "CQUAD4", "node_ids": [11, 12, 13, 14]},
+            ],
+            "existing_connectors": [],
+        }
+        model = self.write_mesh(payload)
+        settings = {"search_distance": 3.0, "max_search_distance": 5.0, "min_weld_length": 5.0, "min_valid_ratio": 0.7, "feature_angle_deg": 35.0, "max_chain_turn_angle_deg": 60.0, "gap_jump_limit": 1.0, "allow_closed_loop": True, "retain_short_candidates": False, "detect_duplicates": True, "high_confidence_threshold": 0.85, "review_confidence_threshold": 0.6}
+        request = {"mode": "SHELL_SHELL_PAIR", "source_component_ids": [1], "target_component_ids": [2], "solid_component_ids": [], "shell_component_ids": [1, 2], "settings": settings}
+        candidates = detect(request, model, __import__("logging").getLogger("test"))
+        self.assertTrue(candidates)
+        self.assertTrue(all(set(candidate["node_ids"]).issubset({1, 2, 3, 4}) for candidate in candidates))
+
+    def test_mixed_selection_requires_review_and_a_solid(self):
+        model = MeshModel(
+            {1: Component(1, "S1", "SOLID"), 2: Component(2, "H1", "SHELL"), 3: Component(3, "H2", "SHELL")},
+            {}, [], [],
+        )
+        request = validate_request({"schema_version": "1.0", "run_id": "x", "selected_component_ids": [1, 2, 3], "primary_component_ids": [1, 2, 3], "secondary_component_ids": [], "settings": {}})
+        classified = classify_workflow(request, model)
+        self.assertEqual("MIXED_COMPONENTS", classified["mode"])
+        self.assertTrue(classified["requires_review"])
+        self.assertEqual([(1, 2), (1, 3)], component_pairs(classified))
 
     def test_integration_detects_nearby_cube_edges(self):
         model = self.write_mesh(cube_mesh())
@@ -165,6 +244,24 @@ class SolidSeamTests(unittest.TestCase):
             self.assertEqual("1.0", json.loads(output.read_text(encoding="utf-8"))["schema_version"])
             self.assertTrue(sidecar.is_file())
             self.assertTrue(log.is_file())
+
+    def test_cli_merges_per_component_fems_and_returns_workflow_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "component_1.fem"
+            second = root / "component_2.fem"
+            first.write_text("BEGIN BULK\nGRID,1,,0.,0.,0.\nGRID,2,,10.,0.,0.\nGRID,3,,10.,10.,0.\nGRID,4,,0.,10.,0.\nCQUAD4,1,101,1,2,3,4\nENDDATA\n", encoding="utf-8")
+            second.write_text("BEGIN BULK\nGRID,11,,0.,-2.,0.\nGRID,12,,10.,-2.,0.\nGRID,13,,10.,-12.,0.\nGRID,14,,0.,-12.,0.\nCQUAD4,2,202,11,12,13,14\nENDDATA\n", encoding="utf-8")
+            settings = {"search_distance": 3.0, "max_search_distance": 5.0, "min_weld_length": 5.0, "min_valid_ratio": 0.7, "feature_angle_deg": 35.0, "max_chain_turn_angle_deg": 60.0, "gap_jump_limit": 1.0, "allow_closed_loop": True, "retain_short_candidates": False, "detect_duplicates": True, "high_confidence_threshold": 0.85, "review_confidence_threshold": 0.6}
+            request = root / "request.json"
+            request.write_text(json.dumps({"schema_version": "1.0", "run_id": "fem_pair", "selected_component_ids": [1, 2], "primary_component_ids": [1], "secondary_component_ids": [2], "settings": settings}), encoding="utf-8")
+            output, sidecar = root / "candidates.json", root / "candidates.tcl"
+            code = cli_main(["--request", str(request), "--mesh", str(first), "--mesh", str(second), "--output", str(output), "--tcl-output", str(sidecar)])
+            self.assertEqual(0, code)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual("SHELL_SHELL_PAIR", payload["mode"])
+            self.assertFalse(payload["requires_review"])
+            self.assertIn("set ::SolidSeam::requiresReview 0", sidecar.read_text(encoding="utf-8"))
 
     def test_direct_script_launch_finds_sibling_modules(self):
         """Match the isolated child-process launch used by HyperMesh Tcl."""

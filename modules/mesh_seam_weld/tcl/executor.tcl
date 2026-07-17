@@ -40,25 +40,41 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
     }
 
     set imprintStarted [clock milliseconds]
-    ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $imprintClosedLoop $targetElemIds
-    set imprintNodes [::MeshSeamWeld::targetCandidatesAfterImprint $sourceNodes $targetComps {}]
+    if {[catch {
+        ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $imprintClosedLoop $targetElemIds
+    } imprintErr]} {
+        ::MeshSeamWeld::stageError IMPRINT $imprintErr
+    }
+    if {[catch {
+        set imprintNodes [::MeshSeamWeld::targetCandidatesAfterImprint $sourceNodes $targetComps {}]
+    } candidateErr]} {
+        ::MeshSeamWeld::stageError TARGET_MATCH $candidateErr
+    }
     set imprintMs [expr {[clock milliseconds] - $imprintStarted}]
 
     set targetStarted [clock milliseconds]
-    set targetNodes [::MeshSeamWeld::targetPathNodesAfterImprint $sourceNodes $imprintNodes]
-    set targetNodes [::MeshSeamWeld::alignTargetPathNodes $sourceNodes $targetNodes $closedLoop]
+    if {[catch {
+        set targetNodes [::MeshSeamWeld::targetPathNodesAfterImprint $sourceNodes $imprintNodes]
+        set targetNodes [::MeshSeamWeld::alignTargetPathNodes $sourceNodes $targetNodes $closedLoop]
+    } targetErr]} {
+        ::MeshSeamWeld::stageError TARGET_MATCH $targetErr
+    }
     if {![::MeshSeamWeld::targetPathIsContinuous $targetNodes $targetComps $closedLoop]} {
-        error [::HWFlow::txt \
+        ::MeshSeamWeld::stageError TARGET_CONTINUITY [::HWFlow::txt \
             "imprint 后的目标节点不能在所选目标 component 上形成连续路径，已取消该闭环。" \
             "The imprinted target nodes do not form a continuous path on the selected target components; the loop was cancelled."]
     }
     set targetMs [expr {[clock milliseconds] - $targetStarted}]
 
     set meshStarted [clock milliseconds]
-    set weldElems [::MeshSeamWeld::createRuledMeshBetweenNodePaths \
-        $sourceNodes $targetNodes $seamComp $closedLoop]
+    if {[catch {
+        set weldElems [::MeshSeamWeld::createRuledMeshBetweenNodePaths \
+            $sourceNodes $targetNodes $seamComp $closedLoop]
+    } meshErr]} {
+        ::MeshSeamWeld::stageError AUTOMESH $meshErr
+    }
     if {[llength $weldElems] == 0} {
-        error [::HWFlow::txt \
+        ::MeshSeamWeld::stageError AUTOMESH [::HWFlow::txt \
             "automesh 没有创建焊缝单元。" \
             "Automesh did not create weld elements."]
     }

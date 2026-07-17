@@ -14,7 +14,7 @@ proc ::SolidSeam::resolvePython {} {
     error [::SolidSeam::txt "未找到可用 Python 3.8+ 运行时。" "No usable Python 3.8+ runtime was found."]
 }
 
-proc ::SolidSeam::runPythonDetection {requestPath meshPath} {
+proc ::SolidSeam::runPythonDetection {requestPath meshPaths} {
     variable MODULE_DIR; variable runtimeDir; variable candidateRows
     set entry [file join $MODULE_DIR python main.py]
     if {![file isfile $entry]} { error "Python entry not found: $entry" }
@@ -22,7 +22,9 @@ proc ::SolidSeam::runPythonDetection {requestPath meshPath} {
     set tclOutput [file join $runtimeDir candidates.tcl]
     set stdout [file join $runtimeDir python_stdout.log]
     set stderr [file join $runtimeDir python_stderr.log]
-    set command [concat [::SolidSeam::resolvePython] [list $entry --request $requestPath --mesh $meshPath --output $output --tcl-output $tclOutput --log [file join $runtimeDir operation.log]]]
+    set meshArgs {}
+    foreach meshPath $meshPaths { lappend meshArgs --mesh $meshPath }
+    set command [concat [::SolidSeam::resolvePython] [list $entry --request $requestPath] $meshArgs [list --output $output --tcl-output $tclOutput --log [file join $runtimeDir operation.log]]]
     ::SolidSeam::log INFO "python launch"
     if {[catch {exec {*}$command > $stdout 2> $stderr} err opts]} {
         set detail [::HWFlow::readTextFile $stderr]

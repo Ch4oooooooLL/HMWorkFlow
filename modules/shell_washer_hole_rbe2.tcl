@@ -96,6 +96,8 @@ namespace eval ::RB2W {
     variable rbe2MarkCacheSelector       ""
     variable rbe2MarkCacheGrouped        0
     variable rbe2MarkCacheCanGroup       0
+    variable pendingUnusedRBE2DeleteIds  {}
+    variable unusedRBE2DeleteScheduled   0
     variable rbe2CandidateCompId
     variable rbe2CandidateByComp
     variable currentComponentName ""
@@ -297,6 +299,7 @@ proc ::RB2W::showPanel {{settingsOnly 0}} {
     button $w.btn.back -text [::HWFlow::txt "返回主页" "Back to Home"] -width 14 -command "::RB2W::savePanelState; set ::RB2W::ui(ok) 0; ::RB2W::backToHome .rb2w_panel"
     button $w.btn.save -text [::HWFlow::txt "保存配置" "Save Config"] -width 12 -command "::RB2W::savePanelState"
     if {$settingsOnly} {
+        button $w.btn.unused -text [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -width 18 -command "::RB2W::requestUnusedRBE2Cleanup"
         button $w.btn.collect -text [::HWFlow::txt "归集全部 RBE2" "Collect All RBE2"] -width 16 -command "::RB2W::collectProjectRBE2FromSettings"
         button $w.btn.start -text [::HWFlow::txt "保存设置" "Save Settings"] -width 18 -command "::RB2W::saveSettingsPanel"
     } else {
@@ -307,6 +310,7 @@ proc ::RB2W::showPanel {{settingsOnly 0}} {
     pack $w.btn.back  -side right -padx 4
     pack $w.btn.save  -side right -padx 4
     if {$settingsOnly} {
+        pack $w.btn.unused -side right -padx 4
         pack $w.btn.collect -side right -padx 4
     }
     if {!$settingsOnly} {
@@ -456,6 +460,14 @@ proc ::RB2W::saveSettingsPanel {} {
     catch {destroy .rb2w_panel}
 }
 
+proc ::RB2W::requestUnusedRBE2Cleanup {} {
+    variable ui
+    ::RB2W::savePanelState
+    set ui(action) find_unused_rbe2
+    set ui(ok) 1
+    catch {destroy .rb2w_panel}
+}
+
 proc ::RB2W::projectRBE2ComponentIds {} {
     variable ui
     variable RBE2_COMPONENT_PREFIX
@@ -553,6 +565,412 @@ proc ::RB2W::collectProjectRBE2FromSettings {} {
     tk_messageBox -icon info -title [::HWFlow::txt "归集项目 RBE2" "Collect Project RBE2"] -message $msg
     catch {raise .rb2w_panel}
     catch {focus .rb2w_panel}
+}
+
+# ---------------- Unused RBE2 review and delete-panel handoff ------------
+proc ::RB2W::unusedRBE2IdsFromIncidence {candidateRows nodeToElementIds} {
+    set unused {}
+    foreach row $candidateRows {
+        if {![dict exists $row eid] || ![dict exists $row center]} { continue }
+        set eid [dict get $row eid]
+        set center [dict get $row center]
+        if {$eid eq "" || $center eq "" || ![dict exists $nodeToElementIds $center]} { continue }
+
+        set hasOtherConnection 0
+        foreach attachedEid [dict get $nodeToElementIds $center] {
+            if {$attachedEid ne "" && $attachedEid != $eid} {
+                set hasOtherConnection 1
+                break
+            }
+        }
+        if {!$hasOtherConnection} { lappend unused $eid }
+    }
+    return [RB2W::uniq $unused]
+}
+
+proc ::RB2W::elemIsRBE2 {eid} {
+    foreach dn {config typename solverkeyword solvername cardimage} {
+        if {[catch {set value [hm_getvalue elems id=$eid dataname=$dn]}] || $value eq ""} { continue }
+        set upper [string toupper [string trim "$value"]]
+        if {[string first "RBE3" $upper] >= 0 || $upper eq "56"} { return 0 }
+        if {[string first "RBE2" $upper] >= 0 || $upper eq "55"} { return 1 }
+    }
+    return 0
+}
+
+proc ::RB2W::clearUnusedRBE2SelectionMarks {} {
+    foreach entityType {elems elements comps components entities entity} {
+        foreach markId {1 2} {
+            catch {*clearmark $entityType $markId}
+            catch {hm_markclear $entityType $markId}
+        }
+    }
+}
+
+proc ::RB2W::selectedUnusedRBE2Scope {} {
+    RB2W::clearUnusedRBE2SelectionMarks
+    set prompt [::HWFlow::txt \
+        "选择待检查的 RBE2 单元或其所在组件；可在选择面板切换 elems/comps。" \
+        "Select RBE2 elements or containing components; switch elems/comps in the selection panel."]
+
+    set opened 0
+    foreach entityType {entities entity} {
+        if {![catch {::HWFlow::nativeMarkPanel $entityType 1 $prompt}]} {
+            set opened 1
+            break
+        }
+    }
+    if {!$opened} {
+        RB2W::clearUnusedRBE2SelectionMarks
+        return -code error [::HWFlow::txt \
+            "当前 HyperMesh 无法打开可切换 elems/comps 的选择面板。" \
+            "HyperMesh could not open the entity-switching selection panel."]
+    }
+
+    set compIds {}
+    set selectedElemIds {}
+    foreach entityType {comps components} {
+        if {![catch {set ids [hm_getmark $entityType 1]}] && [llength $ids] > 0} {
+            set compIds $ids
+            break
+        }
+    }
+    foreach entityType {elems elements} {
+        if {![catch {set ids [hm_getmark $entityType 1]}] && [llength $ids] > 0} {
+            set selectedElemIds $ids
+            break
+        }
+    }
+
+    set candidates {}
+    if {[llength $compIds] > 0} {
+        foreach compId [RB2W::uniq $compIds] {
+            foreach eid [RB2W::getElemsByComp $compId] {
+                if {[RB2W::elemIsRBE2 $eid]} { lappend candidates $eid }
+            }
+        }
+    } else {
+        foreach eid [RB2W::uniq $selectedElemIds] {
+            if {[RB2W::elemIsRBE2 $eid]} { lappend candidates $eid }
+        }
+    }
+    RB2W::clearUnusedRBE2SelectionMarks
+    return [RB2W::uniq $candidates]
+}
+
+proc ::RB2W::elementIncidenceForNode {nodeId} {
+    set queried 0
+    foreach dn {elems elements} {
+        if {![catch {set elemIds [hm_getvalue nodes id=$nodeId dataname=$dn]}]} {
+            set queried 1
+            set elemIds [RB2W::uniq $elemIds]
+            if {[llength $elemIds] > 0} { return [list 1 $elemIds] }
+        }
+    }
+
+    foreach selector [list [list "by node id" $nodeId] [list "by node" $nodeId] [list "by nodes" $nodeId]] {
+        catch {*clearmark elems 2}
+        if {![catch {eval *createmark elems 2 $selector}]} {
+            set queried 1
+            set elemIds {}
+            catch {set elemIds [hm_getmark elems 2]}
+            catch {*clearmark elems 2}
+            set elemIds [RB2W::uniq $elemIds]
+            if {[llength $elemIds] > 0} { return [list 1 $elemIds] }
+        }
+    }
+    catch {*clearmark elems 2}
+    return [list $queried {}]
+}
+
+proc ::RB2W::resolveUnusedRBE2InternalIds {solverIds} {
+    set solverIds [RB2W::uniq $solverIds]
+    array set requested {}
+    array set resolved {}
+    foreach solverId $solverIds { set requested($solverId) 1 }
+
+    # The FEM contains solver IDs.  HyperMesh marks are database selections,
+    # so first resolve each solver ID through the element ID pools.
+    set poolNames {}
+    foreach entityType {elems elements} {
+        if {![catch {set names [hm_getidpools $entityType name]}]} {
+            set poolNames [concat $poolNames $names]
+        }
+    }
+    set poolNames [lsort -unique $poolNames]
+    foreach solverId $solverIds {
+        foreach poolName $poolNames {
+            if {[catch {set internalId [hm_getinternalid $poolName $solverId -bypoolname]}]} { continue }
+            if {$internalId eq "" || $internalId == 0} { continue }
+            if {[RB2W::elemIsRBE2 $internalId]} {
+                set resolved($solverId) $internalId
+                break
+            }
+        }
+    }
+
+    # Most HM2019 models have matching solver/internal element IDs.  Verify
+    # that case against the live database before considering a model-wide
+    # fallback scan.
+    foreach solverId $solverIds {
+        if {![info exists resolved($solverId)] && [RB2W::elemIsRBE2 $solverId]} {
+            set resolved($solverId) $solverId
+        }
+    }
+
+    # Some HM2019 templates do not expose element pools consistently.  Fall
+    # back to the old workflow's principle: start from database RBE2 IDs and
+    # compare their solver IDs, never use FEM IDs directly as mark IDs.
+    set needFallback 0
+    foreach solverId $solverIds {
+        if {![info exists resolved($solverId)]} { set needFallback 1; break }
+    }
+    if {$needFallback} {
+        set candidates [lindex [RB2W::markRigidLinkCandidates 2] 1]
+        foreach internalId $candidates {
+            set solverInfo ""
+            foreach entityType {elems elements} {
+                if {![catch {set solverInfo [hm_getsolverid $entityType $internalId -byid]}] && [llength $solverInfo] > 0} {
+                    break
+                }
+            }
+            if {[llength $solverInfo] == 0} { continue }
+            set solverId [lindex $solverInfo 0]
+            if {[info exists requested($solverId)] && ![info exists resolved($solverId)]} {
+                set resolved($solverId) $internalId
+            }
+        }
+    }
+
+    set internalIds {}
+    set unresolved {}
+    foreach solverId $solverIds {
+        if {[info exists resolved($solverId)]} {
+            lappend internalIds $resolved($solverId)
+        } else {
+            lappend unresolved $solverId
+        }
+    }
+    return [dict create \
+        internal_ids [RB2W::uniq $internalIds] \
+        unresolved_solver_ids [RB2W::uniq $unresolved]]
+}
+
+proc ::RB2W::markUnusedRBE2ForDelete {solverIds} {
+    set resolution [RB2W::resolveUnusedRBE2InternalIds $solverIds]
+    set elemIds [dict get $resolution internal_ids]
+    set unresolved [dict get $resolution unresolved_solver_ids]
+    if {[llength $unresolved] > 0} {
+        RB2W::log "Unused RBE2 mark skipped unresolved FEM solver IDs: $unresolved"
+    }
+    if {[llength $elemIds] == 0} { return "" }
+    foreach entityType {elems elements} {
+        catch {*clearmark $entityType 1}
+        catch {*clearmark $entityType 2}
+        foreach prefix [list [list *createmark $entityType 1 "by id only"] [list *createmark $entityType 1]] {
+            if {![catch {eval [concat $prefix $elemIds]}]} {
+                set marked {}
+                catch {set marked [hm_getmark $entityType 1]}
+                if {[llength $marked] > 0} {
+                    catch {*marktousermark $entityType 1}
+                    return $entityType
+                }
+            }
+            catch {*clearmark $entityType 1}
+        }
+    }
+    return ""
+}
+
+proc ::RB2W::restoreUnusedRBE2DeleteMark {elemIds} {
+    # hm_callpanel initializes the panel's collector and can clear mark 1.
+    # Rebuild both marks from the IDs after the panel event loop starts.
+    RB2W::markUnusedRBE2ForDelete $elemIds
+}
+
+proc ::RB2W::openPendingUnusedRBE2DeletePanel {} {
+    variable pendingUnusedRBE2DeleteIds
+    variable unusedRBE2DeleteScheduled
+    set unusedRBE2DeleteScheduled 0
+    set elemIds $pendingUnusedRBE2DeleteIds
+    set pendingUnusedRBE2DeleteIds {}
+    if {[llength $elemIds] == 0} { return }
+
+    if {[RB2W::markUnusedRBE2ForDelete $elemIds] eq ""} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+            "Python 已返回未使用 RBE2，但这些 ID 无法写入当前模型的 element mark。" \
+            "Python returned unused RBE2 IDs, but they could not be written to the current model's element mark."]
+        return
+    }
+
+    catch {hm_usermessage [::HWFlow::txt \
+        "未使用 RBE2 已预选；请在 Delete 面板复核后确认删除。" \
+        "Unused RBE2 elements are preselected; review and confirm in the Delete panel."]}
+
+    # Let Delete finish initializing, then restore the selection it may clear.
+    after idle [list ::RB2W::restoreUnusedRBE2DeleteMark $elemIds]
+    foreach panelName {delete Delete} {
+        if {![catch {hm_callpanel $panelName}]} { return }
+        after idle [list ::RB2W::restoreUnusedRBE2DeleteMark $elemIds]
+        if {![catch {hm_pushpanel $panelName}]} { return }
+    }
+
+    tk_messageBox -icon warning -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+        "已识别 [llength $elemIds] 个未使用 RBE2，但无法自动进入 Delete 面板；选择已保留在 element mark 1 / user mark。" \
+        "Found [llength $elemIds] unused RBE2 elements, but the Delete panel could not be opened; the selection remains on element mark 1 / user mark."]
+}
+
+proc ::RB2W::queueUnusedRBE2DeletePanel {elemIds} {
+    variable pendingUnusedRBE2DeleteIds
+    variable unusedRBE2DeleteScheduled
+    set pendingUnusedRBE2DeleteIds [RB2W::uniq $elemIds]
+    if {[llength $pendingUnusedRBE2DeleteIds] == 0} { return 0 }
+    if {!$unusedRBE2DeleteScheduled} {
+        set unusedRBE2DeleteScheduled 1
+        after idle ::RB2W::openPendingUnusedRBE2DeletePanel
+    }
+    return 1
+}
+
+proc ::RB2W::runFindUnusedRBE2Legacy {} {
+    set code [catch {set candidateIds [RB2W::selectedUnusedRBE2Scope]} err]
+    if {$code} {
+        tk_messageBox -icon error -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message $err
+        return
+    }
+    if {[llength $candidateIds] == 0} {
+        tk_messageBox -icon info -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+            "选择范围内没有找到 RBE2。" "No RBE2 elements were found in the selected scope."]
+        return
+    }
+
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] \
+            [::HWFlow::txt "正在检查中心节点连接关系..." "Checking center-node connectivity..."] \
+            0]
+    }
+
+    set detectCode [catch {
+        set rows {}
+        set incidence [dict create]
+        set uncertain 0
+        set total [llength $candidateIds]
+        set index 0
+        foreach eid $candidateIds {
+            incr index
+            set center [RB2W::rigidCenterNode $eid]
+            if {$center eq "" || $center == 0} {
+                incr uncertain
+                continue
+            }
+            set query [RB2W::elementIncidenceForNode $center]
+            set attached [lindex $query 1]
+            if {![lindex $query 0] || [lsearch -exact $attached $eid] < 0} {
+                incr uncertain
+                continue
+            }
+            lappend rows [dict create eid $eid center $center]
+            dict set incidence $center $attached
+
+            if {$progressOpened && [llength [info commands ::HWFlow::progressUpdate]] > 0 &&
+                ($index == $total || ($index % 100) == 0)} {
+                set pct [expr {10.0 + 80.0 * ($index / double($total))}]
+                catch {::HWFlow::progressUpdate $pct \
+                    [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] \
+                    [::HWFlow::txt "正在检查 $index/$total" "Checking $index/$total"] \
+                    1}
+            }
+        }
+
+        set unusedIds [RB2W::unusedRBE2IdsFromIncidence $rows $incidence]
+        set usedCount [expr {[llength $candidateIds] - [llength $unusedIds] - $uncertain}]
+    } detectErr detectOpts]
+
+    # The HyperMesh Delete panel owns its own event loop.  Always destroy the
+    # toolkit progress toplevel before handing control to that panel.
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        catch {::HWFlow::progressClose [::HWFlow::txt "连接关系检查完成。" "Connectivity check finished."] 100.0}
+    }
+    if {$detectCode} {
+        tk_messageBox -icon error -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message $detectErr
+        RB2W::log "Unused RBE2 check failed: $detectErr"
+        return
+    }
+
+    RB2W::log "Unused RBE2 check: candidates=[llength $candidateIds], used=$usedCount, unused=[llength $unusedIds], uncertain=$uncertain"
+
+    if {[llength $unusedIds] == 0} {
+        tk_messageBox -icon info -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+            "未发现中心节点完全没有其他单元连接的 RBE2。无法确认连接关系的候选已保留：$uncertain。" \
+            "No RBE2 has a center node without another element connection. Candidates with uncertain incidence were retained: $uncertain."]
+        return
+    }
+
+    if {![RB2W::queueUnusedRBE2DeletePanel $unusedIds]} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+            "已识别 [llength $unusedIds] 个未使用 RBE2，但无法自动进入 Delete 面板；选择已保留在元素 mark 1 / user mark。" \
+            "Found [llength $unusedIds] unused RBE2 elements, but the Delete panel could not be opened automatically; the selection remains on element mark 1 / user mark."]
+    }
+}
+
+proc ::RB2W::runFindUnusedRBE2FromSettings {} {
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        set progressOpened [::HWFlow::progressOpen \
+            [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] \
+            [::HWFlow::txt "准备导出全模型 FEM..." "Preparing the full-model FEM export..."] \
+            0]
+    }
+
+    set analysisCode [catch {
+        set run [::RB2W::runPythonUnusedRBE2Analysis 5.0 95.0]
+        set payload [dict get $run payload]
+        set summary [dict get $payload summary]
+        set unusedIds [dict get $summary unused_rbe2_ids]
+        set rbe2Count [dict get $summary rbe2_count]
+        set usedCount [dict get $summary used_rbe2_count]
+        set taskDir [dict get $run task_dir]
+    } analysisErr analysisOpts]
+
+    ::HybridCore::closeLog
+    if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+        if {$analysisCode} {
+            set closeMessage [::HWFlow::txt "未使用 RBE2 分析失败。" "Unused RBE2 analysis failed."]
+        } else {
+            set closeMessage [::HWFlow::txt "未使用 RBE2 分析完成。" "Unused RBE2 analysis finished."]
+        }
+        catch {::HWFlow::progressClose $closeMessage 100.0}
+    }
+
+    if {$analysisCode} {
+        set diagnostic [::HWFlow::txt \
+            "$analysisErr\n\n任务目录已保留在 runtime/tasks/shell_washer_hole_rbe2，供检查 full_model.fem、operation.log 和 Python 日志。" \
+            "$analysisErr\n\nThe task directory is retained under runtime/tasks/shell_washer_hole_rbe2 for inspection of full_model.fem, operation.log, and Python logs."]
+        RB2W::log "Unused RBE2 Python analysis failed: $analysisErr"
+        tk_messageBox -icon error -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message $diagnostic
+        return
+    }
+
+    RB2W::log "Unused RBE2 Python analysis: rbe2=$rbe2Count used=$usedCount unused=[llength $unusedIds] taskDir=$taskDir"
+    if {$rbe2Count == 0} {
+        tk_messageBox -icon info -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+            "全模型 FEM 中没有找到 RBE2 单元。" "No RBE2 elements were found in the full-model FEM."]
+        return
+    }
+    if {[llength $unusedIds] == 0} {
+        tk_messageBox -icon info -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+            "检查完成：RBE2=$rbe2Count，全部中心节点均被其他单元连接。" \
+            "Check finished: RBE2=$rbe2Count; every center node is referenced by another element."]
+        return
+    }
+
+    if {![RB2W::queueUnusedRBE2DeletePanel $unusedIds]} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "检测未使用 RBE2" "Find Unused RBE2"] -message [::HWFlow::txt \
+            "Python 识别出 [llength $unusedIds] 个未使用 RBE2，但无法自动进入 Delete 面板；选择已保留在 element mark 1 / user mark。" \
+            "Python found [llength $unusedIds] unused RBE2 elements, but the Delete panel could not be opened automatically; the selection remains on element mark 1 / user mark."]
+    }
 }
 
 proc ::RB2W::overallStatus {overallPct compIndex compTotal compName loopIndex loopTotal candidateHoles created skipped {force 0}} {
@@ -2056,7 +2474,11 @@ proc ::RB2W::runAction {} {
 }
 
 proc ::RB2W::runSettings {} {
-    ::RB2W::showPanel 1
+    variable ui
+    if {![::RB2W::showPanel 1]} { return }
+    if {[info exists ui(action)] && $ui(action) eq "find_unused_rbe2"} {
+        ::RB2W::runFindUnusedRBE2FromSettings
+    }
 }
 
 foreach hybridFile {bridge.tcl exporter.tcl executor.tcl workflow.tcl} {

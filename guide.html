@@ -1098,7 +1098,7 @@
                             <span class="card-badge connector">连接</span>
                         </div>
                         <div class="card-path">contact_setup.tcl</div>
-                        <div class="card-desc">一键选择两个零件，系统智能匹配相对的邻近面，自动创建接触面与接触对，支持手动修剪单元。</div>
+                        <div class="card-desc">连续分两次使用 HyperMesh 原生 Face 选择器选取候选单元，筛选公共区域后创建相向接触面与 OptiStruct CONTACT。</div>
                         <a href="#mod-contact-setup" class="card-btn">
                             <svg viewBox="0 0 24 24"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/></svg>
                             查看详情 & 参数
@@ -1313,11 +1313,12 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             该模块主要用于处理车身结构件之间的焊缝面（Seam Surface）网格创建。它打破了传统几何 Ruled 面划分网格的低效率，采用了在已有网格上直接投影的流程：
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
-                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理；自由边上的单节点仍作为对应闭环种子；彼此不连续的多个节点分别作为闭环种子。多个种子都位于普通闭合自由边时，由 Tcl 直接局部追踪并去重，不再导出源/目标 component；分叉、开放或非流形边才回退 Python。仅当恰好选择一个内部节点时，模块使用 HyperMesh 原生选择导出将该节点所在 source component 写为 FEM，Python 一次识别该节点所在连通壳区域的全部闭合自由边，再将有序节点路径一次性返回 Tcl。</li>
+                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理；自由边上的单节点作为对应闭环种子；彼此不连续的多个节点分别作为闭环种子。所有自由边界种子都由 Tcl 按局部一环邻接逐点追踪并按闭环去重，不导出源/目标 component，也不回退 Python；分叉、开放、自交或非流形边界会直接拒绝。仅当恰好选择一个内部节点时，模块使用 HyperMesh 原生选择导出将该节点所在 source component 写为 FEM，Python 一次识别该节点所在连通壳区域的全部闭合自由边，再将有序节点路径一次性返回 Tcl。</li>
                             <li><strong>印记区网格重构 (Remeshing)</strong>：在印记边界内，自动计算重构范围，并将投影线与目标网格强行对齐重划分。</li>
                             <li><strong>自动生成 Ruled 连接带</strong>：自动利用两组特征点对齐，生成两个零件之间均匀的 shell 网格连接带，并将新生成的焊缝网格归类至指定组件。</li>
-                            <li><strong>局部失败隔离</strong>：闭环首次按开放节点列表对局部目标 patch 执行 imprint；若目标节点无法唯一匹配，则回滚并对同一局部 patch 以 <code>close_node_list=1</code> 重试一次，不再扫描或 imprint 整个目标 component。第二次仍失败时只回滚并跳过该闭环；整批完成后在 <code>MESH_SEAM_WELD_FAILED_MARKERS</code> 中创建临时节点标记失败位置。</li>
-                            <li><strong>批量加速</strong>：多个简单边界种子直接由 Tcl 按一环邻接追踪所选闭环，避免构造 component 二进制快照；复杂边界才使用 Python component plan。内部单节点分支仍通过原生 <code>*feoutput_select</code> 导出一次 FEM，由 Python 返回全部源闭环。随后为目标网格建立空间索引，每个闭环只对附近的局部目标 elements 执行 imprint，再在 Tcl 内存中完成目标匹配、方向校正和连续性检查；失败重试也保持相同的局部 elements 范围。</li>
+                            <li><strong>局部失败隔离与分级重试</strong>：闭环首次按开放节点列表对当前局部目标 patch 执行 imprint；失败后先回滚，扩大局部 patch 并以 <code>close_node_list=1</code> 重试。内部点批量模式若再次失败，才对目标 component 做一次最终闭合重试。每次尝试都处于独立撤销事务中，最终失败只跳过当前闭环。</li>
+                            <li><strong>批量性能与可靠性</strong>：内部单节点分支通过原生 <code>*feoutput_select</code> 导出一次 FEM，由 Python 返回全部有序源闭环及中心。Tcl 随后批量读取节点坐标、只建立一次目标索引并一次性准备局部 patch；每个闭环直接进入与手动选择节点排相同的 imprint 流程，不再逐环扫描整个目标组件。只有某次局部 imprint 失败并成功回滚后，才刷新索引、扩大 patch 并重试。</li>
+                            <li><strong>可反馈诊断</strong>：失败会按目标准备、imprint、目标匹配、目标连续性、automesh 或撤销事务分类，显示原因和检查建议，并在任务目录写出 UTF-8 纯文本 <code>mesh_seam_weld_failure_report.txt</code>。反馈问题时同时提供该文件和 <code>operation.log</code> 即可。</li>
                             <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
                         </ul>
                     </div>
@@ -1333,7 +1334,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">2</span>
                                 <div class="step-title">选择源 node path</div>
-                                <div class="step-detail">多选连续节点时使用所选开放路径；自由边上的单节点自动扩展为对应闭环；多个不连续的简单边界种子由 Tcl 逐环追踪并自动去重，复杂拓扑自动回退 Python。仅选择一个内部节点时，原生导出其 source component，Python 自动枚举该节点所在连通壳区域的全部闭合自由边。</div>
+                                <div class="step-detail">多选连续节点时使用所选开放路径；自由边上的单节点自动由 Tcl 扩展为对应闭环；多个不连续的自由边界种子由 Tcl 逐环追踪并自动去重，异常拓扑直接拒绝且不回退 Python。仅选择一个内部节点时，原生导出其 source component，Python 自动枚举该节点所在连通壳区域的全部闭合自由边。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">3</span>
@@ -1343,7 +1344,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">4</span>
                                 <div class="step-title">配置生成参数</div>
-                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐闭环执行 <code>imprint_nodelist</code>、目标路径连续性校验和 ruled 网格创建。首次局部开放 imprint 失败时，会在同一局部 patch 上闭合重试；再次失败则回滚、跳过并继续下一个。结束时请检查失败统计及临时标记节点。</div>
+                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序一次准备全部局部 patch，再逐闭环执行 <code>imprint_nodelist</code>、目标路径连续性校验和 ruled 网格创建。失败时才刷新索引并尝试扩大局部闭合 imprint；内部点模式还会进行一次目标 component 范围最终重试。仍失败时请检查临时标记节点，并反馈完成窗口给出的失败报告和运行日志。</div>
                             </div>
                         </div>
                     </div>
@@ -1472,6 +1473,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <li><strong>自动识别标准 Washer 孔环</strong>：扫描选定 Component 的自由边（Free Edges）圆孔，自动筛选孔径处于 <code>6.0mm ~ 30.0mm</code> 之间的孔。</li>
                             <li><strong>椭圆孔（Oval Holes）适应性</strong>：支持椭圆孔识别，并具有中心偏移容差与长短轴拟合校对功能。</li>
                             <li><strong>防重复建模机制</strong>：在执行前，工具会按孔边界节点集合检查已有 RIGIDS；还可检查源组件与已有输出组件（例如 <code>AUTO_RBE2_&lt;Source&gt;</code>）。发现重复候选会跳过并报告，防止重复建模。</li>
+                            <li><strong>未使用 RBE2 清理</strong>：在 More / 设置子页点击按钮后直接导出全模型 FEM，并由 Python 批量检查所有 RBE2。只有中心节点除自身外未被任何其他单元引用的 RBE2 才会被预选；被 CBEAM、其他 RBE2、RBE3 或任意其他单元连接的候选均视为已使用。识别后自动进入 Delete 面板供人工复核。</li>
                         </ul>
                     </div>
 
@@ -1497,6 +1499,11 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                                 <span class="step-num">4</span>
                                 <div class="step-title">执行生成</div>
                                 <div class="step-detail">点击 <strong>“开始创建 RBE2”</strong>。如需全覆盖重写，可以运行 <strong>“重建模式”</strong>。生成的 RBE2中心节点位于圆孔几何中心，依赖节点会自动连接到孔边缘。</div>
+                            </div>
+                            <div class="step-item">
+                                <span class="step-num">5</span>
+                                <div class="step-title">检查未使用 RBE2</div>
+                                <div class="step-detail">在 More / 设置子页点击 <strong>“检测未使用 RBE2”</strong> 后无需选择单元。工具自动导出全模型 FEM，由 Python 按中心节点的全部单元连接关系筛选，并将真正未连接的 RBE2 预选到 Delete 面板。</div>
                             </div>
                         </div>
                     </div>
@@ -1690,25 +1697,25 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                     <div class="detail-tabs-nav"><button class="detail-tab-btn active" onclick="switchTab(this, 'bolt-desc')">功能与原理</button><button class="detail-tab-btn" onclick="switchTab(this, 'bolt-steps')">使用步骤</button><button class="detail-tab-btn" onclick="switchTab(this, 'bolt-params')">参数配置表</button><button class="detail-tab-btn" onclick="switchTab(this, 'bolt-safety')">安全边界</button></div>
                     <div class="detail-tab-pane active" id="bolt-desc">
                         <p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">模块将用户选区导出为精简 OptiStruct FEM，由 Python 直接解析 RBE2 独立中心节点、完成共轴分组，并生成只包含新增 <code>CBEAM/CBAR</code>、属性和材料的增量 FEM。随后 Tcl 在当前 HyperMesh 会话中导入增量文件并核验每个梁的端点。梁单元按推算的偶数名义孔径归入 <code>BOLT_Dxx_CBEAM</code>（或 CBAR）组件。</p>
-                        <ul style="margin-left:20px; margin-bottom:20px; font-size:14px; color:var(--text-secondary);"><li><strong>共轴分组</strong>：平面 RIGIDS 只沿其检测到的法线方向参加分组；空间型 RIGIDS 仅组成的组会预览并跳过，避免在不确定方向上错误连梁。</li><li><strong>直径与属性</strong>：按中心至依赖节点的有效最小半径推算直径并向下取偶数；未指定属性时会创建或复用对应 PBAR/PBEAM 与默认 MAT1。</li><li><strong>More / 高级清理</strong>：可按 <code>components</code> 批量提取组件中的 RIGIDS，或按 <code>elements</code> 直接选择 RIGIDS。<strong>检测未用 Shell RBE2</strong> 会按当前规则筛出未参与连接的候选，创建标记并预选到 Delete 面板，确认后可一键删除多余创建的 RIGIDS。</li></ul>
+                        <ul style="margin-left:20px; margin-bottom:20px; font-size:14px; color:var(--text-secondary);"><li><strong>共轴分组</strong>：平面 RIGIDS 只沿其检测到的法线方向参加分组；空间型 RIGIDS 仅组成的组会预览并跳过，避免在不确定方向上错误连梁。</li><li><strong>直径与属性</strong>：按中心至依赖节点的有效最小半径推算直径并向下取偶数；未指定属性时会创建或复用对应 PBAR/PBEAM 与默认 MAT1。</li></ul>
                     </div>
-                    <div class="detail-tab-pane" id="bolt-steps"><div class="step-list"><div class="step-item"><span class="step-num">1</span><div class="step-title">配置输入范围</div><div class="step-detail">在 More / 执行面板选择 <strong>elements</strong>（直接选 RIGIDS）或 <strong>components</strong>（扫描所选组件内的 RIGIDS）。</div></div><div class="step-item"><span class="step-num">2</span><div class="step-title">设定分组规则</div><div class="step-detail">建议先用 <code>axisMode=AUTO</code>；按装配方向需要可指定 X/Y/Z，并确认 <code>gapTol</code> 与 <code>offsetTol</code>。</div></div><div class="step-item"><span class="step-num">3</span><div class="step-title">预览后创建</div><div class="step-detail">首次建议开启 <code>dryRun</code>，检查分组；确认后生成 CBEAM/CBAR。</div></div><div class="step-item"><span class="step-num">4</span><div class="step-title">清理未用 RIGIDS</div><div class="step-detail">点击“检测未用 Shell RBE2”，工具会建立 <code>UNUSED_SHELL_RBE2_MARKERS</code> 标记并进入 Delete 面板；复核选择后确认删除。</div></div></div></div>
+                    <div class="detail-tab-pane" id="bolt-steps"><div class="step-list"><div class="step-item"><span class="step-num">1</span><div class="step-title">配置输入范围</div><div class="step-detail">在 More / 执行面板选择 <strong>elements</strong>（直接选 RIGIDS）或 <strong>components</strong>（扫描所选组件内的 RIGIDS）。</div></div><div class="step-item"><span class="step-num">2</span><div class="step-title">设定分组规则</div><div class="step-detail">建议先用 <code>axisMode=AUTO</code>；按装配方向需要可指定 X/Y/Z，并确认 <code>gapTol</code> 与 <code>offsetTol</code>。</div></div><div class="step-item"><span class="step-num">3</span><div class="step-title">预览后创建</div><div class="step-detail">首次建议开启 <code>dryRun</code>，检查分组；确认后生成 CBEAM/CBAR。</div></div></div></div>
                     <div class="detail-tab-pane" id="bolt-params"><div class="param-table-container"><table class="param-table"><thead><tr><th>参数 Key</th><th>默认值</th><th>说明与作用</th></tr></thead><tbody>
                         <tr><td><code>selectMode</code></td><td><code>components</code></td><td>输入模式：默认从所选组件中筛取 RIGIDS；也可切换为 <code>elements</code> 直接选择 RIGIDS。</td></tr><tr><td><code>axisMode</code></td><td><code>AUTO</code></td><td>分组轴向：<code>AUTO</code>、<code>X</code>、<code>Y</code> 或 <code>Z</code>。</td></tr><tr><td><code>gapTol / offsetTol</code></td><td><code>100.0 / 5.0</code></td><td>相邻层沿轴向最大间距与横向偏心容差；超过任一条件不连梁。</td></tr><tr><td><code>minGroupSize / minBeamLength</code></td><td><code>2 / 0.001</code></td><td>最少分组记录数及允许创建的最短梁长。</td></tr><tr><td><code>planeAbsTol / planeFlatRatio</code></td><td><code>0.5 / 0.12</code></td><td>判定 RIGIDS 是否为平面型并限制其可用分组轴的容差。</td></tr><tr><td><code>radialAbsTol / radialRelTol</code></td><td><code>0.5 / 0.08</code></td><td>依赖节点半径一致性筛选的绝对/相对容差，用于可靠估算螺栓直径。</td></tr><tr><td><code>elemType / compPrefix</code></td><td><code>CBEAM / BOLT</code></td><td>输出梁类型及输出组件前缀。</td></tr><tr><td><code>propName</code></td><td><code>空</code></td><td>指定已有 1D 属性；留空时工具按直径创建或复用属性和默认材料。</td></tr><tr><td><code>dryRun</code></td><td><code>0</code></td><td>开启后仅预览分组、不创建或导入增量 FEM，建议首次运行使用。</td></tr>
                     </tbody></table></div></div>
-                    <div class="detail-tab-pane" id="bolt-safety"><div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>分组结果必须复核</h4><p>该工具仅连接满足几何容差的相邻中心节点，不会移动节点；仍应由用户确认每组代表同一物理螺栓。未用 RIGIDS 的删除为“筛选并预选”流程，Delete 面板需人工确认，避免误删合法但暂未参与当前规则的连接。</p></div></div><ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>不足两个可用 RIGIDS、纯空间型分组、过短梁或不满足平面/共轴判定的候选会跳过。</li><li><code>gapTol</code>、<code>offsetTol</code> 过大可能串接相邻螺栓，过小则可能漏连；应与模型单位和装配公差匹配。</li><li>自动生成的 PBAR/PBEAM 与 MAT1 是可求解的默认兜底，不替代项目的材料、截面和预紧规范。</li></ul></div>
+                    <div class="detail-tab-pane" id="bolt-safety"><div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>分组结果必须复核</h4><p>该工具仅连接满足几何容差的相邻中心节点，不会移动节点；仍应由用户确认每组代表同一物理螺栓。</p></div></div><ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>不足两个可用 RIGIDS、纯空间型分组、过短梁或不满足平面/共轴判定的候选会跳过。</li><li><code>gapTol</code>、<code>offsetTol</code> 过大可能串接相邻螺栓，过小则可能漏连；应与模型单位和装配公差匹配。</li><li>自动生成的 PBAR/PBEAM 与 MAT1 是可求解的默认兜底，不替代项目的材料、截面和预紧规范。</li></ul></div>
                 </div>
             </section>
 
             <!-- Module: Contact Setup -->
             <section id="mod-contact-setup" class="module-section" data-module="contact_setup">
                 <h1 class="section-title">6. 接触创建 (Contact Setup)</h1>
-                <div class="module-detail"><div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>两组件接触面与接触组创建</span></div><div class="detail-path-badge">modules/contact_setup.tcl</div></div>
+                <div class="module-detail"><div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>两侧 Face 接触面与接触组创建</span></div><div class="detail-path-badge">modules/contact_setup.tcl</div></div>
                     <div class="detail-tabs-nav"><button class="detail-tab-btn active" onclick="switchTab(this, 'contact-desc')">功能与原理</button><button class="detail-tab-btn" onclick="switchTab(this, 'contact-steps')">使用步骤</button><button class="detail-tab-btn" onclick="switchTab(this, 'contact-params')">参数配置表</button><button class="detail-tab-btn" onclick="switchTab(this, 'contact-safety')">安全边界</button></div>
-                    <div class="detail-tab-pane active" id="contact-desc"><p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">模块严格选择两个组件，提取各自面侧的单元并自动或手动确定主面，创建可继续修剪的接触面；可选创建求解器接触 group。适合建立轻量的两部件接触初始定义。</p></div>
-                    <div class="detail-tab-pane" id="contact-steps"><div class="step-list"><div class="step-item"><span class="step-num">1</span><div class="step-title">选择两个组件</div><div class="step-detail">必须且只能选择两个 component。</div></div><div class="step-item"><span class="step-num">2</span><div class="step-title">定义接触</div><div class="step-detail">设置接触类型、主面策略和摩擦系数。</div></div><div class="step-item"><span class="step-num">3</span><div class="step-title">创建并修剪</div><div class="step-detail">创建接触面/组；如有需要，使用模块的 Trim 操作从接触面移除选定单元。</div></div></div></div>
-                    <div class="detail-tab-pane" id="contact-params"><div class="param-table-container"><table class="param-table"><thead><tr><th>参数 Key</th><th>默认值</th><th>说明与作用</th></tr></thead><tbody><tr><td><code>contact_type</code></td><td><code>SLIDE</code></td><td>可选 <code>SLIDE</code>、<code>TIE</code>、<code>STICK</code>、<code>FREEZE</code>、<code>FRICTIONLESS</code> 或 <code>FRICTION</code>。</td></tr><tr><td><code>main_side</code></td><td><code>AUTO</code></td><td>主面策略：自动、第一组件或第二组件。</td></tr><tr><td><code>friction</code></td><td><code>0.20</code></td><td>摩擦接触记录使用的摩擦系数。</td></tr><tr><td><code>result_prefix</code></td><td><code>AUTO_CONTACT</code></td><td>生成接触面和接触 group 的名称前缀。</td></tr><tr><td><code>keep_face_components / try_group</code></td><td><code>1 / 1</code></td><td>是否保留实体自由面临时组件，以及是否尝试创建求解器接触 group。</td></tr></tbody></table></div></div>
-                    <div class="detail-tab-pane" id="contact-safety"><div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>接触定义需要求解器级复核</h4><p>自动主面和面侧识别仅提供起点；接触方向、法向、覆盖范围、摩擦值及接触卡是否被当前求解器完全支持，均应在导出前检查。修剪操作会修改生成的接触面选择范围。</p></div></div><ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>不是通用的多部件、间隙搜索或复杂接触自动化工具；一次仅处理两个组件。</li><li>实体组件可能生成自由面临时组件；关闭保留选项前先确认这些临时面无需复用。</li></ul></div>
+                    <div class="detail-tab-pane active" id="contact-desc"><p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">模块在一次连续选择会话中调用两次 HyperMesh 原生 Face 选择器，再以双向邻近关系筛出空间公共覆盖部分。节点与坐标使用 mark 批量读取，随后创建法向相向的 contact surface 及 OptiStruct CONTACT group。</p></div>
+                    <div class="detail-tab-pane" id="contact-steps"><div class="step-list"><div class="step-item"><span class="step-num">1</span><div class="step-title">连续选择两侧 Face</div><div class="step-detail">确认 A 侧后会直接进入 B 侧选择，完成两侧后才恢复工具窗口。</div></div><div class="step-item"><span class="step-num">2</span><div class="step-title">定义接触</div><div class="step-detail">设置 SLIDE、STICK 或 FREEZE 类型和主面策略。</div></div><div class="step-item"><span class="step-num">3</span><div class="step-title">创建并修剪</div><div class="step-detail">从公共覆盖区域创建相向接触面/组；如有需要，使用 Trim 移除单元。</div></div></div></div>
+                    <div class="detail-tab-pane" id="contact-params"><div class="param-table-container"><table class="param-table"><thead><tr><th>参数 Key</th><th>默认值</th><th>说明与作用</th></tr></thead><tbody><tr><td><code>contact_type</code></td><td><code>STICK</code></td><td>OptiStruct CONTACT 的 <code>TYPE</code>，可选 <code>SLIDE</code>、<code>STICK</code>、<code>FREEZE</code>。</td></tr><tr><td><code>main_side</code></td><td><code>AUTO</code></td><td>主面策略：自动、第一次选择或第二次选择。</td></tr><tr><td><code>result_prefix</code></td><td><code>AUTO_CONTACT</code></td><td>生成接触面和接触 group 的名称前缀。</td></tr><tr><td><code>try_group</code></td><td><code>1</code></td><td>是否创建并校验 OptiStruct CONTACT group。</td></tr></tbody></table></div></div>
+                    <div class="detail-tab-pane" id="contact-safety"><div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>接触定义需要求解器级复核</h4><p>自动主面和参考单元法向校正仅提供起点；接触方向、法向、覆盖范围、摩擦值及接触卡是否被当前求解器完全支持，均应在导出前检查。修剪操作会修改生成的接触面选择范围。</p></div></div><ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>不是通用的间隙搜索或复杂接触自动化工具；接触范围以两次 Face 选择为准。</li><li>两次选择不能包含相同单元；创建前应确认选择的是相向两侧。</li></ul></div>
                 </div>
             </section>
 

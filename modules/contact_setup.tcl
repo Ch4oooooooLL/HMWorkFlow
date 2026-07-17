@@ -3,10 +3,10 @@
 # HyperMesh 2019 Tcl/Tk
 #
 # Lightweight workflow:
-#   1) pick two components
-#   2) detect the facing side of each component
-#   3) create a contact group that references the two surfaces
-#   4) optional trim mode removes picked elements from the surfaces
+#   1) pick the two contact regions separately with HyperMesh's face selector
+#   2) create two contact surfaces directly from the selected face elements
+#   3) orient both contact surfaces toward one another
+#   4) create a contact group that references the two surfaces
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -14,45 +14,51 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::ContactSetup {
-    variable VERSION "0.2"
+    variable VERSION "0.3"
     variable RULE_FILE [file join [::HWFlow::configDir] "contact_rules.txt"]
 
     variable cfg
     array set cfg {
-        contact_type         SLIDE
+        contact_type         STICK
         main_side            AUTO
-        friction             0.20
         result_prefix        AUTO_CONTACT
-        keep_face_components 1
         try_group            1
     }
 
     variable ui
     array set ui {
-        selectedComps ""
-        selectedText  "No components selected"
+        selectedElemsA ""
+        selectedElemsB ""
+        selectedText  "No contact faces selected"
+        selectionActive 0
+        selectionWindows ""
+        selectionAfter ""
+        selectionAutoCreate 0
         status        ""
     }
 
     variable last
     array set last {}
+
+    variable geometryElemNodes
+    variable geometryNodeXYZ
+    array set geometryElemNodes {}
+    array set geometryNodeXYZ {}
 }
 
 proc ::ContactSetup::defaultRuleText {} {
     return [join {
         {# Lightweight contact setup defaults.}
         {key|value|note}
-        {contact_type|SLIDE|SLIDE, TIE, STICK, FREEZE, FRICTIONLESS or FRICTION}
+        {contact_type|STICK|OptiStruct CONTACT type: SLIDE, STICK or FREEZE}
         {main_side|AUTO|AUTO, FIRST or SECOND}
-        {friction|0.20|stored parameter for frictional contacts}
         {result_prefix|AUTO_CONTACT|name prefix for generated contact surfaces/groups}
-        {keep_face_components|1|keep generated face components for solid components}
         {try_group|1|create solver contact group after contact surfaces}
     } "\n"]
 }
 
 proc ::ContactSetup::stateKeys {} {
-    return {contact_type main_side friction result_prefix keep_face_components try_group}
+    return {contact_type main_side result_prefix try_group}
 }
 
 proc ::ContactSetup::ensureRuleFile {} {
@@ -84,6 +90,9 @@ proc ::ContactSetup::loadRules {} {
     }
     if {[llength [info commands ::HWFlow::applyStateToArray]] > 0} {
         ::HWFlow::applyStateToArray contact_setup ::ContactSetup::cfg
+    }
+    if {$cfg(contact_type) ni {SLIDE STICK FREEZE}} {
+        set cfg(contact_type) STICK
     }
 }
 
@@ -144,9 +153,10 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     foreach key [::ContactSetup::stateKeys] {
         set ui($key) $cfg($key)
     }
-    set ui(selectedComps) ""
-    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
-    set ui(status) [::HWFlow::txt "选择两个 component 后直接创建接触面和接触 group。" "Select two components to create contact surfaces and a contact group."]
+    set ui(selectedElemsA) ""
+    set ui(selectedElemsB) ""
+    set ui(selectedText) [::HWFlow::txt "未选择接触面" "No contact faces selected"]
+    set ui(status) [::HWFlow::txt "依次选择两侧 Face 候选单元，筛选公共区域后创建相向接触。" "Pick both candidate faces; their common region will be used for opposing contact surfaces."]
 
     catch {destroy .contact_setup}
     set w .contact_setup
@@ -160,9 +170,9 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     label $w.main.title -text [::HWFlow::txt "Contact Setup" "Contact Setup"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
-    labelframe $w.main.sel -text [::HWFlow::txt "1. 组件选择" "1. Component Selection"] -padx 8 -pady 8
+    labelframe $w.main.sel -text [::HWFlow::txt "1. 接触面选择" "1. Contact Face Selection"] -padx 8 -pady 8
     grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
-    button $w.main.sel.pick -text [::HWFlow::txt "选择两个组件" "Pick Two Components"] -width 18 -command "::ContactSetup::pickComponents"
+    button $w.main.sel.pick -text [::HWFlow::txt "分两次选择 Face" "Pick Two Faces"] -width 18 -command "::ContactSetup::pickContactFaces"
     label $w.main.sel.info -textvariable ::ContactSetup::ui(selectedText) -width 78 -anchor w
     grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 8}
     grid $w.main.sel.info -row 0 -column 1 -sticky w
@@ -170,28 +180,22 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     labelframe $w.main.type -text [::HWFlow::txt "2. 接触定义" "2. Contact Definition"] -padx 8 -pady 8
     grid $w.main.type -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
     label $w.main.type.l_type -text [::HWFlow::txt "接触类型" "Contact type"] -anchor w
-    tk_optionMenu $w.main.type.m_type ::ContactSetup::ui(contact_type) SLIDE TIE STICK FREEZE FRICTIONLESS FRICTION
+    tk_optionMenu $w.main.type.m_type ::ContactSetup::ui(contact_type) SLIDE STICK FREEZE
     label $w.main.type.l_side -text [::HWFlow::txt "主面" "Main side"] -anchor w
     tk_optionMenu $w.main.type.m_side ::ContactSetup::ui(main_side) AUTO FIRST SECOND
-    label $w.main.type.l_fric -text [::HWFlow::txt "摩擦系数" "Friction"] -anchor w
-    entry $w.main.type.e_fric -textvariable ::ContactSetup::ui(friction) -width 10
     grid $w.main.type.l_type -row 0 -column 0 -sticky w -padx {0 6} -pady 2
     grid $w.main.type.m_type -row 0 -column 1 -sticky w -padx {0 16} -pady 2
     grid $w.main.type.l_side -row 0 -column 2 -sticky w -padx {0 6} -pady 2
     grid $w.main.type.m_side -row 0 -column 3 -sticky w -pady 2
-    grid $w.main.type.l_fric -row 1 -column 0 -sticky w -padx {0 6} -pady 2
-    grid $w.main.type.e_fric -row 1 -column 1 -sticky w -pady 2
 
     labelframe $w.main.opt -text [::HWFlow::txt "3. 输出" "3. Output"] -padx 8 -pady 8
     grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
     label $w.main.opt.l_prefix -text [::HWFlow::txt "结果名前缀" "Result prefix"] -anchor w
     entry $w.main.opt.e_prefix -textvariable ::ContactSetup::ui(result_prefix) -width 22
     checkbutton $w.main.opt.group -text [::HWFlow::txt "创建接触 group" "Create contact group"] -variable ::ContactSetup::ui(try_group)
-    checkbutton $w.main.opt.keep -text [::HWFlow::txt "保留实体自由面临时组件" "Keep solid free-face components"] -variable ::ContactSetup::ui(keep_face_components)
     grid $w.main.opt.l_prefix -row 0 -column 0 -sticky w -padx {0 6} -pady 2
     grid $w.main.opt.e_prefix -row 0 -column 1 -sticky w -pady 2
     grid $w.main.opt.group -row 1 -column 0 -columnspan 2 -sticky w -pady 2
-    grid $w.main.opt.keep -row 2 -column 0 -columnspan 2 -sticky w -pady 2
 
     label $w.main.status -textvariable ::ContactSetup::ui(status) -width 92 -anchor w
     grid $w.main.status -row 4 -column 0 -columnspan 4 -sticky ew
@@ -220,40 +224,124 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     tkwait window $w
 }
 
-proc ::ContactSetup::pickComponents {} {
+# HyperMesh 2019 supports face_edge_mode=1 and filter=6 on the native element
+# picker.  This starts in 2D-face mode and exposes only face / face-ext modes,
+# so the user selects a connected face without a Tcl-side component scan.
+proc ::ContactSetup::finishFaceSelectionSession {} {
+    variable ui
+    if {$ui(selectionAfter) ne ""} {
+        catch {after cancel $ui(selectionAfter)}
+    }
+    set ui(selectionAfter) ""
+    catch {::HWFlow::nativePanelSessionEnd $ui(selectionWindows)}
+    set ui(selectionWindows) ""
+    set ui(selectionActive) 0
+}
+
+proc ::ContactSetup::pickContactFaces {{autoCreate 0}} {
     variable ui
 
-    catch {*clearmark comps 1}
-    ::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt "请选择两个需要创建接触的 component" "Select two components for contact creation"]
-    set comps [hm_getmark comps 1]
-    if {[llength $comps] != 2} {
-        set ui(selectedComps) ""
-        set ui(selectedText) [::HWFlow::txt "需要且仅需要选择 2 个组件。" "Exactly 2 components are required."]
-        return
+    if {$ui(selectionActive)} {
+        return 0
     }
-    set ui(selectedComps) $comps
-    set names {}
-    foreach cid $comps {
-        lappend names [::HWFlow::componentName $cid]
+    set ui(selectedElemsA) ""
+    set ui(selectedElemsB) ""
+    set ui(selectionActive) 1
+    set ui(selectionAutoCreate) $autoCreate
+    set ui(selectionWindows) [::HWFlow::nativePanelSessionBegin]
+    set code [catch {
+        set elemsA [::HWFlow::nativeMarkPanelInSession elems 1 [::HWFlow::txt \
+            "选择第一侧接触 Face（中键确认）" \
+            "Select the first contact face (middle-click to accept)"] 1 6]
+    } err]
+    if {$code} {
+        ::ContactSetup::finishFaceSelectionSession
+        tk_messageBox -icon error -title [::HWFlow::txt "Contact Setup" "Contact Setup"] -message $err
+        return 0
     }
-    set ui(selectedText) [::HWFlow::txt "已选择：[join $names {  <->  }]" "Selected: [join $names {  <->  }]"]
-    catch {raise .contact_setup}
-    catch {focus .contact_setup}
+    set elemsA [::ContactSetup::uniq $elemsA]
+    if {[llength $elemsA] == 0} {
+        set ui(selectedElemsA) ""
+        set ui(selectedElemsB) ""
+        set ui(selectedText) [::HWFlow::txt "第一侧未选择，操作已取消。" "Nothing selected for side A; selection cancelled."]
+        ::ContactSetup::finishFaceSelectionSession
+        return 0
+    }
+
+    set ui(selectedElemsA) $elemsA
+    set ui(selectedText) [::HWFlow::txt \
+        "A 侧已选择 [llength $elemsA] 个单元，正在打开 B 侧选择..." \
+        "Side A: [llength $elemsA] elements. Opening side B..."]
+    # The current UI callback must unwind completely before HM2019 will accept
+    # another push panel.  Opening B from a timer callback avoids the recursive
+    # panel state that prevents middle-click acceptance from advancing.
+    set ui(selectionAfter) [after 100 ::ContactSetup::pickSecondContactFace]
+    return 1
+}
+
+proc ::ContactSetup::pickSecondContactFace {} {
+    variable ui
+    if {!$ui(selectionActive)} {
+        return 0
+    }
+    set ui(selectionAfter) ""
+    set code [catch {
+        set elemsB [::HWFlow::nativeMarkPanelInSession elems 2 [::HWFlow::txt \
+            "选择第二侧相向接触 Face（中键确认）" \
+            "Select the opposing contact face (middle-click to accept)"] 1 6]
+    } err]
+    if {$code} {
+        set ui(selectedElemsA) ""
+        set ui(selectedElemsB) ""
+        ::ContactSetup::finishFaceSelectionSession
+        tk_messageBox -icon error -title [::HWFlow::txt "Contact Setup" "Contact Setup"] -message $err
+        return 0
+    }
+    set elemsB [::ContactSetup::uniq $elemsB]
+    if {[llength $elemsB] == 0} {
+        set ui(selectedElemsA) ""
+        set ui(selectedElemsB) ""
+        set ui(selectedText) [::HWFlow::txt "第二侧未选择，操作已取消。" "Nothing selected for side B; selection cancelled."]
+        ::ContactSetup::finishFaceSelectionSession
+        return 0
+    }
+
+    set ui(selectedElemsB) $elemsB
+    set ui(selectedText) [::HWFlow::txt \
+        "已选择：A=[llength $ui(selectedElemsA)] 个单元，B=[llength $elemsB] 个单元" \
+        "Selected: A=[llength $ui(selectedElemsA)] elements, B=[llength $elemsB] elements"]
+    set autoCreate $ui(selectionAutoCreate)
+    ::ContactSetup::finishFaceSelectionSession
+    if {$autoCreate} {
+        after idle ::ContactSetup::createContact
+    }
+    return 1
+}
+
+proc ::ContactSetup::validateSelectedFaces {} {
+    variable ui
+    if {[llength $ui(selectedElemsA)] == 0 || [llength $ui(selectedElemsB)] == 0} {
+        error [::HWFlow::txt "请先分两次选择两侧接触 Face。" "Select both contact faces first."]
+    }
+    array set onA {}
+    foreach eid $ui(selectedElemsA) { set onA($eid) 1 }
+    foreach eid $ui(selectedElemsB) {
+        if {[info exists onA($eid)]} {
+            error [::HWFlow::txt \
+                "两次选择包含相同单元 $eid；请分别选择相向的两侧。" \
+                "The two selections share element $eid; select the two opposing sides separately."]
+        }
+    }
 }
 
 proc ::ContactSetup::validatePanel {} {
     variable ui
-    if {[llength $ui(selectedComps)] != 2} {
-        error [::HWFlow::txt "请先选择两个 component。" "Select two components first."]
-    }
-    if {$ui(contact_type) ni {SLIDE TIE STICK FREEZE FRICTIONLESS FRICTION}} {
+    ::ContactSetup::validateSelectedFaces
+    if {$ui(contact_type) ni {SLIDE STICK FREEZE}} {
         error [::HWFlow::txt "接触类型无效。" "Invalid contact type."]
     }
     if {$ui(main_side) ni {AUTO FIRST SECOND}} {
         error [::HWFlow::txt "主面选项无效。" "Invalid main side."]
-    }
-    if {![string is double -strict $ui(friction)] || $ui(friction) < 0.0} {
-        error [::HWFlow::txt "摩擦系数必须是不小于 0 的数值。" "Friction must be a non-negative number."]
     }
     if {[string trim $ui(result_prefix)] eq ""} {
         error [::HWFlow::txt "结果名前缀不能为空。" "Result prefix cannot be empty."]
@@ -304,6 +392,14 @@ proc ::ContactSetup::vnorm {a} {
     return [expr {sqrt($x*$x + $y*$y + $z*$z)}]
 }
 
+proc ::ContactSetup::vdot {a b} {
+    return [expr {
+        [lindex $a 0]*[lindex $b 0] +
+        [lindex $a 1]*[lindex $b 1] +
+        [lindex $a 2]*[lindex $b 2]
+    }]
+}
+
 proc ::ContactSetup::vnormalize {a} {
     set n [::ContactSetup::vnorm $a]
     if {$n <= 1.0e-12} {
@@ -313,6 +409,10 @@ proc ::ContactSetup::vnormalize {a} {
 }
 
 proc ::ContactSetup::nodeXYZ {nodeId} {
+    variable geometryNodeXYZ
+    if {[info exists geometryNodeXYZ($nodeId)]} {
+        return $geometryNodeXYZ($nodeId)
+    }
     if {![catch {hm_getvalue nodes id=$nodeId dataname=x} x] &&
         ![catch {hm_getvalue nodes id=$nodeId dataname=y} y] &&
         ![catch {hm_getvalue nodes id=$nodeId dataname=z} z]} {
@@ -340,6 +440,10 @@ proc ::ContactSetup::elemsByComp {compId} {
 }
 
 proc ::ContactSetup::elemNodes {elemId} {
+    variable geometryElemNodes
+    if {[info exists geometryElemNodes($elemId)]} {
+        return $geometryElemNodes($elemId)
+    }
     if {![catch {hm_getvalue elems id=$elemId dataname=nodes} nodes] && [llength $nodes] > 0} {
         return $nodes
     }
@@ -383,6 +487,52 @@ proc ::ContactSetup::faceNormal {nodes} {
         }
     }
     return {0.0 0.0 0.0}
+}
+
+# Use one reference element per selected side.  The native face selector has
+# already resolved the full regions, so reading every node on every selected
+# element would only block HyperMesh on large meshes.  The returned flags are
+# passed directly to contactsurfcreatewithshells as reverse_normals.
+proc ::ContactSetup::referenceOrientations {elemsA elemsB} {
+    set elemA [lindex $elemsA 0]
+    set elemB [lindex $elemsB 0]
+    if {$elemA eq "" || $elemB eq ""} {
+        return [list "" 0 "" 1]
+    }
+
+    set nodesA [::ContactSetup::elemNodes $elemA]
+    set nodesB [::ContactSetup::elemNodes $elemB]
+    if {[llength $nodesA] < 3 || [llength $nodesB] < 3} {
+        return [list $elemA 0 $elemB 1]
+    }
+
+    set centerA [::ContactSetup::centroidNodes $nodesA]
+    set centerB [::ContactSetup::centroidNodes $nodesB]
+    set towardB [::ContactSetup::vsub $centerB $centerA]
+    set towardA [::ContactSetup::vsub $centerA $centerB]
+    set normalA [::ContactSetup::faceNormal $nodesA]
+    set normalB [::ContactSetup::faceNormal $nodesB]
+    set reverseA [expr {[::ContactSetup::vdot $normalA $towardB] < 0.0 ? 1 : 0}]
+    set reverseB [expr {[::ContactSetup::vdot $normalB $towardA] < 0.0 ? 1 : 0}]
+    return [list $elemA $reverseA $elemB $reverseB]
+}
+
+proc ::ContactSetup::elemComponentId {elemId} {
+    foreach dataname {collector.id component.id comp.id} {
+        if {![catch {set value [hm_getvalue elems id=$elemId dataname=$dataname]}] &&
+            $value ne "" && $value != 0} {
+            return $value
+        }
+    }
+    return ""
+}
+
+proc ::ContactSetup::componentForElems {elems fallback} {
+    set compId [::ContactSetup::elemComponentId [lindex $elems 0]]
+    if {$compId eq ""} {
+        return $fallback
+    }
+    return $compId
 }
 
 proc ::ContactSetup::elemSpan {elemId} {
@@ -795,31 +945,59 @@ proc ::ContactSetup::createContactSurf {name elems color orientationElem orienta
         error [::HWFlow::txt "没有可用于 $name 的接触单元。" "No contact elements for $name."]
     }
     ::ContactSetup::deleteContactSurfByName $name
+    # Create the solver-backed OptiStruct SURF entity explicitly.  The generic
+    # contactsurfcreatewithshells command can leave the entity without a SURF
+    # card image, in which case CONTACT exports its IDs but no matching SURF
+    # cards are written.
+    if {[catch {*createentity contactsurfs name=$name cardimage=SURF color=$color} err]} {
+        error [::HWFlow::txt "创建 SURF contact surface $name 失败：$err" "Failed to create SURF contact surface $name: $err"]
+    }
     catch {*clearmark elems 1}
     if {[catch {eval *createmark elems 1 $elems} err]} {
+        ::ContactSetup::deleteContactSurfByName $name
         error [::HWFlow::txt "接触面 $name 打 mark 失败：$err" "Failed to mark contact elements for $name: $err"]
     }
-    if {[catch {*contactsurfcreatewithshells $name $color 1 0} err]} {
+    if {[catch {*addshellstocontactsurf $name 1 $orientationReverse} err]} {
         catch {*clearmark elems 1}
-        error [::HWFlow::txt "创建 contact surface $name 失败：$err" "Failed to create contact surface $name: $err"]
+        ::ContactSetup::deleteContactSurfByName $name
+        error [::HWFlow::txt "向 contact surface $name 添加单元失败：$err" "Failed to add elements to contact surface $name: $err"]
     }
     catch {*clearmark elems 1}
-    if {![::ContactSetup::adjustContactSurfNormal $name $elems $orientationElem $orientationReverse]} {
-        ::ContactSetup::msg [::HWFlow::txt \
-            "contact surface $name 已创建，但法向自动校正未执行成功，请在 HyperMesh 中检查箭头方向。" \
-            "Contact surface $name was created, but automatic normal adjustment did not run successfully. Check the arrow direction in HyperMesh."]
-    }
     set id [::ContactSetup::contactSurfIdByName $name]
     if {$id eq ""} {
         error [::HWFlow::txt "contact surface $name 已创建但无法读取 ID。" "Contact surface $name was created, but its ID could not be read."]
+    }
+    set cardImage ""
+    if {[catch {set cardImage [hm_getvalue contactsurfs id=$id dataname=cardimage]}] ||
+        ![string equal -nocase $cardImage SURF]} {
+        ::ContactSetup::deleteContactSurfByName $name
+        error [::HWFlow::txt \
+            "contact surface $name 未绑定 OptiStruct SURF 卡片，已停止创建 CONTACT。" \
+            "Contact surface $name is not backed by an OptiStruct SURF card; CONTACT creation was stopped."]
+    }
+    set actualElems {}
+    if {[catch {set actualElems [hm_getvalue contactsurfs id=$id dataname=elements]}] ||
+        [llength $actualElems] == 0} {
+        ::ContactSetup::deleteContactSurfByName $name
+        error [::HWFlow::txt \
+            "contact surface $name 未包含任何单元，已停止创建 CONTACT。" \
+            "Contact surface $name contains no elements; CONTACT creation was stopped."]
     }
     return $id
 }
 
 proc ::ContactSetup::baseName {compA compB} {
     variable ui
-    set nA [::ContactSetup::safeName [::HWFlow::componentName $compA]]
-    set nB [::ContactSetup::safeName [::HWFlow::componentName $compB]]
+    set nameA "FACE_A"
+    set nameB "FACE_B"
+    if {$compA ne "" && $compA != 0} {
+        catch {set nameA [::HWFlow::componentName $compA]}
+    }
+    if {$compB ne "" && $compB != 0} {
+        catch {set nameB [::HWFlow::componentName $compB]}
+    }
+    set nA [::ContactSetup::safeName $nameA]
+    set nB [::ContactSetup::safeName $nameB]
     set base "[::ContactSetup::safeName $ui(result_prefix)]_${ui(contact_type)}_${nA}_TO_${nB}"
     if {[string length $base] > 90} {
         set base "[::ContactSetup::safeName $ui(result_prefix)]_${ui(contact_type)}_[::HWFlow::stableHash ${nA}_${nB}]"
@@ -827,18 +1005,154 @@ proc ::ContactSetup::baseName {compA compB} {
     return $base
 }
 
-proc ::ContactSetup::trySetGroupValue {groupName mainSurfId secSurfId} {
-    set attempts [list \
-        [list *setvalue groups name=$groupName "masterentityids={contactsurfs $mainSurfId}" "slaveentityids={contactsurfs $secSurfId}"] \
-        [list *setvalue groups name=$groupName masterentityid=$mainSurfId slaveentityid=$secSurfId] \
-        [list *setvalue groups name=$groupName main=$mainSurfId secondary=$secSurfId] \
-        [list *setvalue groups name=$groupName master=$mainSurfId slave=$secSurfId]]
-    foreach cmd $attempts {
-        if {![catch {uplevel #0 $cmd}]} {
-            return 1
+proc ::ContactSetup::groupReferenceIds {groupId side} {
+    if {$side eq "main"} {
+        set datanames {maincontactsurflist mastercontactsurflist}
+    } else {
+        set datanames {secondarycontactsurflist slavecontactsurflist}
+    }
+    foreach dataname $datanames {
+        if {![catch {set ids [hm_getvalue groups id=$groupId dataname=$dataname]}] && [llength $ids] > 0} {
+            return $ids
         }
     }
-    return 0
+    return {}
+}
+
+proc ::ContactSetup::groupDefinitionMode {groupId side} {
+    if {$side eq "main"} {
+        set datanames {maindefinition masterdefinition}
+    } else {
+        set datanames {secondarydefinition slavedefinition}
+    }
+    foreach dataname $datanames {
+        if {![catch {set mode [hm_getvalue groups id=$groupId dataname=$dataname]}] && $mode ne ""} {
+            return $mode
+        }
+    }
+    return ""
+}
+
+proc ::ContactSetup::contactTypeValue {contactType} {
+    switch -- $contactType {
+        SLIDE { return 0 }
+        STICK { return 1 }
+        FREEZE { return 2 }
+    }
+    error "Unsupported OptiStruct CONTACT type: $contactType"
+}
+
+proc ::ContactSetup::setContactGroupType {groupId contactType} {
+    set attributeName ""
+    set attributeNames {}
+    catch {set attributeNames [hm_attributelist groups $groupId name -byid]}
+    foreach preferred {TYPE CONTACT_TYPE CT_TYPE} {
+        foreach candidate $attributeNames {
+            if {[string equal -nocase $candidate $preferred]} {
+                set attributeName $candidate
+                break
+            }
+        }
+        if {$attributeName ne ""} { break }
+    }
+    if {$attributeName eq ""} {
+        catch {set attributeName [hm_attributeidfromname TYPE]}
+    }
+    if {$attributeName eq ""} {
+        error [::HWFlow::txt \
+            "当前 OptiStruct 模板中未找到 CONTACT 的 TYPE 属性。" \
+            "The CONTACT TYPE attribute was not found in the current OptiStruct template."]
+    }
+
+    set attributeType 1
+    catch {set attributeType [hm_attributetype $attributeName]}
+    if {$attributeType == 3} {
+        set value $contactType
+    } else {
+        set value [::ContactSetup::contactTypeValue $contactType]
+    }
+    set command [list *setvalue groups id=$groupId STATUS=2 ${attributeName}=$value]
+    if {[catch {uplevel #0 $command} err]} {
+        error [::HWFlow::txt \
+            "CONTACT TYPE=$contactType 写入失败：$err" \
+            "Failed to set CONTACT TYPE=$contactType: $err"]
+    }
+    if {[catch {set actual [hm_getvalue groups id=$groupId dataname=$attributeName]}] ||
+        ![string equal -nocase $actual $value]} {
+        error [::HWFlow::txt \
+            "CONTACT TYPE=$contactType 写入后校验失败。" \
+            "CONTACT TYPE=$contactType failed verification after assignment."]
+    }
+}
+
+proc ::ContactSetup::clearGeometryCache {} {
+    variable geometryElemNodes
+    variable geometryNodeXYZ
+    array unset geometryElemNodes
+    array unset geometryNodeXYZ
+    array set geometryElemNodes {}
+    array set geometryNodeXYZ {}
+}
+
+# Prime the selected face geometry with two mark-based database queries.  All
+# downstream bbox/centroid/normal calculations then stay in Tcl memory.
+proc ::ContactSetup::primeGeometryCache {elems} {
+    variable geometryElemNodes
+    variable geometryNodeXYZ
+    ::ContactSetup::clearGeometryCache
+
+    set elems [::ContactSetup::uniq $elems]
+    catch {*clearmark elems 1}
+    if {[catch {eval *createmark elems 1 $elems}]} {
+        error [::HWFlow::txt "公共区域计算无法创建单元 mark。" "Could not create the element mark for common-region detection."]
+    }
+    set markedElems [hm_getmark elems 1]
+    set bulkNodes {}
+    catch {set bulkNodes [hm_getvalue elems mark=1 dataname=nodes]}
+    if {[llength $markedElems] == 1 && [llength $bulkNodes] >= 3 &&
+        [llength [lindex $bulkNodes 0]] == 1} {
+        set geometryElemNodes([lindex $markedElems 0]) $bulkNodes
+    } elseif {[llength $bulkNodes] == [llength $markedElems]} {
+        foreach eid $markedElems nodes $bulkNodes {
+            set geometryElemNodes($eid) $nodes
+        }
+    }
+
+    set allNodes {}
+    foreach eid $markedElems {
+        if {![info exists geometryElemNodes($eid)]} {
+            set nodes {}
+            catch {set nodes [hm_getvalue elems id=$eid dataname=nodes]}
+            set geometryElemNodes($eid) $nodes
+        }
+        foreach nid $geometryElemNodes($eid) { lappend allNodes $nid }
+    }
+    set allNodes [::ContactSetup::uniq $allNodes]
+
+    catch {*clearmark nodes 2}
+    if {[llength $allNodes] > 0 && ![catch {eval *createmark nodes 2 $allNodes}]} {
+        set markedNodes [hm_getmark nodes 2]
+        set bulkXYZ {}
+        catch {set bulkXYZ [hm_getvalue nodes mark=2 dataname=coordinates]}
+        if {[llength $markedNodes] == 1 && [llength $bulkXYZ] >= 3 &&
+            [llength [lindex $bulkXYZ 0]] == 1} {
+            set geometryNodeXYZ([lindex $markedNodes 0]) [lrange $bulkXYZ 0 2]
+        } elseif {[llength $bulkXYZ] == [llength $markedNodes]} {
+            foreach nid $markedNodes xyz $bulkXYZ {
+                if {[llength $xyz] >= 3} {
+                    set geometryNodeXYZ($nid) [lrange $xyz 0 2]
+                }
+            }
+        } elseif {[llength $bulkXYZ] == 3*[llength $markedNodes]} {
+            set index 0
+            foreach nid $markedNodes {
+                set geometryNodeXYZ($nid) [lrange $bulkXYZ $index [expr {$index + 2}]]
+                incr index 3
+            }
+        }
+    }
+    catch {*clearmark elems 1}
+    catch {*clearmark nodes 2}
 }
 
 proc ::ContactSetup::createGroup {groupName mainSurfId secSurfId} {
@@ -857,27 +1171,45 @@ proc ::ContactSetup::createGroup {groupName mainSurfId secSurfId} {
         }
     }
 
-    set created 0
-    foreach cmd [list \
-        [list *createentity groups name=$groupName cardimage=$ui(contact_type)] \
-        [list *createentity groups name=$groupName]] {
-        if {![catch {uplevel #0 $cmd} err]} {
-            set created 1
-            break
-        }
-    }
-    if {!$created} {
-        ::ContactSetup::msg [::HWFlow::txt "contact surface 已创建，但 group 创建失败：$err" "Contact surfaces were created, but group creation failed: $err"]
-        return ""
+    set cardImage CONTACT
+    if {[catch {*createentity groups name=$groupName cardimage=$cardImage} err]} {
+        error [::HWFlow::txt "创建 $cardImage group 失败：$err" "Failed to create the $cardImage group: $err"]
     }
 
     set groupId [::HWFlow::entityIdByName {groups group} $groupName]
-    if {![::ContactSetup::trySetGroupValue $groupName $mainSurfId $secSurfId]} {
-        ::ContactSetup::msg [::HWFlow::txt \
-            "group $groupName 已创建，但当前求解器模板未接受主/从 contact surface 自动赋值，请在面板中确认。" \
-            "Group $groupName was created, but the current solver template did not accept automatic main/secondary contact surface assignment. Please confirm it in the panel."]
+    if {$groupId eq "" || $groupId == 0} {
+        error [::HWFlow::txt "group $groupName 已创建但无法读取 ID。" "Group $groupName was created, but its ID could not be read."]
     }
-    catch {*setvalue groups name=$groupName STATUS=2 friction=$ui(friction)}
+    # HyperMesh stores the selected IDs and the definition method separately.
+    # Without definition=5 the OptiStruct template treats these numeric IDs as
+    # SET references, producing an undefined SSID/MSID even though the legacy
+    # contact surfaces exist in the database.
+    if {[catch {
+        *setvalue groups id=$groupId \
+            masterdefinition=5 \
+            slavedefinition=5 \
+            masterentityids={contactsurfs $mainSurfId} \
+            slaveentityids={contactsurfs $secSurfId}
+    } err]} {
+        error [::HWFlow::txt "group 主从面写入失败：$err" "Failed to assign the group main/secondary surfaces: $err"]
+    }
+    ::ContactSetup::setContactGroupType $groupId $ui(contact_type)
+
+    set actualMain [::ContactSetup::groupReferenceIds $groupId main]
+    set actualSecondary [::ContactSetup::groupReferenceIds $groupId secondary]
+    set mainDefinition [::ContactSetup::groupDefinitionMode $groupId main]
+    set secondaryDefinition [::ContactSetup::groupDefinitionMode $groupId secondary]
+    if {$mainDefinition != 5 || $secondaryDefinition != 5} {
+        error [::HWFlow::txt \
+            "group $groupName 未正确设为 contact surface 主从定义。" \
+            "Group $groupName was not configured to use contact surfaces for its main/secondary definitions."]
+    }
+    if {[lsearch -exact $actualMain $mainSurfId] < 0 ||
+        [lsearch -exact $actualSecondary $secSurfId] < 0} {
+        error [::HWFlow::txt \
+            "group $groupName 的主从 contact surface 校验失败。" \
+            "The main/secondary contact surface references on group $groupName failed verification."]
+    }
     return $groupId
 }
 
@@ -904,22 +1236,22 @@ proc ::ContactSetup::createContact {} {
         array unset last
         array set last {}
 
-        set compA [lindex $ui(selectedComps) 0]
-        set compB [lindex $ui(selectedComps) 1]
-        set prepA [::ContactSetup::contactElemsForComponent $compA A]
-        set prepB [::ContactSetup::contactElemsForComponent $compB B]
-        set allElemsA [dict get $prepA elems]
-        set allElemsB [dict get $prepB elems]
-        if {[llength $allElemsA] == 0 || [llength $allElemsB] == 0} {
-            error [::HWFlow::txt "至少一个 component 没有可用于 contact surface 的壳面/自由面单元。" "At least one component has no shell/free-face elements for contact surface creation."]
-        }
-
-        set contactFaces [::ContactSetup::selectNearestContactFaces $allElemsA $allElemsB]
+        # Limit common-region detection to the two face selections.  The old
+        # workflow expanded both sides to entire components, which made the
+        # same spatial search prohibitively expensive on production models.
+        set selectedA [::ContactSetup::uniq $ui(selectedElemsA)]
+        set selectedB [::ContactSetup::uniq $ui(selectedElemsB)]
+        ::ContactSetup::primeGeometryCache [concat $selectedA $selectedB]
+        set contactFaces [::ContactSetup::selectNearestContactFaces $selectedA $selectedB]
         set elemsA [dict get $contactFaces elemsA]
         set elemsB [dict get $contactFaces elemsB]
         if {[llength $elemsA] == 0 || [llength $elemsB] == 0} {
-            error [::HWFlow::txt "未能识别两个 component 之间相对的接触面。" "Could not identify facing contact faces between the two components."]
+            error [::HWFlow::txt \
+                "两次选择之间未识别到公共接触区域。" \
+                "No common contact region was found between the two selections."]
         }
+        set compA [::ContactSetup::componentForElems $elemsA 0]
+        set compB [::ContactSetup::componentForElems $elemsB 0]
 
         set mainSide [::ContactSetup::chooseMainSide $compA $compB $elemsA $elemsB]
         set base [::ContactSetup::baseName $compA $compB]
@@ -927,19 +1259,11 @@ proc ::ContactSetup::createContact {} {
         set surfB "${base}_B"
         set groupName "${base}_GROUP"
 
-        set recMapA [::ContactSetup::recordMapByElem [dict get $contactFaces recordsA]]
-        set recMapB [::ContactSetup::recordMapByElem [dict get $contactFaces recordsB]]
-        set centerVector [::ContactSetup::vsub \
-            [dict get [::ContactSetup::bboxForElems $allElemsB] center] \
-            [dict get [::ContactSetup::bboxForElems $allElemsA] center]]
-        set orientA [::ContactSetup::orientationByOppositeGeometry \
-            $elemsA $recMapA [dict get $contactFaces pairMapA] $recMapB $centerVector]
-        set orientB [::ContactSetup::orientationByOppositeGeometry \
-            $elemsB $recMapB [dict get $contactFaces pairMapB] $recMapA [::ContactSetup::vsub {0 0 0} $centerVector]]
-        set orientElemA [lindex $orientA 0]
-        set reverseA [lindex $orientA 1]
-        set orientElemB [lindex $orientB 0]
-        set reverseB [lindex $orientB 1]
+        set orientations [::ContactSetup::referenceOrientations $elemsA $elemsB]
+        set orientElemA [lindex $orientations 0]
+        set reverseA [lindex $orientations 1]
+        set orientElemB [lindex $orientations 2]
+        set reverseB [lindex $orientations 3]
         set surfAId [::ContactSetup::createContactSurf $surfA $elemsA 13 $orientElemA $reverseA]
         set surfBId [::ContactSetup::createContactSurf $surfB $elemsB 45 $orientElemB $reverseB]
         if {$mainSide eq "FIRST"} {
@@ -959,8 +1283,8 @@ proc ::ContactSetup::createContact {} {
         set last(compB) $compB
         set last(elemsA) $elemsA
         set last(elemsB) $elemsB
-        set last(allElemsA) $allElemsA
-        set last(allElemsB) $allElemsB
+        set last(allElemsA) $selectedA
+        set last(allElemsB) $selectedB
         set last(searchTol) [dict get $contactFaces searchTol]
         set last(orientElemA) $orientElemA
         set last(orientElemB) $orientElemB
@@ -976,22 +1300,16 @@ proc ::ContactSetup::createContact {} {
         set last(secSurfId) $secSurfId
         set last(groupName) $groupName
         set last(groupId) $groupId
-        set last(tempA) [dict get $prepA tempComp]
-        set last(tempB) [dict get $prepB tempComp]
+        set last(tempA) ""
+        set last(tempB) ""
         set last(restoreDisplay) ""
 
-        if {!$ui(keep_face_components)} {
-            foreach tmp [list $last(tempA) $last(tempB)] {
-                if {$tmp ne ""} {
-                    catch {::HWFlow::displayComponent $tmp off}
-                }
-            }
-        }
         catch {::HWFlow::refreshBrowser}
         ::ContactSetup::msg [::HWFlow::txt \
-            "接触创建完成：相对面 A=[llength $elemsA]/[llength $allElemsA]，B=[llength $elemsB]/[llength $allElemsB]，搜索距离=[format %.6g [dict get $contactFaces searchTol]]，参考单元=($orientElemA,$orientElemB)，reverse=($reverseA,$reverseB)，group=$groupName。" \
-            "Contact created: facing faces A=[llength $elemsA]/[llength $allElemsA], B=[llength $elemsB]/[llength $allElemsB], search=[format %.6g [dict get $contactFaces searchTol]], orientation elems=($orientElemA,$orientElemB), reverse=($reverseA,$reverseB), group=$groupName."]
+            "接触创建完成：公共区域 A=[llength $elemsA]/[llength $selectedA]，B=[llength $elemsB]/[llength $selectedB]，搜索距离=[format %.6g [dict get $contactFaces searchTol]]，group=$groupName。" \
+            "Contact created: common region A=[llength $elemsA]/[llength $selectedA], B=[llength $elemsB]/[llength $selectedB], search=[format %.6g [dict get $contactFaces searchTol]], group=$groupName."]
     } err]
+    ::ContactSetup::clearGeometryCache
     if {$code} {
         tk_messageBox -icon error -title [::HWFlow::txt "Contact Setup" "Contact Setup"] -message $err
     }
@@ -1221,15 +1539,12 @@ proc ::ContactSetup::runAction {} {
     foreach key [::ContactSetup::stateKeys] {
         set ui($key) $cfg($key)
     }
-    set ui(selectedComps) ""
-    set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
+    set ui(selectedElemsA) ""
+    set ui(selectedElemsB) ""
+    set ui(selectedText) [::HWFlow::txt "未选择接触面" "No contact faces selected"]
     set ui(status) ""
 
-    ::ContactSetup::pickComponents
-    if {[llength $ui(selectedComps)] != 2} {
-        return
-    }
-    ::ContactSetup::createContact
+    ::ContactSetup::pickContactFaces 1
 }
 
 proc ::ContactSetup::runSettings {} {

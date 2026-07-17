@@ -1,22 +1,27 @@
 proc ::SolidSeam::runDetection {} {
-    variable ui; variable candidateRows; variable mode; variable runtimeDir
+    variable ui; variable candidateRows; variable mode; variable detectedMode; variable requiresReview; variable runtimeDir
     if {[catch {
         ::SolidSeam::validateSettings
         ::SolidSeam::saveState
         set ui(status) [::SolidSeam::txt "正在选择组件..." "Selecting components..."]; update idletasks
         set componentIds [::SolidSeam::selectComponents]
         if {[llength $componentIds] == 0} { error "__SOLID_SEAM_CANCEL__" }
-        set ui(status) [::SolidSeam::txt "正在分类组件..." "Classifying components..."]; update idletasks
-        set classification [::SolidSeam::classifySelection $componentIds]
         ::SolidSeam::newRun
-        set ui(status) [::SolidSeam::txt "正在导出网格拓扑..." "Exporting mesh topology..."]; update idletasks
-        set meshPath [::SolidSeam::exportMeshData $classification]
+        set ui(status) [::SolidSeam::txt "正在导出所选 Components 为 FEM..." "Exporting selected components to FEM..."]; update idletasks
+        set meshPath [::SolidSeam::exportSelectedFem]
         set requestPath [::SolidSeam::writeRequest]
         set ui(status) [::SolidSeam::txt "Python 正在识别候选焊缝..." "Python is detecting seam candidates..."]; update idletasks
         ::SolidSeam::runPythonDetection $requestPath $meshPath
-        if {$ui(auto_accept_high)} { ::SolidSeam::acceptHighConfidence }
+        set mode $detectedMode
         set ui(status) [::SolidSeam::txt "识别完成：模式 $mode；候选 [llength $candidateRows] 条。运行目录：$runtimeDir" "Detection complete: mode $mode; [llength $candidateRows] candidates. Run directory: $runtimeDir"]
-        ::SolidSeam::showCandidateWindow
+        if {$requiresReview} {
+            if {$ui(auto_accept_high)} { ::SolidSeam::acceptHighConfidence }
+            ::SolidSeam::showCandidateWindow
+        } else {
+            if {[llength $candidateRows] == 0} { error [::SolidSeam::txt "未识别到可创建的焊缝位置。" "No weld location was detected."] }
+            ::SolidSeam::acceptAllCandidates
+            ::SolidSeam::createAcceptedCandidates
+        }
     } err opts]} {
         if {$err eq "__SOLID_SEAM_CANCEL__"} {
             set ui(status) [::SolidSeam::txt "用户取消选择。" "Selection cancelled."]

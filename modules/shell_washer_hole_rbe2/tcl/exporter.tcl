@@ -67,3 +67,65 @@ proc ::RB2W::writeHybridExisting {taskDir compId} {
 proc ::RB2W::exportHybridInputs {taskDir runId compId} {
     return [dict create request [::RB2W::writeHybridRequest $taskDir $runId $compId] mesh [::RB2W::writeHybridMesh $taskDir $compId] existing [::RB2W::writeHybridExisting $taskDir $compId] delta [file join $taskDir rigid_import.fem]]
 }
+
+proc ::RB2W::unusedRBE2ExportTemplate {} {
+    set candidates {}
+    if {![catch {set templatesDir [hm_info -appinfo SPECIFIEDPATH TEMPLATES_DIR]}] &&
+        [string trim $templatesDir] ne ""} {
+        lappend candidates [file join $templatesDir feoutput optistruct optistruct]
+    }
+    if {![catch {set executableDir [hm_info -appinfo EXECUTABLEDIR]}] &&
+        [string trim $executableDir] ne ""} {
+        lappend candidates [file join $executableDir .. .. .. templates feoutput optistruct optistruct]
+    }
+    foreach candidate $candidates {
+        set normalized [file normalize $candidate]
+        if {[file isfile $normalized]} { return $normalized }
+    }
+    error [::HWFlow::txt \
+        "找不到 HyperMesh OptiStruct FEM 导出模板。" \
+        "Could not locate the HyperMesh OptiStruct FEM export template."]
+}
+
+proc ::RB2W::writeUnusedRBE2Request {taskDir runId} {
+    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"shell_washer_hole_rbe2\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"hypermesh_version\": \"2019\",\n  \"selected_component_ids\": \[\],\n  \"settings\": {\"mode\": \"find_unused_rbe2\"},\n  \"options\": {\"debug\": false, \"keep_runtime_files\": true}\n}\n"
+    return [::HybridCore::writeTextFile [file join $taskDir request.json] $json]
+}
+
+proc ::RB2W::exportWholeModelFem {taskDir} {
+    set outputPath [file join $taskDir full_model.fem]
+    set exportTemplate [::RB2W::unusedRBE2ExportTemplate]
+    catch {*clearmark elems 1}
+    catch {*clearmark nodes 1}
+    set code [catch {
+        *createmark elems 1 all
+        *createmark nodes 1 all
+        set elemCount [llength [hm_getmark elems 1]]
+        set nodeCount [llength [hm_getmark nodes 1]]
+        if {$elemCount == 0 || $nodeCount == 0} {
+            error [::HWFlow::txt "当前模型没有可导出的网格。" "The current model has no exportable mesh."]
+        }
+        *feoutput_select $exportTemplate $outputPath 1 0 0
+    } err opts]
+    catch {*clearmark elems 1}
+    catch {*clearmark nodes 1}
+    if {$code} { return -options $opts $err }
+    if {![file isfile $outputPath] || [file size $outputPath] == 0} {
+        error [::HWFlow::txt "HyperMesh 未生成全模型 FEM 文件。" "HyperMesh did not create the full-model FEM export."]
+    }
+
+    set normalized [file normalize $outputPath]
+    if {![info exists ::HybridCore::workerFileFingerprints]} {
+        set ::HybridCore::workerFileFingerprints [dict create]
+    }
+    dict set ::HybridCore::workerFileFingerprints $normalized \
+        "unused-rbe2-fem-v1:[file size $normalized]:[clock clicks -milliseconds]"
+    ::HybridCore::log INFO "full model FEM exported elements=$elemCount nodes=$nodeCount bytes=[file size $outputPath]"
+    return $outputPath
+}
+
+proc ::RB2W::exportUnusedRBE2Inputs {taskDir runId} {
+    return [dict create \
+        request [::RB2W::writeUnusedRBE2Request $taskDir $runId] \
+        mesh [::RB2W::exportWholeModelFem $taskDir]]
+}

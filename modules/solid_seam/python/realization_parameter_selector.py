@@ -90,7 +90,7 @@ def select(model, source_component_id, chain, settings, joint_type):
 
     source_points = _component_points(model, source_component_id)
     source_normals = [normal for item in chain["items"] for normal in item.edge.face_normals]
-    thickness = _plate_thickness(source_points, mesh_size, source_normals)
+    thickness = mesh_size if model.components[source_component_id].mesh_class == "SHELL" else _plate_thickness(source_points, mesh_size, source_normals)
     # A 0.8 x thickness leg produced oversized penta wedges on triangular
     # plate edges. Use a conservative 0.6 x thickness baseline and keep it
     # compatible with the local mesh without letting coarse edge spacing

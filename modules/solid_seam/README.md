@@ -4,13 +4,13 @@ This module implements the `solid_seam_connector_spec.md` workflow inside the ex
 
 ## Implemented path
 
-1. Tcl opens the native Components selector.
-2. Tcl classifies the selection and enforces the two-component and multi-component mode rules.
-3. Tcl exports only selected component topology to versioned JSON.
-4. Bundled Python extracts supported solid exterior faces, boundary/feature edges, target triangles, distance-valid segments, edge chains, joint recommendations, confidence, and duplicate annotations.
-5. Tcl displays candidates, previews node marks, permits acceptance/rejection/type changes/reversal, and performs batch creation.
+1. Tcl opens the native Components selector. One component opens a second selector; a multi-component first selection proceeds immediately.
+2. Tcl exports each selected component to its own native OptiStruct FEM file, preserving selection order separately from solver property IDs.
+3. Bundled Python reads and classifies the FEM meshes. Supported inputs are two solid components, two shell components, or a mixed multi-component selection containing at least one solid.
+4. Python extracts source boundary/feature nodes, target surfaces, distance-valid chains, penta realization type, adaptive parameters, confidence, and duplicate annotations.
+5. Solid/solid and shell/shell pairs are accepted and created directly. Mixed selections use the existing candidate preview/editor before batch creation.
 6. Every model write passes preflight validation and a verified HyperMesh Command File profile. Each item fails independently and the batch continues.
-7. The run directory contains `request.json`, `mesh_data.json`, `candidates.json`, `accepted_candidates.csv` when exported, `operation.log`, and `realization_result.json` after creation.
+7. The run directory contains `request.json`, `component_<id>.fem`, `candidates.json`, `accepted_candidates.csv` when exported, `operation.log`, and `realization_result.json` after creation.
 
 Runtime output is written below `temp/solid_seam/<run_id>` and is intentionally ignored by Git.
 

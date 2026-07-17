@@ -23,7 +23,7 @@ proc ::SolidSeam::showPanel {} {
     wm minsize $w 720 430
     frame $w.main -padx 12 -pady 10; pack $w.main -fill both -expand 1
     label $w.main.title -text [::SolidSeam::txt "实体焊缝 / Solid Seam" "Solid Seam"] -font [::HWFlow::uiFont heading] -anchor w
-    label $w.main.note -text [::SolidSeam::txt "选择两个或更多 Components。识别由 Python 完成，模型写入仅通过已验证的 HM2019 realization profile。" "Select two or more components. Python performs recognition; model writes use verified HM2019 realization profiles only."] -anchor w -justify left
+    label $w.main.note -text [::SolidSeam::txt "首次选一个 Component 时会继续选择连接件；首次选多个时直接分析。两实体/两壳体直接创建，混合类型进入预览。" "Selecting one component opens a second selector; selecting multiple components starts analysis. Solid/solid and shell/shell pairs create directly; mixed selections open preview."] -anchor w -justify left
     pack $w.main.title $w.main.note -fill x -pady {0 6}
     labelframe $w.main.parameters -text [::SolidSeam::txt "识别参数" "Detection Settings"] -padx 8 -pady 8; pack $w.main.parameters -fill x
     set fields {

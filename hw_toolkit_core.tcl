@@ -91,6 +91,14 @@ namespace eval ::HWToolkit {
             proc     "::MeshSeamWeld::runAction"
             settings_proc "::MeshSeamWeld::runSettings"
         }
+        batch_property_assignment {
+            group    "Mesh"
+            label_zh "批量赋予 Property 和材料"
+            label_en "Batch Property and Material Assignment"
+            desc_zh  "按 Vxx_件号_Txx_材料 / SEAM_Txx 命名批量创建 PSHELL Property，并生成异常名称复核清单。"
+            desc_en  "Create and assign PSHELL properties from Vxx_part_Txx_material / SEAM_Txx names and list exceptions for review."
+            proc     "::BatchPropertyAssignment::runAction"
+        }
         local_mesh_optimizer {
             group    "Mesh"
             label_zh "局部网格优化"
@@ -140,8 +148,8 @@ namespace eval ::HWToolkit {
             group    "Connector"
             label_zh "接触创建"
             label_en "Contact Setup"
-            desc_zh  "选择两个 component，自动识别方向并创建可修剪的接触面。"
-            desc_en  "Pick two components, detect their facing direction, and create trimmable contact surfaces."
+            desc_zh  "分两次选择相向 Face 单元，并直接创建可修剪的接触面。"
+            desc_en  "Pick opposing face elements in two passes and create trimmable contact surfaces directly."
             proc     "::ContactSetup::runAction"
             settings_proc "::ContactSetup::runSettings"
         }

@@ -13,7 +13,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.19"
+    variable VERSION "0.22"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -167,8 +167,8 @@ proc ::MeshSeamWeld::showPanel {} {
     }
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "连续节点直接作为开放路径执行；自由边单节点及不连续节点保持原闭环种子流程；内部单节点通过 HyperMesh 原生 FEM 导出交给 Python，一次识别其连通壳区域的全部闭合边界。投影与连接仍由 HyperMesh 执行。" \
-        "Continuous nodes execute directly as an open path. Free-edge single nodes and disconnected seeds retain the original loop workflow. One internal node uses a native HyperMesh FEM export so Python can find every closed boundary on its connected shell region in one pass. HyperMesh still performs imprint and connection."]
+        "连续节点直接作为开放路径执行；自由边单节点及不连续边界种子全部由 Tcl 局部追踪闭环，不再与 Python 通讯；只有内部单节点仍通过 HyperMesh 原生 FEM 导出交给 Python，识别其连通壳区域的全部闭合边界。投影与连接由 HyperMesh 执行。" \
+        "Continuous nodes execute directly as an open path. Tcl locally traces every free-edge single node and disconnected boundary seed without Python communication. Only one internal node still uses a native HyperMesh FEM export so Python can find every closed boundary on its connected shell region. HyperMesh performs imprint and connection."]
     grid $w.main.note -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -757,7 +757,7 @@ proc ::MeshSeamWeld::freeEdgeNeighbors {nodeId} {
     foreach elemId $ownerElems {
         set nodes [::MeshSeamWeld::elemNodes $elemId]
         set count [llength $nodes]
-        if {$count < 3} {
+        if {$count ni {3 4}} {
             continue
         }
         for {set i 0} {$i < $count} {incr i} {
@@ -775,6 +775,9 @@ proc ::MeshSeamWeld::freeEdgeNeighbors {nodeId} {
     foreach neighbor [array names candidates] {
         set owners {}
         foreach elemId $ownerElems {
+            if {[llength [::MeshSeamWeld::elemNodes $elemId]] ni {3 4}} {
+                continue
+            }
             if {[::MeshSeamWeld::elementContainsEdge $elemId $nodeId $neighbor]} {
                 lappend owners $elemId
             }
@@ -1617,8 +1620,48 @@ proc ::MeshSeamWeld::targetGridKey {xyz} {
         [expr {int(floor(double([lindex $xyz 2]) / $targetIndexCellSize))}]]
 }
 
-proc ::MeshSeamWeld::buildTargetElementIndex {targetComps} {
+proc ::MeshSeamWeld::readShellElementConnectivityBulk {elemIds {markId 2}} {
+    set result [dict create]
+    set elemIds [lsort -integer -unique $elemIds]
+    if {[llength $elemIds] == 0} { return $result }
+
+    set marked [::MeshSeamWeld::markElements $elemIds $markId]
+    set bulkValues {}
+    foreach entityType {elems elements} {
+        if {![catch {
+            set bulkValues [hm_getvalue $entityType mark=$markId dataname=nodes]
+        }]} {
+            break
+        }
+    }
+    set markedCount [llength $marked]
+    if {$markedCount == 1 && [llength $bulkValues] in {3 4}} {
+        dict set result [lindex $marked 0] $bulkValues
+    } elseif {[llength $bulkValues] == $markedCount} {
+        foreach elemId $marked nodes $bulkValues {
+            if {[llength $nodes] in {3 4}} {
+                dict set result $elemId $nodes
+            }
+        }
+    }
+
+    # HyperMesh builds that do not expose a list-per-element mark result fall
+    # back only for the missing records and periodically return to the UI.
+    set index 0
+    foreach elemId $elemIds {
+        if {![dict exists $result $elemId]} {
+            set nodes [::MeshSeamWeld::elemNodes $elemId]
+            if {[llength $nodes] in {3 4}} { dict set result $elemId $nodes }
+        }
+        incr index
+        if {$index % 256 == 0} { ::HybridCore::cooperativeYield }
+    }
+    return $result
+}
+
+proc ::MeshSeamWeld::buildTargetElementIndex {targetComps {progressOpened 0}} {
     variable cfg
+    variable nodeXYZCache
     variable targetElemGrid
     variable targetElemCentroid
     variable targetNodeToElems
@@ -1636,17 +1679,47 @@ proc ::MeshSeamWeld::buildTargetElementIndex {targetComps} {
         set elemIds [concat $elemIds [::MeshSeamWeld::componentElementIds $compId]]
     }
     set elemIds [::MeshSeamWeld::uniq $elemIds]
+    if {$progressOpened} {
+        ::HybridCore::progressUpdate 3.0 "Mesh Seam Weld" \
+            "Building target element index..." 1
+    }
+
+    # Read connectivity once, then query all coordinates with one marked-node
+    # HyperMesh call.  The former implementation called hm_getvalue once per
+    # node while Python had already finished, which blocked the HM main thread
+    # for a long time on large target components.
+    set connectivityMap [::MeshSeamWeld::readShellElementConnectivityBulk $elemIds]
+    set elementRecords {}
+    set allNodeIds {}
+    set scanned 0
+    foreach elemId $elemIds {
+        if {![dict exists $connectivityMap $elemId]} { continue }
+        set nodes [dict get $connectivityMap $elemId]
+        lappend elementRecords [list $elemId $nodes]
+        set allNodeIds [concat $allNodeIds $nodes]
+        incr scanned
+        if {$scanned % 256 == 0} { ::HybridCore::cooperativeYield }
+    }
+    set allNodeIds [lsort -integer -unique $allNodeIds]
+    set coordinateMap [::HybridCore::readNodeCoordinatesBulk $allNodeIds \
+        [list ::MeshSeamWeld::nodeXYZ]]
+    foreach nodeId $allNodeIds {
+        if {[dict exists $coordinateMap $nodeId]} {
+            set nodeXYZCache($nodeId) [dict get $coordinateMap $nodeId]
+        }
+    }
+
     set firstKey 1
     set indexed 0
-    foreach elemId $elemIds {
-        set nodes [::MeshSeamWeld::elemNodes $elemId]
-        if {[llength $nodes] ni {3 4}} { continue }
+    foreach record $elementRecords {
+        lassign $record elemId nodes
         set x 0.0; set y 0.0; set z 0.0; set valid 1
         foreach nodeId $nodes {
-            if {[catch {set xyz [::MeshSeamWeld::nodeXYZ $nodeId]}]} {
+            if {![dict exists $coordinateMap $nodeId]} {
                 set valid 0
                 break
             }
+            set xyz [dict get $coordinateMap $nodeId]
             set x [expr {$x + [lindex $xyz 0]}]
             set y [expr {$y + [lindex $xyz 1]}]
             set z [expr {$z + [lindex $xyz 2]}]
@@ -1674,6 +1747,7 @@ proc ::MeshSeamWeld::buildTargetElementIndex {targetComps} {
                 [expr {max([lindex $targetGridMax 2],[lindex $key 2])}]]
         }
         incr indexed
+        if {$indexed % 256 == 0} { ::HybridCore::cooperativeYield }
     }
     if {$indexed == 0} {
         error [::HWFlow::txt \
@@ -1732,7 +1806,7 @@ proc ::MeshSeamWeld::nearestIndexedTargetElem {xyz} {
     return $bestElem
 }
 
-proc ::MeshSeamWeld::localTargetPatchForPath {sourceNodes} {
+proc ::MeshSeamWeld::localTargetPatchForPath {sourceNodes {extraLayers 0}} {
     variable cfg
     variable targetNodeToElems
 
@@ -1745,7 +1819,7 @@ proc ::MeshSeamWeld::localTargetPatchForPath {sourceNodes} {
             lappend frontier $elemId
         }
     }
-    set expandLayers [expr {$cfg(patch_expand_layers) + 3}]
+    set expandLayers [expr {$cfg(patch_expand_layers) + 3 + max(0, int($extraLayers))}]
     for {set layer 0} {$layer < $expandLayers && [llength $frontier] > 0} {incr layer} {
         set nextFrontier {}
         foreach elemId $frontier {
@@ -1803,6 +1877,50 @@ proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}
         if {$progressOpened && ($pathIndex == $pathTotal || $pathIndex % 25 == 0)} {
             set percent [expr {3.0 + 6.0*$pathIndex/double(max(1,$pathTotal))}]
             ::HybridCore::progressUpdate $percent "Mesh Seam Weld" "Prepared local patch $pathIndex/$pathTotal" 1
+        }
+    }
+    return $jobs
+}
+
+proc ::MeshSeamWeld::prepareDeferredWeldJobs {plans targetComps knownSourceCompIds {progressOpened 0}} {
+    variable nodeXYZCache
+    set jobs {}
+    set related [lsort -integer -unique [concat $knownSourceCompIds $targetComps]]
+    set seamComp [::MeshSeamWeld::seamComponentForRelatedComps $related]
+    ::MeshSeamWeld::buildTargetElementIndex $targetComps $progressOpened
+
+    # Python returns ordered node IDs.  Preload their coordinates in one HM
+    # query so each path behaves like a manually selected node row afterward.
+    set allSourceNodes {}
+    foreach plan $plans {
+        set allSourceNodes [concat $allSourceNodes [dict get $plan source_node_ids]]
+    }
+    set allSourceNodes [lsort -integer -unique $allSourceNodes]
+    set sourceCoordinates [::HybridCore::readNodeCoordinatesBulk $allSourceNodes \
+        [list ::MeshSeamWeld::nodeXYZ]]
+    foreach nodeId $allSourceNodes {
+        set nodeXYZCache($nodeId) [dict get $sourceCoordinates $nodeId]
+    }
+
+    set planIndex 0
+    set planTotal [llength $plans]
+    foreach plan $plans {
+        incr planIndex
+        set sourceNodes [dict get $plan source_node_ids]
+        lappend jobs [dict create \
+            source_nodes $sourceNodes \
+            source_component_ids $knownSourceCompIds \
+            seam_component $seamComp \
+            target_elements [::MeshSeamWeld::localTargetPatchForPath $sourceNodes] \
+            center [dict get $plan center] \
+            closed_loop 1 \
+            imprint_closed_loop 0 \
+            retry_patch_extra_layers 4 \
+            component_fallback 1]
+        if {$progressOpened && ($planIndex == $planTotal || $planIndex % 25 == 0)} {
+            ::HybridCore::progressUpdate \
+                [expr {3.0 + 6.0*$planIndex/double(max(1,$planTotal))}] \
+                "Mesh Seam Weld" "Prepared local patch $planIndex/$planTotal" 1
         }
     }
     return $jobs
@@ -1993,9 +2111,9 @@ proc ::MeshSeamWeld::processWeldPathIsolated {sourceNodes targetComps closedLoop
     if {!$historyStarted} {
         ::HybridCore::log ERROR "PERF mesh_seam_weld path=$pathIndex/$pathTotal status=skipped reason=no_undo_transaction total_ms=[expr {[clock milliseconds]-$isolatedStarted}]"
         return [dict create ok 0 \
-            error [::HWFlow::txt \
+            error "\[MSW_STAGE:TRANSACTION\] [::HWFlow::txt \
                 "无法启动该闭环的撤销事务；为避免留下部分投影，已跳过。" \
-                "Could not start an undo transaction for this loop; it was skipped to avoid leaving a partial imprint."] \
+                "Could not start an undo transaction for this loop; it was skipped to avoid leaving a partial imprint."]" \
             center $failureCenter rollback_ok 0]
     }
     set code [catch {
@@ -2020,6 +2138,126 @@ proc ::MeshSeamWeld::processWeldPathIsolated {sourceNodes targetComps closedLoop
         return [dict create ok 0 error $result center $failureCenter rollback_ok $rollbackOk]
     }
     return [dict create ok 1 result $result rollback_ok 1]
+}
+
+proc ::MeshSeamWeld::stageError {stage message} {
+    set clean [string trim [string map [list "\r" " " "\n" " | "] $message]]
+    return -code error -errorcode [list MESH_SEAM_WELD $stage] \
+        "\[MSW_STAGE:$stage\] $clean"
+}
+
+proc ::MeshSeamWeld::diagnoseFailure {errorText} {
+    set stage "UNKNOWN"
+    regexp {\[MSW_STAGE:([A-Z_]+)\]} $errorText -> stage
+    switch -- $stage {
+        TARGET_PREPARE {
+            set reasonZh "无法在当前目标网格上建立局部投影区域。"
+            set reasonEn "The current target mesh could not provide a local projection patch."
+            set actionZh "确认目标组件包含三角形或四边形壳单元，并且位于源边界附近。"
+            set actionEn "Confirm that the target component contains triangular or quadrilateral shell elements near the source boundary."
+        }
+        SOURCE_PLAN {
+            set reasonZh "内部点所在源组件的 FEM 导出或闭合边界规划失败。"
+            set reasonEn "FEM export or closed-boundary planning failed for the source component containing the internal point."
+            set actionZh "确认内部点唯一属于一个包含线性三角形/四边形壳单元的组件，并反馈报告中的原始 Python/导出错误。"
+            set actionEn "Confirm that the internal point belongs to exactly one component containing linear triangular/quadrilateral shell elements, then provide the raw Python/export error from the report."
+        }
+        IMPRINT {
+            set reasonZh "HyperMesh 在目标网格上执行 imprint 失败。"
+            set reasonEn "HyperMesh failed while imprinting the source path onto the target mesh."
+            set actionZh "检查源边界是否完整落在目标面范围内，以及目标局部网格是否存在极小、退化或严重扭曲单元。"
+            set actionEn "Check that the complete source boundary projects inside the target surface and that the local target mesh has no tiny, degenerate, or severely distorted elements."
+        }
+        TARGET_MATCH {
+            set reasonZh "imprint 后没有得到与源边界一一对应的目标节点。"
+            set reasonEn "The imprinted target nodes could not be matched one-to-one with the source boundary."
+            set actionZh "通常表示只有部分边界投影到了目标面、多个源点落到同一目标点，或目标网格过粗。"
+            set actionEn "This usually means only part of the boundary reached the target, multiple source nodes collapsed to one target node, or the target mesh is too coarse."
+        }
+        TARGET_CONTINUITY {
+            set reasonZh "匹配出的目标节点不能沿目标壳网格形成连续闭合路径。"
+            set reasonEn "The matched target nodes do not form a continuous closed path on the target shell mesh."
+            set actionZh "检查目标面是否有裂缝、重复节点、组件断开或局部重网格失败。"
+            set actionEn "Check the target surface for cracks, duplicate nodes, disconnected components, or a failed local remesh."
+        }
+        AUTOMESH {
+            set reasonZh "目标路径已经建立，但 Ruled 焊缝网格生成失败。"
+            set reasonEn "The target path was established, but creation of the ruled weld mesh failed."
+            set actionZh "检查源/目标闭环节点数、首尾方向、两条路径间距以及焊缝网格尺寸。"
+            set actionEn "Check source/target loop counts, orientation, spacing, and the configured weld mesh size."
+        }
+        TRANSACTION {
+            set reasonZh "无法启动或回滚该闭环的 HyperMesh 撤销事务。"
+            set reasonEn "The HyperMesh undo transaction for this loop could not be started or rolled back."
+            set actionZh "保存模型后重新打开 HyperMesh 会话再试，并反馈诊断报告。"
+            set actionEn "Save the model, retry in a fresh HyperMesh session, and provide the diagnostic report."
+        }
+        default {
+            set reasonZh "焊缝创建在未分类阶段失败。"
+            set reasonEn "Weld creation failed in an unclassified stage."
+            set actionZh "请反馈失败报告和 operation.log，以便根据原始错误继续定位。"
+            set actionEn "Provide the failure report and operation.log so the raw error can be investigated."
+        }
+    }
+    return [dict create stage $stage reason_zh $reasonZh reason_en $reasonEn \
+        action_zh $actionZh action_en $actionEn]
+}
+
+proc ::MeshSeamWeld::dictValueOr {record key defaultValue} {
+    if {[dict exists $record $key]} { return [dict get $record $key] }
+    return $defaultValue
+}
+
+proc ::MeshSeamWeld::reportLineValue {value} {
+    return [string trim [string map [list "\r" "" "\n" " | "] $value]]
+}
+
+proc ::MeshSeamWeld::writeFailureReport {taskDir context failureRecords} {
+    variable VERSION
+    if {[llength $failureRecords] == 0 || [string trim $taskDir] eq ""} { return "" }
+    file mkdir $taskDir
+    set reportPath [file join $taskDir mesh_seam_weld_failure_report.txt]
+    set channel [open $reportPath w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel "\ufeff"
+    puts $channel "MESH_SEAM_WELD_FAILURE_REPORT"
+    puts $channel "schema_version=1"
+    puts $channel "module_version=$VERSION"
+    set hmVersion "unknown"
+    catch {set hmVersion [hm_info -appinfo VERSION]}
+    puts $channel "hypermesh_version=[::MeshSeamWeld::reportLineValue $hmVersion]"
+    puts $channel "created_at=[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}]"
+    foreach key {source_mode path_total success_count source_components target_components weld_mesh_size patch_expand_layers imprint_remesh_mode imprint_angle} {
+        puts $channel "$key=[::MeshSeamWeld::reportLineValue [::MeshSeamWeld::dictValueOr $context $key {}]]"
+    }
+    puts $channel "failure_count=[llength $failureRecords]"
+    set index 0
+    foreach record $failureRecords {
+        incr index
+        set finalError [::MeshSeamWeld::dictValueOr $record final_error \
+            [::MeshSeamWeld::dictValueOr $record error ""]]
+        set diagnosis [::MeshSeamWeld::diagnoseFailure $finalError]
+        set sourceNodes [::MeshSeamWeld::dictValueOr $record source_nodes {}]
+        set targetElems [::MeshSeamWeld::dictValueOr $record target_elements {}]
+        puts $channel ""
+        puts $channel "[format {--- FAILURE %d ---} $index]"
+        puts $channel "path_index=[::MeshSeamWeld::dictValueOr $record path_index 0]"
+        puts $channel "stage=[dict get $diagnosis stage]"
+        puts $channel "reason_zh=[dict get $diagnosis reason_zh]"
+        puts $channel "action_zh=[dict get $diagnosis action_zh]"
+        puts $channel "source_seed=[lindex $sourceNodes 0]"
+        puts $channel "source_node_count=[llength $sourceNodes]"
+        puts $channel "source_nodes=[join $sourceNodes ,]"
+        puts $channel "center=[join [::MeshSeamWeld::dictValueOr $record center {}] ,]"
+        puts $channel "target_components=[join [::MeshSeamWeld::dictValueOr $record target_components {}] ,]"
+        puts $channel "target_element_count=[llength $targetElems]"
+        puts $channel "retry_count=[::MeshSeamWeld::dictValueOr $record retry_count 0]"
+        puts $channel "rollback_ok=[::MeshSeamWeld::dictValueOr $record rollback_ok 0]"
+        puts $channel "first_error=[::MeshSeamWeld::reportLineValue [::MeshSeamWeld::dictValueOr $record first_error $finalError]]"
+        puts $channel "raw_error=[::MeshSeamWeld::reportLineValue $finalError]"
+    }
+    close $channel
+    return $reportPath
 }
 
 proc ::MeshSeamWeld::createFailureMarkerNodes {failureRecords} {
@@ -2109,6 +2347,8 @@ proc ::MeshSeamWeld::runAction {} {
             [::HWFlow::txt "正在准备闭合边界任务..." "Preparing closed-boundary jobs..."] 0]
     }
 
+    set failureReportPath ""
+    set sourceComponentIds {}
     set code [catch {
         set batchTaskDir ""
         set batchLogPath ""
@@ -2127,79 +2367,22 @@ proc ::MeshSeamWeld::runAction {} {
                     "源 component 与目标 component 不能重叠。" \
                     "Source and target component selections must not overlap."]
             }
-            set tclBoundaryFastPath 0
-            set tclBoundaryFallbackReason ""
-            if {!$internalSingleNode && [llength $selectedNodes] > 1} {
+            if {!$internalSingleNode} {
                 set boundaryTraceStarted [clock milliseconds]
-                set simpleBoundarySeeds 0
-                if {[catch {
-                    set simpleBoundarySeeds [::MeshSeamWeld::selectedNodesAreSimpleFreeEdgeSeeds $selectedNodes]
-                } topologyErr]} {
-                    set tclBoundaryFallbackReason "boundary topology check failed: $topologyErr"
-                } elseif {!$simpleBoundarySeeds} {
-                    set tclBoundaryFallbackReason "one or more selected nodes are not on a simple manifold free edge"
-                } elseif {[catch {
-                    set sourcePaths [::MeshSeamWeld::closedFreeEdgeLoopsFromSeedsLocal $selectedNodes]
-                } traceErr]} {
-                    set tclBoundaryFallbackReason "local boundary trace failed: $traceErr"
-                } elseif {[llength $sourcePaths] == 0} {
-                    set tclBoundaryFallbackReason "local boundary trace returned no closed loop"
-                } else {
-                    set boundaryTraceMs [expr {[clock milliseconds] - $boundaryTraceStarted}]
-                    set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
-                    set batchTaskDir [dict get $batchWorkspace task_dir]
-                    set batchLogPath [file join $batchTaskDir operation.log]
-                    set targetPrepareStarted [clock milliseconds]
-                    set weldJobs [::MeshSeamWeld::prepareWeldJobs \
-                        $sourcePaths $targetComps $progressOpened]
-                    set targetPrepareMs [expr {[clock milliseconds] - $targetPrepareStarted}]
-                    set normalizedJobs {}
-                    foreach job $weldJobs {
-                        dict set job closed_loop 1
-                        dict set job imprint_closed_loop 0
-                        lappend normalizedJobs $job
-                    }
-                    set weldJobs $normalizedJobs
-                    set tclBoundaryFastPath 1
-                    set sourceSelectionMode "multiple free-edge seeds -> Tcl boundary loops"
-                    ::HybridCore::log INFO "PERF mesh_seam_weld planning_mode=tcl_boundary seeds=[llength $selectedNodes] paths=[llength $sourcePaths] boundary_trace_ms=$boundaryTraceMs target_prepare_ms=$targetPrepareMs"
-                }
-            }
-
-            if {!$tclBoundaryFastPath} {
-            if {$internalSingleNode} {
-                if {[llength $sourceComponentIds] != 1} {
+                set sourcePaths [::MeshSeamWeld::closedFreeEdgeLoopsFromSeedsLocal $selectedNodes]
+                if {[llength $sourcePaths] == 0} {
                     error [::HWFlow::txt \
-                        "内部种子节点必须唯一属于一个源 component。" \
-                        "The internal seed node must belong to exactly one source component."]
+                        "所选边界节点没有形成有效的闭合自由边。" \
+                        "The selected boundary nodes did not produce a valid closed free edge."]
                 }
-                set planRun [::MeshSeamWeld::runPythonInternalComponentPlan \
-                    [lindex $selectedNodes 0] [lindex $sourceComponentIds 0] 2.0 12.0]
-            } else {
-                set planRun [::MeshSeamWeld::runPythonComponentPlan \
-                    $selectedNodes $sourceComponentIds $targetComps 2.0 12.0]
-            }
-            set batchTaskDir [dict get $planRun task_dir]
-            set batchLogPath [file join $batchTaskDir operation.log]
-            set payload [dict get $planRun payload]
-            set candidates [dict get $payload candidates]
-            if {[llength $candidates] != 1 ||
-                ![dict exists [lindex $candidates 0] weld_plans]} {
-                error [::HWFlow::txt \
-                    "Python 未返回有效的 component 焊缝计划。" \
-                    "Python did not return a valid component weld plan."]
-            }
-            set sourcePaths {}
-            set weldJobs {}
-            if {$internalSingleNode} {
-                foreach plan [dict get [lindex $candidates 0] weld_plans] {
-                    foreach key {source_node_ids source_component_ids closed_loop} {
-                        if {![dict exists $plan $key]} { error "Python internal component plan is missing $key" }
-                    }
-                    lappend sourcePaths [dict get $plan source_node_ids]
-                }
-                set weldJobs [::MeshSeamWeld::prepareWeldJobs $sourcePaths $targetComps \
-                    $progressOpened $sourceComponentIds]
+                set boundaryTraceMs [expr {[clock milliseconds] - $boundaryTraceStarted}]
+                set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
+                set batchTaskDir [dict get $batchWorkspace task_dir]
+                set batchLogPath [file join $batchTaskDir operation.log]
+                set targetPrepareStarted [clock milliseconds]
+                set weldJobs [::MeshSeamWeld::prepareWeldJobs \
+                    $sourcePaths $targetComps $progressOpened]
+                set targetPrepareMs [expr {[clock milliseconds] - $targetPrepareStarted}]
                 set normalizedJobs {}
                 foreach job $weldJobs {
                     dict set job closed_loop 1
@@ -2207,29 +2390,45 @@ proc ::MeshSeamWeld::runAction {} {
                     lappend normalizedJobs $job
                 }
                 set weldJobs $normalizedJobs
+                set sourceSelectionMode [expr {[llength $selectedNodes] == 1 ?
+                    "single free-edge seed -> Tcl boundary loop" :
+                    "multiple free-edge seeds -> Tcl boundary loops"}]
+                ::HybridCore::log INFO "PERF mesh_seam_weld planning_mode=tcl_boundary seeds=[llength $selectedNodes] paths=[llength $sourcePaths] boundary_trace_ms=$boundaryTraceMs target_prepare_ms=$targetPrepareMs"
             } else {
-                foreach plan [dict get [lindex $candidates 0] weld_plans] {
-                    foreach key {source_node_ids source_component_ids target_component_ids target_element_ids closed_loop} {
-                        if {![dict exists $plan $key]} { error "Python weld plan is missing $key" }
+                if {[llength $sourceComponentIds] != 1} {
+                    error [::HWFlow::txt \
+                        "内部种子节点必须唯一属于一个源 component。" \
+                        "The internal seed node must belong to exactly one source component."]
+                }
+                if {[catch {
+                    set planRun [::MeshSeamWeld::runPythonInternalComponentPlan \
+                        [lindex $selectedNodes 0] [lindex $sourceComponentIds 0] 2.0 12.0]
+                } planErr]} {
+                    ::MeshSeamWeld::stageError SOURCE_PLAN $planErr
+                }
+                set batchTaskDir [dict get $planRun task_dir]
+                set batchLogPath [file join $batchTaskDir operation.log]
+                set payload [dict get $planRun payload]
+                set candidates [dict get $payload candidates]
+                if {[llength $candidates] != 1 ||
+                    ![dict exists [lindex $candidates 0] weld_plans]} {
+                    error [::HWFlow::txt \
+                        "Python 未返回有效的内部节点 component 焊缝计划。" \
+                        "Python did not return a valid internal-node component weld plan."]
+                }
+                set internalPlans [dict get [lindex $candidates 0] weld_plans]
+                set sourcePaths {}
+                foreach plan $internalPlans {
+                    foreach key {source_node_ids source_component_ids center closed_loop} {
+                        if {![dict exists $plan $key]} { error "Python internal component plan is missing $key" }
                     }
-                    set sourceNodes [dict get $plan source_node_ids]
-                    set sourceCompIds [dict get $plan source_component_ids]
-                    set jobTargetComps [dict get $plan target_component_ids]
-                    set related [::MeshSeamWeld::uniq [concat $sourceCompIds $jobTargetComps]]
-                    lappend sourcePaths $sourceNodes
-                    lappend weldJobs [dict create source_nodes $sourceNodes \
-                        source_component_ids $sourceCompIds target_components $jobTargetComps \
-                        seam_component [::MeshSeamWeld::seamComponentForRelatedComps $related] \
-                        target_elements [dict get $plan target_element_ids] \
-                        closed_loop [dict get $plan closed_loop] imprint_closed_loop 0 \
-                        center [::MeshSeamWeld::pathCenter $sourceNodes]]
+                    lappend sourcePaths [dict get $plan source_node_ids]
                 }
-            }
-                if {$tclBoundaryFallbackReason ne ""} {
-                    set fallbackLog [string map [list "\r" "" "\n" " | "] $tclBoundaryFallbackReason]
-                    ::HybridCore::log WARN "planning_mode=python_fallback reason=$fallbackLog"
-                    set sourceSelectionMode "multiple boundary seeds -> Python topology fallback"
-                }
+                # Convert Python's ordered node rows to the same precomputed
+                # local Tcl jobs used by a manual node-row selection.  A full
+                # index refresh is reserved for a failed, rolled-back attempt.
+                set weldJobs [::MeshSeamWeld::prepareDeferredWeldJobs \
+                    $internalPlans $targetComps $sourceComponentIds $progressOpened]
             }
             if {[llength $weldJobs] == 0} {
                 error [::HWFlow::txt "没有识别到有效闭合自由边。" "No valid closed free-edge loop was found."]
@@ -2269,27 +2468,61 @@ proc ::MeshSeamWeld::runAction {} {
             if {[dict exists $job imprint_closed_loop]} {
                 set jobImprintClosedLoop [dict get $job imprint_closed_loop]
             }
+            set jobTargetElems [dict get $job target_elements]
             set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
                 $jobClosedLoop $progressOpened $pathIndex $pathTotal \
                 [dict get $job source_component_ids] [dict get $job seam_component] \
-                [dict get $job center] [dict get $job target_elements] $jobImprintClosedLoop]
+                [dict get $job center] $jobTargetElems $jobImprintClosedLoop]
+            set firstIsolated $isolated
+            set retryCount 0
             if {![dict get $isolated ok] && $jobClosedLoop && \
-                [llength [dict get $job target_elements]] > 0 && \
+                [llength $jobTargetElems] > 0 && \
                 [dict exists $isolated rollback_ok] && [dict get $isolated rollback_ok]} {
-                ::HybridCore::log WARN "local target patch failed path=$pathIndex/$pathTotal; retrying the same local patch once with close_node_list=1"
+                set retryTargetElems $jobTargetElems
+                set retryExtraLayers [::MeshSeamWeld::dictValueOr $job retry_patch_extra_layers 0]
+                if {$retryExtraLayers > 0} {
+                    if {[catch {
+                        ::MeshSeamWeld::invalidateTargetCaches $jobTargetComps "" "" {}
+                        ::MeshSeamWeld::buildTargetElementIndex $jobTargetComps
+                        set retryTargetElems [::MeshSeamWeld::localTargetPatchForPath \
+                            $sourceNodes $retryExtraLayers]
+                    } retryPrepareErr]} {
+                        ::HybridCore::log WARN "expanded retry patch preparation failed path=$pathIndex/$pathTotal error=[::MeshSeamWeld::reportLineValue $retryPrepareErr]; retaining first patch"
+                        set retryTargetElems $jobTargetElems
+                    }
+                }
+                incr retryCount
+                ::HybridCore::log WARN "local target patch failed path=$pathIndex/$pathTotal; retrying with close_node_list=1 target_elements=[llength $retryTargetElems] extra_layers=$retryExtraLayers"
+                set jobTargetElems $retryTargetElems
                 set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
                     $jobClosedLoop $progressOpened $pathIndex $pathTotal \
                     [dict get $job source_component_ids] [dict get $job seam_component] \
-                    [dict get $job center] [dict get $job target_elements] 1]
+                    [dict get $job center] $jobTargetElems 1]
+            }
+            if {![dict get $isolated ok] && \
+                [::MeshSeamWeld::dictValueOr $job component_fallback 0] && \
+                [dict exists $isolated rollback_ok] && [dict get $isolated rollback_ok]} {
+                incr retryCount
+                ::HybridCore::log WARN "expanded local retry failed path=$pathIndex/$pathTotal; starting final component-scope retry with close_node_list=1"
+                set jobTargetElems {}
+                set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
+                    $jobClosedLoop $progressOpened $pathIndex $pathTotal \
+                    [dict get $job source_component_ids] [dict get $job seam_component] \
+                    [dict get $job center] {} 1]
             }
             if {![dict get $isolated ok]} {
+                set diagnosis [::MeshSeamWeld::diagnoseFailure [dict get $isolated error]]
                 set failure [dict create path_index $pathIndex source_nodes $sourceNodes \
-                    center [dict get $isolated center] error [dict get $isolated error]]
+                    center [dict get $isolated center] target_components $jobTargetComps \
+                    target_elements $jobTargetElems retry_count $retryCount \
+                    rollback_ok [::MeshSeamWeld::dictValueOr $isolated rollback_ok 0] \
+                    first_error [dict get $firstIsolated error] \
+                    final_error [dict get $isolated error] error [dict get $isolated error]]
                 lappend failureRecords $failure
                 ::HybridCore::log ERROR "weld path skipped path=$pathIndex/$pathTotal source_seed=[lindex $sourceNodes 0] error=[dict get $isolated error]"
                 ::MeshSeamWeld::msg [::HWFlow::txt \
-                    "闭环 $pathIndex/$pathTotal 创建失败，已回滚并跳过。" \
-                    "Loop $pathIndex/$pathTotal failed; its changes were rolled back and it was skipped."]
+                    "闭环 $pathIndex/$pathTotal 创建失败，已回滚并跳过。阶段：[dict get $diagnosis stage]。原因：[dict get $diagnosis reason_zh] 建议：[dict get $diagnosis action_zh]" \
+                    "Loop $pathIndex/$pathTotal failed and was rolled back. Stage: [dict get $diagnosis stage]. Reason: [dict get $diagnosis reason_en] Action: [dict get $diagnosis action_en]"]
                 continue
             }
             set result [dict get $isolated result]
@@ -2307,16 +2540,66 @@ proc ::MeshSeamWeld::runAction {} {
         set executionMs [expr {[clock milliseconds] - $executionStarted}]
         set failureMarkerNodes [::MeshSeamWeld::createFailureMarkerNodes $failureRecords]
         set batchElapsedMs [expr {[clock milliseconds] - $batchStarted}]
+        if {[llength $failureRecords] > 0} {
+            set reportContext [dict create \
+                source_mode $sourceSelectionMode \
+                path_total $pathTotal \
+                success_count [expr {$pathTotal - [llength $failureRecords]}] \
+                source_components $sourceComponentIds \
+                target_components $targetComps \
+                weld_mesh_size $cfg(weld_mesh_size) \
+                patch_expand_layers $cfg(patch_expand_layers) \
+                imprint_remesh_mode $cfg(imprint_remesh_mode) \
+                imprint_angle $cfg(imprint_angle)]
+            if {[catch {
+                set failureReportPath [::MeshSeamWeld::writeFailureReport \
+                    $batchTaskDir $reportContext $failureRecords]
+            } reportErr]} {
+                set failureReportPath ""
+                ::HybridCore::log ERROR "failure report creation failed error=[::MeshSeamWeld::reportLineValue $reportErr]"
+            } else {
+                ::HybridCore::log ERROR "failure_report=$failureReportPath"
+            }
+        }
         ::HybridCore::log INFO "PERF mesh_seam_weld batch paths=$pathTotal success=[expr {$pathTotal-[llength $failureRecords]}] failed=[llength $failureRecords] prepare_ms=$prepareMs execution_ms=$executionMs total_ms=$batchElapsedMs"
     } err]
 
     if {$code} {
+        if {$batchTaskDir eq ""} {
+            catch {
+                set fatalWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
+                set batchTaskDir [dict get $fatalWorkspace task_dir]
+                set batchLogPath [file join $batchTaskDir operation.log]
+            }
+        }
         catch {::HybridCore::log ERROR "mesh_seam_weld batch failed error=$err"}
+        set fatalDiagnosis [::MeshSeamWeld::diagnoseFailure $err]
+        if {$batchTaskDir ne "" && $failureReportPath eq ""} {
+            set fatalRecord [dict create path_index 0 source_nodes $selectedNodes \
+                center {} target_components $targetComps target_elements {} retry_count 0 \
+                rollback_ok 0 first_error $err final_error $err error $err]
+            set fatalContext [dict create source_mode $sourceSelectionMode path_total 0 \
+                success_count 0 source_components $sourceComponentIds \
+                target_components $targetComps weld_mesh_size $cfg(weld_mesh_size) \
+                patch_expand_layers $cfg(patch_expand_layers) \
+                imprint_remesh_mode $cfg(imprint_remesh_mode) \
+                imprint_angle $cfg(imprint_angle)]
+            catch {set failureReportPath [::MeshSeamWeld::writeFailureReport \
+                $batchTaskDir $fatalContext [list $fatalRecord]]}
+        }
         catch {::HybridCore::closeLog}
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
             catch {::HWFlow::progressClose [::HWFlow::txt "网格焊缝命令流失败。" "Mesh seam weld command stream failed."] 100.0}
         }
-        tk_messageBox -icon error -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $err
+        set fatalMessage [::HWFlow::txt \
+            "网格焊缝任务失败。\n阶段：[dict get $fatalDiagnosis stage]\n原因：[dict get $fatalDiagnosis reason_zh]\n建议：[dict get $fatalDiagnosis action_zh]\n\n原始错误：$err" \
+            "Mesh seam weld task failed.\nStage: [dict get $fatalDiagnosis stage]\nReason: [dict get $fatalDiagnosis reason_en]\nAction: [dict get $fatalDiagnosis action_en]\n\nRaw error: $err"]
+        if {$failureReportPath ne ""} {
+            append fatalMessage [::HWFlow::txt \
+                "\n\n反馈文件：$failureReportPath\n运行日志：$batchLogPath" \
+                "\n\nFeedback file: $failureReportPath\nOperation log: $batchLogPath"]
+        }
+        tk_messageBox -icon error -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $fatalMessage
         return
     }
 
@@ -2332,12 +2615,14 @@ proc ::MeshSeamWeld::runAction {} {
         "网格焊缝完成。\n源选择模式：$sourceSelectionMode\n闭合边界/路径数：[llength $sourcePaths]\n源节点：[llength $allSourceNodes]\n源组件：[llength $sourceCompIds]\n目标组件：[llength $targetComps]\n焊缝组件：[join $seamCompNames {, }]\n焊缝网格尺寸：$cfg(weld_mesh_size)\nimprint 目标路径节点：[llength $allImprintNodes]\n目标路径节点：[llength $allTargetNodes]\n新建焊缝单元：[llength $allWeldElems]" \
         "Mesh seam weld finished.\nSource selection mode: $sourceSelectionMode\nClosed boundaries/paths: [llength $sourcePaths]\nSource nodes: [llength $allSourceNodes]\nSource components: [llength $sourceCompIds]\nTarget components: [llength $targetComps]\nWeld components: [join $seamCompNames {, }]\nWeld mesh size: $cfg(weld_mesh_size)\nImprint target path nodes: [llength $allImprintNodes]\nTarget path nodes: [llength $allTargetNodes]\nNew weld elements: [llength $allWeldElems]"]
     append msg [::HWFlow::txt \
-        "\n成功路径：$successCount\n跳过路径：$failedCount\n失败标记节点：[llength $failureMarkerNodes]\n组件导出及 Python 规划耗时：[format %.3f [expr {$prepareMs/1000.0}]] 秒\nPython 返回后的 Tcl/HM 执行耗时：[format %.3f [expr {$executionMs/1000.0}]] 秒\n总耗时：[format %.3f [expr {$batchElapsedMs/1000.0}]] 秒" \
-        "\nSuccessful paths: $successCount\nSkipped paths: $failedCount\nFailure marker nodes: [llength $failureMarkerNodes]\nComponent export and Python planning: [format %.3f [expr {$prepareMs/1000.0}]] s\nTcl/HM execution after Python returned: [format %.3f [expr {$executionMs/1000.0}]] s\nElapsed: [format %.3f [expr {$batchElapsedMs/1000.0}]] s"]
+        "\n成功路径：$successCount\n跳过路径：$failedCount\n失败标记节点：[llength $failureMarkerNodes]\n边界/路径规划及局部目标准备耗时：[format %.3f [expr {$prepareMs/1000.0}]] 秒\nTcl/HyperMesh 执行耗时：[format %.3f [expr {$executionMs/1000.0}]] 秒\n总耗时：[format %.3f [expr {$batchElapsedMs/1000.0}]] 秒" \
+        "\nSuccessful paths: $successCount\nSkipped paths: $failedCount\nFailure marker nodes: [llength $failureMarkerNodes]\nBoundary/path planning and local-target preparation: [format %.3f [expr {$prepareMs/1000.0}]] s\nTcl/HyperMesh execution: [format %.3f [expr {$executionMs/1000.0}]] s\nElapsed: [format %.3f [expr {$batchElapsedMs/1000.0}]] s"]
     if {$failedCount > 0} {
+        set firstFailure [lindex $failureRecords 0]
+        set firstDiagnosis [::MeshSeamWeld::diagnoseFailure [dict get $firstFailure final_error]]
         append msg [::HWFlow::txt \
-            "\n\n未成功部分已在 MESH_SEAM_WELD_FAILED_MARKERS 中放置临时节点，请检查这些位置。" \
-            "\n\nTemporary nodes were placed in MESH_SEAM_WELD_FAILED_MARKERS at unsuccessful locations; inspect those positions."]
+            "\n\n首个失败闭环：[dict get $firstFailure path_index]；阶段：[dict get $firstDiagnosis stage]\n原因：[dict get $firstDiagnosis reason_zh]\n建议：[dict get $firstDiagnosis action_zh]\n未成功位置已在 MESH_SEAM_WELD_FAILED_MARKERS 中标记。\n\n请将以下两个纯文本文件反馈给开发人员：\n失败报告：$failureReportPath\n运行日志：$batchLogPath" \
+            "\n\nFirst failed loop: [dict get $firstFailure path_index]; stage: [dict get $firstDiagnosis stage]\nReason: [dict get $firstDiagnosis reason_en]\nAction: [dict get $firstDiagnosis action_en]\nFailed locations are marked in MESH_SEAM_WELD_FAILED_MARKERS.\n\nProvide these two plain-text files to the developer:\nFailure report: $failureReportPath\nOperation log: $batchLogPath"]
     }
     set completionIcon [expr {$failedCount > 0 ? "warning" : "info"}]
     append msg [::HWFlow::txt \
