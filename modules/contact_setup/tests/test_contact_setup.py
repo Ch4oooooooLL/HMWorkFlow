@@ -216,6 +216,73 @@ class ContactSetupTclTests(unittest.TestCase):
         self.assertEqual(interp.eval("dict get {{{}}} elemsA".format(result)), "10")
         self.assertEqual(interp.eval("dict get {{{}}} elemsB".format(result)), "20")
 
+    def test_spatial_grid_is_reused_by_reference(self):
+        interp = self.interp()
+        result = interp.eval(
+            "set records [list "
+            "[dict create elem 10 center {0 0 0} normal {0 0 1} span 1] "
+            "[dict create elem 20 center {2 0 0} normal {0 0 1} span 1]];"
+            "array set grid {};"
+            "::ContactSetup::buildRecordGrid $records 1.0 grid;"
+            "set query [dict create elem 99 center {1.8 0 0} normal {0 0 1} span 1];"
+            "set nearest [::ContactSetup::nearestRecord $query $records grid 1.0];"
+            "list [array size grid] [lindex $nearest 0]"
+        )
+        self.assertEqual(result, "2 1")
+
+        source = MODULE.read_text(encoding="utf-8")
+        body = source.split("proc ::ContactSetup::nearestRecord", 1)[1].split(
+            "proc ::ContactSetup::progress", 1
+        )[0]
+        self.assertIn("upvar 1 $gridVar grid", body)
+        self.assertNotIn("array set grid $gridList", body)
+
+    def test_threshold_match_stops_after_first_qualifying_record(self):
+        interp = self.interp()
+        result = interp.eval(
+            "set records [list "
+            "[dict create elem 10 center {0 0 0} normal {} span 1] "
+            "[dict create elem 20 center {0.2 0 0} normal {} span 1]];"
+            "array set grid {};"
+            "::ContactSetup::buildRecordGrid $records 1.0 grid;"
+            "rename ::ContactSetup::distance2 ::ContactSetup::distance2_real;"
+            "proc ::ContactSetup::distance2 {a b} {incr ::distance_calls; return 0.25};"
+            "set ::distance_calls 0;"
+            "set query [dict create elem 99 center {0.1 0 0} normal {} span 1];"
+            "set near [::ContactSetup::firstNearbyRecord $query $records grid 1.0 1.0];"
+            "rename ::ContactSetup::distance2 {};"
+            "rename ::ContactSetup::distance2_real ::ContactSetup::distance2;"
+            "list [lindex $near 0] $::distance_calls"
+        )
+        self.assertEqual(result, "0 1")
+
+    def test_face_geometry_data_combines_record_and_bbox_passes(self):
+        interp = self.interp()
+        interp.eval(
+            "array set ::ContactSetup::geometryElemNodes {10 {1 2 3}};"
+            "array set ::ContactSetup::geometryNodeXYZ {"
+            "1 {0 0 0} 2 {2 0 0} 3 {0 2 0}}"
+        )
+        result = interp.eval("::ContactSetup::faceGeometryData {10}")
+        self.assertEqual(
+            interp.eval("dict get [lindex {{{}}} 2] min".format(result)),
+            "0 0 0",
+        )
+        self.assertEqual(
+            interp.eval("dict get [lindex {{{}}} 2] max".format(result)),
+            "2 2 0",
+        )
+        self.assertEqual(
+            interp.eval("dict get [lindex [lindex {{{}}} 0] 0] center".format(result)),
+            "0.6666666666666666 0.6666666666666666 0.0",
+        )
+
+        no_normals = interp.eval("::ContactSetup::faceGeometryData {10} 0")
+        self.assertEqual(
+            interp.eval("dict get [lindex [lindex {{{}}} 0] 0] normal".format(no_normals)),
+            "",
+        )
+
     def test_contact_surface_is_created_with_computed_reverse_flag(self):
         interp = self.interp()
         interp.eval(
@@ -224,9 +291,11 @@ class ContactSetupTclTests(unittest.TestCase):
             "proc ::ContactSetup::deleteContactSurfByName {name} {return 0};"
             "proc ::ContactSetup::contactSurfIdByName {name} {return 77};"
             "proc *clearmark args {}; proc *createmark args {};"
-            "proc *createentity {entity args} {set ::surface_create [list $entity {*}$args]};"
-            "proc *addshellstocontactsurf {name mark reverse} {"
-            "set ::surface_add [list $name $mark $reverse]};"
+            "proc *contactsurfcreatewithshells {name color mark reverse} {"
+            "set ::surface_create [list $name $color $mark $reverse]};"
+            "proc hm_info {args} {return {/tmp/optiStruct.tmpl}};"
+            "proc hm_marklength {entity mark} {return 1};"
+            "proc *dictionaryload args {};"
             "proc hm_getvalue {entity args} {"
             "if {[lsearch $args dataname=elements] >= 0} {return {10 11}};"
             "if {[lsearch $args dataname=cardimage] >= 0} {return SURF}; return {}}"
@@ -237,9 +306,8 @@ class ContactSetupTclTests(unittest.TestCase):
         )
         self.assertEqual(
             interp.eval("set ::surface_create"),
-            "contactsurfs name=SURF_A cardimage=SURF color=13",
+            "SURF_A 13 1 1",
         )
-        self.assertEqual(interp.eval("set ::surface_add"), "SURF_A 1 1")
 
     def test_optistruct_group_declares_contact_surface_definitions(self):
         interp = self.interp()
@@ -252,7 +320,7 @@ class ContactSetupTclTests(unittest.TestCase):
             "proc *createentity {entity args} {set ::create_group [list $entity {*}$args]};"
             "proc ::HWFlow::entityIdByName {types name} {return 88};"
             "proc *setvalue {entity selector args} {lappend ::group_values [list $entity $selector {*}$args]};"
-            "proc hm_attributelist {args} {return {TYPE}};"
+            "proc hm_attributelist {args} {return {CONTACT_PROP_TYPE TYPE}};"
             "proc hm_attributetype {name} {return 1};"
             "proc hm_getvalue {entity args} {"
             "if {[lsearch $args dataname=masterdefinition] >= 0 || "
@@ -265,7 +333,7 @@ class ContactSetupTclTests(unittest.TestCase):
             "[lsearch $args dataname=slavecontactsurflist] >= 0} {return 102};"
             "if {[lsearch $args dataname=mainentityids] >= 0} {return 101};"
             "if {[lsearch $args dataname=secondaryentityids] >= 0} {return 102};"
-            "if {[lsearch $args dataname=TYPE] >= 0} {return 0}; return {}}"
+            "if {[lsearch $args dataname=CONTACT_PROP_TYPE] >= 0} {return SLIDE}; return {}}"
         )
 
         self.assertEqual(interp.eval("::ContactSetup::createGroup CONTACT_1 101 102"), "88")
@@ -274,11 +342,9 @@ class ContactSetupTclTests(unittest.TestCase):
             "groups name=CONTACT_1 cardimage=CONTACT",
         )
         values = interp.eval("set ::group_values")
-        self.assertIn("masterdefinition=5", values)
-        self.assertIn("slavedefinition=5", values)
         self.assertIn("masterentityids=\\{contactsurfs 101\\}", values)
         self.assertIn("slaveentityids=\\{contactsurfs 102\\}", values)
-        self.assertIn("TYPE=0", values)
+        self.assertIn("CONTACT_PROP_TYPE=SLIDE", values)
 
     def test_group_verification_requires_contactsurf_definition_mode(self):
         interp = self.interp()

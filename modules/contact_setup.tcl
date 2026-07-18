@@ -644,6 +644,101 @@ proc ::ContactSetup::faceRecords {elems} {
     return [list $records [::ContactSetup::median $spans]]
 }
 
+# Build the per-element geometry records and the side bounding box in one
+# traversal.  The previous path walked every element once for bboxForElems and
+# then three more times inside faceRecords (centroid, normal and span).
+proc ::ContactSetup::faceGeometryData {elems {includeNormals 1}} {
+    set records {}
+    set spans {}
+    set overallFirst 1
+    foreach eid $elems {
+        set nodes [::ContactSetup::uniq [::ContactSetup::elemNodes $eid]]
+        if {[llength $nodes] < 3} {
+            continue
+        }
+
+        set points {}
+        set sx 0.0; set sy 0.0; set sz 0.0
+        set first 1
+        foreach nodeId $nodes {
+            set p [::ContactSetup::nodeXYZ $nodeId]
+            lappend points $p
+            set x [lindex $p 0]; set y [lindex $p 1]; set z [lindex $p 2]
+            set sx [expr {$sx + $x}]
+            set sy [expr {$sy + $y}]
+            set sz [expr {$sz + $z}]
+            if {$first} {
+                set xmin $x; set xmax $x
+                set ymin $y; set ymax $y
+                set zmin $z; set zmax $z
+                set first 0
+            } else {
+                if {$x < $xmin} {set xmin $x}
+                if {$x > $xmax} {set xmax $x}
+                if {$y < $ymin} {set ymin $y}
+                if {$y > $ymax} {set ymax $y}
+                if {$z < $zmin} {set zmin $z}
+                if {$z > $zmax} {set zmax $z}
+            }
+        }
+
+        set count [llength $points]
+        set center [list \
+            [expr {$sx/double($count)}] \
+            [expr {$sy/double($count)}] \
+            [expr {$sz/double($count)}]]
+        set normal {}
+        if {$includeNormals} {
+            set normal {0.0 0.0 0.0}
+            set p0 [lindex $points 0]
+            for {set i 1} {$i < [expr {$count - 1}]} {incr i} {
+                set cr [::ContactSetup::vcross \
+                    [::ContactSetup::vsub [lindex $points $i] $p0] \
+                    [::ContactSetup::vsub [lindex $points [expr {$i + 1}]] $p0]]
+                if {[::ContactSetup::vnorm $cr] > 1.0e-12} {
+                    set normal [::ContactSetup::vnormalize $cr]
+                    break
+                }
+            }
+        }
+        set span [expr {sqrt(
+            ($xmax-$xmin)*($xmax-$xmin) +
+            ($ymax-$ymin)*($ymax-$ymin) +
+            ($zmax-$zmin)*($zmax-$zmin))}]
+        lappend spans $span
+        lappend records [dict create elem $eid center $center normal $normal span $span]
+
+        if {$overallFirst} {
+            set oxmin $xmin; set oxmax $xmax
+            set oymin $ymin; set oymax $ymax
+            set ozmin $zmin; set ozmax $zmax
+            set overallFirst 0
+        } else {
+            if {$xmin < $oxmin} {set oxmin $xmin}
+            if {$xmax > $oxmax} {set oxmax $xmax}
+            if {$ymin < $oymin} {set oymin $ymin}
+            if {$ymax > $oymax} {set oymax $ymax}
+            if {$zmin < $ozmin} {set ozmin $zmin}
+            if {$zmax > $ozmax} {set ozmax $zmax}
+        }
+    }
+    if {$overallFirst} {
+        error [::HWFlow::txt "没有可读取的接触候选单元节点。" "No readable nodes found in contact candidate elements."]
+    }
+    set bbox [dict create \
+        min [list $oxmin $oymin $ozmin] \
+        max [list $oxmax $oymax $ozmax] \
+        center [list \
+            [expr {($oxmin+$oxmax)/2.0}] \
+            [expr {($oymin+$oymax)/2.0}] \
+            [expr {($ozmin+$ozmax)/2.0}]] \
+        range [list \
+            [expr {$oxmax-$oxmin}] \
+            [expr {$oymax-$oymin}] \
+            [expr {$ozmax-$ozmin}]]]
+    return [list $records [::ContactSetup::median $spans] $bbox]
+}
+
 proc ::ContactSetup::distance2 {a b} {
     set dx [expr {[lindex $a 0] - [lindex $b 0]}]
     set dy [expr {[lindex $a 1] - [lindex $b 1]}]
@@ -658,7 +753,9 @@ proc ::ContactSetup::gridKey {point cell} {
     return "${ix}_${iy}_${iz}"
 }
 
-proc ::ContactSetup::buildRecordGrid {records cell} {
+proc ::ContactSetup::buildRecordGrid {records cell gridVar} {
+    upvar 1 $gridVar grid
+    catch {array unset grid}
     array set grid {}
     set idx 0
     foreach rec $records {
@@ -666,11 +763,10 @@ proc ::ContactSetup::buildRecordGrid {records cell} {
         lappend grid($key) $idx
         incr idx
     }
-    return [array get grid]
 }
 
-proc ::ContactSetup::nearestRecord {rec otherRecords gridList cell} {
-    array set grid $gridList
+proc ::ContactSetup::nearestRecord {rec otherRecords gridVar cell} {
+    upvar 1 $gridVar grid
     set c [dict get $rec center]
     set key [::ContactSetup::gridKey $c $cell]
     scan $key "%d_%d_%d" ix iy iz
@@ -699,17 +795,61 @@ proc ::ContactSetup::nearestRecord {rec otherRecords gridList cell} {
     return [list $bestIdx $bestD2]
 }
 
+# Contact-region filtering only needs to know whether an opposite element is
+# within searchTol.  Returning on the first qualifying center preserves the
+# selected element sets while avoiding a full exact-nearest scan of all 27
+# neighboring grid cells.
+proc ::ContactSetup::firstNearbyRecord {rec otherRecords gridVar cell maxD2} {
+    upvar 1 $gridVar grid
+    set c [dict get $rec center]
+    set key [::ContactSetup::gridKey $c $cell]
+    scan $key "%d_%d_%d" ix iy iz
+    for {set dx -1} {$dx <= 1} {incr dx} {
+        for {set dy -1} {$dy <= 1} {incr dy} {
+            for {set dz -1} {$dz <= 1} {incr dz} {
+                set nkey "[expr {$ix+$dx}]_[expr {$iy+$dy}]_[expr {$iz+$dz}]"
+                if {![info exists grid($nkey)]} {
+                    continue
+                }
+                foreach idx $grid($nkey) {
+                    set d2 [::ContactSetup::distance2 \
+                        $c [dict get [lindex $otherRecords $idx] center]]
+                    if {$d2 <= $maxD2} {
+                        return [list $idx $d2]
+                    }
+                }
+            }
+        }
+    }
+    return {}
+}
+
+proc ::ContactSetup::progress {percent message detail {force 0}} {
+    if {[llength [info commands ::HWFlow::progressIsActive]] == 0 ||
+        ![::HWFlow::progressIsActive] ||
+        [llength [info commands ::HWFlow::progressUpdate]] == 0} {
+        return
+    }
+    catch {::HWFlow::progressUpdate $percent $message $detail $force}
+}
+
 proc ::ContactSetup::selectNearestContactFaces {elemsA elemsB} {
-    set bboxA [::ContactSetup::bboxForElems $elemsA]
-    set bboxB [::ContactSetup::bboxForElems $elemsB]
-    set dataA [::ContactSetup::faceRecords $elemsA]
-    set dataB [::ContactSetup::faceRecords $elemsB]
+    set totalStarted [clock milliseconds]
+    set geometryStarted $totalStarted
+    # Normals are only required later for one reference element per side.
+    # Computing them for every selected element is wasted work on large faces.
+    set dataA [::ContactSetup::faceGeometryData $elemsA 0]
+    set dataB [::ContactSetup::faceGeometryData $elemsB 0]
     set recsA [lindex $dataA 0]
     set recsB [lindex $dataB 0]
     set medA [lindex $dataA 1]
     set medB [lindex $dataB 1]
+    set bboxA [lindex $dataA 2]
+    set bboxB [lindex $dataB 2]
+    set geometryMs [expr {[clock milliseconds] - $geometryStarted}]
     if {[llength $recsA] == 0 || [llength $recsB] == 0} {
-        return [dict create elemsA {} elemsB {} pairMapA {} pairMapB {} searchTol 0]
+        return [dict create elemsA {} elemsB {} pairMapA {} pairMapB {} searchTol 0 \
+            perf [dict create geometry_ms $geometryMs grid_ms 0 match_ms 0 total_ms $geometryMs]]
     }
 
     set elemScale [expr {max($medA, $medB, 1.0e-6)}]
@@ -718,16 +858,30 @@ proc ::ContactSetup::selectNearestContactFaces {elemsA elemsB} {
     set cell $searchTol
     set maxD2 [expr {$searchTol * $searchTol}]
 
-    set gridA [::ContactSetup::buildRecordGrid $recsA $cell]
-    set gridB [::ContactSetup::buildRecordGrid $recsB $cell]
+    set gridStarted [clock milliseconds]
+    array set gridA {}
+    array set gridB {}
+    ::ContactSetup::buildRecordGrid $recsA $cell gridA
+    ::ContactSetup::buildRecordGrid $recsB $cell gridB
+    set gridMs [expr {[clock milliseconds] - $gridStarted}]
     array set keepA {}
     array set keepB {}
     array set pairA {}
     array set pairB {}
 
-    for {set i 0} {$i < [llength $recsA]} {incr i} {
-        set near [::ContactSetup::nearestRecord [lindex $recsA $i] $recsB $gridB $cell]
-        if {[llength $near] == 0 || [lindex $near 1] > $maxD2} {
+    set matchStarted [clock milliseconds]
+    set countA [llength $recsA]
+    set countB [llength $recsB]
+    for {set i 0} {$i < $countA} {incr i} {
+        if {$i > 0 && [expr {$i % 2000}] == 0} {
+            set pct [expr {30.0 + 12.0*$i/double(max($countA, 1))}]
+            ::ContactSetup::progress $pct \
+                [::HWFlow::txt "正在匹配第一侧接触区域" "Matching first contact side"] \
+                "$i/$countA"
+        }
+        set near [::ContactSetup::firstNearbyRecord \
+            [lindex $recsA $i] $recsB gridB $cell $maxD2]
+        if {[llength $near] == 0} {
             continue
         }
         set j [lindex $near 0]
@@ -738,9 +892,16 @@ proc ::ContactSetup::selectNearestContactFaces {elemsA elemsB} {
         set pairA($eidA) $eidB
     }
 
-    for {set j 0} {$j < [llength $recsB]} {incr j} {
-        set near [::ContactSetup::nearestRecord [lindex $recsB $j] $recsA $gridA $cell]
-        if {[llength $near] == 0 || [lindex $near 1] > $maxD2} {
+    for {set j 0} {$j < $countB} {incr j} {
+        if {$j > 0 && [expr {$j % 2000}] == 0} {
+            set pct [expr {42.0 + 13.0*$j/double(max($countB, 1))}]
+            ::ContactSetup::progress $pct \
+                [::HWFlow::txt "正在匹配第二侧接触区域" "Matching second contact side"] \
+                "$j/$countB"
+        }
+        set near [::ContactSetup::firstNearbyRecord \
+            [lindex $recsB $j] $recsA gridA $cell $maxD2]
+        if {[llength $near] == 0} {
             continue
         }
         set i [lindex $near 0]
@@ -751,6 +912,8 @@ proc ::ContactSetup::selectNearestContactFaces {elemsA elemsB} {
         set pairB($eidB) $eidA
     }
 
+    set matchMs [expr {[clock milliseconds] - $matchStarted}]
+    set totalMs [expr {[clock milliseconds] - $totalStarted}]
     return [dict create \
         elemsA [lsort -integer [array names keepA]] \
         elemsB [lsort -integer [array names keepB]] \
@@ -758,7 +921,8 @@ proc ::ContactSetup::selectNearestContactFaces {elemsA elemsB} {
         pairMapB [array get pairB] \
         recordsA $recsA \
         recordsB $recsB \
-        searchTol $searchTol]
+        searchTol $searchTol \
+        perf [dict create geometry_ms $geometryMs grid_ms $gridMs match_ms $matchMs total_ms $totalMs]]
 }
 
 proc ::ContactSetup::recordMapByElem {records} {
@@ -782,6 +946,9 @@ proc ::ContactSetup::orientationByOppositeGeometry {elems recordMap pairMap othe
         }
         set rec $records($eid)
         set n [dict get $rec normal]
+        if {[llength $n] != 3} {
+            set n [::ContactSetup::faceNormal [::ContactSetup::elemNodes $eid]]
+        }
         set v $fallbackVector
         if {[info exists pairs($eid)] && [info exists otherRecords($pairs($eid))]} {
             set v [::ContactSetup::vsub [dict get $otherRecords($pairs($eid)) center] [dict get $rec center]]
@@ -945,24 +1112,36 @@ proc ::ContactSetup::createContactSurf {name elems color orientationElem orienta
         error [::HWFlow::txt "没有可用于 $name 的接触单元。" "No contact elements for $name."]
     }
     ::ContactSetup::deleteContactSurfByName $name
-    # Create the solver-backed OptiStruct SURF entity explicitly.  The generic
-    # contactsurfcreatewithshells command can leave the entity without a SURF
-    # card image, in which case CONTACT exports its IDs but no matching SURF
-    # cards are written.
-    if {[catch {*createentity contactsurfs name=$name cardimage=SURF color=$color} err]} {
-        error [::HWFlow::txt "创建 SURF contact surface $name 失败：$err" "Failed to create SURF contact surface $name: $err"]
-    }
+    # Create the shell-defined contact surface and populate it in one call.
+    # *contactsurfcreatewithshells is the only creation path that yields a
+    # contact surface *addshellstocontactsurf can later append to; creating the
+    # entity with *createentity contactsurfs cardimage=SURF leaves it in a
+    # definition type that rejects element addition, which surfaced at runtime
+    # as a "write contact surf failed" error from *addshellstocontactsurf.
     catch {*clearmark elems 1}
     if {[catch {eval *createmark elems 1 $elems} err]} {
         ::ContactSetup::deleteContactSurfByName $name
         error [::HWFlow::txt "接触面 $name 打 mark 失败：$err" "Failed to mark contact elements for $name: $err"]
     }
-    if {[catch {*addshellstocontactsurf $name 1 $orientationReverse} err]} {
+    if {[catch {*contactsurfcreatewithshells $name $color 1 $orientationReverse} err]} {
         catch {*clearmark elems 1}
         ::ContactSetup::deleteContactSurfByName $name
-        error [::HWFlow::txt "向 contact surface $name 添加单元失败：$err" "Failed to add elements to contact surface $name: $err"]
+        error [::HWFlow::txt "创建 SURF contact surface $name 失败：$err" "Failed to create SURF contact surface $name: $err"]
     }
     catch {*clearmark elems 1}
+    # *contactsurfcreatewithshells can leave the entity without the SURF card
+    # image, in which case CONTACT exports its IDs but no matching SURF cards
+    # are written.  Load the SURF dictionary explicitly, mirroring HyperMesh's
+    # own OptiStruct contact wizard (autocontact_tab.tcl).
+    if {![catch {set template [hm_info templatefilename]}] && $template ne ""} {
+        catch {*clearmark contactsurfs 1}
+        if {![catch {*createmark contactsurfs 1 "by name only" $name}]} {
+            if {![catch {hm_marklength contactsurfs 1} len] && $len} {
+                catch {*dictionaryload contactsurfs 1 $template "SURF"}
+            }
+            catch {*clearmark contactsurfs 1}
+        }
+    }
     set id [::ContactSetup::contactSurfIdByName $name]
     if {$id eq ""} {
         error [::HWFlow::txt "contact surface $name 已创建但无法读取 ID。" "Contact surface $name was created, but its ID could not be read."]
@@ -1046,7 +1225,7 @@ proc ::ContactSetup::setContactGroupType {groupId contactType} {
     set attributeName ""
     set attributeNames {}
     catch {set attributeNames [hm_attributelist groups $groupId name -byid]}
-    foreach preferred {TYPE CONTACT_TYPE CT_TYPE} {
+    foreach preferred {CONTACT_PROP_TYPE TYPE CONTACT_TYPE CT_TYPE} {
         foreach candidate $attributeNames {
             if {[string equal -nocase $candidate $preferred]} {
                 set attributeName $candidate
@@ -1064,13 +1243,11 @@ proc ::ContactSetup::setContactGroupType {groupId contactType} {
             "The CONTACT TYPE attribute was not found in the current OptiStruct template."]
     }
 
-    set attributeType 1
-    catch {set attributeType [hm_attributetype $attributeName]}
-    if {$attributeType == 3} {
-        set value $contactType
-    } else {
-        set value [::ContactSetup::contactTypeValue $contactType]
-    }
+    # OptiStruct's CONTACT_PROP_TYPE is a string enumeration in the HM2019
+    # output template.  The generic TYPE dataname also exists but is unrelated
+    # to the exported contact type, so writing it silently leaves SLIDE in the
+    # solver deck.
+    set value $contactType
     set command [list *setvalue groups id=$groupId STATUS=2 ${attributeName}=$value]
     if {[catch {uplevel #0 $command} err]} {
         error [::HWFlow::txt \
@@ -1180,16 +1357,13 @@ proc ::ContactSetup::createGroup {groupName mainSurfId secSurfId} {
     if {$groupId eq "" || $groupId == 0} {
         error [::HWFlow::txt "group $groupName 已创建但无法读取 ID。" "Group $groupName was created, but its ID could not be read."]
     }
-    # HyperMesh stores the selected IDs and the definition method separately.
-    # Without definition=5 the OptiStruct template treats these numeric IDs as
-    # SET references, producing an undefined SSID/MSID even though the legacy
-    # contact surfaces exist in the database.
+    # Supplying the typed entity references makes HyperMesh 2019 select
+    # definition mode 5 (contact surfaces) automatically.  Writing the
+    # definition fields explicitly in the same *setvalue call is rejected by
+    # HM2019 with "Value is not modified successfully".
     if {[catch {
-        *setvalue groups id=$groupId \
-            masterdefinition=5 \
-            slavedefinition=5 \
-            masterentityids={contactsurfs $mainSurfId} \
-            slaveentityids={contactsurfs $secSurfId}
+        *setvalue groups id=$groupId masterentityids={contactsurfs $mainSurfId}
+        *setvalue groups id=$groupId slaveentityids={contactsurfs $secSurfId}
     } err]} {
         error [::HWFlow::txt "group 主从面写入失败：$err" "Failed to assign the group main/secondary surfaces: $err"]
     }
@@ -1225,13 +1399,54 @@ proc ::ContactSetup::chooseMainSide {compA compB elemsA elemsB} {
     return FIRST
 }
 
+proc ::ContactSetup::writePerformanceReport {values} {
+    # Only persist runtime evidence inside a real HyperMesh session.  Plain Tcl
+    # unit tests exercise createContact with command stubs and must not replace
+    # the latest production timing report with synthetic zero-duration data.
+    if {![info exists ::HWFlow::ROOT_DIR] || [llength [info commands hm_info]] == 0} {
+        return ""
+    }
+    set outputDir [file join $::HWFlow::ROOT_DIR runtime tasks contact_setup]
+    if {[catch {file mkdir $outputDir}]} {
+        return ""
+    }
+    set path [file join $outputDir performance_latest.txt]
+    set lines [list \
+        "timestamp=[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}]" \
+        "selected_a=[dict get $values selected_a]" \
+        "selected_b=[dict get $values selected_b]" \
+        "contact_a=[dict get $values contact_a]" \
+        "contact_b=[dict get $values contact_b]" \
+        "cache_ms=[dict get $values cache_ms]" \
+        "geometry_ms=[dict get $values geometry_ms]" \
+        "grid_ms=[dict get $values grid_ms]" \
+        "match_ms=[dict get $values match_ms]" \
+        "surface_a_ms=[dict get $values surface_a_ms]" \
+        "surface_b_ms=[dict get $values surface_b_ms]" \
+        "group_ms=[dict get $values group_ms]" \
+        "refresh_ms=[dict get $values refresh_ms]" \
+        "total_ms=[dict get $values total_ms]"]
+    if {[catch {::HWFlow::writeTextFile $path [join $lines "\n"]}]} {
+        return ""
+    }
+    return $path
+}
+
 proc ::ContactSetup::createContact {} {
     variable ui
     variable last
 
+    set totalStarted [clock milliseconds]
+    set progressOpened 0
     set code [catch {
         ::ContactSetup::validatePanel
         ::ContactSetup::saveRules
+
+        if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+            catch {set progressOpened [::HWFlow::progressOpen \
+                [::HWFlow::txt "创建接触" "Creating contact"] \
+                [::HWFlow::txt "正在准备所选接触面..." "Preparing selected contact faces..."] 0]}
+        }
 
         array unset last
         array set last {}
@@ -1241,7 +1456,15 @@ proc ::ContactSetup::createContact {} {
         # same spatial search prohibitively expensive on production models.
         set selectedA [::ContactSetup::uniq $ui(selectedElemsA)]
         set selectedB [::ContactSetup::uniq $ui(selectedElemsB)]
+        ::ContactSetup::progress 8.0 \
+            [::HWFlow::txt "正在批量读取接触几何" "Reading contact geometry"] \
+            "A=[llength $selectedA], B=[llength $selectedB]" 1
+        set stageStarted [clock milliseconds]
         ::ContactSetup::primeGeometryCache [concat $selectedA $selectedB]
+        set cacheMs [expr {[clock milliseconds] - $stageStarted}]
+        ::ContactSetup::progress 25.0 \
+            [::HWFlow::txt "正在建立空间索引" "Building spatial index"] \
+            [::HWFlow::txt "几何数据已读取" "Geometry data loaded"] 1
         set contactFaces [::ContactSetup::selectNearestContactFaces $selectedA $selectedB]
         set elemsA [dict get $contactFaces elemsA]
         set elemsB [dict get $contactFaces elemsB]
@@ -1264,8 +1487,18 @@ proc ::ContactSetup::createContact {} {
         set reverseA [lindex $orientations 1]
         set orientElemB [lindex $orientations 2]
         set reverseB [lindex $orientations 3]
+        ::ContactSetup::progress 62.0 \
+            [::HWFlow::txt "正在创建第一侧 SURF" "Creating first SURF"] \
+            "elements=[llength $elemsA]" 1
+        set stageStarted [clock milliseconds]
         set surfAId [::ContactSetup::createContactSurf $surfA $elemsA 13 $orientElemA $reverseA]
+        set surfaceAMs [expr {[clock milliseconds] - $stageStarted}]
+        ::ContactSetup::progress 74.0 \
+            [::HWFlow::txt "正在创建第二侧 SURF" "Creating second SURF"] \
+            "elements=[llength $elemsB]" 1
+        set stageStarted [clock milliseconds]
         set surfBId [::ContactSetup::createContactSurf $surfB $elemsB 45 $orientElemB $reverseB]
+        set surfaceBMs [expr {[clock milliseconds] - $stageStarted}]
         if {$mainSide eq "FIRST"} {
             set mainSurf $surfA
             set mainSurfId $surfAId
@@ -1277,7 +1510,12 @@ proc ::ContactSetup::createContact {} {
             set secSurf $surfA
             set secSurfId $surfAId
         }
+        ::ContactSetup::progress 86.0 \
+            [::HWFlow::txt "正在创建 CONTACT 卡片" "Creating CONTACT card"] \
+            "$mainSurf -> $secSurf" 1
+        set stageStarted [clock milliseconds]
         set groupId [::ContactSetup::createGroup $groupName $mainSurfId $secSurfId]
+        set groupMs [expr {[clock milliseconds] - $stageStarted}]
 
         set last(compA) $compA
         set last(compB) $compB
@@ -1304,14 +1542,45 @@ proc ::ContactSetup::createContact {} {
         set last(tempB) ""
         set last(restoreDisplay) ""
 
+        ::ContactSetup::progress 96.0 \
+            [::HWFlow::txt "正在刷新模型浏览器" "Refreshing Model Browser"] "" 1
+        set stageStarted [clock milliseconds]
         catch {::HWFlow::refreshBrowser}
+        set refreshMs [expr {[clock milliseconds] - $stageStarted}]
+        set selectionPerf [dict create geometry_ms 0 grid_ms 0 match_ms 0]
+        if {[dict exists $contactFaces perf]} {
+            set selectionPerf [dict get $contactFaces perf]
+        }
+        set totalMs [expr {[clock milliseconds] - $totalStarted}]
+        set perf [dict create \
+            selected_a [llength $selectedA] \
+            selected_b [llength $selectedB] \
+            contact_a [llength $elemsA] \
+            contact_b [llength $elemsB] \
+            cache_ms $cacheMs \
+            geometry_ms [dict get $selectionPerf geometry_ms] \
+            grid_ms [dict get $selectionPerf grid_ms] \
+            match_ms [dict get $selectionPerf match_ms] \
+            surface_a_ms $surfaceAMs \
+            surface_b_ms $surfaceBMs \
+            group_ms $groupMs \
+            refresh_ms $refreshMs \
+            total_ms $totalMs]
+        set last(perf) $perf
+        set last(perfReport) [::ContactSetup::writePerformanceReport $perf]
         ::ContactSetup::msg [::HWFlow::txt \
             "接触创建完成：公共区域 A=[llength $elemsA]/[llength $selectedA]，B=[llength $elemsB]/[llength $selectedB]，搜索距离=[format %.6g [dict get $contactFaces searchTol]]，group=$groupName。" \
             "Contact created: common region A=[llength $elemsA]/[llength $selectedA], B=[llength $elemsB]/[llength $selectedB], search=[format %.6g [dict get $contactFaces searchTol]], group=$groupName."]
     } err]
     ::ContactSetup::clearGeometryCache
     if {$code} {
+        if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
+            catch {::HWFlow::progressClose [::HWFlow::txt "接触创建失败" "Contact creation failed"] 100.0}
+        }
         tk_messageBox -icon error -title [::HWFlow::txt "Contact Setup" "Contact Setup"] -message $err
+    } elseif {$progressOpened && [llength [info commands ::HWFlow::progressFinish]] > 0} {
+        catch {::HWFlow::progressFinish \
+            [::HWFlow::txt "接触创建完成" "Contact creation completed"] 100.0}
     }
 }
 
