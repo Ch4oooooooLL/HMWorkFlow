@@ -125,7 +125,6 @@ INCLUDE_ITEMS=(
     "examples"
     "modules"
     "python"
-    "runtime/python"
     "tools"
 )
 
@@ -202,6 +201,16 @@ for item in "${INCLUDE_ITEMS[@]}"; do
     cp -a "$src" "$dest"
 done
 
+# The unpacked python38/ standard library is a local runtime cache. Copy only
+# files from the two approved runtime levels; never recursively copy a runtime
+# subdirectory into package staging.
+RUNTIME_SOURCE_ROOT="${PROJECT_ROOT}/runtime/python"
+RUNTIME_STAGE_ROOT="${TEMP_PROJECT_ROOT}/runtime/python"
+mkdir -p "${RUNTIME_STAGE_ROOT}/windows-x64"
+find "$RUNTIME_SOURCE_ROOT" -maxdepth 1 -type f -exec cp -p {} "$RUNTIME_STAGE_ROOT" \;
+find "${RUNTIME_SOURCE_ROOT}/windows-x64" -maxdepth 1 -type f \
+    -exec cp -p {} "${RUNTIME_STAGE_ROOT}/windows-x64" \;
+
 # ---------------------------------------------------------------------------
 # Remove *_state.txt files from the packaged config/ directory
 # ---------------------------------------------------------------------------
@@ -222,7 +231,8 @@ find "$TEMP_PROJECT_ROOT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
 STAGED_UNPACKED_STDLIB="${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python38"
 if [[ -e "$STAGED_UNPACKED_STDLIB" ]]; then
-    rm -rf "$STAGED_UNPACKED_STDLIB"
+    echo "Unpacked python38 directory must never enter package staging: $STAGED_UNPACKED_STDLIB" >&2
+    exit 1
 fi
 
 if [[ ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python.exe" ||

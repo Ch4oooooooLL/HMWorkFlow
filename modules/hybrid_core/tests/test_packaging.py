@@ -1,6 +1,8 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -41,20 +43,31 @@ class PackagingScriptTests(unittest.TestCase):
         powershell = (ROOT / "build_package.ps1").read_text(encoding="utf-8")
         shell = (ROOT / "build_package.sh").read_text(encoding="utf-8")
 
-        self.assertIn('Remove-Item -LiteralPath $StagedUnpackedStdlib -Recurse -Force', powershell)
-        self.assertIn('rm -rf "$STAGED_UNPACKED_STDLIB"', shell)
+        self.assertNotIn('    "runtime\\python",', powershell)
+        self.assertNotIn('    "runtime/python"', shell)
+        self.assertIn("$RuntimeCopyLevels", powershell)
+        self.assertIn('-maxdepth 1 -type f', shell)
+        self.assertIn("must never enter package staging", powershell)
+        self.assertIn("must never enter package staging", shell)
 
     def test_packaging_whitelists_distributable_runtime_and_audits_zip(self):
         powershell = (ROOT / "build_package.ps1").read_text(encoding="utf-8")
         shell = (ROOT / "build_package.sh").read_text(encoding="utf-8")
 
-        self.assertIn('"runtime\\python"', powershell)
         self.assertNotIn('    "runtime"\n', powershell)
-        self.assertIn('"runtime/python"', shell)
         self.assertNotIn('    "runtime"\n', shell)
         self.assertIn("New-PortableZipArchive", powershell)
         self.assertIn("tools\\release_audit.py", powershell)
         self.assertIn("tools/release_audit.py", shell)
+
+    def test_git_tracking_policy_is_clean(self):
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "tools/repository_audit.py")],
+            cwd=str(ROOT),
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
 
     def test_release_audit_accepts_a_minimal_clean_archive(self):
         audit = load_release_audit()
@@ -82,6 +95,20 @@ class PackagingScriptTests(unittest.TestCase):
                 archive.writestr("HW/runtime/instances/hm-1/startup.log", "bad")
             errors = audit.audit_archive(archive_path)
             self.assertTrue(any("non-distributable runtime entry" in error for error in errors))
+
+    def test_release_audit_rejects_unpacked_python38_directory(self):
+        audit = load_release_audit()
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "bad-python38.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "HW/runtime/python/windows-x64/python38/encodings/__init__.py",
+                    "bad",
+                )
+            errors = audit.audit_archive(archive_path)
+            self.assertTrue(
+                any("unpacked Python standard library" in error for error in errors)
+            )
 
 
 if __name__ == "__main__":

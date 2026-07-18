@@ -12,3 +12,5 @@
 - Correct HM2019 PBEAM/PBAR HyperBeam association and verify it through real `hmbatch.exe` import.
 - Add module capability metadata and a repeatable four-case HM2019 integration matrix.
 - Add release metadata, whitelist packaging, archive auditing, offline test gates, and markdown-link checks.
+- Audit the Git tracking list, remove generated Local Mesh fixtures and a machine-specific runtime validation script from the index, and enforce repository hygiene in the offline test gate.
+- Package portable Python from approved file levels only; the locally unpacked `python38/` directory is rejected by both staging and release audit.

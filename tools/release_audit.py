@@ -84,6 +84,8 @@ def audit_archive(path: Path) -> List[str]:
                 errors.append("runtime directory in release: {}".format(name))
             if lower.startswith("runtime/") and not lower.startswith("runtime/python/"):
                 errors.append("non-distributable runtime entry: {}".format(name))
+            if lower.startswith("runtime/python/windows-x64/python38/"):
+                errors.append("unpacked Python standard library in release: {}".format(name))
             if "/__pycache__/" in "/" + lower or suffix in MODEL_OR_RUNTIME_SUFFIXES:
                 errors.append("generated/runtime artifact: {}".format(name))
             if lower.startswith("examples/") and lower.endswith("_manifest.json"):

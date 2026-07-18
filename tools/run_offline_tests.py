@@ -37,6 +37,11 @@ def commands() -> List[Sequence[str]]:
 
 
 def main() -> int:
+    repository_audit = subprocess.run(
+        [sys.executable, str(ROOT / "tools/repository_audit.py")], cwd=str(ROOT)
+    )
+    if repository_audit.returncode:
+        return repository_audit.returncode
     link_check = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_markdown_links.py")], cwd=str(ROOT)
     )

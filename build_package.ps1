@@ -141,7 +141,6 @@ $IncludeItems = @(
     "examples",
     "modules",
     "python",
-    "runtime\python",
     "tools"
 )
 
@@ -204,6 +203,27 @@ try {
         Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
     }
 
+    # The unpacked python38/ standard library is a local runtime cache. Copy
+    # only distributable files from the two approved runtime levels so no
+    # runtime subdirectory can enter staging by accident.
+    $RuntimeCopyLevels = @(
+        [pscustomobject]@{
+            Source = (Join-Path $ProjectRoot "runtime\python")
+            Destination = (Join-Path $TempProjectRoot "runtime\python")
+        },
+        [pscustomobject]@{
+            Source = (Join-Path $ProjectRoot "runtime\python\windows-x64")
+            Destination = (Join-Path $TempProjectRoot "runtime\python\windows-x64")
+        }
+    )
+    foreach ($Level in $RuntimeCopyLevels) {
+        New-Item -ItemType Directory -Path $Level.Destination -Force | Out-Null
+        Get-ChildItem -LiteralPath $Level.Source -File |
+            ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Level.Destination $_.Name) -Force
+            }
+    }
+
     $PackagedConfigDir = Join-Path $TempProjectRoot "config"
     if (Test-Path -LiteralPath $PackagedConfigDir) {
         Get-ChildItem -LiteralPath $PackagedConfigDir -Filter "*_state.txt" -File |
@@ -236,7 +256,7 @@ try {
     $StagedPythonDir = Join-Path $TempProjectRoot "runtime\python\windows-x64"
     $StagedUnpackedStdlib = Join-Path $StagedPythonDir "python38"
     if (Test-Path -LiteralPath $StagedUnpackedStdlib) {
-        Remove-Item -LiteralPath $StagedUnpackedStdlib -Recurse -Force
+        throw "Unpacked python38 directory must never enter package staging: $StagedUnpackedStdlib"
     }
     foreach ($RequiredName in @("python.exe", "pythonw.exe", "python38.zip", "python38._pth", "LICENSE.txt")) {
         $StagedFile = Join-Path $StagedPythonDir $RequiredName
