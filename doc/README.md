@@ -1,10 +1,10 @@
 # HyperMesh Toolkit
 
-快捷键的首次安装、更新和恢复流程见 [快捷键安装与更新](doc/shortcut_installation.md)。请优先运行 `install_update.tcl`；`hw_toolkit.tcl` 保留为兼容入口。
+快捷键的首次安装、更新和恢复流程见 [快捷键安装与更新](shortcut_installation.md)。请优先运行 `install_update.tcl`；`hw_toolkit.tcl` 保留为兼容入口。
 
-面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、批量 Property、局部网格优化、铸件四面体网格、RBE2、螺栓连接和接触设置。
+面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、局部网格优化、铸件四面体网格、RBE2、螺栓连接和接触设置。
 
-局部网格优化模块的集成状态、使用步骤、HM2019 运行验证和已知限制见 [README_LocalMeshOptimizer.md](doc/README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定，并保留运行时错误处理、任务快照、复检和回滚。
+局部网格优化模块的集成状态、使用步骤、HM2019 运行验证和已知限制见 [README_LocalMeshOptimizer.md](README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定，并保留运行时错误处理、任务快照、复检和回滚。
 
 默认界面语言为中文。需要英文界面时，将项目根目录 `config.yaml` 中的 `workflow.language` 改为 `en_US`。
 
@@ -105,7 +105,7 @@ Connection
 4. `Sheet BatchMesh and Washer`：对中面或壳 component 执行 BatchMesh，并按孔径规则生成 washer。
 5. `Shell Washer-Hole RBE2`：识别标准 washer 孔并创建 RBE2。
 6. `RBE2 Bolt Connector`：将成组 RBE2 中心节点连接为 CBEAM/CBAR 螺栓段。
-7. `Contact Setup`：分两次选择相向 Face 单元，创建 contact surface 和接触 group。
+7. `Contact Setup`：在两个 component 的相对区域创建 contact surface 和接触 group。
 
 典型输出包括：
 
@@ -127,7 +127,7 @@ AUTO_CONTACT_*
 4. `Casting TetraMesh`：对铸件执行 surface 清理、三角面网格质量迭代和 TetraMesh。
 5. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
 6. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
-7. `Contact Setup`：基于两次 Face 单元选择建立相向接触。
+7. `Contact Setup`：为实体/壳或实体/实体的相对面建立接触。
 
 ### 2.5 中断、返回和刷新
 
@@ -161,7 +161,6 @@ AUTO_CONTACT_*
     |-- seam_surface.tcl
     |-- batch_mesh_washer.tcl
     |-- casting_tetramesh.tcl
-    |-- batch_property_assignment.tcl
     |-- local_mesh_optimizer.tcl
     |-- local_mesh_optimizer/
     |   |-- python/
@@ -228,17 +227,6 @@ SEAM_T2.0
 - Midsurface Extraction 优先读取源组件名中的 `_Tx`，无法读取时会尝试从中面拓扑或体积/面积测量厚度。
 - Midsurface Extraction 与 Mesh Seam Weld 共用厚度标记规则；中面输出中的 `_Tx` 可直接被网格焊缝读取并生成 `SEAM_Tx`。
 - Seam Surface Creation 输出 `SEAM_Tx`，其中 `x` 优先取相邻组件名中较薄的厚度。
-
-`Batch Property and Material Assignment` 位于主界面的 `Mesh / 网格` 页，扫描全部 component，并使用以下规则创建或复用 OptiStruct `PSHELL`：
-
-```text
-Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
-包含 SEAM 且其后存在 Txx      ->  SEAM_Txx（材料固定为 Steel）
-```
-
-普通件只读取 `T` 后紧跟的数字作为厚度，并把最后一个下划线字段作为材料；例如 `V01_xxxx_T10aaa_355` 生成 `355_T10`。焊缝名称的其余后缀会被忽略，例如 `SEAM_T10_dff` 和 `SEAM_T10.surf` 都生成 `SEAM_T10`。
-
-材料必须已由用户创建。已经关联 Property 的 component，以及名称中包含 `BEAM`、`RBE`、`BUSH`、`SPRING`（不区分大小写）的 1D component 会直接跳过。无法识别、找不到材料、Property 创建失败或赋予校验失败的 component 不会被移动；模块只会在 `PROPERTY_ASSIGNMENT_REVIEW` assembly 中创建名为 `PROPERTY_REVIEW__<原component名>` 的空 component collector，作为人工复核名称清单，不复制网格、节点或几何。
 
 ## 6. 模块功能和用法
 
@@ -487,28 +475,28 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 
 入口：`::ContactSetup::run`
 
-功能：调用 HyperMesh 原生 Face 单元选择器，连续分两次选择候选区域，筛选两侧空间公共部分后创建相向 contact surface 和 OptiStruct `CONTACT` group，并支持按单元修剪多余接触。创建过程不再遍历整个 component。
+功能：选择两个 component，自动识别相对方向，创建 contact surface 和接触 group，并支持按单元修剪多余接触。
 
 用法：
 
 1. 在主面板运行 `Contact Setup`。
-2. 点击 `分两次选择 Face`，先选择 A 侧 Face 单元并中键确认，再选择相向的 B 侧 Face 单元。
-3. 选择接触类型：`SLIDE`、`STICK` 或 `FREEZE`；默认值为 `STICK`。
+2. 点击 `选择两个组件`，在 HyperMesh 中选择需要建立接触关系的两个 component。
+3. 选择接触类型：`SLIDE`、`TIE`、`STICK`、`FREEZE`、`FRICTIONLESS` 或 `FRICTION`。
 4. 设置主面：
    - `AUTO`：按 contact surface 单元数量自动选择较大侧。
-   - `FIRST`：第一次选择的 Face 作为主面。
-   - `SECOND`：第二次选择的 Face 作为主面。
-5. 设置结果名前缀和是否创建 contact group。
+   - `FIRST`：第一个选择的 component 作为主面。
+   - `SECOND`：第二个选择的 component 作为主面。
+5. 设置结果名前缀、是否创建 contact group、是否保留实体自由面临时组件。
 6. 点击 `创建接触`。
 7. 如需删除多余接触，点击 `修改接触`，连续选择需要从 contact surface 中移除的单元后中键确认。
 8. 修改完成后点击 `恢复视图`。
 
 输出：
 
-- 对两次选中的 Face 候选集进行双向邻近筛选，仅保留空间公共覆盖区域。
+- 自动识别两个 component 之间相对的外侧面。
 - 分别创建 `contactsurfs`。
-- 创建 OptiStruct `CONTACT` group，以 contact surface 定义主/从侧，写入 `TYPE=SLIDE/STICK/FREEZE` 后回读校验。
-- contact surface 创建时直接写入计算所得 `reverse_normals`；节点和坐标通过 mark 批量读取，不扫描整个 component。
+- 自动创建接触 group，并尝试写入主/从 contact surface。
+- 实体 component 会先生成自由面临时组件；壳 component 直接使用壳单元。
 - 修改模式只会从当前 contact surface 中移除所选单元，不删除源 component 原始网格。
 
 ### 6.12 Solid Seam Connector
@@ -525,7 +513,7 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 4. 在候选页预览节点、接受/拒绝候选、修改 PENTA 类型或反转 nodelist。
 5. 只对已接受候选执行创建。每条失败独立记录，不中断后续候选。
 
-识别结果和日志写入 `temp/solid_seam/<run_id>/`。为防止未经验证的 connector 参数修改模型，仓库默认关闭 realization；必须先按 [模块说明](modules/solid_seam/README.md) 从目标 HM2019 Command File 制作并启用 profile。
+识别结果和日志写入 `temp/solid_seam/<run_id>/`。为防止未经验证的 connector 参数修改模型，仓库默认关闭 realization；必须先按 [模块说明](../modules/solid_seam/README.md) 从目标 HM2019 Command File 制作并启用 profile。
 
 完整识别验证可运行 `examples/SolidSeam_Validation/generate_fem.py`，并导入生成的单一组合模型 `SolidSeam_Combined_Validation.fem`。对应 manifest 给出了每组应选组件、参数和预期结果。
 

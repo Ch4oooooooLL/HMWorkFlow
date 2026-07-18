@@ -1,5 +1,41 @@
+proc ::RB2Bolt::compactIdList {ids {sampleSize 20}} {
+    set count [llength $ids]
+    if {$count == 0} { return "count=0" }
+    set sorted [lsort -integer -unique $ids]
+    set first [lrange $sorted 0 [expr {$sampleSize - 1}]]
+    set last {}
+    if {[llength $sorted] > $sampleSize} {
+        set last [lrange $sorted end-[expr {$sampleSize - 1}] end]
+    }
+    return "count=$count unique=[llength $sorted] range=[lindex $sorted 0]-[lindex $sorted end] first={$first} last={$last}"
+}
+
+proc ::RB2Bolt::writeIncrementalImportDiagnostic {stage incrementalFem reader detail expected detected} {
+    set path [file join [file dirname $incrementalFem] incremental_import_error.json]
+    if {[catch {
+        set json "{\n"
+        append json "  \"schema_version\": \"1.0\",\n"
+        append json "  \"stage\": [::HybridCore::jsonString $stage],\n"
+        append json "  \"incremental_fem\": [::HybridCore::jsonString [file nativename $incrementalFem]],\n"
+        append json "  \"reader\": [::HybridCore::jsonString $reader],\n"
+        append json "  \"detail\": [::HybridCore::jsonString $detail],\n"
+        append json "  \"expected_element_ids\": [::HybridCore::jsonIntArray $expected],\n"
+        append json "  \"detected_element_ids\": [::HybridCore::jsonIntArray $detected]\n"
+        append json "}\n"
+        ::HybridCore::writeTextFile $path $json
+    }]} {
+        return ""
+    }
+    return $path
+}
+
 proc ::RB2Bolt::incrementalImportError {stage incrementalFem reader detail expected detected} {
-    return "INCREMENTAL_IMPORT_FAILED stage=$stage incremental_fem=[file nativename $incrementalFem] reader=$reader expected_element_ids={$expected} detected_element_ids={$detected} detail={$detail} hint={Run one manual OptiStruct Solver Deck import in HM2019 and compare command.tcl import_reader/options. The source selection FEM and incremental FEM are retained in the task workspace.}"
+    set diagnostic [::RB2Bolt::writeIncrementalImportDiagnostic $stage $incrementalFem $reader $detail $expected $detected]
+    set compactDetail $detail
+    if {[string length $compactDetail] > 1200} {
+        set compactDetail "[string range $compactDetail 0 1199]... (full detail in diagnostic file)"
+    }
+    return "INCREMENTAL_IMPORT_FAILED stage=$stage incremental_fem=[file nativename $incrementalFem] reader=$reader expected_element_ids_summary={[::RB2Bolt::compactIdList $expected]} detected_element_ids_summary={[::RB2Bolt::compactIdList $detected]} detail={$compactDetail} diagnostic={[file nativename $diagnostic]} hint={Run one manual OptiStruct Solver Deck import in HM2019 and compare command.tcl import_reader/options. The source selection FEM and incremental FEM are retained in the task workspace.}"
 }
 
 proc ::RB2Bolt::existingExpectedElements {expectedIds} {

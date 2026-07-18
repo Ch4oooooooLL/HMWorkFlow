@@ -68,6 +68,8 @@ proc ::HybridCore::initializeInstanceWorker {} {
     if {[catch {
         file mkdir $instanceLogDir
         ::HybridCore::openLog [file join $instanceLogDir startup.log]
+        set metadata [::HybridCore::packageMetadata]
+        ::HybridCore::log INFO "HMWorkFlow start package_version=[dict get $metadata package_version] build_time=[dict get $metadata build_time_utc] source_commit=[dict get $metadata source_commit] runtime_version=[dict get $metadata runtime_version]"
         ::HybridCore::log INFO "HyperMesh Python instance start instance_id=$instanceId owner_pid=[pid]"
         ::HybridCore::startPersistentWorker
     } err]} {

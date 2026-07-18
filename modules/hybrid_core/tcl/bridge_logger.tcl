@@ -26,3 +26,42 @@ proc ::HybridCore::log {level message} {
     }
     return $line
 }
+
+proc ::HybridCore::readMetadataValue {path key {default "unknown"}} {
+    if {![file isfile $path]} { return $default }
+    if {[catch {set text [::HybridCore::readTextFile $path]}]} { return $default }
+    set pattern [format {"%s"\s*:\s*"([^"]*)"} $key]
+    if {[regexp $pattern $text -> value] && $value ne ""} { return $value }
+    return $default
+}
+
+proc ::HybridCore::packageMetadata {} {
+    variable ROOT_DIR
+    set version "unknown"
+    set versionPath [file join $ROOT_DIR VERSION]
+    if {[file isfile $versionPath] && ![catch {set version [string trim [::HybridCore::readTextFile $versionPath]]}]} {
+        if {$version eq ""} { set version "unknown" }
+    }
+    set releaseManifest [file join $ROOT_DIR release_manifest.json]
+    set runtimeManifest [file join $ROOT_DIR runtime python RUNTIME_MANIFEST.json]
+    return [dict create \
+        package_version $version \
+        build_time_utc [::HybridCore::readMetadataValue $releaseManifest build_time_utc] \
+        source_commit [::HybridCore::readMetadataValue $releaseManifest source_commit] \
+        runtime_version [::HybridCore::readMetadataValue $runtimeManifest version]]
+}
+
+proc ::HybridCore::diagnosticSummary {} {
+    set result [::HybridCore::packageMetadata]
+    set hmVersion "unavailable"
+    catch {set hmVersion [hm_info -appinfo VERSION]}
+    dict set result hm_version $hmVersion
+    dict set result expected_solver_profile OptiStruct
+    if {[llength [info commands ::HybridCore::workerStatus]] > 0} {
+        set status [::HybridCore::workerStatus]
+        dict set result worker_alive [dict get $status alive]
+        dict set result worker_pid [dict get $status pid]
+        dict set result worker_python [dict get $status executable]
+    }
+    return $result
+}

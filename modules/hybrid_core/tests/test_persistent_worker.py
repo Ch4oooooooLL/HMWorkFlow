@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import tkinter
 import unittest
@@ -31,6 +34,38 @@ class EmbeddedWorkerBootstrapTests(unittest.TestCase):
 
 
 class PersistentWorkerTests(unittest.TestCase):
+    def test_shutdown_protocol_is_valid_json_and_worker_exits_cleanly(self):
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-u",
+                str(PYTHON_DIR / "persistent_worker.py"),
+                "--owner-pid",
+                str(os.getpid()),
+                "--instance-id",
+                "shutdown-test",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        stdout, stderr = process.communicate(
+            json.dumps({"command": "shutdown"}) + "\n", timeout=10
+        )
+
+        self.assertEqual(0, process.returncode)
+        self.assertEqual("", stdout)
+        self.assertEqual("", stderr)
+
+    def test_tcl_shutdown_helper_contains_the_json_object_delimiters(self):
+        source = (ROOT / "modules/hybrid_core/tcl/process_runner.tcl").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('return {{"command":"shutdown"}}', source)
+        self.assertNotIn('puts $workerChannel {"command":"shutdown"}', source)
+
     def test_entry_and_its_imports_are_executed_only_once(self):
         worker = load_worker()
         with tempfile.TemporaryDirectory() as directory:

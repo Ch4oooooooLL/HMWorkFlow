@@ -24,7 +24,7 @@ if {[catch {
         }
         source $shortcutFile
     }
-    ::HWShortcut::initialize
+    ::HWShortcut::initialize startup
 
     set hybridCoreInit [file join $hmworkflowRoot "modules" "hybrid_core" "tcl" "init.tcl"]
     if {![file exists $hybridCoreInit]} {

@@ -195,6 +195,8 @@ class RegionTests(unittest.TestCase):
         self.assertIn("set runtime(pythonCommand) \"\"", source)
 
     def test_tcl_python_command_accepts_portable_python_directory(self):
+        if sys.platform == "win32":
+            self.skipTest("POSIX executable shim is required for this path-resolution test")
         try:
             import tkinter
         except ModuleNotFoundError:

@@ -6,8 +6,8 @@ config/*_state.txt
 # Local Codex/project memory
 AGENTS.md
 
-# Local documentation and generated task workspaces
-doc/
+# Generated documentation captures and task workspaces
+/doc/command.tcl
 runtime/tasks/
 # Locally unpacked embedded standard library; python38.zip is the source asset.
 runtime/python/windows-x64/python38/
