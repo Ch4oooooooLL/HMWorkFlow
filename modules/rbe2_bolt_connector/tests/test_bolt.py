@@ -1,10 +1,10 @@
 import importlib.util,math,unittest
 from pathlib import Path
-from mesh_model import Component,Element,MeshModel
-from rbe2_analyzer import analyze
-from grouping import build
-from pair_planner import plan
-from duplicate_detector import annotate
+from hmworkflow.core.mesh_model import Component,Element,MeshModel
+from hmworkflow.rbe2_bolt_connector.rbe2_analyzer import analyze
+from hmworkflow.rbe2_bolt_connector.grouping import build
+from hmworkflow.rbe2_bolt_connector.pair_planner import plan
+from hmworkflow.rbe2_bolt_connector.duplicate_detector import annotate
 SPEC=importlib.util.spec_from_file_location("bolt_test_schema",str(Path(__file__).resolve().parents[1]/"python"/"schema.py")); M=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(M)
 
 def model(centers,axis="Z",spatial=False):

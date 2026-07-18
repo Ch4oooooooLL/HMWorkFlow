@@ -25,11 +25,17 @@ proc ::HybridCore::workerAlive {} {
     return 1
 }
 
+proc ::HybridCore::workerShutdownJson {} {
+    # Tcl braces delimit this literal; the doubled outer braces are the JSON
+    # object delimiters that must actually be written to the worker pipe.
+    return {{"command":"shutdown"}}
+}
+
 proc ::HybridCore::stopPersistentWorker {} {
     variable workerChannel; variable workerPid; variable workerPython
     if {$workerChannel ne ""} {
         catch {fconfigure $workerChannel -blocking 1}
-        catch {puts $workerChannel {"command":"shutdown"}; flush $workerChannel}
+        catch {puts $workerChannel [::HybridCore::workerShutdownJson]; flush $workerChannel}
         catch {close $workerChannel}
     }
     set workerChannel ""; set workerPid ""; set workerPython ""

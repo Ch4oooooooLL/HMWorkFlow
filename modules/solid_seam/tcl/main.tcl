@@ -29,12 +29,14 @@ proc ::SolidSeam::runDetection {} {
         }
         set ui(status) [::SolidSeam::txt "执行失败：$err" "Execution failed: $err"]
         ::SolidSeam::log ERROR $err
+        if {$runtimeDir ne ""} {catch {::HybridCore::finalizeTaskWorkspace $runtimeDir FAILED}}
         ::SolidSeam::message error $ui(status)
         # The failure has already been presented to the user. Do not rethrow
         # into the Tk shortcut callback, which would display the same error a
         # second time together with an internal stack trace.
         return 0
     }
+    if {$runtimeDir ne ""} {catch {::HybridCore::finalizeTaskWorkspace $runtimeDir SUCCESS}}
     return 1
 }
 

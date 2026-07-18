@@ -4,9 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-from geometry import cross, norm, normalize, subtract
-from mesh_model import MeshModel
-from topology import exterior_faces, shell_corner_nodes, solid_faces
+try:
+    from hmworkflow.core.geometry import cross, norm, normalize, subtract
+    from hmworkflow.core.mesh_model import MeshModel
+    from hmworkflow.core.topology import exterior_faces, shell_corner_nodes, solid_faces
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import cross, norm, normalize, subtract
+    from mesh_model import MeshModel
+    from topology import exterior_faces, shell_corner_nodes, solid_faces
 
 
 @dataclass(frozen=True)

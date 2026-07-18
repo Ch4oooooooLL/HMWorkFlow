@@ -1,7 +1,11 @@
 from __future__ import annotations
 import math
-from diameter_selector import estimate
-from planar_detector import detect
+try:
+    from .diameter_selector import estimate
+    from .planar_detector import detect
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from diameter_selector import estimate
+    from planar_detector import detect
 
 def analyze(model, settings):
     records=[]; rejected=[]

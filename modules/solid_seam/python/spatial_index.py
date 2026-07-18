@@ -1,7 +1,10 @@
 """Dependency-free AABB coarse index with exact point-to-triangle distance."""
 from __future__ import annotations
 
-from geometry import bbox, point_triangle_distance
+try:
+    from .geometry import bbox, point_triangle_distance
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import bbox, point_triangle_distance
 
 
 class TriangleIndex:

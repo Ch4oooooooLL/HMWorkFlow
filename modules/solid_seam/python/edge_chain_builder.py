@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from geometry import angle_deg, sub
+try:
+    from .geometry import angle_deg, sub
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import angle_deg, sub
 
 
 def _turn_ok(model, previous, current, following, limit):

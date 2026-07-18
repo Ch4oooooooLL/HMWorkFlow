@@ -106,7 +106,12 @@ fi
 INCLUDE_ITEMS=(
     ".editorconfig"
     ".gitignore"
+    "pyproject.toml"
     "使用教程.pdf"
+    "README.md"
+    "VERSION"
+    "CHANGELOG.md"
+    "release_manifest.json"
     "config.yaml"
     "guide.html"
     "install_update.tcl"
@@ -119,7 +124,8 @@ INCLUDE_ITEMS=(
     "doc"
     "examples"
     "modules"
-    "runtime"
+    "python"
+    "tools"
 )
 
 PORTABLE_PYTHON_DIR="${PROJECT_ROOT}/runtime/python/windows-x64"
@@ -195,6 +201,16 @@ for item in "${INCLUDE_ITEMS[@]}"; do
     cp -a "$src" "$dest"
 done
 
+# The unpacked python38/ standard library is a local runtime cache. Copy only
+# files from the two approved runtime levels; never recursively copy a runtime
+# subdirectory into package staging.
+RUNTIME_SOURCE_ROOT="${PROJECT_ROOT}/runtime/python"
+RUNTIME_STAGE_ROOT="${TEMP_PROJECT_ROOT}/runtime/python"
+mkdir -p "${RUNTIME_STAGE_ROOT}/windows-x64"
+find "$RUNTIME_SOURCE_ROOT" -maxdepth 1 -type f -exec cp -p {} "$RUNTIME_STAGE_ROOT" \;
+find "${RUNTIME_SOURCE_ROOT}/windows-x64" -maxdepth 1 -type f \
+    -exec cp -p {} "${RUNTIME_STAGE_ROOT}/windows-x64" \;
+
 # ---------------------------------------------------------------------------
 # Remove *_state.txt files from the packaged config/ directory
 # ---------------------------------------------------------------------------
@@ -207,13 +223,16 @@ fi
 PACKAGED_EXAMPLES_DIR="${TEMP_PROJECT_ROOT}/examples"
 if [[ -d "$PACKAGED_EXAMPLES_DIR" ]]; then
     find "$PACKAGED_EXAMPLES_DIR" -type f -iname '*.fem' -delete
+    find "$PACKAGED_EXAMPLES_DIR" -type f -iname '*_manifest.json' -delete
 fi
+rm -f "${TEMP_PROJECT_ROOT}/doc/command.tcl"
 find "$TEMP_PROJECT_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$TEMP_PROJECT_ROOT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
 STAGED_UNPACKED_STDLIB="${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python38"
 if [[ -e "$STAGED_UNPACKED_STDLIB" ]]; then
-    rm -rf "$STAGED_UNPACKED_STDLIB"
+    echo "Unpacked python38 directory must never enter package staging: $STAGED_UNPACKED_STDLIB" >&2
+    exit 1
 fi
 
 if [[ ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python.exe" ||
@@ -225,9 +244,12 @@ if [[ ! -f "${TEMP_PROJECT_ROOT}/runtime/python/windows-x64/python.exe" ||
     exit 1
 fi
 
+python3 "${PROJECT_ROOT}/tools/build_release_manifest.py" \
+    --source-root "$PROJECT_ROOT" \
+    --output "${TEMP_PROJECT_ROOT}/release_manifest.json"
+
 # ---------------------------------------------------------------------------
-# Helper: create a zip archive. Tries the system `zip` first; falls back to
-# Python's built-in zipfile module (which is always available).
+# Helper: create a zip archive with portable forward-slash entry names.
 # Usage: create_zip <source_dir> <output_zip_path> <base_name>
 # ---------------------------------------------------------------------------
 create_zip() {
@@ -235,10 +257,7 @@ create_zip() {
     local zip_path="$2"
     local base_name="$3"
 
-    if command -v zip &>/dev/null; then
-        (cd "$src_dir" && zip -rq "$zip_path" "$base_name")
-    else
-        PY_SRC_DIR="$src_dir" PY_ZIP_PATH="$zip_path" PY_BASE_NAME="$base_name" python3 -c '
+    PY_SRC_DIR="$src_dir" PY_ZIP_PATH="$zip_path" PY_BASE_NAME="$base_name" python3 -c '
 import zipfile, os
 src_dir = os.environ["PY_SRC_DIR"]
 zip_path = os.environ["PY_ZIP_PATH"]
@@ -246,16 +265,17 @@ base_name = os.environ["PY_BASE_NAME"]
 os.chdir(src_dir)
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
     for root, dirs, files in os.walk(base_name):
-        for fn in files:
+        dirs.sort()
+        for fn in sorted(files):
             fp = os.path.join(root, fn)
-            zf.write(fp, fp)
+            zf.write(fp, fp.replace(os.sep, "/"))
 '
-    fi
 }
 
 # ---------------------------------------------------------------------------
 # Create the zip archive
 # ---------------------------------------------------------------------------
 create_zip "$TEMP_ROOT" "$ZIP_PATH" "$PROJECT_NAME"
+python3 "${PROJECT_ROOT}/tools/release_audit.py" --zip "$ZIP_PATH"
 
 echo "Package created: ${ZIP_PATH}"

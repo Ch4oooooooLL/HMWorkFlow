@@ -1,7 +1,10 @@
 """Validate candidate references before writing an operation plan."""
 from __future__ import annotations
 
-from hybrid_schema import SchemaError
+try:
+    from hmworkflow.core.hybrid_schema import SchemaError
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from hybrid_schema import SchemaError
 
 
 def validate(candidates, model):

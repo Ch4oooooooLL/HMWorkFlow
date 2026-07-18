@@ -436,10 +436,12 @@ proc ::HWToolkit::showPanel {} {
     ::HWFlow::uiWidget frame $w.foot
     pack $w.foot -fill x -padx 12 -pady 10
     ::HWFlow::uiWidget button $w.foot.help -text [::HWFlow::txt "查看帮助" "View Help"] -width 14 -command "::HWToolkit::openGuide"
+    ::HWFlow::uiWidget button $w.foot.diagnostics -text [::HWFlow::txt "复制诊断" "Copy Diagnostics"] -width 14 -command "::HWToolkit::copyDiagnostics"
     ::HWFlow::uiWidget button $w.foot.shortcuts -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -width 14 -command "::HWShortcut::showManager"
     ::HWFlow::uiWidget button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command "destroy .hwtoolkit"
     pack $w.foot.close -side right
     pack $w.foot.shortcuts -side right -padx {0 8}
+    pack $w.foot.diagnostics -side right -padx {0 8}
     pack $w.foot.help -side right -padx {0 8}
     bind $w <Escape> "destroy .hwtoolkit"
 
@@ -591,6 +593,40 @@ proc ::HWToolkit::openGuide {} {
     return 1
 }
 
+proc ::HWToolkit::copyDiagnostics {} {
+    variable SCRIPT_DIR
+    set rows [list "HMWorkFlow diagnostics"]
+    if {[llength [info commands ::HybridCore::diagnosticSummary]] > 0} {
+        set summary [::HybridCore::diagnosticSummary]
+        foreach key [lsort [dict keys $summary]] {
+            lappend rows "$key=[dict get $summary $key]"
+        }
+    } else {
+        set version "unknown"
+        set versionPath [file join $SCRIPT_DIR VERSION]
+        if {[file isfile $versionPath] && ![catch {
+            set channel [open $versionPath r]
+            set version [string trim [read $channel]]
+            close $channel
+        }]} {}
+        lappend rows "package_version=$version"
+        lappend rows "hm_pid=[pid]"
+    }
+    if {[llength [info commands ::HWShortcut::getStartupHeartbeatStatus]] > 0} {
+        lappend rows "shortcut_startup=[::HWShortcut::getStartupHeartbeatStatus]"
+        lappend rows "shortcut_config=[::HWShortcut::getConfigFile]"
+    }
+    set text [join $rows "\n"]
+    if {[llength [info commands clipboard]] > 0} {
+        clipboard clear
+        clipboard append $text
+        catch {hm_usermessage [::HWFlow::txt "诊断信息已复制到剪贴板。" "Diagnostics copied to the clipboard."]}
+    } else {
+        catch {puts $text}
+    }
+    return $text
+}
+
 proc ::HWToolkit::runModule {key} {
     catch {destroy .hwtoolkit}
     ::HWToolkit::invokeModule $key
@@ -614,6 +650,17 @@ proc ::HWToolkit::invokeModule {key} {
         return 0
     }
     if {![::HWToolkit::sourceOneModule $key $info]} {
+        return 0
+    }
+    # Direct UI and shortcut flows share one engineering-context gate before
+    # a module can reach model-mutating commands.
+    if {[catch {::HWFlow::requireEngineeringContext} preflightError]} {
+        catch {puts "HMWorkFlow module $key blocked by preflight: $preflightError"}
+        if {[llength [info commands tk_messageBox]] > 0} {
+            tk_messageBox -icon warning -title "HMWorkFlow Preflight" -message $preflightError
+        } else {
+            catch {hm_usermessage $preflightError}
+        }
         return 0
     }
     set procName [dict get $info proc]

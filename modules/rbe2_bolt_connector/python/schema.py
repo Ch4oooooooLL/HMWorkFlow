@@ -1,5 +1,8 @@
 from __future__ import annotations
-from hybrid_schema import SchemaError, validate_request as validate_common
+try:
+    from hmworkflow.core.hybrid_schema import SchemaError, validate_request as validate_common
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from hybrid_schema import SchemaError, validate_request as validate_common
 
 DEFAULTS={"axisMode":"AUTO","gapTol":100.0,"offsetTol":5.0,"minGroupSize":2,"minBeamLength":0.001,"planeAbsTol":0.5,"planeFlatRatio":0.12,"radialAbsTol":0.5,"radialRelTol":0.08,"elemType":"CBEAM","compPrefix":"BOLT","propName":"","dryRun":False}
 

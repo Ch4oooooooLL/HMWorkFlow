@@ -1,7 +1,10 @@
 """Conservative joint classification and realization recommendation."""
 from __future__ import annotations
 
-from geometry import angle_deg
+try:
+    from .geometry import angle_deg
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import angle_deg
 
 REALIZATION = {"T_JOINT": "PENTA_MIG_T", "LAP_JOINT": "PENTA_MIG_L", "BUTT_JOINT": "PENTA_MIG_B", "ANGLED_JOINT": "PENTA_MIG", "UNKNOWN": "PENTA_MIG"}
 

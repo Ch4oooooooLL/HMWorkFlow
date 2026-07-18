@@ -54,6 +54,43 @@ function Resolve-LocalPythonCommand {
     throw "No usable local Python 3.8+ was found. Install Python, set the PYTHON environment variable, or pass -PythonExe."
 }
 
+function New-PortableZipArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $SourcePrefix = [System.IO.Path]::GetFullPath($SourceRoot)
+    $Archive = [System.IO.Compression.ZipFile]::Open(
+        $DestinationPath,
+        [System.IO.Compression.ZipArchiveMode]::Create
+    )
+    try {
+        Get-ChildItem -LiteralPath $SourceRoot -File -Recurse |
+            Sort-Object FullName |
+            ForEach-Object {
+                $RelativePath = $_.FullName.Substring($SourcePrefix.Length).TrimStart('\', '/')
+                $EntryName = $RelativePath.Replace('\', '/')
+                $Entry = $Archive.CreateEntry(
+                    $EntryName,
+                    [System.IO.Compression.CompressionLevel]::Optimal
+                )
+                $InputStream = $_.OpenRead()
+                $OutputStream = $Entry.Open()
+                try {
+                    $InputStream.CopyTo($OutputStream)
+                } finally {
+                    $OutputStream.Dispose()
+                    $InputStream.Dispose()
+                }
+            }
+    } finally {
+        $Archive.Dispose()
+    }
+}
+
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectName = Split-Path -Leaf $ProjectRoot
 
@@ -85,7 +122,12 @@ $TempProjectRoot = Join-Path $TempRoot $ProjectName
 $IncludeItems = @(
     ".editorconfig",
     ".gitignore",
+    "pyproject.toml",
     "使用教程.pdf",
+    "README.md",
+    "VERSION",
+    "CHANGELOG.md",
+    "release_manifest.json",
     "config.yaml",
     "guide.html",
     "install_update.tcl",
@@ -98,7 +140,8 @@ $IncludeItems = @(
     "doc",
     "examples",
     "modules",
-    "runtime"
+    "python",
+    "tools"
 )
 
 $PortablePythonDir = Join-Path $ProjectRoot "runtime\python\windows-x64"
@@ -160,6 +203,27 @@ try {
         Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
     }
 
+    # The unpacked python38/ standard library is a local runtime cache. Copy
+    # only distributable files from the two approved runtime levels so no
+    # runtime subdirectory can enter staging by accident.
+    $RuntimeCopyLevels = @(
+        [pscustomobject]@{
+            Source = (Join-Path $ProjectRoot "runtime\python")
+            Destination = (Join-Path $TempProjectRoot "runtime\python")
+        },
+        [pscustomobject]@{
+            Source = (Join-Path $ProjectRoot "runtime\python\windows-x64")
+            Destination = (Join-Path $TempProjectRoot "runtime\python\windows-x64")
+        }
+    )
+    foreach ($Level in $RuntimeCopyLevels) {
+        New-Item -ItemType Directory -Path $Level.Destination -Force | Out-Null
+        Get-ChildItem -LiteralPath $Level.Source -File |
+            ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Level.Destination $_.Name) -Force
+            }
+    }
+
     $PackagedConfigDir = Join-Path $TempProjectRoot "config"
     if (Test-Path -LiteralPath $PackagedConfigDir) {
         Get-ChildItem -LiteralPath $PackagedConfigDir -Filter "*_state.txt" -File |
@@ -170,8 +234,15 @@ try {
     $PackagedExamplesDir = Join-Path $TempProjectRoot "examples"
     if (Test-Path -LiteralPath $PackagedExamplesDir) {
         Get-ChildItem -LiteralPath $PackagedExamplesDir -File -Recurse |
-            Where-Object { $_.Extension -ieq ".fem" } |
+            Where-Object {
+                $_.Extension -ieq ".fem" -or
+                $_.Name -ilike "*_manifest.json"
+            } |
             Remove-Item -Force
+    }
+    $PackagedCommandCapture = Join-Path $TempProjectRoot "doc\command.tcl"
+    if (Test-Path -LiteralPath $PackagedCommandCapture) {
+        Remove-Item -LiteralPath $PackagedCommandCapture -Force
     }
     Get-ChildItem -LiteralPath $TempProjectRoot -Directory -Recurse -Filter "__pycache__" |
         Remove-Item -Recurse -Force
@@ -185,7 +256,7 @@ try {
     $StagedPythonDir = Join-Path $TempProjectRoot "runtime\python\windows-x64"
     $StagedUnpackedStdlib = Join-Path $StagedPythonDir "python38"
     if (Test-Path -LiteralPath $StagedUnpackedStdlib) {
-        Remove-Item -LiteralPath $StagedUnpackedStdlib -Recurse -Force
+        throw "Unpacked python38 directory must never enter package staging: $StagedUnpackedStdlib"
     }
     foreach ($RequiredName in @("python.exe", "pythonw.exe", "python38.zip", "python38._pth", "LICENSE.txt")) {
         $StagedFile = Join-Path $StagedPythonDir $RequiredName
@@ -194,7 +265,19 @@ try {
         }
     }
 
-    Compress-Archive -Path $TempProjectRoot -DestinationPath $ZipPath -CompressionLevel Optimal -Force
+    $ManifestScript = Join-Path $ProjectRoot "tools\build_release_manifest.py"
+    $StagedManifest = Join-Path $TempProjectRoot "release_manifest.json"
+    & $LocalPython.Executable @LocalPythonArgs $ManifestScript --source-root $ProjectRoot --output $StagedManifest
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release manifest generation failed with exit code $LASTEXITCODE."
+    }
+
+    New-PortableZipArchive -SourceRoot $TempRoot -DestinationPath $ZipPath
+    $AuditScript = Join-Path $ProjectRoot "tools\release_audit.py"
+    & $LocalPython.Executable @LocalPythonArgs $AuditScript --zip $ZipPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release audit failed with exit code $LASTEXITCODE."
+    }
     Write-Host "Package created: $ZipPath"
 } finally {
     if (Test-Path -LiteralPath $TempRoot) {

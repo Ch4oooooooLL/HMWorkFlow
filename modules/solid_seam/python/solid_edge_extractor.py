@@ -5,9 +5,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-from geometry import angle_deg, distance
-from schema import MeshModel
-from solid_surface_extractor import SurfaceFace
+try:
+    from .geometry import angle_deg, distance
+    from .schema import MeshModel
+    from .solid_surface_extractor import SurfaceFace
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import angle_deg, distance
+    from schema import MeshModel
+    from solid_surface_extractor import SurfaceFace
 
 
 @dataclass(frozen=True)

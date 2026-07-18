@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -9,6 +10,42 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 class InstallerReloadTests(unittest.TestCase):
+    def test_startup_mode_writes_current_process_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = tkinter.Tcl()
+            interpreter.eval("namespace eval ::HWFlow {}")
+            interpreter.eval("proc ::HWFlow::txt {zh en} { return $en }")
+            interpreter.eval("namespace eval ::HWToolkit { variable MODULES {} }")
+            interpreter.eval("set ::env(APPDATA) {{{}}}".format(Path(directory).as_posix()))
+            interpreter.eval(
+                "set ::env(LOCALAPPDATA) {{{}}}".format(Path(directory).as_posix())
+            )
+            manager = (ROOT / "modules/shortcut_manager.tcl").as_posix()
+            interpreter.eval("source {{{}}}".format(manager))
+            interpreter.call("::HWShortcut::initialize", "startup")
+            heartbeat = Path(
+                str(interpreter.call("::HWShortcut::getStartupHeartbeatFile"))
+            )
+            payload = json.loads(heartbeat.read_text(encoding="utf-8"))
+
+            self.assertEqual(int(interpreter.eval("pid")), payload["hm_pid"])
+            self.assertEqual("1.0", payload["schema_version"])
+            self.assertEqual(
+                str(ROOT.resolve()).replace("\\", "/"),
+                payload["project_root"].replace("\\", "/"),
+            )
+            self.assertEqual(
+                "verified",
+                str(
+                    interpreter.call(
+                        "dict",
+                        "get",
+                        interpreter.call("::HWShortcut::getStartupHeartbeatInfo"),
+                        "status",
+                    )
+                ),
+            )
+
     def test_install_update_replaces_stale_hybrid_core_session(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory) / "Moved HMWorkFlow"

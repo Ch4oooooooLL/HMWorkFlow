@@ -195,6 +195,8 @@ class RegionTests(unittest.TestCase):
         self.assertIn("set runtime(pythonCommand) \"\"", source)
 
     def test_tcl_python_command_accepts_portable_python_directory(self):
+        if sys.platform == "win32":
+            self.skipTest("POSIX executable shim is required for this path-resolution test")
         try:
             import tkinter
         except ModuleNotFoundError:
@@ -254,6 +256,7 @@ class RegionTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=False,
             )
+            self.assertIn("task_token", json.loads(status.read_text(encoding="utf-8")))
             self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
             payload = json.loads(status.read_text(encoding="utf-8"))
             self.assertEqual(payload["exit_code"], 0)

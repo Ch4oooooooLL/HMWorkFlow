@@ -28,6 +28,7 @@ namespace eval ::HWShortcut {
     variable SETUP_RESULT ""
     variable MARK_START "# >>> HMWorkFlow shortcut loader >>>"
     variable MARK_END "# <<< HMWorkFlow shortcut loader <<<"
+    variable LAST_REGISTRATION_RESULT [dict create registered 0 errors {}]
 }
 
 proc ::HWShortcut::projectRoot {} {
@@ -53,6 +54,85 @@ proc ::HWShortcut::getUserConfigDir {} {
 
 proc ::HWShortcut::getConfigFile {} {
     return [file join [::HWShortcut::getUserConfigDir] shortcuts.cfg]
+}
+
+proc ::HWShortcut::getLocalStateDir {} {
+    if {[info exists ::env(LOCALAPPDATA)] && $::env(LOCALAPPDATA) ne ""} {
+        set dir [file join $::env(LOCALAPPDATA) HMWorkFlow]
+    } elseif {[info exists ::env(APPDATA)] && $::env(APPDATA) ne ""} {
+        set dir [file join $::env(APPDATA) HMWorkFlow local]
+    } else {
+        set dir [file join [file normalize "~"] .hmworkflow local]
+    }
+    if {![file exists $dir]} { file mkdir $dir }
+    return $dir
+}
+
+proc ::HWShortcut::getStartupHeartbeatFile {} {
+    return [file join [::HWShortcut::getLocalStateDir] startup_heartbeat.json]
+}
+
+proc ::HWShortcut::jsonString {value} {
+    set escaped [string map [list \\ \\\\ \" \\\" \n \\n \r \\r \t \\t] $value]
+    return "\"$escaped\""
+}
+
+proc ::HWShortcut::writeStartupHeartbeat {registrationResult} {
+    set errors {}
+    if {[dict exists $registrationResult errors]} {
+        foreach value [dict get $registrationResult errors] {
+            lappend errors [::HWShortcut::jsonString $value]
+        }
+    }
+    set registered 0
+    if {[dict exists $registrationResult registered]} {
+        set registered [dict get $registrationResult registered]
+    }
+    set path [::HWShortcut::getStartupHeartbeatFile]
+    set json "{\n"
+    append json "  \"schema_version\": \"1.0\",\n"
+    append json "  \"timestamp_utc\": [::HWShortcut::jsonString [clock format [clock seconds] -gmt 1 -format {%Y-%m-%dT%H:%M:%SZ}]],\n"
+    append json "  \"hm_pid\": [pid],\n"
+    append json "  \"project_root\": [::HWShortcut::jsonString [file normalize [::HWShortcut::projectRoot]]],\n"
+    append json "  \"bootstrap_path\": [::HWShortcut::jsonString [file normalize [::HWShortcut::getBootstrapFile]]],\n"
+    append json "  \"native_api\": [::HWShortcut::jsonString [::HWShortcut::nativeKeyApi]],\n"
+    append json "  \"registered_shortcuts\": $registered,\n"
+    append json "  \"errors\": \[[join $errors ,]\]\n"
+    append json "}\n"
+    ::HWShortcut::writeFileSafe $path $json
+    return $path
+}
+
+proc ::HWShortcut::getStartupHeartbeatInfo {} {
+    set path [::HWShortcut::getStartupHeartbeatFile]
+    if {![file isfile $path]} {
+        return [dict create status missing path $path]
+    }
+    set text [::HWShortcut::readFileSafe $path]
+    if {![regexp {"hm_pid"\s*:\s*([0-9]+)} $text -> heartbeatPid] ||
+        ![regexp {"project_root"\s*:\s*"([^"]*)"} $text -> heartbeatRoot] ||
+        ![regexp {"timestamp_utc"\s*:\s*"([^"]*)"} $text -> timestamp]} {
+        return [dict create status invalid path $path]
+    }
+    set expected [file normalize [::HWShortcut::projectRoot]]
+    if {[catch {set heartbeatRoot [file normalize $heartbeatRoot]}] || $heartbeatRoot ne $expected} {
+        return [dict create status path_mismatch path $path timestamp $timestamp pid $heartbeatPid]
+    }
+    if {$heartbeatPid != [pid]} {
+        return [dict create status previous_session path $path timestamp $timestamp pid $heartbeatPid]
+    }
+    return [dict create status verified path $path timestamp $timestamp pid $heartbeatPid]
+}
+
+proc ::HWShortcut::getStartupHeartbeatStatus {} {
+    set status [dict get [::HWShortcut::getStartupHeartbeatInfo] status]
+    switch -- $status {
+        verified { return [::HWFlow::txt "本次启动已验证" "Verified this startup"] }
+        previous_session { return [::HWFlow::txt "仅有上次启动记录" "Previous startup only"] }
+        path_mismatch { return [::HWFlow::txt "启动记录路径不匹配" "Startup path mismatch"] }
+        invalid { return [::HWFlow::txt "启动记录损坏" "Invalid startup record"] }
+    }
+    return [::HWFlow::txt "本次启动未验证" "Not verified this startup"]
 }
 
 proc ::HWShortcut::getBootstrapFile {} {
@@ -392,19 +472,36 @@ proc ::HWShortcut::registerMainBinding {} {
 
 proc ::HWShortcut::registerAll {} {
     variable KEY_MAP
-    ::HWShortcut::registerMainBinding
-    foreach shortcut [array names KEY_MAP] {
-        ::HWShortcut::registerBinding $shortcut $KEY_MAP($shortcut)
+    set registered 0
+    set errors {}
+    if {[::HWShortcut::mainShortcutConfigured]} {
+        if {[::HWShortcut::registerMainBinding]} {
+            incr registered
+        } else {
+            lappend errors "main shortcut registration failed"
+        }
     }
+    foreach shortcut [array names KEY_MAP] {
+        if {[::HWShortcut::registerBinding $shortcut $KEY_MAP($shortcut)]} {
+            incr registered
+        } else {
+            lappend errors "shortcut registration failed: $shortcut"
+        }
+    }
+    return [dict create registered $registered errors $errors]
 }
 
-proc ::HWShortcut::initialize {} {
+proc ::HWShortcut::initialize {{mode manual}} {
     variable INITIALIZED
+    variable LAST_REGISTRATION_RESULT
     if {!$INITIALIZED} {
         set INITIALIZED 1
     }
     ::HWShortcut::loadConfig
-    ::HWShortcut::registerAll
+    set LAST_REGISTRATION_RESULT [::HWShortcut::registerAll]
+    if {$mode eq "startup"} {
+        ::HWShortcut::writeStartupHeartbeat $LAST_REGISTRATION_RESULT
+    }
     return 1
 }
 
@@ -859,7 +956,7 @@ proc ::HWShortcut::refreshManager {} {
         }
     }
     set info [::HWShortcut::getAutoLoaderInfo]
-    catch {$w.status configure -text [::HWFlow::txt "自动加载状态：[::HWShortcut::getAutoLoaderStatus]\n用户配置路径：[::HWShortcut::getConfigFile]\n启动加载路径：[dict get $info path]" "Auto-load status: [::HWShortcut::getAutoLoaderStatus]\nUser config: [::HWShortcut::getConfigFile]\nBootstrap path: [dict get $info path]"]}
+    catch {$w.status configure -text [::HWFlow::txt "安装状态：[::HWShortcut::getAutoLoaderStatus]\n启动验证：[::HWShortcut::getStartupHeartbeatStatus]\n用户配置路径：[::HWShortcut::getConfigFile]\n启动加载路径：[dict get $info path]" "Installed: [::HWShortcut::getAutoLoaderStatus]\nStartup verification: [::HWShortcut::getStartupHeartbeatStatus]\nUser config: [::HWShortcut::getConfigFile]\nBootstrap path: [dict get $info path]"]}
 }
 
 proc ::HWShortcut::managerApply {} {

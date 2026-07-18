@@ -4,18 +4,18 @@ try:
     import tkinter
 except ImportError:
     tkinter=None
-from free_edge_path import closed_loop
-from mesh_topology import adjacency,edges
-from path_aligner import align,cost
-from path_matcher import match
-from path_validator import validate_ordered
-from seam_planner import plan
-from component_planner import plan_component_welds,plan_internal_component_boundaries,plan_internal_component_welds
-from fem_mesh_reader import read_shell_fem,read_shell_fem_bundle
-from main import calculate
-from mesh_model import Component,Element,MeshModel
-from hybrid_schema import new_result
-from result_writer import write_binary_result
+from hmworkflow.mesh_seam_weld.free_edge_path import closed_loop
+from hmworkflow.mesh_seam_weld.mesh_topology import adjacency,edges
+from hmworkflow.mesh_seam_weld.path_aligner import align,cost
+from hmworkflow.mesh_seam_weld.path_matcher import match
+from hmworkflow.mesh_seam_weld.path_validator import validate_ordered
+from hmworkflow.mesh_seam_weld.seam_planner import plan
+from hmworkflow.mesh_seam_weld.component_planner import plan_component_welds,plan_internal_component_boundaries,plan_internal_component_welds
+from hmworkflow.mesh_seam_weld.fem_mesh_reader import read_shell_fem,read_shell_fem_bundle
+from hmworkflow.mesh_seam_weld.main import calculate
+from hmworkflow.core.mesh_model import Component,Element,MeshModel
+from hmworkflow.core.hybrid_schema import new_result
+from hmworkflow.core.result_writer import write_binary_result
 ROOT=Path(__file__).resolve().parents[3]
 
 class SeamTests(unittest.TestCase):

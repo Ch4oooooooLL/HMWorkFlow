@@ -6,7 +6,10 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from schema import validate_result
+try:
+    from .schema import validate_result
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from schema import validate_result
 
 
 _BINARY_RESULT_MAGIC = b"HMWFR1\x00\x00"

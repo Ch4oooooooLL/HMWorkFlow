@@ -4,7 +4,10 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Dict, Iterable, List, Set, Tuple
 
-from topology import edge_key
+try:
+    from .topology import edge_key
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from topology import edge_key
 
 
 class EdgeGraph:

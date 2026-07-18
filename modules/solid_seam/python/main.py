@@ -11,28 +11,52 @@ from pathlib import Path
 # automatically add the executed script's directory to sys.path. HyperMesh
 # launches this file directly, so make sibling modules importable explicitly
 # before importing any solid_seam module.
-MODULE_DIR = str(Path(__file__).resolve().parent)
+ENTRY_PATH = Path(__file__).resolve()
+MODULE_DIR = str(ENTRY_PATH.parent)
+COMMON_DIR = str(ENTRY_PATH.parents[2] / "hybrid_core" / "python")
+PACKAGE_DIR = str(ENTRY_PATH.parents[3] / "python")
 if MODULE_DIR not in sys.path:
     sys.path.insert(0, MODULE_DIR)
+for directory in (COMMON_DIR, PACKAGE_DIR):
+    if directory not in sys.path:
+        sys.path.append(directory)
 
-from candidate_detector import detect_edges
-from confidence import calculate
-from duplicate_detector import classify as classify_duplicate
-from edge_chain_builder import build_chains
-from fem_mesh_reader import read_fem
-from geometry import bbox, expanded_bbox_intersects
-from joint_classifier import classify as classify_joint
-from mesh_reader import load_json, read_mesh
-from result_validator import validate_results
-from result_writer import write_json, write_tcl
-from realization_parameter_selector import select as select_realization_parameters
-from schema import SchemaError, validate_request
-from schema import MeshModel
-from solid_edge_extractor import extract_candidate_edges
-from solid_surface_extractor import extract_surface_faces
-from shell_surface_extractor import extract_shell_faces
-from spatial_index import TriangleIndex
-from target_surface_builder import build_target_surface
+try:
+    from .candidate_detector import detect_edges
+    from .confidence import calculate
+    from .duplicate_detector import classify as classify_duplicate
+    from .edge_chain_builder import build_chains
+    from .fem_mesh_reader import read_fem
+    from .geometry import bbox, expanded_bbox_intersects
+    from .joint_classifier import classify as classify_joint
+    from .mesh_reader import load_json, read_mesh
+    from .result_validator import validate_results
+    from .result_writer import flatten_candidates, write_json, write_tcl
+    from .realization_parameter_selector import select as select_realization_parameters
+    from .schema import MeshModel, SchemaError, validate_request
+    from .solid_edge_extractor import extract_candidate_edges
+    from .solid_surface_extractor import extract_surface_faces
+    from .shell_surface_extractor import extract_shell_faces
+    from .spatial_index import TriangleIndex
+    from .target_surface_builder import build_target_surface
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from candidate_detector import detect_edges
+    from confidence import calculate
+    from duplicate_detector import classify as classify_duplicate
+    from edge_chain_builder import build_chains
+    from fem_mesh_reader import read_fem
+    from geometry import bbox, expanded_bbox_intersects
+    from joint_classifier import classify as classify_joint
+    from mesh_reader import load_json, read_mesh
+    from result_validator import validate_results
+    from result_writer import flatten_candidates, write_json, write_tcl
+    from realization_parameter_selector import select as select_realization_parameters
+    from schema import MeshModel, SchemaError, validate_request
+    from solid_edge_extractor import extract_candidate_edges
+    from solid_surface_extractor import extract_surface_faces
+    from shell_surface_extractor import extract_shell_faces
+    from spatial_index import TriangleIndex
+    from target_surface_builder import build_target_surface
 
 
 def component_pairs(request):
@@ -162,7 +186,21 @@ def main(argv=None):
         payload = {"schema_version": "1.0", "run_id": request["run_id"], "mode": request["mode"], "requires_review": request.get("requires_review", request["mode"] in {"MIXED_COMPONENTS", "MULTI_SOLID_SHELL"}), "summary": summary, "candidates": candidates}
         args.output.parent.mkdir(parents=True, exist_ok=True)
         write_json(args.output, payload)
-        write_tcl(args.tcl_output or args.output.with_suffix(".tcl"), candidates, payload)
+        sidecar = args.tcl_output or args.output.with_suffix(".tcl")
+        if sidecar.suffix.lower() == ".hmwfr":
+            try:
+                from hmworkflow.core.result_writer import write_binary_result
+            except ImportError:
+                from result_writer import write_binary_result
+            write_binary_result(sidecar, {
+                "schema_version": "1.0", "module": "solid_seam",
+                "run_id": request["run_id"], "status": "SUCCESS",
+                "summary": dict(summary, mode=payload["mode"], requires_review=payload["requires_review"]),
+                "candidates": flatten_candidates(candidates), "warnings": [], "errors": [],
+                "performance": {},
+            })
+        else:
+            write_tcl(sidecar, candidates, payload)
         logger.info("complete candidates=%d", len(candidates))
         return 0
     except Exception as exc:

@@ -109,12 +109,7 @@ proc ::WeldIntegrityCheck::runDetection {} {
     if {![file isfile $outputPath] || ![file isfile $tclPath]} {
         error [::WeldIntegrityCheck::txt "检测程序未生成有效结果文件，请查看 Python 日志：$pythonLog" "No valid result was generated. See Python log: $pythonLog"]
     }
-    set sidecar [::HybridCore::readTextFile $tclPath]
-    if {![string match "# WELD_INTEGRITY_RESULT_V1*" $sidecar]} { error "Unsafe or invalid result sidecar: $tclPath" }
-    unset -nocomplain ::WeldIntegrityCheck::pythonResult
-    source -encoding utf-8 $tclPath
-    if {![info exists ::WeldIntegrityCheck::pythonResult]} { error "Result sidecar did not set pythonResult" }
-    set resultData $::WeldIntegrityCheck::pythonResult
+    set resultData [::HybridCore::loadDataSidecar $tclPath ::WeldIntegrityCheck::pythonResult "# WELD_INTEGRITY_RESULT_V1"]
     if {![dict exists $resultData success] || ![dict get $resultData success]} {
         set failureMessage "Invalid Python result"
         if {[dict exists $resultData message]} { set failureMessage [dict get $resultData message] }

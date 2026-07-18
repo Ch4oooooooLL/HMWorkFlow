@@ -13,17 +13,30 @@ for directory in (str(MODULE_DIR), str(COMMON_DIR)):
     if directory not in sys.path:
         sys.path.insert(0, directory)
 
-from duplicate_detector import annotate
-from fem_io import read_fem
-from grouping import build
-from hybrid_schema import new_result
-from incremental_fem import write_incremental_fem
-from logging_utils import close_logger, create_logger
-from mesh_model import load_json
-from pair_planner import plan
-from rbe2_analyzer import analyze
-from result_validator import validate
-from result_writer import write_result
+try:
+    from .duplicate_detector import annotate
+    from .fem_io import read_fem
+    from .grouping import build
+    from .incremental_fem import write_incremental_fem
+    from .pair_planner import plan
+    from .rbe2_analyzer import analyze
+    from .result_validator import validate
+    from hmworkflow.core.hybrid_schema import new_result
+    from hmworkflow.core.logging_utils import close_logger, create_logger
+    from hmworkflow.core.mesh_model import load_json
+    from hmworkflow.core.result_writer import write_result
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from duplicate_detector import annotate
+    from fem_io import read_fem
+    from grouping import build
+    from hybrid_schema import new_result
+    from incremental_fem import write_incremental_fem
+    from logging_utils import close_logger, create_logger
+    from mesh_model import load_json
+    from pair_planner import plan
+    from rbe2_analyzer import analyze
+    from result_validator import validate
+    from result_writer import write_result
 
 
 SPEC = importlib.util.spec_from_file_location("bolt_schema", str(MODULE_DIR / "schema.py"))

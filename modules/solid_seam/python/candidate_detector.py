@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from geometry import add, point_segment_distance, scale
+try:
+    from .geometry import add, point_segment_distance, scale
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import add, point_segment_distance, scale
 
 
 @dataclass

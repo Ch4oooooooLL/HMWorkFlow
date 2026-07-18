@@ -1,3 +1,5 @@
+import gc
+import time
 import unittest
 from pathlib import Path
 
@@ -14,9 +16,23 @@ MODULE = ROOT / "modules" / "contact_setup.tcl"
 @unittest.skipIf(tkinter is None, "tkinter Tcl runtime is unavailable")
 class ContactSetupTclTests(unittest.TestCase):
     def interp(self):
-        interp = tkinter.Tcl()
-        interp.eval("source {{{}}}".format(MODULE.as_posix()))
-        return interp
+        # Python 3.14 on Windows can intermittently report "No error" while
+        # opening init.tcl or a sourced Tcl file.  Keep every test isolated,
+        # but retry that host-runtime condition without masking Tcl failures.
+        for attempt in range(3):
+            try:
+                interp = tkinter.Tcl()
+                interp.eval("source {{{}}}".format(MODULE.as_posix()))
+                return interp
+            except tkinter.TclError as exc:
+                message = str(exc)
+                transient = "No error" in message and (
+                    "couldn't read" in message or "Can't find a usable init.tcl" in message
+                )
+                if not transient or attempt == 2:
+                    raise
+                gc.collect()
+                time.sleep(0.02)
 
     def test_second_face_panel_is_deferred_to_a_new_event_callback(self):
         interp = self.interp()

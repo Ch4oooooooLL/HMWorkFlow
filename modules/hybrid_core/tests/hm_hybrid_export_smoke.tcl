@@ -1,4 +1,9 @@
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
+# hmbatch does not load the interactive profile framework.  Select the
+# OptiStruct template directly so solver-specific property APIs are available.
+set optiTemplate [file normalize [file join [file dirname [info nameofexecutable]] .. .. .. templates feoutput optistruct optistruct]]
+if {![file exists $optiTemplate]} {error "OptiStruct template not found: $optiTemplate"}
+*templatefileset $optiTemplate
 foreach module {auto_hole_rbe2.tcl shell_washer_hole_rbe2.tcl rbe2_bolt_connector.tcl mesh_seam_weld.tcl} {
     source [file join $root modules $module]
 }

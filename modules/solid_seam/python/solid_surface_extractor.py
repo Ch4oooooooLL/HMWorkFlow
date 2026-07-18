@@ -5,8 +5,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
-from geometry import centroid, triangle_area_normal
-from schema import Element, MeshModel, SOLID_TYPES
+try:
+    from .geometry import centroid, triangle_area_normal
+    from .schema import Element, MeshModel, SOLID_TYPES
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import centroid, triangle_area_normal
+    from schema import Element, MeshModel, SOLID_TYPES
 
 FACE_TEMPLATES = {
     "CHEXA": ((0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)),

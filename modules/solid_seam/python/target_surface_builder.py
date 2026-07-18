@@ -4,9 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from geometry import bbox, triangle_area_normal
-from schema import MeshModel, SHELL_TYPES
-from solid_surface_extractor import extract_surface_faces
+try:
+    from .geometry import bbox, triangle_area_normal
+    from .schema import MeshModel, SHELL_TYPES
+    from .solid_surface_extractor import extract_surface_faces
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import bbox, triangle_area_normal
+    from schema import MeshModel, SHELL_TYPES
+    from solid_surface_extractor import extract_surface_faces
 
 
 @dataclass(frozen=True)

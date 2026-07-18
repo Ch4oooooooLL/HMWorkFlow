@@ -7,8 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
-from schema import SchemaError, int_list, require_mapping, require_version
-from worker_cache import get_file_resource
+try:
+    from .schema import SchemaError, int_list, require_mapping, require_version
+    from .worker_cache import get_file_resource
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from schema import SchemaError, int_list, require_mapping, require_version
+    from worker_cache import get_file_resource
 
 
 _BINARY_MESH_MAGIC = b"HMWFMB1\x00"

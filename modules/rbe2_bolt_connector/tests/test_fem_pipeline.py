@@ -4,12 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fem_io import FemParseError, read_fem
-from incremental_fem import IncrementalFemError, write_incremental_fem
-from main import main as cli_main
-from rbe2_analyzer import analyze
-from grouping import build
-from pair_planner import plan
+from hmworkflow.rbe2_bolt_connector.fem_io import FemParseError, read_fem
+from hmworkflow.rbe2_bolt_connector.incremental_fem import IncrementalFemError, write_incremental_fem
+from hmworkflow.rbe2_bolt_connector.main import main as cli_main
+from hmworkflow.rbe2_bolt_connector.rbe2_analyzer import analyze
+from hmworkflow.rbe2_bolt_connector.grouping import build
+from hmworkflow.rbe2_bolt_connector.pair_planner import plan
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -251,7 +251,9 @@ class TclImportContractTests(unittest.TestCase):
         self.assertIn("*feinputwithdata2", source)
         self.assertIn("INCREMENTAL_IMPORT_FAILED", source)
         self.assertIn("incremental_fem", source)
-        self.assertIn("expected_element_ids", source)
+        self.assertIn("expected_element_ids_summary", source)
+        self.assertIn("incremental_import_error.json", source)
+        self.assertIn("compactIdList", source)
         self.assertIn("cleanupIncrementalBoltImport", source)
         self.assertIn("created_property_ids", source)
         self.assertIn("created_material_ids", source)
@@ -279,7 +281,10 @@ class TclImportContractTests(unittest.TestCase):
         self.assertIn("$value == 0", body)
         self.assertIn("SOLID_CIRCLE", full_source)
         self.assertIn("*beamsectioncreatestandardsolver 11 0 HMCirc 0", full_source)
-        self.assertIn("3186=[list beamsects $beamSectId]", full_source)
+        self.assertIn(
+            "*attributeupdateentity properties $propId $attributeId 1 2 0 beamsects $beamSectId",
+            full_source,
+        )
 
     def test_solid_circle_uses_hypermesh_standard_section_update_contract(self):
         full_source = (Path(__file__).resolve().parents[2] / "rbe2_bolt_connector.tcl").read_text(
@@ -301,8 +306,13 @@ class TclImportContractTests(unittest.TestCase):
         start = full_source.index("proc ::RB2Bolt::linkBeamSectionToProperty")
         end = full_source.index("\nproc ::RB2Bolt::assignPropertyToComponent", start)
         body = full_source[start:end]
-        self.assertIn("3186=[list beamsects $beamSectId]", body)
-        self.assertIn("3179=$beamSectId", body)
+        self.assertIn("set attributeId 3186", body)
+        self.assertIn("set attributeId 3179", body)
+        self.assertIn(
+            "*attributeupdateentity properties $propId $attributeId 1 2 0 beamsects $beamSectId",
+            body,
+        )
+        self.assertNotIn("*setvalue $entityType", body)
         self.assertIn("*syncpropertybeamsectionvalues 1", body)
 
     def test_create_and_assign_all_paths_share_the_same_section_linker(self):

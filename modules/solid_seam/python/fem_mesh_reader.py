@@ -4,7 +4,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from schema import Component, Element, MeshModel, SHELL_TYPES, SOLID_TYPES, SchemaError
+try:
+    from .schema import Component, Element, MeshModel, SHELL_TYPES, SOLID_TYPES, SchemaError
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from schema import Component, Element, MeshModel, SHELL_TYPES, SOLID_TYPES, SchemaError
 
 
 _HMNAME = re.compile(r'^\s*\$HMNAME\s+COMP\s+(\d+)\s*"([^"]*)"', re.IGNORECASE)

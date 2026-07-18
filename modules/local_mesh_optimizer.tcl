@@ -9,6 +9,9 @@
 if {![namespace exists ::HWFlow]} {
     source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
+if {![namespace exists ::HybridCore]} {
+    source [file join [file dirname [file normalize [info script]]] hybrid_core tcl init.tcl]
+}
 
 namespace eval ::LocalMeshOptimizer {
     variable VERSION "0.4.1"
@@ -634,12 +637,9 @@ proc ::LocalMeshOptimizer::modelPath {} {
 }
 
 proc ::LocalMeshOptimizer::createTaskDir {} {
-    variable SCRIPT_DIR
     variable runtime
-    set root [file dirname $SCRIPT_DIR]
-    set stamp [clock format [clock seconds] -format {%Y%m%d_%H%M%S}]
-    set suffix [pid]
-    set runtime(taskDir) [file normalize [file join $root temp local_mesh_optimizer "task_${stamp}_${suffix}"]]
+    set workspace [::HybridCore::createTaskWorkspace local_mesh_optimizer]
+    set runtime(taskDir) [dict get $workspace task_dir]
     set runtime(currentReportDir) ""
     set runtime(currentReportPath) ""
     set runtime(logBuffer) {}
@@ -903,15 +903,11 @@ proc ::LocalMeshOptimizer::appendPythonCommandCandidates {candidatesVar commandT
 
 proc ::LocalMeshOptimizer::pythonCandidates {} {
     variable SCRIPT_DIR
-    variable ui
     set candidates {}
-    ::LocalMeshOptimizer::appendPythonCommandCandidates candidates $ui(PYTHON_COMMAND)
     if {$::tcl_platform(platform) eq "windows"} {
         set bundled [file normalize [file join $SCRIPT_DIR .. runtime python windows-x64 python.exe]]
         if {[file isfile $bundled]} { lappend candidates [list $bundled] }
     }
-    if {$::tcl_platform(platform) eq "windows"} { lappend candidates [list py -3] }
-    lappend candidates [list python3] [list python]
     return $candidates
 }
 
@@ -1006,7 +1002,7 @@ proc ::LocalMeshOptimizer::pythonProgressPulse {stage} {
     catch {::LocalMeshOptimizer::optimizationProgress $percent [::LocalMeshOptimizer::txt "Python 后台处理中" "Python background processing"] [::LocalMeshOptimizer::txt "阶段：$stage；Python=$pythonPercent%" "Stage: $stage; Python=$pythonPercent%"] 0}
 }
 
-proc ::LocalMeshOptimizer::runPython {stage taskPath} {
+proc ::LocalMeshOptimizer::runPythonLegacy {stage taskPath} {
     variable PYTHON_ENTRY
     variable runtime
     if {![file isfile $PYTHON_ENTRY]} { error "Python controller not found: $PYTHON_ENTRY" }
@@ -1056,6 +1052,25 @@ proc ::LocalMeshOptimizer::runPython {stage taskPath} {
     set elapsed [expr {([clock milliseconds] - $started) / 1000.0}]
     ::LocalMeshOptimizer::performanceAdd tcl_python_communication $elapsed
     ::LocalMeshOptimizer::log INFO "Python background stage=$stage complete pid=$runtime(pythonPid)" - - python 1 1 $elapsed
+    return 1
+}
+
+proc ::LocalMeshOptimizer::runPython {stage taskPath} {
+    variable PYTHON_ENTRY
+    variable runtime
+    if {![file isfile $PYTHON_ENTRY]} {error "Python controller not found: $PYTHON_ENTRY"}
+    set token [::HybridCore::taskToken $runtime(taskDir)]
+    if {$token eq ""} {error "Local Mesh Optimizer task token is missing"}
+    ::LocalMeshOptimizer::log INFO "starting detached Python stage=$stage" - - python 1 0
+    ::LocalMeshOptimizer::performanceIncr python_starts
+    set started [clock milliseconds]
+    set task [::HybridCore::runDetachedPythonStage $PYTHON_ENTRY \
+        [list --task $taskPath --stage $stage] $runtime(taskDir) $stage $token \
+        [list ::LocalMeshOptimizer::pythonProgressPulse] 1800000]
+    set runtime(pythonPid) [dict get $task pid]
+    set elapsed [expr {([clock milliseconds] - $started) / 1000.0}]
+    ::LocalMeshOptimizer::performanceAdd tcl_python_communication $elapsed
+    ::LocalMeshOptimizer::log INFO "detached Python stage=$stage complete pid=$runtime(pythonPid) task_token=$token" - - python 1 1 $elapsed
     return 1
 }
 
@@ -2071,6 +2086,7 @@ proc ::LocalMeshOptimizer::startOptimization {} {
             if {[file isfile $taskPath]} { catch {::LocalMeshOptimizer::runPython finalize $taskPath} }
         }
         set message [::LocalMeshOptimizer::txt "优化流程失败：$err；$recovery 日志：$runtime(taskDir)/optimizer.log" "Optimization failed: $err; $recovery Log: $runtime(taskDir)/optimizer.log"]
+        if {$runtime(taskDir) ne ""} {catch {::HybridCore::finalizeTaskWorkspace $runtime(taskDir) FAILED}}
         ::LocalMeshOptimizer::setStatus ERROR $message
         catch {::HWFlow::progressFinish $message 100.0}
         return 0
@@ -2391,6 +2407,7 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
     ::LocalMeshOptimizer::log INFO $ui(RESULT_TEXT)
     catch {::HWFlow::progressFinish $ui(RESULT_TEXT) 100.0}
     if {!$reportCode && $ui(AUTO_OPEN_REPORT)} { after idle ::LocalMeshOptimizer::openReport }
+    catch {::HybridCore::finalizeTaskWorkspace $runtime(taskDir) [expr {$cancelled ? "CANCELLED" : ($taskRolledBack ? "FAILED" : "SUCCESS")}]]}
     return [expr {!$cancelled && !$taskRolledBack}]
 }
 

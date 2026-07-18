@@ -4,7 +4,10 @@ from __future__ import annotations
 import math
 import statistics
 
-from geometry import add, angle_deg, centroid, cross, distance, dot, scale, sub, unit
+try:
+    from .geometry import add, angle_deg, centroid, cross, distance, dot, scale, sub, unit
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import add, angle_deg, centroid, cross, distance, dot, scale, sub, unit
 
 
 def _clamp(value, lower, upper):

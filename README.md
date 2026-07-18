@@ -1,10 +1,18 @@
 # HyperMesh Toolkit
 
+平台稳定化后的工程上下文、用户数据目录、任务清理策略和验证方法见
+[平台服务迁移说明](doc/migration_platform_services.md)。执行任何会修改模型的入口前，
+请先确认 `config.yaml` 中的求解器、单位制及 `units_confirmed` 与当前项目一致。
+
+仓库目录边界、Git 跟踪规则和发布白名单见
+[仓库目录与发布规则](doc/repository_layout.md)。本机解压的
+`runtime/python/windows-x64/python38/` 只用于运行，不进入 Git 或发布 ZIP。
+
 快捷键的首次安装、更新和恢复流程见 [快捷键安装与更新](doc/shortcut_installation.md)。请优先运行 `install_update.tcl`；`hw_toolkit.tcl` 保留为兼容入口。
 
 面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、批量 Property、局部网格优化、铸件四面体网格、RBE2、螺栓连接和接触设置。
 
-局部网格优化模块的集成状态、使用步骤、HM2019 运行验证和已知限制见 [README_LocalMeshOptimizer.md](README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定，并保留运行时错误处理、任务快照、复检和回滚。
+局部网格优化模块的集成状态、使用步骤、HM2019 运行验证和已知限制见 [README_LocalMeshOptimizer.md](doc/README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定，并保留运行时错误处理、任务快照、复检和回滚。
 
 默认界面语言为中文。需要英文界面时，将项目根目录 `config.yaml` 中的 `workflow.language` 改为 `en_US`。
 

@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from schema import Component, Element, MeshModel, SHELL_TYPES, SOLID_TYPES, SchemaError, require_version
+try:
+    from .schema import Component, Element, MeshModel, SHELL_TYPES, SOLID_TYPES, SchemaError, require_version
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from schema import Component, Element, MeshModel, SHELL_TYPES, SOLID_TYPES, SchemaError, require_version
 
 
 def load_json(path: Path) -> Dict[str, Any]:
