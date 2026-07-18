@@ -652,6 +652,17 @@ proc ::HWToolkit::invokeModule {key} {
     if {![::HWToolkit::sourceOneModule $key $info]} {
         return 0
     }
+    # Direct UI and shortcut flows share one engineering-context gate before
+    # a module can reach model-mutating commands.
+    if {[catch {::HWFlow::requireEngineeringContext} preflightError]} {
+        catch {puts "HMWorkFlow module $key blocked by preflight: $preflightError"}
+        if {[llength [info commands tk_messageBox]] > 0} {
+            tk_messageBox -icon warning -title "HMWorkFlow Preflight" -message $preflightError
+        } else {
+            catch {hm_usermessage $preflightError}
+        }
+        return 0
+    }
     set procName [dict get $info proc]
     if {[llength [info commands $procName]] == 0} {
         set err [::HWFlow::txt "模块入口不存在：$procName" "Module entry does not exist: $procName"]

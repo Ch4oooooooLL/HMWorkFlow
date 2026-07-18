@@ -8,18 +8,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 
-from edge_chain_builder import build_chains
-from duplicate_detector import classify as classify_duplicate
-from joint_classifier import classify as classify_joint
-from fem_mesh_reader import read_fem
-from main import classify_workflow, component_pairs, detect, main as cli_main
-from mesh_reader import read_mesh
-from schema import validate_request
-from solid_edge_extractor import extract_candidate_edges
-from solid_surface_extractor import extract_surface_faces
-from result_writer import write_tcl
-from realization_parameter_selector import select as select_realization_parameters
-from schema import Element, MeshModel, Component
+from hmworkflow.solid_seam.edge_chain_builder import build_chains
+from hmworkflow.solid_seam.duplicate_detector import classify as classify_duplicate
+from hmworkflow.solid_seam.joint_classifier import classify as classify_joint
+from hmworkflow.solid_seam.fem_mesh_reader import read_fem
+from hmworkflow.solid_seam.main import classify_workflow, component_pairs, detect, main as cli_main
+from hmworkflow.solid_seam.mesh_reader import read_mesh
+from hmworkflow.solid_seam.schema import validate_request
+from hmworkflow.solid_seam.solid_edge_extractor import extract_candidate_edges
+from hmworkflow.solid_seam.solid_surface_extractor import extract_surface_faces
+from hmworkflow.solid_seam.result_writer import write_tcl
+from hmworkflow.solid_seam.realization_parameter_selector import select as select_realization_parameters
+from hmworkflow.solid_seam.schema import Element, MeshModel, Component
 
 
 def cube_mesh(shell=True):
@@ -244,6 +244,10 @@ class SolidSeamTests(unittest.TestCase):
             self.assertEqual("1.0", json.loads(output.read_text(encoding="utf-8"))["schema_version"])
             self.assertTrue(sidecar.is_file())
             self.assertTrue(log.is_file())
+            binary = root / "candidates.hmwfr"
+            code = cli_main(["--request", str(request_path), "--mesh", str(mesh_path), "--output", str(output), "--tcl-output", str(binary), "--log", str(log)])
+            self.assertEqual(0, code)
+            self.assertEqual(b"HMWFR1\x00\x00", binary.read_bytes()[:8])
 
     def test_cli_merges_per_component_fems_and_returns_workflow_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,9 +1,14 @@
 """Represent shell elements as source faces for seam-edge recognition."""
 from __future__ import annotations
 
-from geometry import centroid, triangle_area_normal
-from schema import SHELL_TYPES
-from solid_surface_extractor import SurfaceFace
+try:
+    from .geometry import centroid, triangle_area_normal
+    from .schema import SHELL_TYPES
+    from .solid_surface_extractor import SurfaceFace
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import centroid, triangle_area_normal
+    from schema import SHELL_TYPES
+    from solid_surface_extractor import SurfaceFace
 
 
 def extract_shell_faces(model, component_id):

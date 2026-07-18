@@ -1,5 +1,8 @@
 """Validate generated candidate payloads before they cross back into Tcl."""
-from schema import validate_candidate
+try:
+    from .schema import validate_candidate
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from schema import validate_candidate
 
 
 def validate_results(candidates, model):

@@ -35,6 +35,7 @@ namespace eval ::HybridCore {
 }
 
 foreach fileName {
+    storage_service.tcl
     data_writer.tcl
     binary_codec.tcl
     hm_bulk_reader.tcl
@@ -45,10 +46,14 @@ foreach fileName {
     python_runtime.tcl
     progress_bridge.tcl
     process_runner.tcl
+    detached_task.tcl
     result_loader.tcl
 } {
     source [file join $::HybridCore::TCL_DIR $fileName]
 }
+
+::HybridCore::initializeStorage
+after idle ::HybridCore::cleanupTaskWorkspaces
 
 # Start one warm Python process from each HyperMesh Tcl interpreter.  Because
 # HyperMesh opens the stdio pipe itself, python.exe is a direct child process

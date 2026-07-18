@@ -6,7 +6,10 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
 
-from fem_delta import EntityIdAllocator, entity_registry, new_manifest
+try:
+    from hmworkflow.core.fem_delta import EntityIdAllocator, entity_registry, new_manifest
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from fem_delta import EntityIdAllocator, entity_registry, new_manifest
 
 
 class IncrementalFemError(ValueError):

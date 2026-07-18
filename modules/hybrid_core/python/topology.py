@@ -4,7 +4,10 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-from mesh_model import Element
+try:
+    from .mesh_model import Element
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from mesh_model import Element
 
 Edge = Tuple[int, int]
 

@@ -52,11 +52,22 @@ proc ::HybridCore::packageMetadata {} {
 }
 
 proc ::HybridCore::diagnosticSummary {} {
+    variable USER_CONFIG_ROOT
+    variable CACHE_ROOT
+    variable RUNTIME_ROOT
+    variable TASK_ROOT
     set result [::HybridCore::packageMetadata]
     set hmVersion "unavailable"
     catch {set hmVersion [hm_info -appinfo VERSION]}
     dict set result hm_version $hmVersion
     dict set result expected_solver_profile OptiStruct
+    dict set result user_config_root $USER_CONFIG_ROOT
+    dict set result cache_root $CACHE_ROOT
+    dict set result runtime_root $RUNTIME_ROOT
+    dict set result task_root $TASK_ROOT
+    if {[llength [info commands ::HWFlow::engineeringPreflight]] > 0} {
+        catch {dict set result preflight_status [dict get [::HWFlow::engineeringPreflight] status]}
+    }
     if {[llength [info commands ::HybridCore::workerStatus]] > 0} {
         set status [::HybridCore::workerStatus]
         dict set result worker_alive [dict get $status alive]

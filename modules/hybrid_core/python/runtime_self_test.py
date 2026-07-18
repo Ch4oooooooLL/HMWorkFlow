@@ -10,10 +10,16 @@ MODULE_DIR = Path(__file__).resolve().parent
 if str(MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(MODULE_DIR))
 
-from edge_graph import EdgeGraph
-from geometry import centroid, point_line_distance
-from result_writer import write_result
-from schema import new_result, validate_request
+try:
+    from .edge_graph import EdgeGraph
+    from .geometry import centroid, point_line_distance
+    from .result_writer import write_result
+    from .schema import new_result, validate_request
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from edge_graph import EdgeGraph
+    from geometry import centroid, point_line_distance
+    from result_writer import write_result
+    from schema import new_result, validate_request
 
 
 def run(output_dir: Path) -> None:

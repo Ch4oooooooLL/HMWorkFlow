@@ -7,7 +7,7 @@ from pathlib import Path
 PYTHON_DIR = Path(__file__).resolve().parents[1] / "python"
 sys.path.insert(0, str(PYTHON_DIR))
 
-from detector import detect  # noqa: E402
+from hmworkflow.weld_integrity_check.detector import detect  # noqa: E402
 
 
 SETTINGS = {

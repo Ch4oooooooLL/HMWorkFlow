@@ -1,5 +1,8 @@
 from __future__ import annotations
-from worker_cache import get_adjacency, get_or_create
+try:
+    from hmworkflow.core.worker_cache import get_adjacency, get_or_create
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from worker_cache import get_adjacency, get_or_create
 
 
 def edges(elements):

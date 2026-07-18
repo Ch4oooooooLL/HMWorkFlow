@@ -7,7 +7,7 @@
 # ============================================================================
 
 namespace eval ::HWFlow {
-    variable VERSION "0.1"
+    variable VERSION "0.2"
     variable ROOT_DIR [file dirname [file dirname [file normalize [info script]]]]
     variable GLOBAL_CONFIG_FILE [file join $ROOT_DIR "config.yaml"]
     variable CONFIG_DIR [file join $ROOT_DIR "config"]
@@ -15,6 +15,8 @@ namespace eval ::HWFlow {
     variable CATEGORIES {SHELL SOLID CASTING SOURCE_GEOM SEAM CONNECTOR}
     variable LANGUAGE "zh_CN"
     variable LANGUAGE_LOADED 0
+    variable ENGINEERING_CONTEXT {}
+    variable ENGINEERING_CONTEXT_LOADED 0
     variable materialRows {}
     variable materialKeys {}
     variable progressWin ".hwflow_progress"
@@ -55,10 +57,168 @@ proc ::HWFlow::globalConfigFile {} {
 proc ::HWFlow::defaultGlobalConfigText {} {
     return [join {
         {# HyperMesh Toolkit global configuration}
+        {schema_version: 2.0}
         {workflow:}
         {  # 界面语言 / UI language: zh_CN or en_US}
         {  language: zh_CN}
+        {project:}
+        {  unit_system: mm_N_s_tonne}
+        {  solver_profile: OptiStruct}
+        {  length_unit: mm}
+        {  force_unit: N}
+        {  time_unit: s}
+        {  mass_unit: tonne}
+        {  stress_unit: MPa}
+        {  density_unit: tonne_per_mm3}
+        {  units_confirmed: false}
     } "\n"]
+}
+
+proc ::HWFlow::configScalar {section key fallback} {
+    set path [::HWFlow::ensureGlobalConfig]
+    set active ""
+    foreach rawLine [split [::HWFlow::readTextFile $path] "\n"] {
+        set withoutComment [lindex [split $rawLine "#"] 0]
+        if {[string trim $withoutComment] eq ""} {continue}
+        if {[regexp {^([A-Za-z0-9_.-]+)\s*:\s*$} [string trim $withoutComment] -> name]} {
+            set active $name
+            continue
+        }
+        if {$active eq $section && [regexp "^\\s+${key}\\s*:\\s*(.+?)\\s*$" $withoutComment -> value]} {
+            return [string trim $value "\"' "]
+        }
+        if {[regexp "^${section}\\.${key}\\s*:\\s*(.+?)\\s*$" [string trim $withoutComment] -> value]} {
+            return [string trim $value "\"' "]
+        }
+    }
+    return $fallback
+}
+
+proc ::HWFlow::configBoolean {section key fallback} {
+    set value [string tolower [::HWFlow::configScalar $section $key $fallback]]
+    return [expr {$value in {1 true yes on}}]
+}
+
+proc ::HWFlow::engineeringContext {{refresh 0}} {
+    variable ENGINEERING_CONTEXT
+    variable ENGINEERING_CONTEXT_LOADED
+    if {$ENGINEERING_CONTEXT_LOADED && !$refresh} {return $ENGINEERING_CONTEXT}
+    set context [dict create \
+        unit_system [::HWFlow::configScalar project unit_system ""] \
+        solver_profile [::HWFlow::configScalar project solver_profile ""] \
+        length_unit [::HWFlow::configScalar project length_unit ""] \
+        force_unit [::HWFlow::configScalar project force_unit ""] \
+        time_unit [::HWFlow::configScalar project time_unit ""] \
+        mass_unit [::HWFlow::configScalar project mass_unit ""] \
+        stress_unit [::HWFlow::configScalar project stress_unit ""] \
+        density_unit [::HWFlow::configScalar project density_unit ""] \
+        units_confirmed [::HWFlow::configBoolean project units_confirmed false]]
+    set ENGINEERING_CONTEXT $context
+    set ENGINEERING_CONTEXT_LOADED 1
+    return $context
+}
+
+proc ::HWFlow::currentSolverContext {} {
+    set profile ""
+    set template ""
+    if {[info exists ::g_profile_name]} {set profile [string trim $::g_profile_name]}
+    if {[llength [info commands hm_info]] > 0} {
+        catch {set template [string trim [hm_info templatetype]]}
+    }
+    return [dict create profile $profile template $template]
+}
+
+proc ::HWFlow::preflightCheck {name status detail} {
+    return [dict create name $name status $status detail $detail]
+}
+
+proc ::HWFlow::engineeringPreflight {{refresh 0}} {
+    set context [::HWFlow::engineeringContext $refresh]
+    set checks {}
+    set blocked 0
+    set warned 0
+
+    set requiredUnits {unit_system length_unit force_unit time_unit mass_unit stress_unit density_unit}
+    set missing {}
+    foreach key $requiredUnits {
+        if {[string trim [dict get $context $key]] eq ""} {lappend missing $key}
+    }
+    if {![dict get $context units_confirmed] || [llength $missing] > 0} {
+        set blocked 1
+        lappend checks [::HWFlow::preflightCheck units BLOCKED "Project units are incomplete or not confirmed: $missing"]
+    } else {
+        lappend checks [::HWFlow::preflightCheck units PASS "[dict get $context unit_system] ([dict get $context stress_unit], [dict get $context density_unit])"]
+    }
+
+    set expected [dict get $context solver_profile]
+    set solver [::HWFlow::currentSolverContext]
+    set profile [string tolower [dict get $solver profile]]
+    set template [string tolower [dict get $solver template]]
+    if {$expected eq ""} {
+        set blocked 1
+        lappend checks [::HWFlow::preflightCheck solver BLOCKED "project.solver_profile is not configured"]
+    } elseif {[llength [info commands hm_info]] == 0} {
+        set warned 1
+        lappend checks [::HWFlow::preflightCheck solver WARNING "HyperMesh solver context is unavailable offline; expected $expected"]
+    } elseif {($profile ne "" && $profile ne "optistruct") || ($profile eq "" && $template ni {nastran optistruct})} {
+        set blocked 1
+        lappend checks [::HWFlow::preflightCheck solver BLOCKED "Expected $expected; current profile='$profile' template='$template'"]
+    } else {
+        lappend checks [::HWFlow::preflightCheck solver PASS "profile='$profile' template='$template'"]
+    }
+
+    set hmVersion ""
+    if {[llength [info commands hm_info]] > 0} {catch {set hmVersion [hm_info -appinfo VERSION]}}
+    if {$hmVersion eq ""} {
+        set warned 1
+        lappend checks [::HWFlow::preflightCheck hypermesh WARNING "HyperMesh version could not be queried"]
+    } elseif {![string match "*2019*" $hmVersion]} {
+        set warned 1
+        lappend checks [::HWFlow::preflightCheck hypermesh WARNING "Validated baseline is HM2019; current version is $hmVersion"]
+    } else {
+        lappend checks [::HWFlow::preflightCheck hypermesh PASS $hmVersion]
+    }
+
+    if {[llength [info commands ::HybridCore::workerAlive]] > 0} {
+        if {[::HybridCore::workerAlive]} {
+            lappend checks [::HWFlow::preflightCheck worker PASS "persistent worker is alive"]
+        } else {
+            set warned 1
+            lappend checks [::HWFlow::preflightCheck worker WARNING "persistent worker is not started yet"]
+        }
+    } else {
+        set warned 1
+        lappend checks [::HWFlow::preflightCheck worker WARNING "module does not require the shared worker"]
+    }
+
+    set scratch [file join $::HWFlow::ROOT_DIR runtime tasks]
+    if {[info exists ::HybridCore::TASK_ROOT]} {set scratch $::HybridCore::TASK_ROOT}
+    if {[file exists $scratch] && ![file writable $scratch]} {
+        set blocked 1
+        lappend checks [::HWFlow::preflightCheck scratch BLOCKED "Task storage is not writable: $scratch"]
+    } else {
+        lappend checks [::HWFlow::preflightCheck scratch PASS $scratch]
+    }
+
+    set status PASS
+    if {$blocked} {set status BLOCKED} elseif {$warned} {set status WARNING}
+    return [dict create status $status context $context checks $checks]
+}
+
+proc ::HWFlow::formatEngineeringPreflight {result} {
+    set lines [list "HMWorkFlow preflight: [dict get $result status]"]
+    foreach check [dict get $result checks] {
+        lappend lines "[dict get $check status] [dict get $check name]: [dict get $check detail]"
+    }
+    return [join $lines "\n"]
+}
+
+proc ::HWFlow::requireEngineeringContext {} {
+    set result [::HWFlow::engineeringPreflight 1]
+    if {[dict get $result status] eq "BLOCKED"} {
+        error [::HWFlow::formatEngineeringPreflight $result]
+    }
+    return $result
 }
 
 proc ::HWFlow::ensureGlobalConfig {} {
@@ -502,11 +662,14 @@ proc ::HWFlow::createTopLevel {w {role module}} {
 }
 
 proc ::HWFlow::configDir {} {
-    variable CONFIG_DIR
-    if {![file isdirectory $CONFIG_DIR]} {
-        file mkdir $CONFIG_DIR
+    if {[info exists ::env(APPDATA)] && [string trim $::env(APPDATA)] ne ""} {
+        set userConfig [file normalize [file join $::env(APPDATA) HMWorkFlow]]
+    } else {
+        variable CONFIG_DIR
+        set userConfig $CONFIG_DIR
     }
-    return $CONFIG_DIR
+    if {![file isdirectory $userConfig]} {file mkdir $userConfig}
+    return $userConfig
 }
 
 proc ::HWFlow::materialFile {} {
@@ -563,7 +726,10 @@ proc ::HWFlow::loadState {moduleKey} {
     set path [::HWFlow::stateFile $moduleKey]
     set state [dict create]
     if {![file exists $path]} {
-        return $state
+        # Dual-read migration: consume the former installation-local state
+        # once, while all new writes go to the per-user AppData directory.
+        set legacy [file join $::HWFlow::CONFIG_DIR "[::HWFlow::sanitizeToken $moduleKey state]_state.txt"]
+        if {[file exists $legacy]} {set path $legacy} else {return $state}
     }
 
     foreach rawLine [split [::HWFlow::readTextFile $path] "\n"] {

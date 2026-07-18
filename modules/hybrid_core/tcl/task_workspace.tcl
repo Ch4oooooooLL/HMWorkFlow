@@ -26,9 +26,11 @@ proc ::HybridCore::createTaskWorkspace {moduleName} {
             file mkdir $taskDir
             set currentRunId $runId
             set currentTaskDir $taskDir
+            set taskToken [::HybridCore::newTaskToken]
+            ::HybridCore::writeTaskMetadata $taskDir RUNNING $taskToken
             ::HybridCore::openLog [file join $taskDir operation.log]
-            ::HybridCore::log INFO "workspace created module=$moduleName run_id=$runId"
-            return [dict create module $moduleName run_id $runId task_dir $taskDir]
+            ::HybridCore::log INFO "workspace created module=$moduleName run_id=$runId task_token=$taskToken"
+            return [dict create module $moduleName run_id $runId task_dir $taskDir task_token $taskToken]
         }
     }
     error "Could not create a unique task workspace for $moduleName"

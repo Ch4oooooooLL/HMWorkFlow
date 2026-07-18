@@ -1,2 +1,5 @@
 """Unambiguous import alias for the shared schema module."""
-from schema import *  # noqa: F401,F403
+try:
+    from .schema import *  # noqa: F401,F403
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from schema import *  # noqa: F401,F403

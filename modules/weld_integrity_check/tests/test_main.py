@@ -11,8 +11,8 @@ from pathlib import Path
 PYTHON_DIR = Path(__file__).resolve().parents[1] / "python"
 sys.path.insert(0, str(PYTHON_DIR))
 
-from main import main  # noqa: E402
-from test_detector import SETTINGS, model  # noqa: E402
+from hmworkflow.weld_integrity_check.main import main  # noqa: E402
+from modules.weld_integrity_check.tests.test_detector import SETTINGS, model  # noqa: E402
 
 
 class MainIntegrationTests(unittest.TestCase):

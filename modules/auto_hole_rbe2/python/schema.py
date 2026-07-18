@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from hybrid_schema import SchemaError, int_list, validate_request as validate_common_request
+try:
+    from hmworkflow.core.hybrid_schema import SchemaError, int_list, validate_request as validate_common_request
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from hybrid_schema import SchemaError, int_list, validate_request as validate_common_request
 
 
 DEFAULTS = {

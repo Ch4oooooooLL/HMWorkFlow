@@ -1,4 +1,24 @@
 # HyperMesh 前处理工作流全局配置 / HyperMesh Preprocess Workflow global configuration
+schema_version: 2.0
 workflow:
   # 界面语言 / UI language: zh_CN or en_US
   language: zh_CN
+project:
+  # Engineering values in config/materials.txt use this consistent system.
+  # Change these values and reconfirm before using another project system.
+  unit_system: mm_N_s_tonne
+  solver_profile: OptiStruct
+  length_unit: mm
+  force_unit: N
+  time_unit: s
+  mass_unit: tonne
+  stress_unit: MPa
+  density_unit: tonne_per_mm3
+  units_confirmed: true
+storage:
+  # Leave empty to use %LOCALAPPDATA%/HMWorkFlow/runtime.
+  scratch_dir: ""
+  success_retention_days: 7
+  failure_retention_days: 30
+  success_keep_latest: 10
+  max_disk_gb: 20

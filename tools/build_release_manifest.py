@@ -40,7 +40,7 @@ def build_manifest(source_root: Path) -> dict:
         "runtime_version": str(runtime_manifest.get("version", "unknown")),
         "supported_hypermesh_versions": ["2019"],
         "solver_profiles": ["OptiStruct"],
-        "config_schema_version": "1.0",
+        "config_schema_version": "2.0",
     }
 
 

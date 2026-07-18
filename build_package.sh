@@ -106,6 +106,7 @@ fi
 INCLUDE_ITEMS=(
     ".editorconfig"
     ".gitignore"
+    "pyproject.toml"
     "使用教程.pdf"
     "README.md"
     "VERSION"
@@ -123,6 +124,7 @@ INCLUDE_ITEMS=(
     "doc"
     "examples"
     "modules"
+    "python"
     "runtime/python"
     "tools"
 )

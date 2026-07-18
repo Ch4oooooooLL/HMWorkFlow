@@ -9,6 +9,9 @@ MODULES = {
     "shell_washer_hole_rbe2",
     "rbe2_bolt_connector",
     "mesh_seam_weld",
+    "solid_seam",
+    "local_mesh_optimizer",
+    "weld_integrity_check",
     "hybrid_core_self_test",
 }
 

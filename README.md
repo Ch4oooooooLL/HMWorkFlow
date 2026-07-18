@@ -1,5 +1,9 @@
 # HyperMesh Toolkit
 
+平台稳定化后的工程上下文、用户数据目录、任务清理策略和验证方法见
+[平台服务迁移说明](doc/migration_platform_services.md)。执行任何会修改模型的入口前，
+请先确认 `config.yaml` 中的求解器、单位制及 `units_confirmed` 与当前项目一致。
+
 快捷键的首次安装、更新和恢复流程见 [快捷键安装与更新](doc/shortcut_installation.md)。请优先运行 `install_update.tcl`；`hw_toolkit.tcl` 保留为兼容入口。
 
 面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、批量 Property、局部网格优化、铸件四面体网格、RBE2、螺栓连接和接触设置。

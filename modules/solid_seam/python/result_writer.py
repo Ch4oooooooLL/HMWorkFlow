@@ -15,14 +15,22 @@ def _tcl(value):
     return '"' + text + '"'
 
 
-def write_tcl(path, candidates, metadata=None):
+def flatten_candidates(candidates):
     rows = []
     fields = ("candidate_id", "status", "connection_mode", "edge_class", "joint_type", "suggested_realization", "length", "average_distance", "maximum_distance", "valid_ratio", "confidence", "confidence_level", "duplicate_state", "is_closed")
     for candidate in candidates:
         flat = {key: candidate.get(key, "") for key in fields}
         flat.update(source_component_id=candidate["source_solid"]["component_id"], source_component_name=candidate["source_solid"]["component_name"], target_component_id=candidate["target_component"]["component_id"], target_component_name=candidate["target_component"]["component_name"], node_ids=" ".join(map(str, candidate["node_ids"])), warnings="|".join(candidate["warnings"]))
         flat.update(candidate.get("realization_parameters", {}))
-        rows.append("[dict create " + " ".join(f"{key} {_tcl(value)}" for key, value in flat.items()) + "]")
+        rows.append(flat)
+    return rows
+
+
+def write_tcl(path, candidates, metadata=None):
+    rows = [
+        "[dict create " + " ".join(f"{key} {_tcl(value)}" for key, value in row.items()) + "]"
+        for row in flatten_candidates(candidates)
+    ]
     metadata = metadata or {}
     mode = _tcl(metadata.get("mode", ""))
     review = "1" if metadata.get("requires_review", False) else "0"

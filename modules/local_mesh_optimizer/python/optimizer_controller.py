@@ -394,6 +394,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--task", required=True, type=Path)
     parser.add_argument("--stage", choices=("build-regions", "finalize", "report"), default="build-regions")
     parser.add_argument("--status-file", type=Path, help="Atomic completion status written for the Tcl launcher")
+    parser.add_argument("--task-token", default="", help="Opaque token used to reject stale detached-task results")
     arguments = parser.parse_args(argv)
     exit_code = EXIT_INTERNAL
     status_message = ""
@@ -423,6 +424,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pass
         exit_code = EXIT_INTERNAL
     finally:
+        if arguments.task_token:
+            try:
+                result_path = arguments.task.resolve().parent / "result.json"
+                result = read_json(result_path) if result_path.exists() else {}
+                result["task_token"] = arguments.task_token
+                atomic_write_json(result_path, result)
+            except Exception:
+                logging.error("Could not attach task token to result:\n%s", traceback.format_exc())
         if arguments.status_file is not None:
             try:
                 atomic_write_json(
@@ -432,6 +441,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "exit_code": exit_code,
                         "message": status_message,
                         "pid": os.getpid(),
+                        "task_token": arguments.task_token,
                     },
                 )
             except Exception:

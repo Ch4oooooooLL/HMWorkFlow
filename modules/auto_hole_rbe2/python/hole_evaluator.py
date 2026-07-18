@@ -3,11 +3,18 @@ from __future__ import annotations
 
 import math
 
-from geometry import (
-    add, centroid, dot, norm, normalize, point_line_distance,
-    project_point_on_line, scale, subtract,
-)
-from loop_builder import boundary_loops
+try:
+    from hmworkflow.core.geometry import (
+        add, centroid, dot, norm, normalize, point_line_distance,
+        project_point_on_line, scale, subtract,
+    )
+    from .loop_builder import boundary_loops
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import (
+        add, centroid, dot, norm, normalize, point_line_distance,
+        project_point_on_line, scale, subtract,
+    )
+    from loop_builder import boundary_loops
 
 
 def _loop_normal(model, nodes, epsilon):

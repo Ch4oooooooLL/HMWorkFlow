@@ -1091,25 +1091,17 @@ proc ::RB2Bolt::ensureCircleBeamSection {dia} {
 }
 
 proc ::RB2Bolt::linkBeamSectionToProperty {propId propName card beamSectId} {
-    # HM2019 stores the PBAR and PBEAM references differently.  These are the
-    # exact commands recorded by the Property Editor: PBAR uses scalar 3179;
-    # PBEAM uses entity-reference 3186.  Treating both alike silently leaves an
-    # invalid/undefined Beam Section in one of the card images.
-    set linked 0
-    foreach entityType {props properties} {
-        if {[string toupper $card] eq "PBAR"} {
-            if {![catch {*setvalue $entityType id=$propId STATUS=2 3179=$beamSectId}]} {
-                set linked 1
-                break
-            }
-        } else {
-            if {![catch {*setvalue $entityType id=$propId STATUS=2 3186=[list beamsects $beamSectId]}]} {
-                set linked 1
-                break
-            }
-        }
+    # HM2019 exposes the HyperBeam reference as an entity-valued property
+    # attribute.  *setvalue STATUS=2 rejects these numeric attribute IDs in
+    # HM2019 even though newer releases accept equivalent syntax.  Use the
+    # native HM2019 command used by Altair's own OptiStruct scripts.
+    set attributeId 3186
+    if {[string toupper $card] eq "PBAR"} {set attributeId 3179}
+    if {[catch {
+        *attributeupdateentity properties $propId $attributeId 1 2 0 beamsects $beamSectId
+    }]} {
+        return 0
     }
-    if {!$linked} {return 0}
 
     # Selecting a HyperBeam section does not itself copy A/I/J and the other
     # calculated values into PBAR/PBEAM.  Synchronizing is what prevents the

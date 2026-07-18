@@ -842,6 +842,10 @@ proc ::CompWorkflow::applyCategory {} {
 
 proc ::CompWorkflow::applyMaterial {} {
     variable ui
+    if {[catch {::HWFlow::requireEngineeringContext} preflightError]} {
+        tk_messageBox -icon warning -title "HMWorkFlow Preflight" -message $preflightError
+        return
+    }
     set comps $ui(materialComps)
     set matKey [string trim $ui(selectedMaterial)]
     if {[llength $comps] == 0} {

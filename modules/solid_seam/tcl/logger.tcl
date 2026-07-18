@@ -33,11 +33,10 @@ proc ::SolidSeam::jsonBool {value} { return [expr {$value ? "true" : "false"}] }
 proc ::SolidSeam::jsonIntArray {values} { return "\[[join $values ,]\]" }
 
 proc ::SolidSeam::newRun {} {
-    variable ROOT_DIR; variable runtimeDir; variable runId; variable candidateRows; variable cancelled
-    set stamp [clock format [clock seconds] -format %Y%m%d_%H%M%S]
-    set runId "${stamp}_[format %05d [expr {int(rand()*100000)}]]"
-    set runtimeDir [file normalize [file join $ROOT_DIR temp solid_seam $runId]]
-    file mkdir $runtimeDir
+    variable runtimeDir; variable runId; variable candidateRows; variable cancelled
+    set workspace [::HybridCore::createTaskWorkspace solid_seam]
+    set runId [dict get $workspace run_id]
+    set runtimeDir [dict get $workspace task_dir]
     set candidateRows {}
     set cancelled 0
     ::SolidSeam::log INFO "run started version=$::SolidSeam::VERSION"

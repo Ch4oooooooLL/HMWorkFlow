@@ -14,7 +14,7 @@ proc ::SolidSeam::resolvePython {} {
     error [::SolidSeam::txt "未找到可用 Python 3.8+ 运行时。" "No usable Python 3.8+ runtime was found."]
 }
 
-proc ::SolidSeam::runPythonDetection {requestPath meshPaths} {
+proc ::SolidSeam::runPythonDetectionLegacy {requestPath meshPaths} {
     variable MODULE_DIR; variable runtimeDir; variable candidateRows
     set entry [file join $MODULE_DIR python main.py]
     if {![file isfile $entry]} { error "Python entry not found: $entry" }
@@ -34,5 +34,31 @@ proc ::SolidSeam::runPythonDetection {requestPath meshPaths} {
     set candidateRows {}
     if {[catch {source $tclOutput} err]} { error [::SolidSeam::txt "候选结果无法读取：$err" "Candidate sidecar cannot be read: $err"] }
     ::SolidSeam::log INFO "python complete candidates=[llength $candidateRows]"
+    return $candidateRows
+}
+
+proc ::SolidSeam::runPythonDetection {requestPath meshPaths} {
+    variable MODULE_DIR
+    variable runtimeDir
+    variable runId
+    variable candidateRows
+    set entry [file join $MODULE_DIR python main.py]
+    if {![file isfile $entry]} {error "Python entry not found: $entry"}
+    set output [file join $runtimeDir candidates.json]
+    set binaryOutput [file join $runtimeDir candidates.hmwfr]
+    set meshArgs {}
+    foreach meshPath $meshPaths {lappend meshArgs --mesh $meshPath}
+    ::SolidSeam::log INFO "HybridCore Python launch"
+    ::HybridCore::runPythonEntry $entry [concat [list --request $requestPath] $meshArgs \
+        [list --output $output --tcl-output $binaryOutput --log [file join $runtimeDir operation.log]]] $runtimeDir
+    if {![file isfile $output] || ![file isfile $binaryOutput]} {
+        error "Python did not create valid candidate outputs."
+    }
+    set payload [::HybridCore::loadBinaryResult $binaryOutput solid_seam $runId]
+    set candidateRows [dict get $payload candidates]
+    set summary [dict get $payload summary]
+    set ::SolidSeam::detectedMode [dict get $summary mode]
+    set ::SolidSeam::requiresReview [dict get $summary requires_review]
+    ::SolidSeam::log INFO "HybridCore Python complete candidates=[llength $candidateRows]"
     return $candidateRows
 }

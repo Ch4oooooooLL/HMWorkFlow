@@ -5,7 +5,10 @@ import json
 import re
 from pathlib import Path
 
-from mesh_model import Component, Element, MeshModel
+try:
+    from hmworkflow.core.mesh_model import Component, Element, MeshModel
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from mesh_model import Component, Element, MeshModel
 
 
 class FemMeshError(ValueError):

@@ -19,6 +19,8 @@ dist/
 /command.tcl
 /optistruct.msg
 /runtime/hm_source_modules.ok
+/runtime/hm2019_matrix_report.json
+/runtime/hm_hybrid_export_smoke.ok
 /temp/
 *.h3d
 *.op2

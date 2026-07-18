@@ -3,8 +3,12 @@ from __future__ import annotations
 
 from collections import Counter
 
-from edge_graph import EdgeGraph
-from topology import polygon_edges
+try:
+    from hmworkflow.core.edge_graph import EdgeGraph
+    from hmworkflow.core.topology import polygon_edges
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from edge_graph import EdgeGraph
+    from topology import polygon_edges
 
 
 def boundary_loops(segment, faces_by_id):

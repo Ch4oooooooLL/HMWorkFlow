@@ -1,7 +1,11 @@
 from __future__ import annotations
 import math
-from diameter_selector import choose
-from grouping import matches
+try:
+    from .diameter_selector import choose
+    from .grouping import matches
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from diameter_selector import choose
+    from grouping import matches
 
 def plan(groups,s):
     plans=[]; rejected=[]

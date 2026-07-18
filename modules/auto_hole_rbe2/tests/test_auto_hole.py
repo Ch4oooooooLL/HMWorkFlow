@@ -8,12 +8,12 @@ import time
 import unittest
 from pathlib import Path
 
-from duplicate_detector import annotate, build_index
-from face_segmentation import segment_faces
-from hole_evaluator import evaluate
-from main import main as cli_main
-from mesh_model import Component, Element, MeshModel
-from solid_surface import Face, extract
+from hmworkflow.auto_hole_rbe2.duplicate_detector import annotate, build_index
+from hmworkflow.auto_hole_rbe2.face_segmentation import segment_faces
+from hmworkflow.auto_hole_rbe2.hole_evaluator import evaluate
+from hmworkflow.auto_hole_rbe2.main import main as cli_main
+from hmworkflow.core.mesh_model import Component, Element, MeshModel
+from hmworkflow.auto_hole_rbe2.solid_surface import Face, extract
 
 SPEC = importlib.util.spec_from_file_location(
     "auto_hole_test_schema", str(Path(__file__).resolve().parents[1] / "python" / "schema.py")

@@ -122,6 +122,7 @@ $TempProjectRoot = Join-Path $TempRoot $ProjectName
 $IncludeItems = @(
     ".editorconfig",
     ".gitignore",
+    "pyproject.toml",
     "使用教程.pdf",
     "README.md",
     "VERSION",
@@ -139,6 +140,7 @@ $IncludeItems = @(
     "doc",
     "examples",
     "modules",
+    "python",
     "runtime\python",
     "tools"
 )

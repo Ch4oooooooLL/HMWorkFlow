@@ -4,19 +4,34 @@ from pathlib import Path
 MODULE_DIR=Path(__file__).resolve().parent; COMMON_DIR=MODULE_DIR.parents[1]/"hybrid_core"/"python"
 for d in (str(MODULE_DIR),str(COMMON_DIR)):
     if d not in sys.path:sys.path.insert(0,d)
-from free_edge_path import closed_loop
-from hybrid_schema import new_result
-from logging_utils import close_logger,create_logger
-from mesh_model import load_json,read_mesh
-from mesh_topology import adjacency,edges
-from path_aligner import align_with_metadata
-from path_matcher import match
-from path_validator import validate_ordered
-from result_validator import validate
-from result_writer import write_result
-from seam_planner import plan
-from component_planner import plan_component_welds,plan_internal_component_welds
-from fem_mesh_reader import read_shell_fem_bundle
+try:
+    from .free_edge_path import closed_loop
+    from .mesh_topology import adjacency, edges
+    from .path_aligner import align_with_metadata
+    from .path_matcher import match
+    from .path_validator import validate_ordered
+    from .result_validator import validate
+    from .seam_planner import plan
+    from .component_planner import plan_component_welds, plan_internal_component_welds
+    from .fem_mesh_reader import read_shell_fem_bundle
+    from hmworkflow.core.hybrid_schema import new_result
+    from hmworkflow.core.logging_utils import close_logger, create_logger
+    from hmworkflow.core.mesh_model import load_json, read_mesh
+    from hmworkflow.core.result_writer import write_result
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from free_edge_path import closed_loop
+    from hybrid_schema import new_result
+    from logging_utils import close_logger, create_logger
+    from mesh_model import load_json, read_mesh
+    from mesh_topology import adjacency, edges
+    from path_aligner import align_with_metadata
+    from path_matcher import match
+    from path_validator import validate_ordered
+    from result_validator import validate
+    from result_writer import write_result
+    from seam_planner import plan
+    from component_planner import plan_component_welds, plan_internal_component_welds
+    from fem_mesh_reader import read_shell_fem_bundle
 SPEC=importlib.util.spec_from_file_location("seam_schema",str(MODULE_DIR/"schema.py")); MOD=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(MOD)
 def calculate(req,model):
     s=req["settings"]

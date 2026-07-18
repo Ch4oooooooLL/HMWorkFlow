@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from mesh_model import Component, Element, MeshModel
+try:
+    from hmworkflow.core.mesh_model import Component, Element, MeshModel
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from mesh_model import Component, Element, MeshModel
 
 
 class FemParseError(ValueError):

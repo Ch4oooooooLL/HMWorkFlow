@@ -4,8 +4,12 @@ from __future__ import annotations
 import math
 from collections import defaultdict, deque
 
-from geometry import dot
-from topology import polygon_edges
+try:
+    from hmworkflow.core.geometry import dot
+    from hmworkflow.core.topology import polygon_edges
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from geometry import dot
+    from topology import polygon_edges
 
 
 def segment_faces(faces, feature_angle_deg):

@@ -14,16 +14,28 @@ for directory in (str(MODULE_DIR), str(COMMON_DIR)):
     if directory not in sys.path:
         sys.path.insert(0, directory)
 
-from duplicate_detector import annotate, build_index
-from fem_delta import write_rigid_incremental_fem
-from face_segmentation import segment_faces
-from hole_evaluator import evaluate
-from logging_utils import close_logger, create_logger
-from mesh_model import load_json, read_mesh
-from result_validator import validate
-from result_writer import write_result
-from hybrid_schema import new_result
-from solid_surface import extract
+try:
+    from .duplicate_detector import annotate, build_index
+    from .face_segmentation import segment_faces
+    from .hole_evaluator import evaluate
+    from .result_validator import validate
+    from .solid_surface import extract
+    from hmworkflow.core.fem_delta import write_rigid_incremental_fem
+    from hmworkflow.core.logging_utils import close_logger, create_logger
+    from hmworkflow.core.mesh_model import load_json, read_mesh
+    from hmworkflow.core.result_writer import write_result
+    from hmworkflow.core.hybrid_schema import new_result
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from duplicate_detector import annotate, build_index
+    from fem_delta import write_rigid_incremental_fem
+    from face_segmentation import segment_faces
+    from hole_evaluator import evaluate
+    from logging_utils import close_logger, create_logger
+    from mesh_model import load_json, read_mesh
+    from result_validator import validate
+    from result_writer import write_result
+    from hybrid_schema import new_result
+    from solid_surface import extract
 
 SPEC = importlib.util.spec_from_file_location("auto_hole_schema", str(MODULE_DIR / "schema.py"))
 if SPEC is None or SPEC.loader is None:

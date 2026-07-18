@@ -12,8 +12,12 @@ MODULE_DIR = Path(__file__).resolve().parent
 if str(MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(MODULE_DIR))
 
-from data_io import load_inputs, write_json, write_tcl
-from detector import detect
+try:
+    from .data_io import load_inputs, write_json, write_tcl
+    from .detector import detect
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from data_io import load_inputs, write_json, write_tcl
+    from detector import detect
 
 
 def main(argv=None) -> int:
