@@ -168,6 +168,62 @@ def _expanded_patch(seed_elements, component_id, layers, elements, node_to_eleme
     return sorted(visited)
 
 
+def _target_search(model, target_component_ids):
+    target_ids = sorted(set(int(value) for value in target_component_ids))
+    if not target_ids:
+        raise ValueError("target component selection must not be empty")
+    node_to_target_elements = defaultdict(set)
+    kd_rows = []
+    for element in model.elements.values():
+        if element.component_id not in target_ids or len(element.node_ids) not in (3, 4):
+            continue
+        kd_rows.append((_centroid(element.node_ids, model.nodes), element.element_id, element.component_id))
+        for node_id in element.node_ids:
+            node_to_target_elements[node_id].add(element.element_id)
+    if not kd_rows:
+        raise ValueError("selected target components contain no shell elements")
+    return target_ids, _build_kd(kd_rows), node_to_target_elements
+
+
+def _target_patch_for_path(source_nodes, model, target_ids, tree, node_to_target_elements, layers):
+    nearest_rows = [_nearest(tree, model.nodes[node_id]) for node_id in source_nodes]
+    component_votes = Counter(row[0].component_id for row in nearest_rows)
+    target_component_id = min(
+        component_votes,
+        key=lambda component_id: (-component_votes[component_id], sum(
+            distance for node, distance in nearest_rows if node.component_id == component_id
+        ), component_id),
+    )
+    if target_component_id not in target_ids:
+        raise ValueError("nearest target component is outside the selected target set")
+    target_seeds = {
+        _nearest(tree, model.nodes[node_id], target_component_id)[0].element_id
+        for node_id in source_nodes
+    }
+    target_patch = _expanded_patch(
+        target_seeds, target_component_id, layers,
+        model.elements, node_to_target_elements,
+    )
+    return target_component_id, target_patch
+
+
+def plan_internal_component_welds(
+    model, source_component_id, selected_node_id, target_component_ids, patch_expand_layers
+):
+    """Return ordered source loops and Python-planned local target patches."""
+    plans = plan_internal_component_boundaries(model, source_component_id, selected_node_id)
+    target_ids, tree, node_to_target_elements = _target_search(model, target_component_ids)
+    for plan in plans:
+        target_component_id, target_patch = _target_patch_for_path(
+            plan["source_node_ids"], model, target_ids, tree,
+            node_to_target_elements, patch_expand_layers,
+        )
+        plan["target_component_ids"] = [target_component_id]
+        plan["target_element_ids"] = target_patch
+        plan["projection_mode"] = "LOCAL_ELEMENTS"
+    return plans
+
+
 def plan_component_welds(model, source_component_ids, target_component_ids, weld_mesh_size, patch_expand_layers, selected_node_ids=None):
     del weld_mesh_size  # Reserved for distance filtering without changing the wire protocol.
     source_ids = sorted(set(int(value) for value in source_component_ids))
@@ -179,21 +235,10 @@ def plan_component_welds(model, source_component_ids, target_component_ids, weld
         raise ValueError("source and target components must be different")
 
     source_elements = defaultdict(list)
-    target_elements = []
-    node_to_target_elements = defaultdict(set)
-    kd_rows = []
     for element in model.elements.values():
         if element.component_id in source_ids:
             source_elements[element.component_id].append(element)
-        if element.component_id in target_ids and len(element.node_ids) in (3, 4):
-            target_elements.append(element)
-            center = _centroid(element.node_ids, model.nodes)
-            kd_rows.append((center, element.element_id, element.component_id))
-            for node_id in element.node_ids:
-                node_to_target_elements[node_id].add(element.element_id)
-    if not kd_rows:
-        raise ValueError("selected target components contain no shell elements")
-    tree = _build_kd(kd_rows)
+    target_ids, tree, node_to_target_elements = _target_search(model, target_ids)
 
     plans = []
     for source_component_id in source_ids:
@@ -207,21 +252,9 @@ def plan_component_welds(model, source_component_ids, target_component_ids, weld
             if seeds_on_loops == component_seeds:
                 component_loops = matched_loops
         for source_nodes in component_loops:
-            nearest_rows = [_nearest(tree, model.nodes[node_id]) for node_id in source_nodes]
-            component_votes = Counter(row[0].component_id for row in nearest_rows)
-            target_component_id = min(
-                component_votes,
-                key=lambda component_id: (-component_votes[component_id], sum(
-                    distance for node, distance in nearest_rows if node.component_id == component_id
-                ), component_id),
-            )
-            target_seeds = {
-                _nearest(tree, model.nodes[node_id], target_component_id)[0].element_id
-                for node_id in source_nodes
-            }
-            target_patch = _expanded_patch(
-                target_seeds, target_component_id, patch_expand_layers,
-                model.elements, node_to_target_elements,
+            target_component_id, target_patch = _target_patch_for_path(
+                source_nodes, model, target_ids, tree,
+                node_to_target_elements, patch_expand_layers,
             )
             plans.append({
                 "plan_id": "W{:06d}".format(len(plans) + 1),

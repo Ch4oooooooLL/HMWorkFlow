@@ -1,4 +1,4 @@
-import tempfile,unittest
+import json,tempfile,unittest
 from pathlib import Path
 try:
     import tkinter
@@ -10,8 +10,8 @@ from path_aligner import align,cost
 from path_matcher import match
 from path_validator import validate_ordered
 from seam_planner import plan
-from component_planner import plan_component_welds,plan_internal_component_boundaries
-from fem_mesh_reader import read_shell_fem
+from component_planner import plan_component_welds,plan_internal_component_boundaries,plan_internal_component_welds
+from fem_mesh_reader import read_shell_fem,read_shell_fem_bundle
 from main import calculate
 from mesh_model import Component,Element,MeshModel
 from hybrid_schema import new_result
@@ -116,31 +116,56 @@ class SeamTests(unittest.TestCase):
         self.assertIn("runPythonInternalComponentPlan",run_action)
         self.assertNotIn("runPythonComponentPlan",run_action)
         self.assertIn("*feoutput_select",exporter)
-        self.assertIn("source_component.fem",exporter)
+        self.assertIn("selected_components.fem",exporter)
+        self.assertIn("selected_components_manifest.json",exporter)
+        self.assertIn("targetComponentIds",exporter)
         self.assertIn("runPythonInternalComponentPlan",bridge)
         self.assertIn("prepareDeferredWeldJobs",run_action)
-    def test_internal_jobs_prepare_all_local_patches_once_and_refresh_only_on_failure(self):
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_internal_fem_export_manifest_maps_all_selected_components(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        for name in ("componentElementIds","componentExportName","optistructExportTemplate"):
+            interp.eval("rename ::MeshSeamWeld::{0} ::MeshSeamWeld::{0}_real".format(name))
+        interp.eval("proc ::MeshSeamWeld::componentElementIds {id} {dict get {7 {101} 9 {201 202} 10 {301}} $id}")
+        interp.eval("proc ::MeshSeamWeld::componentExportName {id} {return COMP_$id}")
+        interp.eval("proc ::MeshSeamWeld::optistructExportTemplate {} {return template}")
+        interp.eval("proc *createmark {args} {lappend ::createdMarks $args}")
+        interp.eval("proc hm_getmark {args} {return {1}}")
+        interp.eval("proc *feoutput_select {template output mark reserved1 reserved2} {set channel [open $output w]; puts $channel {BEGIN BULK}; close $channel}")
+        with tempfile.TemporaryDirectory() as directory:
+            result=interp.eval("::MeshSeamWeld::exportInternalComponentFemBundle {{{}}} RUN 7 {{9 10}}".format(Path(directory).as_posix()))
+            manifest_path=Path(interp.eval("dict get {{{}}} manifest".format(result)))
+            manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual([row["component_id"] for row in manifest["components"]],[7,9,10])
+            self.assertEqual(manifest["components"][1]["element_ids"],[201,202])
+            self.assertIn("{by component id} 7 9 10",interp.eval("set ::createdMarks"))
+    def test_internal_jobs_use_python_local_patches_without_retry_or_component_fallback(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
         deferred=module.split("proc ::MeshSeamWeld::prepareDeferredWeldJobs",1)[1].split("proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths",1)[0]
-        self.assertIn("buildTargetElementIndex $targetComps",deferred)
-        self.assertIn("localTargetPatchForPath $sourceNodes",deferred)
+        self.assertIn("dict get $plan target_component_ids",deferred)
+        self.assertIn("dict get $plan target_element_ids",deferred)
+        self.assertNotIn("buildTargetElementIndex",deferred)
+        self.assertNotIn("localTargetPatchForPath",deferred)
         self.assertNotIn("pathCenter $sourceNodes",deferred)
         self.assertNotIn("refresh_target_patch 1",module)
-        execution=run_action.split("foreach job $weldJobs",1)[1]
-        process=execution.index("processWeldPathIsolated")
-        refresh=execution.index("buildTargetElementIndex")
-        self.assertGreater(refresh,process)
-        self.assertIn("retry_patch_extra_layers",execution)
-        self.assertIn("component_fallback 1",module)
-        self.assertIn("final component-scope retry",execution)
-    def test_target_index_bulk_loads_coordinates_and_cooperatively_reports_progress(self):
+        execution=run_action.split("set pathTotal [llength $sourcePaths]",1)[1].split("set executionMs",1)[0]
+        self.assertNotIn("buildTargetElementIndex",execution)
+        self.assertNotIn("retryTargetElems",execution)
+        self.assertNotIn("component-scope retry",execution)
+        self.assertIn("createFailureMarkerNodes [list $failure]",execution)
+        self.assertIn("retry_count 0",execution)
+    def test_tcl_boundary_jobs_project_nodes_without_full_component_index(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
-        body=module.split("proc ::MeshSeamWeld::buildTargetElementIndex",1)[1].split("proc ::MeshSeamWeld::nearestIndexedTargetElem",1)[0]
-        self.assertIn("readShellElementConnectivityBulk",body)
-        self.assertIn("readNodeCoordinatesBulk",body)
-        self.assertIn("cooperativeYield",body)
-        self.assertIn("Building target element index",body)
+        body=module.split("proc ::MeshSeamWeld::prepareWeldJobs",1)[1].split("proc ::MeshSeamWeld::prepareDeferredWeldJobs",1)[0]
+        self.assertIn("projectNodesToTargetComponents",body)
+        self.assertIn("localTargetPatchFromProjectedNodes",body)
+        self.assertNotIn("buildTargetElementIndex",body)
+        self.assertNotIn("componentElementIds",body)
+        projection=module.split("proc ::MeshSeamWeld::projectNodesToTargetComponents",1)[1].split("proc ::MeshSeamWeld::localTargetPatchFromProjectedNodes",1)[0]
+        self.assertIn("hm_getclosestnode",projection)
+        self.assertNotIn("hm_getmark",projection)
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_shell_connectivity_reader_accepts_bulk_mark_result(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
@@ -181,13 +206,13 @@ set failure [dict create path_index 2 source_nodes {11 12 13 14} center {1.0 2.0
             self.assertIn("stage=TARGET_MATCH",text)
             self.assertIn("source_node_count=4",text)
             self.assertIn("raw_error=",text)
-    def test_auto_closed_plan_uses_manual_open_imprint_fast_path(self):
+    def test_auto_closed_plan_imprints_closed_once_without_retry(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
         executor=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"executor.tcl").read_text(encoding="utf-8")
         workflow=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"workflow.tcl").read_text(encoding="utf-8")
         self.assertIn("dict set job closed_loop 1",run_action)
-        self.assertIn("imprint_closed_loop 0",run_action)
+        self.assertIn("imprint_closed_loop 1",run_action)
         self.assertIn("imprintClosedLoop",workflow)
         self.assertIn("imprintClosedLoop",executor)
         tcl_executor=executor.split("proc ::MeshSeamWeld::processWeldPathTcl",1)[1]
@@ -202,17 +227,33 @@ set failure [dict create path_index 2 source_nodes {11 12 13 14} center {1.0 2.0
         body=module.split("proc ::MeshSeamWeld::targetCandidatesAfterImprint",1)[1].split("proc ::MeshSeamWeld::matchTargetPathNodes",1)[0]
         self.assertNotIn("componentNodeIds",body)
         self.assertNotIn("fallback=target_components",body)
-        self.assertIn("without component-wide fallback",body)
-        self.assertIn("error [::HWFlow::txt",body)
-    def test_failed_open_imprint_retries_same_local_patch_as_closed(self):
+        self.assertIn("Local target elements are required",body)
+        self.assertIn("targetElemIds",body)
+        self.assertIn("localTargetNodesFromElements",body)
+        self.assertNotIn("targetNodesFromClosestQuery",body)
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_tcl_refreshed_local_target_scope_expands_and_filters_components(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::MeshSeamWeld::markElements ::MeshSeamWeld::markElements_real")
+        interp.eval("rename ::MeshSeamWeld::elemComponentId ::MeshSeamWeld::elemComponentId_real")
+        interp.eval("proc ::MeshSeamWeld::markElements {ids mark} {set ::markedElems $ids; return $ids}")
+        interp.eval("proc ::MeshSeamWeld::elemComponentId {id} {if {$id == 202} {return 77}; return 9}")
+        interp.eval("proc hm_getmark {type mark} {return $::markedElems}")
+        interp.eval("proc *appendmark {type mark option} {set ::markedElems [concat $::markedElems {201 202}]} ")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::markRefreshedLocalTargetElements {101} {9} 1"),
+            "101 201",
+        )
+    def test_failed_local_imprint_is_marked_and_skipped_without_retry(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
-        retry=run_action.split("set retryTargetElems $jobTargetElems",1)[1].split("if {![dict get $isolated ok]}",1)[0]
         self.assertIn("$jobClosedLoop",run_action)
-        self.assertIn("retry_patch_extra_layers",retry)
-        self.assertIn("$jobTargetElems 1",retry)
-        self.assertIn("final component-scope retry",retry)
-        self.assertIn("createFailureMarkerNodes $failureRecords",run_action)
+        self.assertNotIn("retryTargetElems",run_action)
+        self.assertNotIn("component_fallback",run_action)
+        self.assertNotIn("component-scope retry",run_action)
+        self.assertIn("createFailureMarkerNodes [list $failure]",run_action)
     def test_component_exporter_writes_combined_binary_mesh(self):
         exporter=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"exporter.tcl").read_text(encoding="utf-8")
         self.assertIn("writeComponentPlanMesh",exporter)
@@ -270,6 +311,29 @@ set failure [dict create path_index 2 source_nodes {11 12 13 14} center {1.0 2.0
         self.assertEqual(set(plans[0]["source_node_ids"]),{1,2,3,4,6,7,8,9})
         self.assertEqual(plans[0]["center"],[1.0,1.0,0.0])
         self.assertNotIn(20,plans[0]["source_node_ids"])
+    def test_internal_component_plan_returns_nearby_target_element_patch(self):
+        components={7:Component(7,"SOURCE","SHELL"),9:Component(9,"TARGET","SHELL")}
+        nodes={
+            1:(0,0,1),2:(1,0,1),3:(2,0,1),4:(0,1,1),5:(1,1,1),
+            6:(2,1,1),7:(0,2,1),8:(1,2,1),9:(2,2,1),
+            11:(0,0,0),12:(1,0,0),13:(2,0,0),14:(0,1,0),15:(1,1,0),
+            16:(2,1,0),17:(0,2,0),18:(1,2,0),19:(2,2,0),
+        }
+        elements={
+            101:Element(101,7,"CQUAD4",(1,2,5,4)),
+            102:Element(102,7,"CQUAD4",(2,3,6,5)),
+            103:Element(103,7,"CQUAD4",(4,5,8,7)),
+            104:Element(104,7,"CQUAD4",(5,6,9,8)),
+            201:Element(201,9,"CQUAD4",(11,12,15,14)),
+            202:Element(202,9,"CQUAD4",(12,13,16,15)),
+            203:Element(203,9,"CQUAD4",(14,15,18,17)),
+            204:Element(204,9,"CQUAD4",(15,16,19,18)),
+        }
+        plans=plan_internal_component_welds(MeshModel(components,nodes,elements),7,5,[9],1)
+        self.assertEqual(len(plans),1)
+        self.assertEqual(plans[0]["target_component_ids"],[9])
+        self.assertEqual(set(plans[0]["target_element_ids"]),{201,202,203,204})
+        self.assertEqual(plans[0]["projection_mode"],"LOCAL_ELEMENTS")
     def test_native_fem_reader_accepts_free_and_fixed_shell_cards(self):
         free="""BEGIN BULK
 GRID,1,,0.,0.,0.
@@ -293,31 +357,123 @@ ENDDATA
                 model=read_shell_fem(path,7)
                 self.assertEqual(model.elements[101].node_ids,(1,2,3,4))
                 self.assertEqual(model.elements[101].component_id,7)
+    def test_native_fem_bundle_restores_hypermesh_component_ownership(self):
+        fem="""BEGIN BULK
+GRID,1,,0.,0.,1.
+GRID,2,,1.,0.,1.
+GRID,3,,1.,1.,1.
+GRID,4,,0.,1.,1.
+GRID,11,,0.,0.,0.
+GRID,12,,1.,0.,0.
+GRID,13,,1.,1.,0.
+GRID,14,,0.,1.,0.
+CQUAD4,101,77,1,2,3,4
+CQUAD4,201,88,11,12,13,14
+ENDDATA
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            (root/"selected_components.fem").write_text(fem,encoding="utf-8")
+            manifest={
+                "schema_version":"1.0","format":"hm_selected_components_fem",
+                "fem_path":"selected_components.fem","components":[
+                    {"component_id":7,"component_name":"SOURCE","role":"source","element_ids":[101]},
+                    {"component_id":9,"component_name":"TARGET","role":"target","element_ids":[201]},
+                ],
+            }
+            path=root/"selected_components_manifest.json"
+            path.write_text(json.dumps(manifest),encoding="utf-8")
+            model=read_shell_fem_bundle(path)
+            self.assertEqual(model.elements[101].component_id,7)
+            self.assertEqual(model.elements[201].component_id,9)
+            self.assertEqual(model.components[9].component_name,"TARGET")
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_local_imprint_uses_element_target(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
         interp.eval("rename ::MeshSeamWeld::markElements ::MeshSeamWeld::markElements_real")
         interp.eval("rename ::MeshSeamWeld::markComponents ::MeshSeamWeld::markComponents_real")
+        interp.eval("rename ::MeshSeamWeld::markRefreshedLocalTargetElements ::MeshSeamWeld::markRefreshedLocalTargetElements_real")
         interp.eval("proc ::MeshSeamWeld::markElements {ids mark} {return $ids}")
         interp.eval("proc ::MeshSeamWeld::markComponents {ids mark} {return 1}")
+        interp.eval("proc ::MeshSeamWeld::markRefreshedLocalTargetElements {ids comps mark args} {return {201 202 203}}")
         interp.eval("proc *clearlist {args} {}; proc *createlist {args} {}")
         interp.eval("proc *imprint_nodelist {listId entityType markId options} {set ::imprintEntityType $entityType}")
         interp.eval("::MeshSeamWeld::runImprintNodeList {1 2 3} {9} 1 {101 102}")
         self.assertEqual(interp.eval("set ::imprintEntityType"),"elements")
+        self.assertEqual(interp.eval("set ::MeshSeamWeld::lastImprintTargetMode"),"local_elements")
+        self.assertEqual(interp.eval("set ::MeshSeamWeld::lastImprintTargetElemCount"),"2")
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
-    def test_tcl_local_patch_index_finds_nearest_target(self):
+    def test_shared_node_shells_from_other_components_join_local_imprint_halo(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
-        for name in ("componentElementIds","elemNodes","nodeXYZ"):
+        for name in ("elemNodes","adjacentElementsForNodes","isLinearShellElement"):
             interp.eval("rename ::MeshSeamWeld::{0} ::MeshSeamWeld::{0}_real".format(name))
-        interp.eval("proc ::MeshSeamWeld::componentElementIds {comp} {return {101 102}}")
-        interp.eval("proc ::MeshSeamWeld::elemNodes {id} {if {$id == 101} {return {11 12 15 14}}; return {12 13 16 15}}")
-        interp.eval("array set ::xyz {1 {0.2 0.2 8} 11 {0 0 0} 12 {5 0 0} 13 {10 0 0} 14 {0 5 0} 15 {5 5 0} 16 {10 5 0}}")
+        interp.eval("proc ::MeshSeamWeld::elemNodes {id} {dict get {101 {1 2 3 4} 201 {1 4 5 6} 301 {1 2 7 8}} $id}")
+        interp.eval("proc ::MeshSeamWeld::adjacentElementsForNodes {nodes} {return {101 201 301}}")
+        interp.eval("proc ::MeshSeamWeld::isLinearShellElement {id} {expr {$id != 301}}")
+        plan=interp.eval("::MeshSeamWeld::localImprintSupportElements {101} 1")
+        self.assertEqual(interp.eval("dict get {{{}}} core".format(plan)),"101")
+        self.assertEqual(interp.eval("dict get {{{}}} support".format(plan)),"201")
+        self.assertEqual(interp.eval("dict get {{{}}} all".format(plan)),"101 201")
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_shared_node_halo_accepts_linear_shells_and_rejects_four_node_solids(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("proc hm_getvalue {type args} {set id [string range [lindex $args 0] 3 end]; dict get {201 104 301 208} $id}")
+        self.assertEqual(interp.eval("::MeshSeamWeld::isLinearShellElement 201"),"1")
+        self.assertEqual(interp.eval("::MeshSeamWeld::isLinearShellElement 301"),"0")
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_imprint_receives_core_plus_shared_node_support_but_keeps_local_scope(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        for name in ("markElements","localImprintSupportElements","elemNodes","clearLocalTopologyCaches"):
+            interp.eval("rename ::MeshSeamWeld::{0} ::MeshSeamWeld::{0}_real".format(name))
+        interp.eval("proc ::MeshSeamWeld::markElements {ids mark} {set ::imprintMarked $ids; return $ids}")
+        interp.eval("proc ::MeshSeamWeld::localImprintSupportElements {core layers} {return [dict create core $core support {201 202} all [concat $core {201 202}]]}")
+        interp.eval("proc ::MeshSeamWeld::elemNodes {id} {return {1 2 3 4}}")
+        interp.eval("proc ::MeshSeamWeld::clearLocalTopologyCaches {elems nodes} {set ::clearedElems $elems}")
+        interp.eval("proc *clearlist {args} {}; proc *createlist {args} {}")
+        interp.eval("proc *imprint_nodelist {listId entityType markId options} {set ::imprintEntityType $entityType}")
+        interp.eval("::MeshSeamWeld::runImprintNodeList {1 2 3} {9} 1 {101 102}")
+        self.assertEqual(interp.eval("set ::imprintMarked"),"101 102 201 202")
+        self.assertEqual(interp.eval("set ::MeshSeamWeld::lastImprintTargetMode"),"local_elements_shared_support")
+        self.assertEqual(interp.eval("set ::MeshSeamWeld::lastImprintCoreElemCount"),"2")
+        self.assertEqual(interp.eval("set ::MeshSeamWeld::lastImprintSupportElemCount"),"2")
+        self.assertEqual(interp.eval("set ::MeshSeamWeld::lastImprintTargetElemCount"),"4")
+    def test_local_imprint_never_falls_back_to_components(self):
+        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
+        body=module.split("proc ::MeshSeamWeld::runImprintNodeList",1)[1].split("proc ::MeshSeamWeld::targetNodesFromImprintList",1)[0]
+        self.assertIn("markRefreshedLocalTargetElements",body)
+        self.assertIn("localImprintSupportElements",body)
+        self.assertNotIn("markComponents",body)
+        self.assertNotIn("components comps",body)
+        self.assertIn("No local target elements were prepared",body)
+        support=module.split("proc ::MeshSeamWeld::localImprintSupportElements",1)[1].split("proc ::MeshSeamWeld::clearLocalTopologyCaches",1)[0]
+        self.assertIn("min(4",support)
+        self.assertIn("adjacentElementsForNodes",support)
+        self.assertNotIn("componentElementIds",support)
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_tcl_projection_builds_patch_from_nearby_target_nodes(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        for name in ("nodeElementIds","elemComponentId","elemNodes","nodeXYZ","markRefreshedLocalTargetElements"):
+            interp.eval("rename ::MeshSeamWeld::{0} ::MeshSeamWeld::{0}_real".format(name))
+        interp.eval("array set ::xyz {1 {0 0 1} 2 {1 0 1}}")
         interp.eval("proc ::MeshSeamWeld::nodeXYZ {id} {return $::xyz($id)}")
-        interp.eval("::MeshSeamWeld::buildTargetElementIndex {9}")
-        self.assertEqual(interp.eval("::MeshSeamWeld::nearestIndexedTargetElem {0.2 0.2 8}"),"101")
-        self.assertIn("101",interp.eval("::MeshSeamWeld::localTargetPatchForPath {1}").split())
+        interp.eval("proc *clearmark {args} {}; proc *createmark {args} {}")
+        interp.eval("proc hm_getclosestnode {x y z elemMark nodeMark} {expr {$x < 0.5 ? 11 : 12}}")
+        interp.eval("set p [::MeshSeamWeld::projectNodesToTargetComponents {1 2} {9}]")
+        self.assertEqual(interp.eval("dict get $p projected 1"),"11")
+        self.assertEqual(interp.eval("dict get $p projected 2"),"12")
+        interp.eval("proc ::MeshSeamWeld::nodeElementIds {id} {expr {$id == 11 ? {201} : {202}}}")
+        interp.eval("proc ::MeshSeamWeld::elemComponentId {id} {return 9}")
+        interp.eval("proc ::MeshSeamWeld::elemNodes {id} {return {11 12 13 14}}")
+        interp.eval("proc ::MeshSeamWeld::markRefreshedLocalTargetElements {ids comps mark extra} {return {201 202 203}}")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::localTargetPatchFromProjectedNodes {11 12} {9}"),
+            "201 202 203",
+        )
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_latest_id_survives_undo_zero(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
@@ -340,15 +496,86 @@ ENDDATA
     def test_tcl_closest_target_query_does_not_need_latest_id(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
-        interp.eval("rename ::MeshSeamWeld::markElementsByComponents ::MeshSeamWeld::markElementsByComponents_real")
+        interp.eval("rename ::MeshSeamWeld::markRefreshedLocalTargetElements ::MeshSeamWeld::markRefreshedLocalTargetElements_real")
         interp.eval("rename ::MeshSeamWeld::nodeXYZ ::MeshSeamWeld::nodeXYZ_real")
-        interp.eval("proc ::MeshSeamWeld::markElementsByComponents {comps mark} {return {101 102}}")
+        interp.eval("proc ::MeshSeamWeld::markRefreshedLocalTargetElements {ids comps mark args} {return {101 102}}")
         interp.eval("array set ::xyz {1 {0 0 1} 2 {1 0 1} 11 {0 0 0} 12 {1 0 0}}")
         interp.eval("proc ::MeshSeamWeld::nodeXYZ {id} {return $::xyz($id)}")
         interp.eval("proc *clearmark {args} {}; proc *createmark {args} {}")
         interp.eval("proc hm_getclosestnode {x y z elemMark nodeMark} {if {$x < 0.5} {return 11}; return 12}")
         interp.eval("proc hm_latestentityid {type} {error {latest ID must not be used}}")
-        self.assertEqual(interp.eval("::MeshSeamWeld::targetNodesFromClosestQuery {1 2} {9}"),"11 12")
+        self.assertEqual(interp.eval("::MeshSeamWeld::targetNodesFromClosestQuery {1 2} {9} {101 102}"),"11 12")
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_post_imprint_fallback_uses_new_nodes_from_local_patch(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::MeshSeamWeld::targetNodesFromImprintList ::MeshSeamWeld::targetNodesFromImprintList_real")
+        interp.eval("rename ::MeshSeamWeld::localTargetNodesFromElements ::MeshSeamWeld::localTargetNodesFromElements_real")
+        interp.eval("proc ::MeshSeamWeld::targetNodesFromImprintList {source before} {return {}}")
+        interp.eval("proc ::MeshSeamWeld::localTargetNodesFromElements {elems comps} {return {11 12 13 14}}")
+        interp.eval("proc hm_getlist {args} {return {}}")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::targetCandidatesAfterImprint {1 2} {9} {} {101 102} {11 12}"),
+            "13 14",
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_topology_constrained_matching_selects_continuous_closed_target(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::MeshSeamWeld::nodeXYZ ::MeshSeamWeld::nodeXYZ_real")
+        interp.eval("array set ::xyz {1 {0 0 1} 2 {1 0 1} 3 {1 1 1} 4 {0 1 1} 11 {0 0 0} 12 {1 0 0} 13 {1 1 0} 14 {0 1 0} 21 {0.1 0 0} 22 {0.9 0 0} 23 {0.9 1 0} 24 {0.1 1 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {id} {return $::xyz($id)}")
+        interp.eval("set ::MeshSeamWeld::lastLocalTargetEdges [dict create 11,12 1 12,13 1 13,14 1 11,14 1]")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::matchContinuousTargetPathNodes {1 2 3 4} {11 12 13 14 21 22 23 24} 1"),
+            "11 12 13 14",
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_direct_single_layer_closed_strip_preserves_pairing_at_seam(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        quads=interp.splitlist(
+            interp.eval("::MeshSeamWeld::directStripQuadNodeLists {1 2 3 4} {11 12 13 14} 1")
+        )
+        self.assertEqual(
+            [tuple(interp.splitlist(quad)) for quad in quads],
+            [
+                ("1","2","12","11"),
+                ("2","3","13","12"),
+                ("3","4","14","13"),
+                ("4","1","11","14"),
+            ],
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_direct_multi_layer_closed_strip_preserves_every_cross_chain(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        quads=interp.splitlist(
+            interp.eval("::MeshSeamWeld::directStructuredStripQuadNodeLists {{1 101 11} {2 102 12} {3 103 13}} 1")
+        )
+        self.assertEqual(
+            [tuple(interp.splitlist(quad)) for quad in quads],
+            [
+                ("1","2","102","101"),("101","102","12","11"),
+                ("2","3","103","102"),("102","103","13","12"),
+                ("3","1","101","103"),("103","101","11","13"),
+            ],
+        )
+    def test_all_cross_layers_bypass_ruled_surface_automesh(self):
+        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
+        ruled=module.split("proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths",1)[1].split("proc ::MeshSeamWeld::legacyRuledMeshBetweenNodePaths",1)[0]
+        self.assertIn("createDirectStructuredStrip",ruled)
+        self.assertIn("$crossDensity",ruled)
+        self.assertNotIn("*linearsurfacebetweennodes",ruled)
+        self.assertNotIn("*automesh",ruled)
+        self.assertIn("*createmark nodes 1 -1",module)
+    def test_executor_passes_local_target_scope_to_post_imprint_matching(self):
+        executor=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"executor.tcl").read_text(encoding="utf-8")
+        fast=executor.split("proc ::MeshSeamWeld::processWeldPathTcl",1)[1]
+        call=fast.split("targetCandidatesAfterImprint",1)[1].split("]",1)[0]
+        self.assertIn("$targetElemIds",call)
+        self.assertIn("imprint_scope=",fast)
+        self.assertIn("imprint_target_elems=",fast)
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_collection_difference_accepts_reused_lower_ids(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"

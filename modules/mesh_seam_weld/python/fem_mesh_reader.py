@@ -1,6 +1,7 @@
 """Read a native HyperMesh/OptiStruct shell selection export."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -132,3 +133,50 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
         raise FemMeshError("FEM selection contains no CTRIA3/CQUAD4 cards: {}".format(path))
     component = Component(component_id, str(component_name), "SHELL")
     return MeshModel({component_id: component}, nodes, elements)
+
+
+def read_shell_fem_bundle(manifest_path):
+    """Read one selected-components FEM and restore HyperMesh component ownership."""
+    manifest_path = Path(manifest_path)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise FemMeshError("invalid selected-component FEM manifest: {}".format(exc)) from exc
+    if manifest.get("format") != "hm_selected_components_fem":
+        raise FemMeshError("unsupported FEM bundle format")
+    entries = manifest.get("components")
+    if not isinstance(entries, list) or not entries:
+        raise FemMeshError("FEM bundle contains no component ownership entries")
+
+    components = {}
+    ownership = {}
+    for entry in entries:
+        component_id = _positive_int(str(entry.get("component_id", "")), "component ID", 0)
+        component_name = str(entry.get("component_name") or "COMP_{}".format(component_id))
+        components[component_id] = Component(component_id, component_name, "SHELL")
+        for raw_element_id in entry.get("element_ids", []):
+            element_id = _positive_int(str(raw_element_id), "element ID", 0)
+            previous = ownership.get(element_id)
+            if previous is not None and previous != component_id:
+                raise FemMeshError(
+                    "element {} is assigned to components {} and {}".format(
+                        element_id, previous, component_id
+                    )
+                )
+            ownership[element_id] = component_id
+
+    fem_path = manifest_path.parent / str(manifest.get("fem_path", ""))
+    first_component_id = min(components)
+    raw_model = read_shell_fem(
+        fem_path, first_component_id, components[first_component_id].component_name
+    )
+    elements = {}
+    for element_id, element in raw_model.elements.items():
+        if element_id not in ownership:
+            raise FemMeshError(
+                "FEM shell element {} has no HyperMesh component mapping".format(element_id)
+            )
+        elements[element_id] = Element(
+            element_id, ownership[element_id], element.element_type, element.node_ids
+        )
+    return MeshModel(components, raw_model.nodes, elements)

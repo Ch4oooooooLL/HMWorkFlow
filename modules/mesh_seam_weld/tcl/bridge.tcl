@@ -33,19 +33,19 @@ proc ::MeshSeamWeld::runPythonComponentPlan {selectedNodes sourceComponentIds ta
     return [dict create payload $payload task_dir $dir run_id $runId]
 }
 
-proc ::MeshSeamWeld::runPythonInternalComponentPlan {selectedNode sourceComponentId {progressStart 2.0} {progressEnd 12.0}} {
+proc ::MeshSeamWeld::runPythonInternalComponentPlan {selectedNode sourceComponentId targetComponentIds {progressStart 2.0} {progressEnd 12.0}} {
     variable MODULE_DIR
     set ws [::HybridCore::createTaskWorkspace mesh_seam_weld]
     set dir [dict get $ws task_dir]
     set runId [dict get $ws run_id]
     ::HybridCore::progressUpdate $progressStart "Mesh Seam Weld" \
-        "Native FEM export of the internal-node source component..." 1
+        "Native FEM export of source and selected target components..." 1
     set paths [::MeshSeamWeld::exportInternalComponentPlanInputs \
-        $dir $runId $selectedNode $sourceComponentId]
+        $dir $runId $selectedNode $sourceComponentId $targetComponentIds]
     ::HybridCore::clearTaskOutputs $dir
     set resultPath [file join $dir result.hmwfr]
     ::HybridCore::setProgressRange [expr {$progressStart + 1.0}] $progressEnd \
-        "Mesh Seam Weld" "Python is finding all closed boundaries"
+        "Mesh Seam Weld" "Python is finding boundaries and local target patches"
     ::HybridCore::runPythonEntry [file join $MODULE_DIR python main.py] \
         [list --request [dict get $paths request] --mesh [dict get $paths mesh] \
             --existing [dict get $paths existing] --output $resultPath \

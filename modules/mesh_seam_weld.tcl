@@ -2,10 +2,9 @@
 # Mesh Seam Weld
 # HyperMesh 2019 Tcl/Tk
 #
-# Imprints a selected source node path to target mesh components, then creates
-# a ruled weld region between the source path and imprinted target path and
-# stores the automesh result as weld shell elements.  Geometry surface creation
-# is optional and disabled by default.
+# Imprints a selected source node path to a bounded target mesh region, then
+# creates a deterministic structured shell strip between the source path and
+# the imprinted target path.  No geometry surface or automesh step is used.
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -13,7 +12,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.22"
+    variable VERSION "0.30"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -53,6 +52,17 @@ namespace eval ::MeshSeamWeld {
     variable targetIndexCellSize 1.0
     variable targetGridMin {0 0 0}
     variable targetGridMax {0 0 0}
+    # Detailed per-path diagnostics are disabled in normal runs.  The compact
+    # PERF line remains enabled, while avoiding several forced small writes per
+    # loop on workstations whose model and task directories live on HDDs.
+    variable verbosePathLogging 0
+    variable lastImprintTargetMode target_components
+    variable lastImprintTargetElemCount 0
+    variable lastImprintCoreElemCount 0
+    variable lastImprintSupportElemCount 0
+    variable lastImprintAffectedElemIds {}
+    variable lastLocalTargetNodeIds {}
+    variable lastLocalTargetEdges [dict create]
     # Legacy compatibility only.  The weld execution path no longer relies on
     # hm_latestentityid because IDs are not monotonic after model trimming.
     variable lastKnownNodeId 0
@@ -97,6 +107,13 @@ proc ::MeshSeamWeld::msg {text} {
         catch {::HWFlow::progressAppend "MeshSeamWeld: $text"}
     }
     catch {update}
+}
+
+proc ::MeshSeamWeld::tracePath {message} {
+    variable verbosePathLogging
+    if {$verbosePathLogging} {
+        ::HybridCore::log INFO $message
+    }
 }
 
 proc ::MeshSeamWeld::loadState {} {
@@ -188,6 +205,7 @@ proc ::MeshSeamWeld::showPanel {} {
 
 proc ::MeshSeamWeld::showMorePanel {} {
     variable ui
+    set ui(create_geometry_surf) 0
 
     set w .mesh_seam_weld_more
     catch {destroy $w}
@@ -197,16 +215,9 @@ proc ::MeshSeamWeld::showMorePanel {} {
 
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
-    checkbutton $w.main.keep_surface \
-        -text [::HWFlow::txt \
-            "创建并保留焊缝几何 surface（默认关闭）" \
-            "Create and keep weld geometry surface (off by default)"] \
-        -variable ::MeshSeamWeld::ui(create_geometry_surf) \
-        -onvalue 1 -offvalue 0
-    pack $w.main.keep_surface -anchor w
     message $w.main.note -width 430 -text [::HWFlow::txt \
-        "关闭时使用 Mesh, delete surface：会临时建立网格区域并在网格完成后删除，不向模型保留新的几何 surface。" \
-        "When off, Mesh, delete surface uses a temporary mesh region and removes it after meshing, leaving no geometry surface in the model."]
+        "当前焊缝使用源/目标节点链直接创建结构化壳单元，不创建临时或永久几何 surface。" \
+        "The weld is created directly as a structured shell strip from the source/target node chains; no temporary or permanent geometry surface is created."]
     pack $w.main.note -anchor w -pady {8 0}
 
     frame $w.btn -padx 12 -pady {0 10}
@@ -281,6 +292,13 @@ proc ::MeshSeamWeld::resetRunCaches {} {
     set ::MeshSeamWeld::targetGridMax {0 0 0}
     set ::MeshSeamWeld::lastKnownNodeId 0
     set ::MeshSeamWeld::lastKnownElemId 0
+    set ::MeshSeamWeld::lastImprintTargetMode target_components
+    set ::MeshSeamWeld::lastImprintTargetElemCount 0
+    set ::MeshSeamWeld::lastImprintCoreElemCount 0
+    set ::MeshSeamWeld::lastImprintSupportElemCount 0
+    set ::MeshSeamWeld::lastImprintAffectedElemIds {}
+    set ::MeshSeamWeld::lastLocalTargetNodeIds {}
+    set ::MeshSeamWeld::lastLocalTargetEdges [dict create]
 }
 
 proc ::MeshSeamWeld::clearNodeSelection {} {
@@ -1268,8 +1286,13 @@ proc ::MeshSeamWeld::markElements {elemIds markId} {
     return {}
 }
 
-proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 0} {targetElemIds {}}} {
+proc ::MeshSeamWeld::legacyComponentImprintNodeList {sourceNodes targetComps {closeNodeList 0} {targetElemIds {}}} {
     variable cfg
+    variable lastImprintTargetMode
+    variable lastImprintTargetElemCount
+
+    set lastImprintTargetMode target_components
+    set lastImprintTargetElemCount 0
 
     # list 2 is the fast path for receiving the imprinted target nodes.  Clear
     # it first so an unsupported runtime cannot accidentally reuse a prior run.
@@ -1287,17 +1310,30 @@ proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 
     set lastErr ""
     if {[llength $targetElemIds] > 0} {
         set localElems [::MeshSeamWeld::markElements $targetElemIds 2]
-        set retention [expr {double([llength $localElems]) / double([llength $targetElemIds])}]
-        if {[llength $localElems] > 0 && $retention >= 0.60} {
-            foreach entityType {elements elems} {
-                if {![catch {*imprint_nodelist 1 $entityType 2 $options} err]} {
-                    ::HybridCore::log INFO "imprint target_mode=local_elements requested=[llength $targetElemIds] marked=[llength $localElems]"
-                    return 1
-                }
-                set lastErr $err
+        set refreshErr ""
+        if {[llength $localElems] != [llength $targetElemIds]} {
+            if {[catch {
+                set localElems [::MeshSeamWeld::markRefreshedLocalTargetElements \
+                    $targetElemIds $targetComps 2]
+            } refreshErr]} {
+                set localElems {}
             }
         }
-        ::HybridCore::log WARN "local element imprint unavailable; falling back to target components requested=[llength $targetElemIds] marked=[llength $localElems] retention=[format %.3f $retention] error=$lastErr"
+        if {[llength $localElems] == 0} {
+            error "The prepared local target elements are stale; the local index must be rebuilt. $refreshErr"
+        }
+        foreach entityType {elements elems} {
+            if {![catch {*imprint_nodelist 1 $entityType 2 $options} err]} {
+                set lastImprintTargetMode local_elements
+                set lastImprintTargetElemCount [llength $localElems]
+                ::MeshSeamWeld::tracePath "imprint target_mode=local_elements requested=[llength $targetElemIds] refreshed=[llength $localElems]"
+                return 1
+            }
+            set lastErr $err
+        }
+        # Retired IDs trigger the isolated local-index rebuild above.  Keep the
+        # component route only for HM builds that reject element-target imprint.
+        ::HybridCore::log WARN "local element imprint command unavailable; falling back to target components requested=[llength $targetElemIds] refreshed=[llength $localElems] error=$lastErr"
         if {![::MeshSeamWeld::markComponents $targetComps 2]} {
             error [::HWFlow::txt "无法标记目标组件。" "Could not mark target components."]
         }
@@ -1311,11 +1347,182 @@ proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 
     error [::HWFlow::txt "imprint_nodelist 执行失败：$lastErr" "imprint_nodelist failed: $lastErr"]
 }
 
+proc ::MeshSeamWeld::isLinearShellElement {elemId} {
+    set config ""
+    catch {set config [hm_getvalue elems id=$elemId dataname=config]}
+    set normalized [string toupper [string trim $config]]
+    if {$normalized ne ""} {
+        if {$normalized in {103 104 TRIA3 CTRIA3 QUAD4 CQUAD4}} { return 1 }
+        if {[regexp {(^|[^A-Z])(C?TRIA3|C?QUAD4)([^A-Z]|$)} $normalized]} { return 1 }
+        # A valid non-shell configuration must not be accepted merely because
+        # a tetrahedron also happens to have four nodes.
+        return 0
+    }
+    set nodes [::MeshSeamWeld::elemNodes $elemId]
+    return [expr {[llength $nodes] in {3 4}}]
+}
+
+proc ::MeshSeamWeld::localImprintSupportElements {coreElemIds {supportLayers 1}} {
+    set coreElemIds [lsort -integer -unique $coreElemIds]
+    if {[llength $coreElemIds] == 0} {
+        return [dict create core {} support {} all {}]
+    }
+    set supportLayers [expr {max(1, min(4, int($supportLayers)))}]
+    array set visited {}
+    foreach elemId $coreElemIds { set visited($elemId) 1 }
+    set frontier $coreElemIds
+    set support {}
+
+    # Expand by shared nodes without a component filter.  These elements are
+    # excluded from pre-projection and post-imprint path matching, but are a
+    # bounded topology halo supplied to the native command so remeshing a core
+    # node cannot leave an attached side wall or neighboring shell outside the
+    # imprint transaction.
+    for {set layer 0} {$layer < $supportLayers && [llength $frontier] > 0} {incr layer} {
+        set frontierNodes {}
+        set frontierConnectivity [::MeshSeamWeld::readShellElementConnectivityBulk \
+            $frontier 1]
+        foreach elemId $frontier {
+            if {[dict exists $frontierConnectivity $elemId]} {
+                set frontierNodes [concat $frontierNodes \
+                    [dict get $frontierConnectivity $elemId]]
+            }
+        }
+        set adjacent [::MeshSeamWeld::adjacentElementsForNodes \
+            [lsort -integer -unique $frontierNodes]]
+        set nextFrontier {}
+        foreach elemId $adjacent {
+            if {[info exists visited($elemId)]} { continue }
+            set visited($elemId) 1
+            if {![::MeshSeamWeld::isLinearShellElement $elemId]} { continue }
+            lappend support $elemId
+            lappend nextFrontier $elemId
+        }
+        set frontier [lsort -integer -unique $nextFrontier]
+    }
+    set support [lsort -integer -unique $support]
+    return [dict create core $coreElemIds support $support \
+        all [lsort -integer -unique [concat $coreElemIds $support]]]
+}
+
+proc ::MeshSeamWeld::clearLocalTopologyCaches {elemIds nodeIds} {
+    variable elemNodesCache
+    variable elemComponentCache
+    variable nodeElemsCache
+    variable nodeFreeEdgeNeighborsCache
+    variable nodeXYZCache
+    foreach elemId [::MeshSeamWeld::uniq $elemIds] {
+        catch {unset elemNodesCache($elemId)}
+        catch {unset elemComponentCache($elemId)}
+    }
+    foreach nodeId [::MeshSeamWeld::uniq $nodeIds] {
+        catch {unset nodeElemsCache($nodeId)}
+        catch {unset nodeFreeEdgeNeighborsCache($nodeId)}
+        catch {unset nodeXYZCache($nodeId)}
+    }
+}
+
+# Production imprint is local-only.  A missing/stale patch or an unsupported
+# element-target command is a per-loop failure; it must never trigger a scan or
+# imprint of all elements in the selected components.
+proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 0} {targetElemIds {}}} {
+    variable cfg
+    variable lastImprintTargetMode
+    variable lastImprintTargetElemCount
+    variable lastImprintCoreElemCount
+    variable lastImprintSupportElemCount
+    variable lastImprintAffectedElemIds
+
+    set lastImprintTargetMode local_elements
+    set lastImprintTargetElemCount 0
+    set lastImprintCoreElemCount 0
+    set lastImprintSupportElemCount 0
+    set lastImprintAffectedElemIds {}
+    catch {*clearlist nodes 2}
+    if {[catch {eval *createlist nodes 1 $sourceNodes} err]} {
+        error "Could not create the source node list: $err"
+    }
+    if {[llength $targetElemIds] == 0} {
+        error "No local target elements were prepared; skipped instead of imprinting an entire component."
+    }
+
+    set localElems [::MeshSeamWeld::markElements $targetElemIds 2]
+    set refreshErr ""
+    if {[llength $localElems] != [llength $targetElemIds]} {
+        if {[catch {
+            set localElems [::MeshSeamWeld::markRefreshedLocalTargetElements \
+                $targetElemIds $targetComps 2]
+        } refreshErr]} {
+            set localElems {}
+        }
+    }
+    if {[llength $localElems] == 0} {
+        error "The prepared local target elements are stale or unavailable; this loop was skipped. $refreshErr"
+    }
+
+    # The projection core remains restricted to the selected target
+    # components.  Separately include a small shell halo across component and
+    # feature-angle boundaries so nodes shared with side walls or neighboring
+    # faces participate in the same native imprint/remesh transaction.
+    set supportLayers [expr {$cfg(patch_expand_layers) + 1}]
+    set supportPlan [::MeshSeamWeld::localImprintSupportElements \
+        $localElems $supportLayers]
+    set coreElems [dict get $supportPlan core]
+    set supportElems [dict get $supportPlan support]
+    set imprintElems [dict get $supportPlan all]
+    set affectedNodesBefore {}
+    set affectedConnectivity [::MeshSeamWeld::readShellElementConnectivityBulk \
+        $imprintElems 1]
+    foreach elemId $imprintElems {
+        if {[dict exists $affectedConnectivity $elemId]} {
+            set affectedNodesBefore [concat $affectedNodesBefore \
+                [dict get $affectedConnectivity $elemId]]
+        }
+    }
+    set affectedNodesBefore [::MeshSeamWeld::uniq $affectedNodesBefore]
+    set markedImprintElems [::MeshSeamWeld::markElements $imprintElems 2]
+    array set markedImprintSet {}
+    foreach elemId $markedImprintElems { set markedImprintSet($elemId) 1 }
+    set missingCoreElems {}
+    foreach elemId $coreElems {
+        if {![info exists markedImprintSet($elemId)]} { lappend missingCoreElems $elemId }
+    }
+    if {[llength $missingCoreElems] > 0} {
+        error "The local imprint core became stale while adding shared-node support elements; this loop was skipped."
+    }
+    set lastImprintCoreElemCount [llength $coreElems]
+    set lastImprintSupportElemCount [llength $supportElems]
+    set lastImprintTargetElemCount [llength $markedImprintElems]
+    set lastImprintAffectedElemIds $markedImprintElems
+    if {$lastImprintSupportElemCount > 0} {
+        set lastImprintTargetMode local_elements_shared_support
+    }
+
+    set options [format "remain %s to_dest_component 0 remesh_layers %s remesh_mode %s angle %.6f create_joint_elems 0 close_node_list %d" \
+        $cfg(imprint_remain) $cfg(patch_expand_layers) $cfg(imprint_remesh_mode) \
+        $cfg(imprint_angle) $closeNodeList]
+    set lastErr ""
+    foreach entityType {elements elems} {
+        if {![catch {*imprint_nodelist 1 $entityType 2 $options} err]} {
+            # Cached ownership/connectivity for both the core and the support
+            # halo is invalid after native remeshing, including elements from
+            # components the user did not select as projection targets.
+            ::MeshSeamWeld::clearLocalTopologyCaches \
+                $markedImprintElems $affectedNodesBefore
+            ::HybridCore::log INFO \
+                "imprint target_mode=$lastImprintTargetMode requested=[llength $targetElemIds] core=$lastImprintCoreElemCount shared_support=$lastImprintSupportElemCount total=$lastImprintTargetElemCount support_layers=[expr {max(1, min(4, int($supportLayers)))}]"
+            return 1
+        }
+        set lastErr $err
+    }
+    error "Local-element imprint_nodelist failed; this loop was skipped: $lastErr"
+}
+
 proc ::MeshSeamWeld::targetNodesFromImprintList {sourceNodes beforeNode} {
     variable nodeXYZCache
     set list2 {}
     catch {set list2 [hm_getlist nodes 2]}
-    ::HybridCore::log INFO "imprint list2 raw_count=[llength $list2] source_count=[llength $sourceNodes] before_node=$beforeNode"
+    ::MeshSeamWeld::tracePath "imprint list2 raw_count=[llength $list2] source_count=[llength $sourceNodes] before_node=$beforeNode"
     if {[llength $list2] != [llength $sourceNodes]} {
         return {}
     }
@@ -1340,7 +1547,7 @@ proc ::MeshSeamWeld::targetNodesFromImprintList {sourceNodes beforeNode} {
         }
         if {$beforeNode ne "" && $nodeId <= $beforeNode} { incr reusedCount }
     }
-    ::HybridCore::log INFO "imprint list2 accepted count=[llength $list2] reused_count=$reusedCount"
+    ::MeshSeamWeld::tracePath "imprint list2 accepted count=[llength $list2] reused_count=$reusedCount"
     return $list2
 }
 
@@ -1391,14 +1598,72 @@ proc ::MeshSeamWeld::markElementsByComponents {compIds markId} {
     return [::MeshSeamWeld::markElements [::MeshSeamWeld::uniq $elemIds] $markId]
 }
 
-proc ::MeshSeamWeld::targetNodesFromClosestQuery {sourceNodes targetComps} {
+proc ::MeshSeamWeld::markedElementIds {markId} {
+    set marked {}
+    foreach entityType {elems elements} {
+        set current {}
+        catch {set current [hm_getmark $entityType $markId]}
+        set marked [concat $marked $current]
+    }
+    return [::MeshSeamWeld::uniq $marked]
+}
+
+proc ::MeshSeamWeld::markRefreshedLocalTargetElements {targetElemIds targetComps markId {extraLayers 0}} {
+    variable cfg
+    variable elemComponentCache
+
+    set marked [::MeshSeamWeld::markElements $targetElemIds $markId]
+    if {[llength $marked] == 0} { return {} }
+
+    # Imprint can replace the center of the original patch.  Expand from the
+    # surviving perimeter after the operation so the new remeshed elements are
+    # included without enumerating every element in the target components.
+    set expandLayers [expr {$cfg(patch_expand_layers) + 2 + max(0, int($extraLayers))}]
+    for {set layer 0} {$layer < $expandLayers} {incr layer} {
+        set expanded 0
+        foreach entityType {elements elems} {
+            foreach option {{by adjacent} adjacent} {
+                if {![catch {*appendmark $entityType $markId $option}]} {
+                    set expanded 1
+                    break
+                }
+            }
+            if {$expanded} { break }
+        }
+        if {!$expanded} { break }
+    }
+
+    array set allowedComp {}
+    foreach compId $targetComps { set allowedComp($compId) 1 }
+    set filtered {}
+    foreach elemId [::MeshSeamWeld::markedElementIds $markId] {
+        # Remesh may reuse an entity ID.  Force a current ownership query for
+        # the small refreshed patch before filtering it to the selected target.
+        catch {unset elemComponentCache($elemId)}
+        set compId [::MeshSeamWeld::elemComponentId $elemId]
+        if {[info exists allowedComp($compId)]} { lappend filtered $elemId }
+    }
+    if {[llength $filtered] == 0} {
+        catch {*clearmark elems $markId}
+        catch {*clearmark elements $markId}
+        return {}
+    }
+    return [::MeshSeamWeld::markElements $filtered $markId]
+}
+
+proc ::MeshSeamWeld::targetNodesFromClosestQuery {sourceNodes targetComps {targetElemIds {}}} {
     variable nodeXYZCache
     if {[llength [info commands hm_getclosestnode]] == 0} {
         error "hm_getclosestnode is unavailable."
     }
-    set markedElems [::MeshSeamWeld::markElementsByComponents $targetComps 1]
+    if {[llength $targetElemIds] == 0} {
+        error "Local target elements are required for closest-node matching."
+    }
+    set markedElems [::MeshSeamWeld::markRefreshedLocalTargetElements \
+        $targetElemIds $targetComps 1]
+    set matchScope local_elements
     if {[llength $markedElems] == 0} {
-        error "Could not mark target component elements for closest-node matching."
+        error "Could not mark $matchScope for closest-node matching."
     }
 
     catch {*clearmark nodes 1}
@@ -1431,11 +1696,11 @@ proc ::MeshSeamWeld::targetNodesFromClosestQuery {sourceNodes targetComps} {
     catch {*clearmark elems 1}
     catch {*clearmark elements 1}
     if {$queryCode} { error $queryErr }
-    ::HybridCore::log INFO "imprint target_nodes=closest_query count=[llength $targetNodes] target_elements=[llength $markedElems]"
+    ::MeshSeamWeld::tracePath "imprint target_nodes=closest_query scope=$matchScope count=[llength $targetNodes] target_elements=[llength $markedElems]"
     return $targetNodes
 }
 
-proc ::MeshSeamWeld::targetCandidatesAfterImprint {sourceNodes targetComps beforeNode} {
+proc ::MeshSeamWeld::legacyComponentTargetCandidatesAfterImprint {sourceNodes targetComps beforeNode {targetElemIds {}}} {
     set listNodes [::MeshSeamWeld::targetNodesFromImprintList $sourceNodes $beforeNode]
     if {[llength $listNodes] > 0} {
         return $listNodes
@@ -1452,6 +1717,17 @@ proc ::MeshSeamWeld::targetCandidatesAfterImprint {sourceNodes targetComps befor
             "Only [llength $rawList]/[llength $sourceNodes] nodes of this loop were projected; the loop was cancelled."]
     }
 
+    set localErr ""
+    if {[llength $targetElemIds] > 0 && ![catch {
+        set closestNodes [::MeshSeamWeld::targetNodesFromClosestQuery \
+            $sourceNodes $targetComps $targetElemIds]
+    } localErr]} {
+        return $closestNodes
+    }
+    if {$localErr ne ""} {
+        ::HybridCore::log WARN "local closest-node scope unavailable; retrying target-component scope error=$localErr"
+    }
+
     set closestErr ""
     if {![catch {
         set closestNodes [::MeshSeamWeld::targetNodesFromClosestQuery $sourceNodes $targetComps]
@@ -1466,6 +1742,90 @@ proc ::MeshSeamWeld::targetCandidatesAfterImprint {sourceNodes targetComps befor
     error [::HWFlow::txt \
         "局部 imprint 后无法唯一匹配目标节点：$closestErr" \
         "Could not uniquely match target nodes after the local imprint: $closestErr"]
+}
+
+proc ::MeshSeamWeld::localTargetNodesFromElements {targetElemIds targetComps} {
+    variable elemNodesCache
+    variable nodeXYZCache
+    variable lastLocalTargetNodeIds
+    variable lastLocalTargetEdges
+
+    if {[llength $targetElemIds] == 0} {
+        error "Local target elements are required to collect target-node candidates."
+    }
+    set localElems [::MeshSeamWeld::markElements $targetElemIds 1]
+    if {[llength $localElems] != [llength $targetElemIds]} {
+        set localElems [::MeshSeamWeld::markRefreshedLocalTargetElements \
+            $targetElemIds $targetComps 1]
+    }
+    if {[llength $localElems] == 0} {
+        error "No current local target elements remain for target-node matching."
+    }
+    foreach elemId $localElems { catch {unset elemNodesCache($elemId)} }
+    set connectivity [::MeshSeamWeld::readShellElementConnectivityBulk $localElems 1]
+    set targetNodes {}
+    set targetEdges [dict create]
+    foreach elemId $localElems {
+        if {[dict exists $connectivity $elemId]} {
+            set elementNodes [dict get $connectivity $elemId]
+            set targetNodes [concat $targetNodes $elementNodes]
+            set nodeCount [llength $elementNodes]
+            for {set index 0} {$index < $nodeCount} {incr index} {
+                set first [lindex $elementNodes $index]
+                set second [lindex $elementNodes [expr {($index + 1) % $nodeCount}]]
+                dict set targetEdges [::MeshSeamWeld::canonicalEdgeKey $first $second] 1
+            }
+        }
+    }
+    set targetNodes [lsort -integer -unique $targetNodes]
+    if {[llength $targetNodes] == 0} {
+        error "The current local target patch contains no shell nodes."
+    }
+    set coordinates [::HybridCore::readNodeCoordinatesBulk $targetNodes \
+        [list ::MeshSeamWeld::nodeXYZ]]
+    foreach nodeId $targetNodes {
+        if {[dict exists $coordinates $nodeId]} {
+            set nodeXYZCache($nodeId) [dict get $coordinates $nodeId]
+        }
+    }
+    set lastLocalTargetNodeIds $targetNodes
+    set lastLocalTargetEdges $targetEdges
+    return $targetNodes
+}
+
+proc ::MeshSeamWeld::targetCandidatesAfterImprint {sourceNodes targetComps beforeNode {targetElemIds {}} {beforeTargetNodes {}}} {
+    set listNodes [::MeshSeamWeld::targetNodesFromImprintList $sourceNodes $beforeNode]
+    if {[llength $listNodes] > 0} { return $listNodes }
+
+    set rawList {}
+    catch {set rawList [hm_getlist nodes 2]}
+    if {[llength $rawList] > 0} {
+        ::HybridCore::log WARN \
+            "imprint list2 incomplete count=[llength $rawList]/[llength $sourceNodes]; reconstructing path from local mesh topology"
+    }
+    if {[llength $targetElemIds] == 0} {
+        error "Local target elements are required for post-imprint matching; this loop was skipped."
+    }
+
+    if {[catch {
+        set currentTargetNodes [::MeshSeamWeld::localTargetNodesFromElements \
+            $targetElemIds $targetComps]
+    } localErr]} {
+        error "Could not collect target nodes from the refreshed local patch; this loop was skipped: $localErr"
+    }
+    set addedTargetNodes [::MeshSeamWeld::idsAddedToCollection \
+        $beforeTargetNodes $currentTargetNodes]
+    if {[llength $addedTargetNodes] >= [llength $sourceNodes]} {
+        ::HybridCore::log INFO \
+            "imprint target_nodes=local_added candidates=[llength $addedTargetNodes] local_nodes=[llength $currentTargetNodes]"
+        return $addedTargetNodes
+    }
+    if {[llength $currentTargetNodes] >= [llength $sourceNodes]} {
+        ::HybridCore::log INFO \
+            "imprint target_nodes=local_patch candidates=[llength $currentTargetNodes] added=[llength $addedTargetNodes]"
+        return $currentTargetNodes
+    }
+    error "The refreshed local patch has only [llength $currentTargetNodes] target nodes for [llength $sourceNodes] source nodes; this loop was skipped."
 }
 
 proc ::MeshSeamWeld::matchTargetPathNodes {sourceNodes candidateNodes} {
@@ -1501,8 +1861,119 @@ proc ::MeshSeamWeld::matchTargetPathNodes {sourceNodes candidateNodes} {
     return $targetNodes
 }
 
-proc ::MeshSeamWeld::targetPathNodesAfterImprint {sourceNodes imprintNodes} {
-    return [::MeshSeamWeld::matchTargetPathNodes $sourceNodes $imprintNodes]
+proc ::MeshSeamWeld::matchContinuousTargetPathNodes {sourceNodes candidateNodes {closedLoop 0}} {
+    variable lastLocalTargetNodeIds
+    variable lastLocalTargetEdges
+
+    set candidateNodes [lsort -integer -unique $candidateNodes]
+    if {[llength $candidateNodes] < [llength $sourceNodes]} {
+        error "The local target patch has fewer candidate nodes than the source path."
+    }
+    set rankedLayers {}
+    set distanceByPair [dict create]
+    set sourceIndex 0
+    foreach sourceNode $sourceNodes {
+        set sourcePoint [::MeshSeamWeld::nodeXYZ $sourceNode]
+        set scored {}
+        foreach candidate $candidateNodes {
+            set distance [::MeshSeamWeld::dist2 $sourcePoint \
+                [::MeshSeamWeld::nodeXYZ $candidate]]
+            lappend scored [list $distance $candidate]
+            dict set distanceByPair "$sourceIndex,$candidate" $distance
+        }
+        lappend rankedLayers [lsort -real -index 0 $scored]
+        incr sourceIndex
+    }
+
+    set maximumWidth [expr {min(64, [llength $candidateNodes])}]
+    set widths {}
+    foreach width {8 16 32 64} {
+        if {$width <= $maximumWidth} { lappend widths $width }
+    }
+    if {[llength $widths] == 0 || [lindex $widths end] != $maximumWidth} {
+        lappend widths $maximumWidth
+    }
+
+    foreach width $widths {
+        set layers {}
+        foreach scored $rankedLayers {
+            set layer {}
+            foreach row [lrange $scored 0 [expr {$width - 1}]] {
+                lappend layer [lindex $row 1]
+            }
+            lappend layers $layer
+        }
+        set bestPath {}
+        set bestCost ""
+        foreach startNode [lindex $layers 0] {
+            set states [dict create $startNode [list \
+                [dict get $distanceByPair "0,$startNode"] [list $startNode]]]
+            for {set layerIndex 1} {$layerIndex < [llength $layers]} {incr layerIndex} {
+                set nextStates [dict create]
+                foreach candidate [lindex $layers $layerIndex] {
+                    set candidateBestCost ""
+                    set candidateBestPath {}
+                    foreach previous [dict keys $states] {
+                        if {![dict exists $lastLocalTargetEdges \
+                            [::MeshSeamWeld::canonicalEdgeKey $previous $candidate]]} {
+                            continue
+                        }
+                        lassign [dict get $states $previous] previousCost previousPath
+                        if {[lsearch -exact $previousPath $candidate] >= 0} { continue }
+                        set candidateCost [expr {$previousCost + \
+                            [dict get $distanceByPair "$layerIndex,$candidate"]}]
+                        if {$candidateBestCost eq "" || $candidateCost < $candidateBestCost} {
+                            set candidateBestCost $candidateCost
+                            set candidateBestPath [concat $previousPath [list $candidate]]
+                        }
+                    }
+                    if {$candidateBestCost ne ""} {
+                        dict set nextStates $candidate \
+                            [list $candidateBestCost $candidateBestPath]
+                    }
+                }
+                set states $nextStates
+                if {[dict size $states] == 0} { break }
+            }
+            foreach endNode [dict keys $states] {
+                if {$closedLoop && ![dict exists $lastLocalTargetEdges \
+                    [::MeshSeamWeld::canonicalEdgeKey $endNode $startNode]]} {
+                    continue
+                }
+                lassign [dict get $states $endNode] pathCost pathNodes
+                if {$bestCost eq "" || $pathCost < $bestCost} {
+                    set bestCost $pathCost
+                    set bestPath $pathNodes
+                }
+            }
+        }
+        if {[llength $bestPath] == [llength $sourceNodes]} {
+            ::HybridCore::log INFO \
+                "imprint target_path=topology_constrained nodes=[llength $bestPath] candidate_width=$width candidate_pool=[llength $candidateNodes]"
+            return $bestPath
+        }
+    }
+    error "No topology-continuous target path could be reconstructed from the local imprint patch."
+}
+
+proc ::MeshSeamWeld::targetPathNodesAfterImprint {sourceNodes imprintNodes {closedLoop 0}} {
+    variable lastLocalTargetNodeIds
+    if {[llength $imprintNodes] == [llength $sourceNodes]} {
+        return [::MeshSeamWeld::matchTargetPathNodes $sourceNodes $imprintNodes]
+    }
+    if {![catch {
+        set targetNodes [::MeshSeamWeld::matchContinuousTargetPathNodes \
+            $sourceNodes $imprintNodes $closedLoop]
+    } topologyErr]} {
+        return $targetNodes
+    }
+    if {[llength $lastLocalTargetNodeIds] > [llength $imprintNodes] && ![catch {
+        set targetNodes [::MeshSeamWeld::matchContinuousTargetPathNodes \
+            $sourceNodes $lastLocalTargetNodeIds $closedLoop]
+    } fullPatchErr]} {
+        return $targetNodes
+    }
+    error "$topologyErr"
 }
 
 proc ::MeshSeamWeld::pathPairingCost {sourceNodes targetNodes} {
@@ -1847,7 +2318,7 @@ proc ::MeshSeamWeld::idsAddedToCollection {beforeIds afterIds} {
     return [::MeshSeamWeld::uniq $added]
 }
 
-proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0} {knownSourceCompIds {}}} {
+proc ::MeshSeamWeld::legacyIndexedPrepareWeldJobs {sourcePaths targetComps {progressOpened 0} {knownSourceCompIds {}}} {
     set jobs {}
     array set seamByRelated {}
     ::MeshSeamWeld::buildTargetElementIndex $targetComps
@@ -1873,7 +2344,8 @@ proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}
             source_component_ids $sourceCompIds \
             seam_component $seamByRelated($relatedKey) \
             target_elements [::MeshSeamWeld::localTargetPatchForPath $sourceNodes] \
-            center [::MeshSeamWeld::pathCenter $sourceNodes]]
+            center [::MeshSeamWeld::pathCenter $sourceNodes] \
+            retry_patch_extra_layers 3]
         if {$progressOpened && ($pathIndex == $pathTotal || $pathIndex % 25 == 0)} {
             set percent [expr {3.0 + 6.0*$pathIndex/double(max(1,$pathTotal))}]
             ::HybridCore::progressUpdate $percent "Mesh Seam Weld" "Prepared local patch $pathIndex/$pathTotal" 1
@@ -1882,15 +2354,159 @@ proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}
     return $jobs
 }
 
+proc ::MeshSeamWeld::markTargetElementsForProjection {targetComps markId} {
+    if {[llength $targetComps] == 0} { error "No target components were selected." }
+    foreach entityType {elements elems} {
+        catch {*clearmark $entityType $markId}
+        foreach selector {"by component id" "by comp id"} {
+            if {![catch {
+                eval *createmark $entityType $markId [list $selector] $targetComps
+            }]} {
+                return $entityType
+            }
+        }
+    }
+    error "Could not mark target elements for local projection."
+}
+
+proc ::MeshSeamWeld::projectNodesToTargetComponents {sourceNodes targetComps} {
+    if {[llength [info commands hm_getclosestnode]] == 0} {
+        error "hm_getclosestnode is unavailable."
+    }
+    ::MeshSeamWeld::markTargetElementsForProjection $targetComps 1
+    catch {*clearmark nodes 2}
+    if {[catch {eval *createmark nodes 2 $sourceNodes} sourceMarkErr]} {
+        catch {*clearmark elems 1}
+        catch {*clearmark elements 1}
+        error "Could not mark source nodes for target projection: $sourceMarkErr"
+    }
+
+    set projected [dict create]
+    set errors [dict create]
+    foreach sourceNode [::MeshSeamWeld::uniq $sourceNodes] {
+        foreach {x y z} [::MeshSeamWeld::nodeXYZ $sourceNode] break
+        if {[catch {set targetNode [hm_getclosestnode $x $y $z 1 2]} queryErr] ||
+            ![string is integer -strict $targetNode] || $targetNode <= 0} {
+            dict set errors $sourceNode \
+                "Could not project source node $sourceNode to the selected target components: $queryErr"
+            continue
+        }
+        dict set projected $sourceNode $targetNode
+    }
+    catch {*clearmark nodes 2}
+    catch {*clearmark elems 1}
+    catch {*clearmark elements 1}
+    return [dict create projected $projected errors $errors]
+}
+
+proc ::MeshSeamWeld::localTargetPatchFromProjectedNodes {projectedNodes targetComps} {
+    array set allowed {}
+    foreach componentId $targetComps { set allowed($componentId) 1 }
+    set seedElems {}
+    foreach targetNode [::MeshSeamWeld::uniq $projectedNodes] {
+        foreach elemId [::MeshSeamWeld::nodeElementIds $targetNode] {
+            set componentId [::MeshSeamWeld::elemComponentId $elemId]
+            if {![info exists allowed($componentId)]} { continue }
+            if {[llength [::MeshSeamWeld::elemNodes $elemId]] ni {3 4}} { continue }
+            lappend seedElems $elemId
+        }
+    }
+    set seedElems [::MeshSeamWeld::uniq $seedElems]
+    if {[llength $seedElems] == 0} {
+        error "Projected target nodes have no attached shell elements in the selected target components."
+    }
+    # Expand only from the projected-node seeds using HyperMesh adjacency.
+    # extraLayers=1 keeps parity with the Python patch planner's small safety
+    # halo while avoiding connectivity/coordinate reads for whole components.
+    set patch [::MeshSeamWeld::markRefreshedLocalTargetElements \
+        $seedElems $targetComps 1 1]
+    if {[llength $patch] == 0} {
+        error "Could not create a local target-element patch from projected nodes."
+    }
+    return [lsort -integer -unique $patch]
+}
+
+proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0} {knownSourceCompIds {}}} {
+    set jobs {}
+    array set seamByRelated {}
+    set allSourceNodes {}
+    foreach sourceNodes $sourcePaths {
+        set allSourceNodes [concat $allSourceNodes $sourceNodes]
+    }
+    set projectionCode [catch {
+        set projectionResult [::MeshSeamWeld::projectNodesToTargetComponents \
+            [lsort -integer -unique $allSourceNodes] $targetComps]
+    } projectionErr]
+
+    set pathTotal [llength $sourcePaths]
+    set pathIndex 0
+    foreach sourceNodes $sourcePaths {
+        incr pathIndex
+        if {[llength $knownSourceCompIds] > 0} {
+            set sourceCompIds $knownSourceCompIds
+        } else {
+            set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
+        }
+        set related [lsort -integer -unique [concat $sourceCompIds $targetComps]]
+        set relatedKey [join $related ,]
+        if {![info exists seamByRelated($relatedKey)]} {
+            set seamByRelated($relatedKey) \
+                [::MeshSeamWeld::seamComponentForRelatedComps $related]
+        }
+
+        set preparationError ""
+        set targetElems {}
+        if {$projectionCode} {
+            set preparationError $projectionErr
+        } else {
+            set projectedNodes {}
+            set projectedMap [dict get $projectionResult projected]
+            set projectionErrors [dict get $projectionResult errors]
+            foreach sourceNode $sourceNodes {
+                if {[dict exists $projectionErrors $sourceNode]} {
+                    set preparationError [dict get $projectionErrors $sourceNode]
+                    break
+                }
+                if {![dict exists $projectedMap $sourceNode]} {
+                    set preparationError "No projected target node was returned for source node $sourceNode."
+                    break
+                }
+                lappend projectedNodes [dict get $projectedMap $sourceNode]
+            }
+            if {$preparationError eq "" && [catch {
+                set targetElems [::MeshSeamWeld::localTargetPatchFromProjectedNodes \
+                    $projectedNodes $targetComps]
+            } patchErr]} {
+                set preparationError $patchErr
+            }
+        }
+        lappend jobs [dict create \
+            source_nodes $sourceNodes \
+            source_component_ids $sourceCompIds \
+            seam_component $seamByRelated($relatedKey) \
+            target_components $targetComps \
+            target_elements $targetElems \
+            center [::MeshSeamWeld::pathCenter $sourceNodes] \
+            preparation_error $preparationError]
+        if {$progressOpened && ($pathIndex == $pathTotal || $pathIndex % 25 == 0)} {
+            set percent [expr {3.0 + 6.0*$pathIndex/double(max(1,$pathTotal))}]
+            ::HybridCore::progressUpdate $percent "Mesh Seam Weld" \
+                "Prepared projected local patch $pathIndex/$pathTotal" 1
+        }
+    }
+    return $jobs
+}
+
 proc ::MeshSeamWeld::prepareDeferredWeldJobs {plans targetComps knownSourceCompIds {progressOpened 0}} {
     variable nodeXYZCache
     set jobs {}
-    set related [lsort -integer -unique [concat $knownSourceCompIds $targetComps]]
-    set seamComp [::MeshSeamWeld::seamComponentForRelatedComps $related]
-    ::MeshSeamWeld::buildTargetElementIndex $targetComps $progressOpened
+    set selectedTargetSet [dict create]
+    foreach componentId $targetComps { dict set selectedTargetSet $componentId 1 }
+    set seamByRelated [dict create]
 
-    # Python returns ordered node IDs.  Preload their coordinates in one HM
-    # query so each path behaves like a manually selected node row afterward.
+    # Python returns both the ordered source loop and its local target patch.
+    # Only source coordinates are preloaded here; the normal path no longer
+    # indexes every element in the selected target components on Tcl's thread.
     set allSourceNodes {}
     foreach plan $plans {
         set allSourceNodes [concat $allSourceNodes [dict get $plan source_node_ids]]
@@ -1907,26 +2523,218 @@ proc ::MeshSeamWeld::prepareDeferredWeldJobs {plans targetComps knownSourceCompI
     foreach plan $plans {
         incr planIndex
         set sourceNodes [dict get $plan source_node_ids]
+        set sourceCompIds [dict get $plan source_component_ids]
+        if {[llength $sourceCompIds] == 0} { set sourceCompIds $knownSourceCompIds }
+        set jobTargetComps [dict get $plan target_component_ids]
+        set jobTargetElems [dict get $plan target_element_ids]
+        if {[llength $jobTargetComps] == 0 || [llength $jobTargetElems] == 0} {
+            error "Python internal component plan returned an empty target patch."
+        }
+        foreach componentId $jobTargetComps {
+            if {![dict exists $selectedTargetSet $componentId]} {
+                error "Python internal component plan returned unselected target component $componentId."
+            }
+        }
+        set related [lsort -integer -unique [concat $sourceCompIds $jobTargetComps]]
+        set relatedKey [join $related ,]
+        if {![dict exists $seamByRelated $relatedKey]} {
+            dict set seamByRelated $relatedKey \
+                [::MeshSeamWeld::seamComponentForRelatedComps $related]
+        }
         lappend jobs [dict create \
             source_nodes $sourceNodes \
-            source_component_ids $knownSourceCompIds \
-            seam_component $seamComp \
-            target_elements [::MeshSeamWeld::localTargetPatchForPath $sourceNodes] \
+            source_component_ids $sourceCompIds \
+            seam_component [dict get $seamByRelated $relatedKey] \
+            target_components $jobTargetComps \
+            target_elements $jobTargetElems \
             center [dict get $plan center] \
             closed_loop 1 \
-            imprint_closed_loop 0 \
-            retry_patch_extra_layers 4 \
-            component_fallback 1]
+            imprint_closed_loop 1 \
+            preparation_error ""]
         if {$progressOpened && ($planIndex == $planTotal || $planIndex % 25 == 0)} {
             ::HybridCore::progressUpdate \
                 [expr {3.0 + 6.0*$planIndex/double(max(1,$planTotal))}] \
-                "Mesh Seam Weld" "Prepared local patch $planIndex/$planTotal" 1
+                "Mesh Seam Weld" "Loaded Python local patch $planIndex/$planTotal" 1
         }
     }
     return $jobs
 }
 
+proc ::MeshSeamWeld::directStructuredStripQuadNodeLists {crossChains {closedLoop 0}} {
+    set nodeCount [llength $crossChains]
+    if {$nodeCount < 2 || ($closedLoop && $nodeCount < 3)} {
+        error "Too few cross chains for direct structured strip creation."
+    }
+    set layerNodeCount [llength [lindex $crossChains 0]]
+    if {$layerNodeCount < 2} {
+        error "Each direct structured strip cross chain must contain at least two nodes."
+    }
+    foreach chain $crossChains {
+        if {[llength $chain] != $layerNodeCount} {
+            error "Direct structured strip cross chains have different layer counts."
+        }
+    }
+    set crossDensity [expr {$layerNodeCount - 1}]
+    set segmentCount [expr {$closedLoop ? $nodeCount : $nodeCount - 1}]
+    set quads {}
+    for {set index 0} {$index < $segmentCount} {incr index} {
+        set nextIndex [expr {($index + 1) % $nodeCount}]
+        set currentChain [lindex $crossChains $index]
+        set nextChain [lindex $crossChains $nextIndex]
+        for {set layer 0} {$layer < $crossDensity} {incr layer} {
+            set quadNodes [list \
+                [lindex $currentChain $layer] [lindex $nextChain $layer] \
+                [lindex $nextChain [expr {$layer + 1}]] \
+                [lindex $currentChain [expr {$layer + 1}]]]
+            if {[llength [lsort -integer -unique $quadNodes]] != 4} {
+                error "Direct weld strip segment [expr {$index + 1}], layer [expr {$layer + 1}] contains duplicate nodes."
+            }
+            lappend quads $quadNodes
+        }
+    }
+    return $quads
+}
+
+proc ::MeshSeamWeld::directStripQuadNodeLists {sourceNodes targetNodes {closedLoop 0}} {
+    if {[llength $sourceNodes] != [llength $targetNodes]} {
+        error "Source and target node counts do not match for direct strip creation."
+    }
+    set crossChains {}
+    for {set index 0} {$index < [llength $sourceNodes]} {incr index} {
+        lappend crossChains [list \
+            [lindex $sourceNodes $index] [lindex $targetNodes $index]]
+    }
+    return [::MeshSeamWeld::directStructuredStripQuadNodeLists \
+        $crossChains $closedLoop]
+}
+
+proc ::MeshSeamWeld::createTrackedNodeAtXYZ {xyz} {
+    foreach {x y z} $xyz break
+    if {[catch {*createnode $x $y $z 0 0 0} createErr]} {
+        error "Failed to create an intermediate weld node: $createErr"
+    }
+    catch {*clearmark nodes 1}
+    if {[catch {*createmark nodes 1 -1} markErr]} {
+        error "Could not mark the intermediate weld node: $markErr"
+    }
+    set createdNodes {}
+    catch {set createdNodes [hm_getmark nodes 1]}
+    catch {*clearmark nodes 1}
+    if {[llength $createdNodes] != 1} {
+        error "Could not uniquely identify the newly created intermediate weld node."
+    }
+    return [lindex $createdNodes 0]
+}
+
+proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossDensity outputCompName outputCompId beforeOutputElems {closedLoop 0}} {
+    if {[llength $sourceNodes] != [llength $targetNodes]} {
+        error "Source and target node counts do not match for direct structured strip creation."
+    }
+    if {![string is integer -strict $crossDensity] || $crossDensity < 1} {
+        error "Direct structured strip cross density must be a positive integer."
+    }
+    catch {*currentcollector component $outputCompName}
+    catch {*currentcollector components $outputCompName}
+
+    set crossChains {}
+    set intermediateNodeCount 0
+    for {set index 0} {$index < [llength $sourceNodes]} {incr index} {
+        set sourceNode [lindex $sourceNodes $index]
+        set targetNode [lindex $targetNodes $index]
+        set sourceXYZ [::MeshSeamWeld::nodeXYZ $sourceNode]
+        set targetXYZ [::MeshSeamWeld::nodeXYZ $targetNode]
+        set chain [list $sourceNode]
+        for {set layer 1} {$layer < $crossDensity} {incr layer} {
+            set ratio [expr {double($layer) / double($crossDensity)}]
+            set xyz {}
+            for {set axis 0} {$axis < 3} {incr axis} {
+                set sourceValue [lindex $sourceXYZ $axis]
+                set targetValue [lindex $targetXYZ $axis]
+                lappend xyz [expr {$sourceValue + $ratio * ($targetValue - $sourceValue)}]
+            }
+            lappend chain [::MeshSeamWeld::createTrackedNodeAtXYZ $xyz]
+            incr intermediateNodeCount
+        }
+        lappend chain $targetNode
+        lappend crossChains $chain
+    }
+
+    set segmentIndex 0
+    foreach quadNodes [::MeshSeamWeld::directStructuredStripQuadNodeLists \
+        $crossChains $closedLoop] {
+        incr segmentIndex
+        if {[catch {
+            eval *createlist nodes 1 $quadNodes
+            *createelement 104 1 1 1
+        } createErr]} {
+            error "Failed to create direct weld strip element $segmentIndex: $createErr"
+        }
+    }
+    set elemIds [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
+        [::MeshSeamWeld::componentElementIds $outputCompId]]
+    if {[llength $elemIds] == 0} {
+        error "Direct structured weld strip creation did not add any elements."
+    }
+    set pathSegments [expr {$closedLoop ? [llength $sourceNodes] : [llength $sourceNodes] - 1}]
+    set expectedElemCount [expr {$pathSegments * $crossDensity}]
+    if {[llength $elemIds] != $expectedElemCount} {
+        error "Direct structured weld strip created [llength $elemIds]/$expectedElemCount expected elements."
+    }
+    ::MeshSeamWeld::moveElemsToComponent $elemIds $outputCompName
+    ::HybridCore::log INFO \
+        "weld_mesh creation_mode=direct_structured cross_layers=$crossDensity intermediate_nodes=$intermediateNodeCount elements=[llength $elemIds] closed_loop=$closedLoop"
+    return $elemIds
+}
+
+proc ::MeshSeamWeld::createDirectSingleLayerStrip {sourceNodes targetNodes outputCompName outputCompId beforeOutputElems {closedLoop 0}} {
+    return [::MeshSeamWeld::createDirectStructuredStrip \
+        $sourceNodes $targetNodes 1 $outputCompName $outputCompId \
+        $beforeOutputElems $closedLoop]
+}
+
 proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes outputCompName {closedLoop 0}} {
+    variable cfg
+
+    if {[llength $sourceNodes] != [llength $targetNodes]} {
+        error "Source and target node path counts do not match."
+    }
+    if {[llength $sourceNodes] < 2 || ($closedLoop && [llength $sourceNodes] < 3)} {
+        error "Too few node pairs for direct structured weld mesh creation."
+    }
+    if {[string trim $outputCompName] eq ""} {
+        set outputCompName $cfg(output_component)
+    }
+    set outputCompId [::MeshSeamWeld::ensureOutputComponent $outputCompName 11]
+    if {$outputCompId eq ""} {
+        error "Could not resolve the weld output component ID for $outputCompName."
+    }
+    set beforeOutputElems [::MeshSeamWeld::componentElementIds $outputCompId]
+
+    # Closed loops have no meaningful first/last connector.  Use the longest
+    # paired connector so every part of the strip respects the requested mesh
+    # size while retaining the exact source-to-target correspondence.
+    set maximumCrossLength 0.0
+    for {set index 0} {$index < [llength $sourceNodes]} {incr index} {
+        set crossLength [::MeshSeamWeld::distanceBetweenNodes \
+            [lindex $sourceNodes $index] [lindex $targetNodes $index]]
+        if {$crossLength > $maximumCrossLength} {
+            set maximumCrossLength $crossLength
+        }
+    }
+    set crossDensity [::MeshSeamWeld::meshDensityForLength \
+        $maximumCrossLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
+
+    # Do not retry through a ruled surface/automesh path.  It reparameterizes
+    # the open representation of a closed loop and can shift the node pairing
+    # at both ends.  A direct structured strip is deterministic for every
+    # transverse layer and lets the outer per-loop transaction mark/skip any
+    # actual creation failure cleanly.
+    return [::MeshSeamWeld::createDirectStructuredStrip \
+        $sourceNodes $targetNodes $crossDensity $outputCompName $outputCompId \
+        $beforeOutputElems $closedLoop]
+}
+
+proc ::MeshSeamWeld::legacyRuledMeshBetweenNodePaths {sourceNodes targetNodes outputCompName {closedLoop 0}} {
     variable cfg
 
     if {[llength $sourceNodes] != [llength $targetNodes]} {
@@ -1958,6 +2766,19 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
     set crossEndDensity [::MeshSeamWeld::meshDensityForLength \
         $crossEndLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
     set crossDensity [expr {max($crossStartDensity, $crossEndDensity)}]
+
+    # A one-layer strip already has a complete one-to-one node map.  Creating
+    # an open ruled surface and manually closing its final column lets the HM
+    # automesher reorder the two end chains and can twist that closure.  Direct
+    # quads preserve the correspondence and are also substantially cheaper.
+    if {$crossDensity == 1} {
+        set elemIds [::MeshSeamWeld::createDirectSingleLayerStrip \
+            $sourceNodes $targetNodes $outputCompName $outputCompId \
+            $beforeOutputElems $closedLoop]
+        ::HybridCore::log INFO \
+            "weld_mesh creation_mode=direct_single_layer elements=[llength $elemIds] closed_loop=$closedLoop"
+        return $elemIds
+    }
 
     # HyperMesh 2019 records show that ruled node-list creation followed by
     # *automesh can terminate the session in mode 3 (Mesh without surface).
@@ -2096,6 +2917,7 @@ proc ::MeshSeamWeld::invalidateTargetCaches {targetComps beforeNode beforeElem {
 
 proc ::MeshSeamWeld::processWeldPathIsolated {sourceNodes targetComps closedLoop progressOpened pathIndex pathTotal {sourceCompIds {}} {seamComp ""} {preparedCenter {}} {targetElemIds {}} {imprintClosedLoop ""}} {
     set isolatedStarted [clock milliseconds]
+    set ::MeshSeamWeld::lastImprintAffectedElemIds {}
     set historyName "Mesh seam weld path $pathIndex/$pathTotal"
     set failureCenter $preparedCenter
     if {[llength $failureCenter] != 3} {
@@ -2132,7 +2954,10 @@ proc ::MeshSeamWeld::processWeldPathIsolated {sourceNodes targetComps closedLoop
                 "; rollback of this loop also failed: $undoErr"]
         }
         ::MeshSeamWeld::clearTransientSelections
-        ::MeshSeamWeld::invalidateTargetCaches $targetComps $beforeNode $beforeElem $targetElemIds
+        set failedAffectedElems [::MeshSeamWeld::uniq [concat \
+            $targetElemIds $::MeshSeamWeld::lastImprintAffectedElemIds]]
+        ::MeshSeamWeld::invalidateTargetCaches \
+            $targetComps $beforeNode $beforeElem $failedAffectedElems
         set logError [string map [list "\r" "" "\n" " | "] $result]
         ::HybridCore::log ERROR "PERF mesh_seam_weld path=$pathIndex/$pathTotal status=failed total_ms=[expr {[clock milliseconds]-$isolatedStarted}] error=$logError"
         return [dict create ok 0 error $result center $failureCenter rollback_ok $rollbackOk]
@@ -2181,8 +3006,8 @@ proc ::MeshSeamWeld::diagnoseFailure {errorText} {
             set actionEn "Check the target surface for cracks, duplicate nodes, disconnected components, or a failed local remesh."
         }
         AUTOMESH {
-            set reasonZh "目标路径已经建立，但 Ruled 焊缝网格生成失败。"
-            set reasonEn "The target path was established, but creation of the ruled weld mesh failed."
+            set reasonZh "目标路径已经建立，但结构化焊缝网格生成失败。"
+            set reasonEn "The target path was established, but creation of the structured weld mesh failed."
             set actionZh "检查源/目标闭环节点数、首尾方向、两条路径间距以及焊缝网格尺寸。"
             set actionEn "Check source/target loop counts, orientation, spacing, and the configured weld mesh size."
         }
@@ -2386,7 +3211,7 @@ proc ::MeshSeamWeld::runAction {} {
                 set normalizedJobs {}
                 foreach job $weldJobs {
                     dict set job closed_loop 1
-                    dict set job imprint_closed_loop 0
+                    dict set job imprint_closed_loop 1
                     lappend normalizedJobs $job
                 }
                 set weldJobs $normalizedJobs
@@ -2402,7 +3227,8 @@ proc ::MeshSeamWeld::runAction {} {
                 }
                 if {[catch {
                     set planRun [::MeshSeamWeld::runPythonInternalComponentPlan \
-                        [lindex $selectedNodes 0] [lindex $sourceComponentIds 0] 2.0 12.0]
+                        [lindex $selectedNodes 0] [lindex $sourceComponentIds 0] \
+                        $targetComps 2.0 12.0]
                 } planErr]} {
                     ::MeshSeamWeld::stageError SOURCE_PLAN $planErr
                 }
@@ -2418,15 +3244,22 @@ proc ::MeshSeamWeld::runAction {} {
                 }
                 set internalPlans [dict get [lindex $candidates 0] weld_plans]
                 set sourcePaths {}
+                set pythonTargetComps {}
+                set pythonTargetElems {}
                 foreach plan $internalPlans {
-                    foreach key {source_node_ids source_component_ids center closed_loop} {
+                    foreach key {source_node_ids source_component_ids target_component_ids target_element_ids center closed_loop} {
                         if {![dict exists $plan $key]} { error "Python internal component plan is missing $key" }
                     }
                     lappend sourcePaths [dict get $plan source_node_ids]
+                    set pythonTargetComps [concat $pythonTargetComps \
+                        [dict get $plan target_component_ids]]
+                    set pythonTargetElems [concat $pythonTargetElems \
+                        [dict get $plan target_element_ids]]
                 }
-                # Convert Python's ordered node rows to the same precomputed
-                # local Tcl jobs used by a manual node-row selection.  A full
-                # index refresh is reserved for a failed, rolled-back attempt.
+                ::HybridCore::log INFO "PERF mesh_seam_weld planning_mode=python_fem_local paths=[llength $internalPlans] target_components=[llength [lsort -integer -unique $pythonTargetComps]] target_patch_elems=[llength [lsort -integer -unique $pythonTargetElems]]"
+                # Convert Python's ordered node rows and local target elements
+                # directly into Tcl jobs.  Failed loops are marked and skipped;
+                # no component-wide index or retry is allowed.
                 set weldJobs [::MeshSeamWeld::prepareDeferredWeldJobs \
                     $internalPlans $targetComps $sourceComponentIds $progressOpened]
             }
@@ -2451,6 +3284,7 @@ proc ::MeshSeamWeld::runAction {} {
         set allTargetNodes {}
         set allWeldElems {}
         set failureRecords {}
+        set failureMarkerNodes {}
         set pathTotal [llength $sourcePaths]
         set pathIndex 0
         foreach job $weldJobs {
@@ -2469,60 +3303,28 @@ proc ::MeshSeamWeld::runAction {} {
                 set jobImprintClosedLoop [dict get $job imprint_closed_loop]
             }
             set jobTargetElems [dict get $job target_elements]
-            set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
-                $jobClosedLoop $progressOpened $pathIndex $pathTotal \
-                [dict get $job source_component_ids] [dict get $job seam_component] \
-                [dict get $job center] $jobTargetElems $jobImprintClosedLoop]
-            set firstIsolated $isolated
-            set retryCount 0
-            if {![dict get $isolated ok] && $jobClosedLoop && \
-                [llength $jobTargetElems] > 0 && \
-                [dict exists $isolated rollback_ok] && [dict get $isolated rollback_ok]} {
-                set retryTargetElems $jobTargetElems
-                set retryExtraLayers [::MeshSeamWeld::dictValueOr $job retry_patch_extra_layers 0]
-                if {$retryExtraLayers > 0} {
-                    if {[catch {
-                        ::MeshSeamWeld::invalidateTargetCaches $jobTargetComps "" "" {}
-                        ::MeshSeamWeld::buildTargetElementIndex $jobTargetComps
-                        set retryTargetElems [::MeshSeamWeld::localTargetPatchForPath \
-                            $sourceNodes $retryExtraLayers]
-                    } retryPrepareErr]} {
-                        ::HybridCore::log WARN "expanded retry patch preparation failed path=$pathIndex/$pathTotal error=[::MeshSeamWeld::reportLineValue $retryPrepareErr]; retaining first patch"
-                        set retryTargetElems $jobTargetElems
-                    }
-                }
-                incr retryCount
-                ::HybridCore::log WARN "local target patch failed path=$pathIndex/$pathTotal; retrying with close_node_list=1 target_elements=[llength $retryTargetElems] extra_layers=$retryExtraLayers"
-                set jobTargetElems $retryTargetElems
+            set preparationError [::MeshSeamWeld::dictValueOr $job preparation_error ""]
+            if {$preparationError ne ""} {
+                set isolated [dict create ok 0 \
+                    error "\[MSW_STAGE:TARGET_PREPARE\] $preparationError" \
+                    center [dict get $job center] rollback_ok 1]
+            } else {
                 set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
                     $jobClosedLoop $progressOpened $pathIndex $pathTotal \
                     [dict get $job source_component_ids] [dict get $job seam_component] \
-                    [dict get $job center] $jobTargetElems 1]
-            }
-            if {![dict get $isolated ok] && \
-                [::MeshSeamWeld::dictValueOr $job component_fallback 0] && \
-                [dict exists $isolated rollback_ok] && [dict get $isolated rollback_ok]} {
-                incr retryCount
-                ::HybridCore::log WARN "expanded local retry failed path=$pathIndex/$pathTotal; starting final component-scope retry with close_node_list=1"
-                set jobTargetElems {}
-                set isolated [::MeshSeamWeld::processWeldPathIsolated $sourceNodes $jobTargetComps \
-                    $jobClosedLoop $progressOpened $pathIndex $pathTotal \
-                    [dict get $job source_component_ids] [dict get $job seam_component] \
-                    [dict get $job center] {} 1]
+                    [dict get $job center] $jobTargetElems $jobImprintClosedLoop]
             }
             if {![dict get $isolated ok]} {
-                set diagnosis [::MeshSeamWeld::diagnoseFailure [dict get $isolated error]]
                 set failure [dict create path_index $pathIndex source_nodes $sourceNodes \
                     center [dict get $isolated center] target_components $jobTargetComps \
-                    target_elements $jobTargetElems retry_count $retryCount \
+                    target_elements $jobTargetElems retry_count 0 \
                     rollback_ok [::MeshSeamWeld::dictValueOr $isolated rollback_ok 0] \
-                    first_error [dict get $firstIsolated error] \
+                    first_error [dict get $isolated error] \
                     final_error [dict get $isolated error] error [dict get $isolated error]]
                 lappend failureRecords $failure
+                set failureMarkerNodes [concat $failureMarkerNodes \
+                    [::MeshSeamWeld::createFailureMarkerNodes [list $failure]]]
                 ::HybridCore::log ERROR "weld path skipped path=$pathIndex/$pathTotal source_seed=[lindex $sourceNodes 0] error=[dict get $isolated error]"
-                ::MeshSeamWeld::msg [::HWFlow::txt \
-                    "闭环 $pathIndex/$pathTotal 创建失败，已回滚并跳过。阶段：[dict get $diagnosis stage]。原因：[dict get $diagnosis reason_zh] 建议：[dict get $diagnosis action_zh]" \
-                    "Loop $pathIndex/$pathTotal failed and was rolled back. Stage: [dict get $diagnosis stage]. Reason: [dict get $diagnosis reason_en] Action: [dict get $diagnosis action_en]"]
                 continue
             }
             set result [dict get $isolated result]
@@ -2538,7 +3340,7 @@ proc ::MeshSeamWeld::runAction {} {
             }
         }
         set executionMs [expr {[clock milliseconds] - $executionStarted}]
-        set failureMarkerNodes [::MeshSeamWeld::createFailureMarkerNodes $failureRecords]
+        set failureMarkerNodes [::MeshSeamWeld::uniq $failureMarkerNodes]
         set batchElapsedMs [expr {[clock milliseconds] - $batchStarted}]
         if {[llength $failureRecords] > 0} {
             set reportContext [dict create \
@@ -2623,6 +3425,9 @@ proc ::MeshSeamWeld::runAction {} {
         append msg [::HWFlow::txt \
             "\n\n首个失败闭环：[dict get $firstFailure path_index]；阶段：[dict get $firstDiagnosis stage]\n原因：[dict get $firstDiagnosis reason_zh]\n建议：[dict get $firstDiagnosis action_zh]\n未成功位置已在 MESH_SEAM_WELD_FAILED_MARKERS 中标记。\n\n请将以下两个纯文本文件反馈给开发人员：\n失败报告：$failureReportPath\n运行日志：$batchLogPath" \
             "\n\nFirst failed loop: [dict get $firstFailure path_index]; stage: [dict get $firstDiagnosis stage]\nReason: [dict get $firstDiagnosis reason_en]\nAction: [dict get $firstDiagnosis action_en]\nFailed locations are marked in MESH_SEAM_WELD_FAILED_MARKERS.\n\nProvide these two plain-text files to the developer:\nFailure report: $failureReportPath\nOperation log: $batchLogPath"]
+        append msg [::HWFlow::txt \
+            "\n失败闭环均已直接跳过；未执行扩大补丁重试或整 component imprint。" \
+            "\nFailed loops were skipped immediately; no expanded-patch retry or whole-component imprint was attempted."]
     }
     set completionIcon [expr {$failedCount > 0 ? "warning" : "info"}]
     append msg [::HWFlow::txt \
@@ -2630,6 +3435,25 @@ proc ::MeshSeamWeld::runAction {} {
         "\nPerformance log: $batchLogPath"]
     catch {::HybridCore::closeLog}
     tk_messageBox -icon $completionIcon -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $msg
+}
+
+# Retire the former component-wide index/retry helpers from the runtime command
+# surface.  Their definitions are kept temporarily for source compatibility
+# while no production or extension call can invoke them.
+foreach retiredCommand {
+    ::MeshSeamWeld::legacyComponentImprintNodeList
+    ::MeshSeamWeld::legacyComponentTargetCandidatesAfterImprint
+    ::MeshSeamWeld::legacyIndexedPrepareWeldJobs
+    ::MeshSeamWeld::legacyRuledMeshBetweenNodePaths
+    ::MeshSeamWeld::buildTargetElementIndex
+    ::MeshSeamWeld::nearestIndexedTargetElem
+    ::MeshSeamWeld::localTargetPatchForPath
+    ::MeshSeamWeld::componentNodeIds
+    ::MeshSeamWeld::markElementsByComponents
+} {
+    if {[llength [info commands $retiredCommand]] > 0} {
+        rename $retiredCommand {}
+    }
 }
 
 proc ::MeshSeamWeld::run {} {

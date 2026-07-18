@@ -15,14 +15,13 @@ from path_validator import validate_ordered
 from result_validator import validate
 from result_writer import write_result
 from seam_planner import plan
-from component_planner import plan_component_welds
-from component_planner import plan_internal_component_boundaries
-from fem_mesh_reader import read_shell_fem
+from component_planner import plan_component_welds,plan_internal_component_welds
+from fem_mesh_reader import read_shell_fem_bundle
 SPEC=importlib.util.spec_from_file_location("seam_schema",str(MODULE_DIR/"schema.py")); MOD=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(MOD)
 def calculate(req,model):
     s=req["settings"]
     if s["mode"]=="internal_component_plan":
-        plans=plan_internal_component_boundaries(model,s["source_component_ids"][0],s["selected_node_ids"][0])
+        plans=plan_internal_component_welds(model,s["source_component_ids"][0],s["selected_node_ids"][0],s["target_component_ids"],s["patch_expand_layers"])
         return {"candidate_id":"I0001","mode":"internal_component_plan","weld_plans":plans,"path_count":len(plans),"warnings":[],"recommended_action":"EXECUTE_TCL_PLAN"}
     if s["mode"]=="component_plan":
         weld_plans=plan_component_welds(model,s["source_component_ids"],s["target_component_ids"],s["weld_mesh_size"],s["patch_expand_layers"],s.get("selected_node_ids",[]))
@@ -41,7 +40,7 @@ def main(argv=None):
     try:
         t=time.perf_counter(); req=MOD.validate_request(load_json(a.request)); settings=req["settings"]
         if settings["mode"]=="internal_component_plan":
-            model=read_shell_fem(a.mesh,settings["source_component_ids"][0])
+            model=read_shell_fem_bundle(a.mesh)
         else:model=read_mesh(a.mesh)
         read=time.perf_counter()-t; t=time.perf_counter(); candidate=calculate(req,model); detect=time.perf_counter()-t
         result=new_result("mesh_seam_weld",req["run_id"]); result["candidates"]=[candidate]; result["summary"]={"mode":candidate["mode"],"path_node_count":len(candidate.get("path_node_ids",candidate.get("target_node_ids",[]))),"path_count":candidate.get("path_count",1)}; result["performance"]["read_seconds"]=round(read,6); result["performance"]["detect_seconds"]=round(detect,6); write_result(a.output,getattr(a,"tcl_output"),"::MeshSeamWeld::pythonResult",result); return 0
