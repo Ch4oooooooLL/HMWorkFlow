@@ -670,8 +670,8 @@ proc ::LocalMeshOptimizer::cancelRequested {} {
 proc ::LocalMeshOptimizer::exportScope {scopeIds} {
     variable runtime
     set exportStarted [clock milliseconds]
-    set connectivityPath [file join $runtime(taskDir) element_connectivity.csv]
-    set coordinatePath [file join $runtime(taskDir) node_coordinates.csv]
+    set connectivityPath [file join $runtime(taskDir) element_connectivity.txt]
+    set coordinatePath [file join $runtime(taskDir) node_coordinates.txt]
     set connectivityStream [open $connectivityPath w]
     set coordinateStream [open $coordinatePath w]
     fconfigure $connectivityStream -encoding utf-8 -translation lf -buffering full -buffersize 65536
@@ -741,7 +741,7 @@ proc ::LocalMeshOptimizer::exportScope {scopeIds} {
     }
     # Header-only file is deliberate until protected-edge extraction has been
     # validated in HM2019. Component crossing is independently blocked in Python.
-    ::HWFlow::writeTextFile [file join $runtime(taskDir) protected_edges.csv] "n1,n2\n"
+    ::HWFlow::writeTextFile [file join $runtime(taskDir) protected_edges.txt] "n1,n2\n"
     ::LocalMeshOptimizer::writeIdFile [file join $runtime(taskDir) protected_nodes.txt] $runtime(userAnchorNodes)
     ::LocalMeshOptimizer::performanceAdd topology_export [expr {([clock milliseconds] - $exportStarted) / 1000.0}]
     return [dict create elements $exportedElements nodes $exportedNodes]
@@ -1361,7 +1361,7 @@ proc ::LocalMeshOptimizer::movedAnchorNodes {before tolerance} {
 
 proc ::LocalMeshOptimizer::readRegionTasks {} {
     variable runtime
-    set path [file join $runtime(taskDir) region_tasks.csv]
+    set path [file join $runtime(taskDir) region_tasks.txt]
     if {![file isfile $path]} { error "Region task file not found: $path" }
     set lines [split [::HWFlow::readTextFile $path] "\n"]
     set regions {}
@@ -1381,7 +1381,7 @@ proc ::LocalMeshOptimizer::readRegionTasks {} {
 
 proc ::LocalMeshOptimizer::readOptimizationActions {} {
     variable runtime
-    set path [file join $runtime(taskDir) optimization_actions.csv]
+    set path [file join $runtime(taskDir) optimization_actions.txt]
     set result [dict create]
     if {![file isfile $path]} { return $result }
     set lines [split [::HWFlow::readTextFile $path] "\n"]
@@ -1402,7 +1402,7 @@ proc ::LocalMeshOptimizer::readOptimizationActions {} {
 
 proc ::LocalMeshOptimizer::readBatchTasks {} {
     variable runtime
-    set path [file join $runtime(taskDir) batch_tasks.csv]
+    set path [file join $runtime(taskDir) batch_tasks.txt]
     set result [dict create]
     if {![file isfile $path]} { return $result }
     set lines [split [::HWFlow::readTextFile $path] "\n"]
@@ -1501,8 +1501,8 @@ proc ::LocalMeshOptimizer::planSummary {} {
     set regionCount 0
     set actionCount 0
     set manualCount 0
-    set regionPath [file join $runtime(taskDir) region_tasks.csv]
-    set actionPath [file join $runtime(taskDir) optimization_actions.csv]
+    set regionPath [file join $runtime(taskDir) region_tasks.txt]
+    set actionPath [file join $runtime(taskDir) optimization_actions.txt]
     if {[file isfile $regionPath]} {
         set lines [split [string trim [::HWFlow::readTextFile $regionPath]] "\n"]
         set regionCount [expr {max(0, [llength $lines] - 1)}]
@@ -1543,10 +1543,10 @@ proc ::LocalMeshOptimizer::optimizationPlanCurrent {} {
     variable runtime
     variable ui
     if {!$runtime(planReady) || $runtime(taskDir) eq ""} { return 0 }
-    foreach name {region_tasks.csv optimization_actions.csv failed_elements.txt task.json} {
+    foreach name {region_tasks.txt optimization_actions.txt failed_elements.txt task.json} {
         if {![file isfile [file join $runtime(taskDir) $name]]} { return 0 }
     }
-    if {$ui(EXECUTION_MODE) eq "batch" && ![file isfile [file join $runtime(taskDir) batch_tasks.csv]]} { return 0 }
+    if {$ui(EXECUTION_MODE) eq "batch" && ![file isfile [file join $runtime(taskDir) batch_tasks.txt]]} { return 0 }
     if {![file isfile $ui(CRITERIA_PATH)]} { return 0 }
     set criteria [file normalize $ui(CRITERIA_PATH)]
     if {$criteria ne $runtime(checkedCriteriaPath) || [file mtime $criteria] != $runtime(checkedCriteriaMtime)} { return 0 }
@@ -2382,7 +2382,7 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
             set runtime(lastOutputModel) $output
         }
     }
-    ::HWFlow::writeTextFile [file join $runtime(taskDir) region_results.csv] [join $resultLines "\n"]
+    ::HWFlow::writeTextFile [file join $runtime(taskDir) region_results.txt] [join $resultLines "\n"]
     set elapsed [expr {([clock milliseconds] - $taskStart) / 1000.0}]
     set topologyPartial [expr {!$taskRolledBack && !$cancelled && $finalFailed > $taskInitialFailed}]
     set taskStatus [expr {$cancelled ? "cancelled" : ($taskRolledBack ? "task_rolled_back" : ($topologyPartial ? "partial_success" : "complete"))}]

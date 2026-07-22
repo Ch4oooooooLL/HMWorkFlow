@@ -212,6 +212,29 @@ class UnusedRBE2CleanupTests(unittest.TestCase):
         self.assertEqual(interp.splitlist(interp.eval("dict get {%s} internal_ids" % result)), ("501", "502"))
         self.assertEqual(interp.splitlist(interp.eval("dict get {%s} unresolved_solver_ids" % result)), ("999",))
 
+    def test_pool_resolution_does_not_depend_on_rbe2_card_query(self):
+        interp = tkinter.Tcl()
+        interp.eval("source {%s}" % self.source_path.as_posix())
+        interp.eval(
+            "proc hm_getidpools {entityType returnType} {return {ELEMENT_IDPOOL}}; "
+            "proc hm_getinternalid {pool solverId searchType} {"
+            "if {$solverId == 100} {return 501}; error {not found}}; "
+            "rename ::RB2W::elemIsRBE2 ::RB2W::elemIsRBE2_original; "
+            "proc ::RB2W::elemIsRBE2 {eid} {return 0}; "
+            "rename ::RB2W::markRigidLinkCandidates ::RB2W::markRigidLinkCandidates_original; "
+            "proc ::RB2W::markRigidLinkCandidates {markId} {"
+            "error {fallback scan must not be needed after an exact pool lookup}}"
+        )
+        result = interp.eval("::RB2W::resolveUnusedRBE2InternalIds {100}")
+        self.assertEqual(
+            interp.splitlist(interp.eval("dict get {%s} internal_ids" % result)),
+            ("501",),
+        )
+        self.assertEqual(
+            interp.splitlist(interp.eval("dict get {%s} unresolved_solver_ids" % result)),
+            (),
+        )
+
     def test_solver_id_resolution_falls_back_to_database_rbe2_records(self):
         interp = tkinter.Tcl()
         interp.eval("source {%s}" % self.source_path.as_posix())

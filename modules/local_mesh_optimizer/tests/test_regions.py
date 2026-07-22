@@ -232,7 +232,7 @@ class RegionTests(unittest.TestCase):
             task_dir = Path(directory)
             criteria = task_dir / "测试 criteria.criteria"
             criteria.write_text("# metadata only\nquality = native_hypermesh\n", encoding="utf-8")
-            (task_dir / "element_connectivity.csv").write_text(
+            (task_dir / "element_connectivity.txt").write_text(
                 "element_id,component_id,n1,n2,n3,n4\n", encoding="utf-8"
             )
             (task_dir / "failed_elements.txt").write_text("", encoding="utf-8")
@@ -261,21 +261,24 @@ class RegionTests(unittest.TestCase):
             payload = json.loads(status.read_text(encoding="utf-8"))
             self.assertEqual(payload["exit_code"], 0)
             self.assertEqual(payload["stage"], "build-regions")
+            for name in ("region_tasks.txt", "optimization_actions.txt", "batch_tasks.txt"):
+                self.assertTrue((task_dir / name).is_file(), name)
+            self.assertEqual(list(task_dir.glob("*.csv")), [])
 
     def test_controller_writes_topology_action_protocol(self):
         with tempfile.TemporaryDirectory() as directory:
             task_dir = Path(directory)
             criteria = task_dir / "rules.criteria"
             criteria.write_text("quality = native_hypermesh\n", encoding="utf-8")
-            (task_dir / "element_connectivity.csv").write_text(
+            (task_dir / "element_connectivity.txt").write_text(
                 "element_id,component_id,n1,n2,n3,n4\n10,1,1,2,3,4\n", encoding="utf-8"
             )
-            (task_dir / "node_coordinates.csv").write_text(
+            (task_dir / "node_coordinates.txt").write_text(
                 "node_id,x,y,z\n1,0,0,0\n2,2,0,0\n3,1.8,1,0\n4,0,1.3,0\n",
                 encoding="utf-8",
             )
             (task_dir / "failed_elements.txt").write_text("10\n", encoding="utf-8")
-            (task_dir / "protected_edges.csv").write_text("n1,n2\n", encoding="utf-8")
+            (task_dir / "protected_edges.txt").write_text("n1,n2\n", encoding="utf-8")
             (task_dir / "protected_nodes.txt").write_text("", encoding="utf-8")
             task = task_dir / "task.json"
             task.write_text(
@@ -297,10 +300,34 @@ class RegionTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
-            actions = (task_dir / "optimization_actions.csv").read_text(encoding="utf-8")
+            actions = (task_dir / "optimization_actions.txt").read_text(encoding="utf-8")
             self.assertIn("split_quad", actions)
             regions = json.loads((task_dir / "regions.json").read_text(encoding="utf-8"))
             self.assertEqual(regions[0]["planned_actions"][0]["action_type"], "split_quad")
+
+            (task_dir / "region_results.txt").write_text(
+                "region_id,final_failed_count,rounds,optimization_methods,elapsed_seconds,status,rollback_count,message\n"
+                "Region_0001,0,1,split_quad,0.25,complete,0,done\n",
+                encoding="utf-8",
+            )
+            finalized = subprocess.run(
+                [
+                    sys.executable,
+                    str(PYTHON_DIR / "optimizer_controller.py"),
+                    "--task",
+                    str(task),
+                    "--stage",
+                    "finalize",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(finalized.returncode, 0, finalized.stderr.decode(errors="replace"))
+            regions = json.loads((task_dir / "regions.json").read_text(encoding="utf-8"))
+            self.assertEqual(regions[0]["current_failed_count"], 0)
+            self.assertEqual(regions[0]["message"], "done")
+            self.assertFalse((task_dir / "region_results.csv").exists())
 
     def test_planner_splits_quad_using_scored_diagonal(self):
         elements = {10: ShellElement(10, 1, (1, 2, 3, 4))}
@@ -557,15 +584,15 @@ class RegionTests(unittest.TestCase):
             task_dir = Path(directory)
             criteria = task_dir / "规则.criteria"
             criteria.write_text("quality = native_hypermesh\n", encoding="utf-8")
-            (task_dir / "element_connectivity.csv").write_text(
+            (task_dir / "element_connectivity.txt").write_text(
                 "element_id,component_id,n1,n2,n3,n4\n10,1,1,2,3,4\n", encoding="utf-8"
             )
-            (task_dir / "node_coordinates.csv").write_text(
+            (task_dir / "node_coordinates.txt").write_text(
                 "node_id,x,y,z\n1,0,0,0\n2,2,0,0\n3,1.8,1,0\n4,0,1.3,0\n",
                 encoding="utf-8",
             )
             (task_dir / "failed_elements.txt").write_text("10\n", encoding="utf-8")
-            (task_dir / "protected_edges.csv").write_text("n1,n2\n", encoding="utf-8")
+            (task_dir / "protected_edges.txt").write_text("n1,n2\n", encoding="utf-8")
             (task_dir / "protected_nodes.txt").write_text("", encoding="utf-8")
             task = task_dir / "task.json"
             task.write_text(
@@ -603,19 +630,19 @@ class RegionTests(unittest.TestCase):
                 task_dir = Path(directory)
                 criteria = task_dir / "rules.criteria"
                 criteria.write_text("quality = native_hypermesh\n", encoding="utf-8")
-                (task_dir / "element_connectivity.csv").write_text(
+                (task_dir / "element_connectivity.txt").write_text(
                     "element_id,component_id,n1,n2,n3,n4\n"
                     "10,1,1,2,3,4\n20,2,5,6,7,8\n",
                     encoding="utf-8",
                 )
-                (task_dir / "node_coordinates.csv").write_text(
+                (task_dir / "node_coordinates.txt").write_text(
                     "node_id,x,y,z\n"
                     "1,0,0,0\n2,2,0,0\n3,1.8,1,0\n4,0,1.3,0\n"
                     "5,10,0,0\n6,12,0,0\n7,11.8,1,0\n8,10,1.3,0\n",
                     encoding="utf-8",
                 )
                 (task_dir / "failed_elements.txt").write_text("10\n20\n", encoding="utf-8")
-                (task_dir / "protected_edges.csv").write_text("n1,n2\n", encoding="utf-8")
+                (task_dir / "protected_edges.txt").write_text("n1,n2\n", encoding="utf-8")
                 (task_dir / "protected_nodes.txt").write_text("", encoding="utf-8")
                 task = task_dir / "task.json"
                 task.write_text(
@@ -633,7 +660,7 @@ class RegionTests(unittest.TestCase):
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
-                outputs.append((task_dir / "optimization_actions.csv").read_text(encoding="utf-8"))
+                outputs.append((task_dir / "optimization_actions.txt").read_text(encoding="utf-8"))
                 regions = json.loads((task_dir / "regions.json").read_text(encoding="utf-8"))
                 region_counts.append(len(regions))
         self.assertEqual(outputs[0], outputs[1])

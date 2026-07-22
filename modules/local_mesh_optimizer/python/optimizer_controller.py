@@ -139,13 +139,13 @@ def build(task_path: Path) -> int:
         _progress(task_dir, "cancelled", 100.0, "用户已取消")
         return EXIT_CANCELLED
     with metrics.measure("topology_read"):
-        elements = read_connectivity(_path(task_dir, task, "connectivity_file", "element_connectivity.csv"))
+        elements = read_connectivity(_path(task_dir, task, "connectivity_file", "element_connectivity.txt"))
     failed = read_id_file(_path(task_dir, task, "failed_elements_file", "failed_elements.txt"))
     if not failed:
         atomic_write_json(task_dir / "regions.json", [])
-        atomic_write_text(task_dir / "region_tasks.csv", "region_id,failed_elements,expanded_elements,components,anchor_nodes\n")
+        atomic_write_text(task_dir / "region_tasks.txt", "region_id,failed_elements,expanded_elements,components,anchor_nodes\n")
         atomic_write_text(
-            task_dir / "optimization_actions.csv",
+            task_dir / "optimization_actions.txt",
             "region_id,action_id,action_type,element_id,edge_index,node_a,node_b,reference_a,reference_b,target_distance,split_method,reason\n",
         )
         write_batch_artifacts(task_dir, [], [], [])
@@ -154,8 +154,8 @@ def build(task_path: Path) -> int:
         return EXIT_SUCCESS
     _progress(task_dir, "building_regions", 35.0, "正在按共享边划分失败区域")
     with metrics.measure("topology_read"):
-        blocked_edges = read_blocked_edges(_path(task_dir, task, "protected_edges_file", "protected_edges.csv"))
-        coordinates = read_node_coordinates(_path(task_dir, task, "node_coordinates_file", "node_coordinates.csv"))
+        blocked_edges = read_blocked_edges(_path(task_dir, task, "protected_edges_file", "protected_edges.txt"))
+        coordinates = read_node_coordinates(_path(task_dir, task, "node_coordinates_file", "node_coordinates.txt"))
     user_anchor_nodes = set(read_id_file(_path(task_dir, task, "protected_nodes_file", "protected_nodes.txt")))
     protect_features = bool(task.get("protection", {}).get("feature_edges", True))
     if protect_features:
@@ -309,7 +309,7 @@ def build(task_path: Path) -> int:
                 ]
             )
         )
-    atomic_write_text(task_dir / "region_tasks.csv", "\n".join(rows) + "\n")
+    atomic_write_text(task_dir / "region_tasks.txt", "\n".join(rows) + "\n")
     action_fields = (
         "region_id", "action_id", "action_type", "element_id", "edge_index",
         "node_a", "node_b", "reference_a", "reference_b", "target_distance",
@@ -318,7 +318,7 @@ def build(task_path: Path) -> int:
     action_rows = [",".join(action_fields)]
     for action in actions:
         action_rows.append(",".join(str(action[field]) for field in action_fields))
-    atomic_write_text(task_dir / "optimization_actions.csv", "\n".join(action_rows) + "\n")
+    atomic_write_text(task_dir / "optimization_actions.txt", "\n".join(action_rows) + "\n")
     atomic_write_json(task_dir / "python_performance_metrics.json", metrics.to_dict())
     _progress(task_dir, "ready", 100.0, "区域构建完成：{} 个".format(len(regions)))
     logging.info("Built %d regions from %d failed elements", len(regions), len(failed))
@@ -332,7 +332,7 @@ def finalize(task_path: Path) -> int:
     task = read_json(task_path)
     regions = read_json(task_dir / "regions.json")
     updates = {}
-    updates_path = task_dir / "region_results.csv"
+    updates_path = task_dir / "region_results.txt"
     if updates_path.exists():
         with updates_path.open("r", encoding="utf-8-sig", newline="") as stream:
             for row in csv.DictReader(stream):

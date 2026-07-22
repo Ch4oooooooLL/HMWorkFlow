@@ -145,11 +145,11 @@ LocalMeshOptimizer_Report_YYYYMMDD_HHMMSS/
 
 ## Python 与 Tcl 通信
 
-Tcl 写入 `task.json`、`failed_elements.txt`、`element_connectivity.csv`、`node_coordinates.csv`、保护 ID/边文件；Python 写入 `regions.json`、`region_tasks.csv`、`operations.json`、`conflicts.json`、`batches.json`、`batch_tasks.csv`、`batches/*.tcl` 和 `progress.json`。Tcl 批次结果写入 `batch_results/*.json`，区域执行结果通过 `region_results.csv` 汇总，再由 Python finalize 阶段生成报告。完整协议见 [批量架构说明](local_mesh_optimizer_batch_architecture.md)。
+Tcl 写入 `task.json`、`failed_elements.txt`、`element_connectivity.txt`、`node_coordinates.txt`、`protected_edges.txt` 和保护节点文件；Python 写入 `regions.json`、`region_tasks.txt`、`optimization_actions.txt`、`operations.json`、`conflicts.json`、`batches.json`、`batch_tasks.txt`、`batches/*.tcl` 和 `progress.json`。Tcl 批次结果写入 `batch_results/*.json`，区域执行结果通过 `region_results.txt` 汇总，再由 Python finalize 阶段生成报告。完整协议见 [批量架构说明](local_mesh_optimizer_batch_architecture.md)。
 
 本项目的 62556 单元压力样例离线重规划中，宏区域打包将 5425 个原始区域压缩为 33 个执行区域，将上一次实机任务的 7065 个批次文件投影降低为 112 个。该数字只证明调度规模下降；最终 HyperMesh 墙钟时间需重新实测。
 
-所有 JSON 使用 UTF-8，Python 写入采用同目录临时文件和 `os.replace`。大 ID 集合使用行文本/CSV，避免逐 element 进程通信。
+所有 JSON 和 TXT 使用 UTF-8，Python 写入采用同目录临时文件和 `os.replace`。任务过程文件不使用 `.csv`，避免企业终端自动加密破坏后续读取；报告目录仍可输出 CSV 供人工分析。
 
 Windows 运行时由 Tcl 后台启动随包提供的 `pythonw.exe`，标准输出、错误输出和完成状态写入任务目录，不显示命令行窗口。Tcl 通过 `after`/`vwait` 等待原子状态文件并继续处理 Tk 事件；不会用同步 `exec` 阻塞主界面。高级设置若填写 `python.exe`，模块只会使用同目录的 `pythonw.exe`；找不到无窗口解释器时会明确报错。
 

@@ -253,7 +253,7 @@ def write_batch_artifacts(task_dir: Path, operations: Sequence[Operation], batch
             lines.append("    {} {}".format(_legacy_tcl_dict(operation), "\\"))
         lines.extend(("]", ""))
         atomic_write_text(batch_dir / filename, "\n".join(lines))
-    atomic_write_text(task_dir / "batch_tasks.csv", rows.getvalue())
+    atomic_write_text(task_dir / "batch_tasks.txt", rows.getvalue())
     atomic_write_json(task_dir / "operations.json", [operation.to_dict() for operation in operations])
     atomic_write_json(task_dir / "batches.json", [batch.to_dict() for batch in batches])
     atomic_write_json(task_dir / "conflicts.json", list(conflicts))

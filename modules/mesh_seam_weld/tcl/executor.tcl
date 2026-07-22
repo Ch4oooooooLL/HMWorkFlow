@@ -1,34 +1,3 @@
-proc ::MeshSeamWeld::processWeldPathPython {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1}} {
-    set base [expr {10.0+80.0*($pathIndex-1)/double($pathTotal)}]; set span [expr {80.0/double($pathTotal)}]
-    set sourceRun [::MeshSeamWeld::runPythonPathStage source $sourceNodes {} $closedLoop $base [expr {$base+0.25*$span}]]
-    set sourceCandidate [lindex [dict get [dict get $sourceRun payload] candidates] 0]
-    set sourceNodes [dict get $sourceCandidate path_node_ids]; ::HybridCore::closeLog
-    set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]; set related [::MeshSeamWeld::uniq [concat $sourceCompIds $targetComps]]; set seamComp [::MeshSeamWeld::seamComponentForRelatedComps $related]
-    set projection [::MeshSeamWeld::projectNodesToTargetComponents $sourceNodes $targetComps]
-    if {[dict size [dict get $projection errors]] > 0} {
-        error "Could not prepare a local target patch for the Python path."
-    }
-    set projectedNodes {}
-    foreach sourceNode $sourceNodes {
-        lappend projectedNodes [dict get $projection projected $sourceNode]
-    }
-    set targetElemIds [::MeshSeamWeld::localTargetPatchFromProjectedNodes \
-        $projectedNodes $targetComps]
-    set beforeTargetNodes [::MeshSeamWeld::localTargetNodesFromElements \
-        $targetElemIds $targetComps]
-    ::HybridCore::progressUpdate [expr {$base+0.30*$span}] "Mesh Seam Weld" "Imprinting path $pathIndex/$pathTotal into target mesh..." 1
-    ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $closedLoop $targetElemIds
-    set imprintNodes [::MeshSeamWeld::targetCandidatesAfterImprint \
-        $sourceNodes $targetComps {} $targetElemIds $beforeTargetNodes]
-    set targetRun [::MeshSeamWeld::runPythonPathStage target $sourceNodes $imprintNodes $closedLoop [expr {$base+0.52*$span}] [expr {$base+0.72*$span}]]
-    set targetCandidate [lindex [dict get [dict get $targetRun payload] candidates] 0]; set targetNodes [dict get $targetCandidate target_node_ids]; ::HybridCore::closeLog
-    ::HybridCore::progressUpdate [expr {$base+0.78*$span}] "Mesh Seam Weld" "Creating structured weld mesh for path $pathIndex/$pathTotal..." 1
-    set weldElems [::MeshSeamWeld::createRuledMeshBetweenNodePaths $sourceNodes $targetNodes $seamComp $closedLoop]
-    if {[llength $weldElems]==0} { error "structured mesh creation did not create weld elements" }
-    ::HybridCore::progressUpdate [expr {$base+$span}] "Mesh Seam Weld" "Path $pathIndex/$pathTotal complete; weld elements=[llength $weldElems]" 1
-    return [list sourceNodes $sourceNodes sourceCompIds $sourceCompIds seamCompName $seamComp imprintNodes $imprintNodes targetNodes $targetNodes weldElems $weldElems]
-}
-
 proc ::MeshSeamWeld::shouldUpdatePathProgress {pathIndex pathTotal} {
     # Each path can take noticeable time in large models.  Report every path
     # so the UI does not appear to execute opaque groups of about 30 loops.
@@ -47,57 +16,77 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
     }
 
     set reportProgress [expr {$progressOpened && [::MeshSeamWeld::shouldUpdatePathProgress $pathIndex $pathTotal]}]
+    set pathBase [expr {10.0 + 80.0 * ($pathIndex - 1) / double(max(1, $pathTotal))}]
+    set pathSpan [expr {80.0 / double(max(1, $pathTotal))}]
     if {$reportProgress} {
-        set percent [expr {10.0 + 80.0 * ($pathIndex - 1) / double(max(1, $pathTotal))}]
-        ::HybridCore::progressUpdate $percent "Mesh Seam Weld" "Imprinting path $pathIndex/$pathTotal..." 1
+        ::HybridCore::progressUpdate $pathBase "Mesh Seam Weld" \
+            "Imprinting path $pathIndex/$pathTotal..." 1
     }
 
     set imprintStarted [clock milliseconds]
-    if {[catch {
-        set beforeTargetNodes [::MeshSeamWeld::localTargetNodesFromElements \
-            $targetElemIds $targetComps]
-    } beforeTargetErr]} {
-        ::MeshSeamWeld::stageError TARGET_PREPARE $beforeTargetErr
-    }
     if {[catch {
         ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $imprintClosedLoop $targetElemIds
     } imprintErr]} {
         ::MeshSeamWeld::stageError IMPRINT $imprintErr
     }
-    if {[catch {
-        set imprintNodes [::MeshSeamWeld::targetCandidatesAfterImprint \
-            $sourceNodes $targetComps {} $targetElemIds $beforeTargetNodes]
-    } candidateErr]} {
-        ::MeshSeamWeld::stageError TARGET_MATCH $candidateErr
-    }
     set imprintMs [expr {[clock milliseconds] - $imprintStarted}]
 
+    if {$reportProgress} {
+        ::HybridCore::progressUpdate [expr {$pathBase + 0.55*$pathSpan}] \
+            "Mesh Seam Weld" \
+            "Validating post-imprint nodes $pathIndex/$pathTotal..." 1
+    }
     set targetStarted [clock milliseconds]
     if {[catch {
-        set targetNodes [::MeshSeamWeld::targetPathNodesAfterImprint \
-            $sourceNodes $imprintNodes $closedLoop]
-        set targetNodes [::MeshSeamWeld::alignTargetPathNodes $sourceNodes $targetNodes $closedLoop]
+        set currentTargetElems [::MeshSeamWeld::targetElementsAfterImprint \
+            $targetComps $targetElemIds]
+        set targetNodes [::MeshSeamWeld::targetNodesFromImprintList \
+            $sourceNodes "" 0]
+        set targetMatchMode native_imprint_list
+        if {[llength $targetNodes] > 0 &&
+            ![::MeshSeamWeld::targetPathIsContinuous \
+                $targetNodes $targetComps $closedLoop]} {
+            # Preserve the successfully imprinted portions.  Mesh creation
+            # splits the source/target correspondence at missing target edges
+            # and skips only those local sections.
+            set targetMatchMode partial_native_imprint_list
+        }
+        if {[llength $targetNodes] == 0} {
+            set targetNodes [::MeshSeamWeld::targetNodesFromPostImprintTopology \
+                $sourceNodes $targetComps $currentTargetElems $closedLoop]
+            set targetMatchMode post_imprint_topology
+        }
     } targetErr]} {
         ::MeshSeamWeld::stageError TARGET_MATCH $targetErr
     }
-    if {![::MeshSeamWeld::targetPathIsContinuous $targetNodes $targetComps $closedLoop]} {
+    if {[llength $targetNodes] < 2} {
         ::MeshSeamWeld::stageError TARGET_CONTINUITY [::HWFlow::txt \
-            "imprint 后的目标节点不能在所选目标 component 上形成连续路径，已取消该闭环。" \
-            "The imprinted target nodes do not form a continuous path on the selected target components; the loop was cancelled."]
+            "imprint 后少于两个目标节点，无法形成任何可连接区段。" \
+            "Fewer than two target nodes remain after imprint, so no connectable section can be formed."]
     }
+    set targetNodes [::MeshSeamWeld::alignTargetPathNodes \
+        $sourceNodes $targetNodes $closedLoop]
+    set imprintNodes $targetNodes
+    ::HybridCore::log INFO \
+        "imprint target_match_mode=$targetMatchMode nodes=[llength $targetNodes] current_target_elements=[llength $currentTargetElems]"
     set targetMs [expr {[clock milliseconds] - $targetStarted}]
 
+    if {$reportProgress} {
+        ::HybridCore::progressUpdate [expr {$pathBase + 0.75*$pathSpan}] \
+            "Mesh Seam Weld" \
+            "Creating structured weld mesh $pathIndex/$pathTotal..." 1
+    }
     set meshStarted [clock milliseconds]
     if {[catch {
         set weldElems [::MeshSeamWeld::createRuledMeshBetweenNodePaths \
-            $sourceNodes $targetNodes $seamComp $closedLoop]
+            $sourceNodes $targetNodes $seamComp $closedLoop $targetComps]
     } meshErr]} {
         ::MeshSeamWeld::stageError AUTOMESH $meshErr
     }
     if {[llength $weldElems] == 0} {
         ::MeshSeamWeld::stageError AUTOMESH [::HWFlow::txt \
-            "结构化网格创建没有生成焊缝单元。" \
-            "Structured mesh creation did not create weld elements."]
+            "焊缝网格创建没有生成单元。" \
+            "Weld mesh creation did not create elements."]
     }
     set meshMs [expr {[clock milliseconds] - $meshStarted}]
     set totalMs [expr {[clock milliseconds] - $totalStarted}]

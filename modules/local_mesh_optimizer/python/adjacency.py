@@ -45,7 +45,7 @@ def read_connectivity(path: Path) -> Dict[int, ShellElement]:
         reader = csv.DictReader(stream)
         required = {"element_id", "component_id"}
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
-            raise ValueError("Connectivity CSV requires element_id and component_id columns")
+            raise ValueError("Connectivity table requires element_id and component_id columns")
         for row in reader:
             element_id = int(row["element_id"])
             if element_id in elements:
