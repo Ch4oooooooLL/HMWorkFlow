@@ -14,6 +14,7 @@
     "local_mesh_optimizer": {"status": "controlled", "runtime": "HybridCore detached task", "model_write": true},
     "weld_integrity_check": {"status": "review_only", "runtime": "HybridCore", "model_write": false},
     "contact_setup": {"status": "production", "runtime": "Tcl", "model_write": true},
+    "seam_surface": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true},
     "batch_property_assignment": {"status": "production", "runtime": "Tcl", "model_write": true}
   }
 }

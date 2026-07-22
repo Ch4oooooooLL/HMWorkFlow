@@ -17,7 +17,7 @@ def read_blocked_edges(path: Optional[Path]) -> Set[Edge]:
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         if reader.fieldnames is None or not {"n1", "n2"}.issubset(reader.fieldnames):
-            raise ValueError("Protected edge CSV requires n1,n2 columns")
+            raise ValueError("Protected edge table requires n1,n2 columns")
         for row in reader:
             first, second = int(row["n1"]), int(row["n2"])
             edges.add((first, second) if first < second else (second, first))
@@ -31,7 +31,7 @@ def read_node_coordinates(path: Optional[Path]) -> Dict[int, Tuple[float, float,
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         if reader.fieldnames is None or not {"node_id", "x", "y", "z"}.issubset(reader.fieldnames):
-            raise ValueError("Node coordinate CSV requires node_id,x,y,z columns")
+            raise ValueError("Node coordinate table requires node_id,x,y,z columns")
         for row in reader:
             coordinates[int(row["node_id"])] = (
                 float(row["x"]), float(row["y"]), float(row["z"])

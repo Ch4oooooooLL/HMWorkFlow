@@ -56,12 +56,12 @@ namespace eval ::HWToolkit {
         }
         seam_surface {
             group    "Geometry"
-            hidden   1
-            label_zh "焊缝面创建"
-            label_en "Seam Surface Creation"
-            desc_zh  "通过线-面或线-线方式创建 SEAM_Tx 焊缝面。"
-            desc_en  "Create SEAM_Tx geometry surfaces with Line-Surface or Line-Line workflows."
+            label_zh "几何焊缝"
+            label_en "Geometry Seam"
+            desc_zh  "局部识别 T 型、角接和搭接接头，复核策略并安全创建、编辑或删除几何焊缝。"
+            desc_en  "Recognize local T, corner, and lap joints, review strategies, and safely create, edit, or delete geometry seams."
             proc     "::SeamSurf::runAction"
+            shortcut_proc "::SeamSurf::runShortcut"
             settings_proc "::SeamSurf::runSettings"
         }
         batch_mesh_washer {
@@ -353,6 +353,9 @@ proc ::HWToolkit::clearExistingWindows {} {
         .rb2w_panel
         .rb2bolt_dlg
         .seam_surface
+        .geometry_seam
+        .geometry_seam_shortcut_selector
+        .geometry_seam_thickness
         .geometry_cleanup
         .contact_setup
         .batch_mesh_washer
@@ -553,7 +556,7 @@ proc ::HWToolkit::drainShortcutLaunch {} {
     if {$target eq "__toolkit_home__"} {
         ::HWToolkit::run
     } else {
-        ::HWToolkit::invokeModule $target
+        ::HWToolkit::invokeModule $target shortcut
     }
 }
 
@@ -632,7 +635,7 @@ proc ::HWToolkit::runModule {key} {
     ::HWToolkit::invokeModule $key
 }
 
-proc ::HWToolkit::invokeModule {key} {
+proc ::HWToolkit::invokeModule {key {launchMode ui}} {
     variable MODULES
     variable MODULE_BUSY
     variable PENDING_SHORTCUT_TARGET
@@ -664,6 +667,9 @@ proc ::HWToolkit::invokeModule {key} {
         return 0
     }
     set procName [dict get $info proc]
+    if {$launchMode eq "shortcut" && [dict exists $info shortcut_proc]} {
+        set procName [dict get $info shortcut_proc]
+    }
     if {[llength [info commands $procName]] == 0} {
         set err [::HWFlow::txt "模块入口不存在：$procName" "Module entry does not exist: $procName"]
         catch {hm_usermessage $err}

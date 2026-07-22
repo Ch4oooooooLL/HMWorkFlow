@@ -702,10 +702,13 @@ proc ::RB2W::resolveUnusedRBE2InternalIds {solverIds} {
         foreach poolName $poolNames {
             if {[catch {set internalId [hm_getinternalid $poolName $solverId -bypoolname]}]} { continue }
             if {$internalId eq "" || $internalId == 0} { continue }
-            if {[RB2W::elemIsRBE2 $internalId]} {
-                set resolved($solverId) $internalId
-                break
-            }
+            # hm_getinternalid is the authoritative solver-ID -> database-ID
+            # lookup.  Do not reject its result through elemIsRBE2: HM2019
+            # profiles do not consistently expose config/card-image data names
+            # for rigid elements, which made every valid result look unresolved
+            # and left the Delete panel's element mark empty.
+            set resolved($solverId) $internalId
+            break
         }
     }
 

@@ -14,9 +14,10 @@
 
 ## 主要文件
 
-- 输入：`task.json`、`failed_elements.txt`、`element_connectivity.csv`、`node_coordinates.csv`。
+- 输入：`task.json`、`failed_elements.txt`、`element_connectivity.txt`、`node_coordinates.txt`、`protected_edges.txt`。
 - 计划：`regions.json`、`operations.json`、`conflicts.json`、`batches.json`。
-- 执行：`batches/*.tcl`、`batch_results/*.json`、`region_results.csv`。
+- 执行：`batches/*.tcl`、`batch_results/*.json`、`region_results.txt`。
 - 报告：`summary.html`、`summary.csv`、`regions.csv`、`settings.json`。
 
 任务目录属于运行数据，不进入 Git 或发布 ZIP。大型中间文件应放在用户配置的 SSD scratch 目录。
+任务过程表格统一使用 `.txt` 扩展名，避免公司终端自动加密 CSV 后破坏 Tcl/Python 文件协议；CSV 仅保留为报告交付格式。

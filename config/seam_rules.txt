@@ -1,8 +1,18 @@
-# Seam surface workflow defaults.
+# Geometry seam defaults (HyperMesh 2019).
 key|value|note
-stitch_tolerance|0.2|surface equivalence tolerance
-default_mode|LINE_SURFACE|LINE_SURFACE or LINE_LINE
-component_mode|by_thickness|by_thickness or per_seam
-line_sync_divisions|24|base sampling divisions for feature detection and projection
-feature_angle|12.0|minimum direction change in degrees treated as a feature point
-thickness_format|%.3g|T value format used in SEAM_Tx component names
+angle_parallel_max|15.0|maximum normal angle for parallel/lap classification
+angle_perpendicular_min|75.0|minimum normal angle for perpendicular classification
+distance_tolerance|1.0|candidate edge-to-surface distance tolerance
+endpoint_merge_tolerance|0.1|line graph endpoint merge tolerance
+min_seam_length|5.0|minimum candidate seam length
+point_spacing|7.0|distributed point target spacing
+area_tolerance|1.0e-6|minimum created surface area
+volume_tolerance|1.0e-6|minimum temporary solid volume
+geometry_offset_distance|50.0|lap intersection construction offset
+extend_offset_distance|12.0|surface extension construction offset
+auto_accept_confidence|0.85|automatic recommendation threshold
+review_confidence|0.60|manual review threshold
+auto_create_enabled|0|v1 always requires confirmation
+thickness_override|0.0|positive value overrides component-name thickness; zero prompts when needed
+shortcut_selector_mode|PANEL|PANEL lets the shortcut selector switch scope; CONFIG uses shortcut_scope directly
+shortcut_scope|COMPONENT_PAIR|COMPONENT_PAIR or SURFACE_GROUPS for CONFIG shortcut mode

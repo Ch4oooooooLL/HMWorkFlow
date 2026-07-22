@@ -71,7 +71,7 @@ Run the same saved input model, criteria and settings once in `legacy` mode and 
 ## Equivalence acceptance checklist
 
 - Initial failed-element set matches.
-- Operation types proposed by `optimization_actions.csv` match; `operations.json` is an adapter, not a replacement planner.
+- Operation types proposed by `optimization_actions.txt` match; `operations.json` is an adapter, not a replacement planner.
 - Protected nodes and protected boundaries are unchanged.
 - Batch failures remain distinguishable (`skipped`, `validation_failed`, `entity_missing`, `hm_command_failed`, `cancelled`/rollback at task level).
 - Final failed count and abnormal topology are no worse than legacy mode.
