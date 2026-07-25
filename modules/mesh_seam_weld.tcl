@@ -8,18 +8,18 @@
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
 
 # Load shared logging, progress, workspace, and HyperMesh bulk-read services
 # directly.  The mesh seam production flow does not load its Python bridge or
 # FEM exporter and does not schedule a Python worker.
 if {![namespace exists ::HybridCore]} {
-    source [file join [file dirname [file normalize [info script]]] hybrid_core tcl init.tcl]
+    ::HWFlow::sourceUtf8 [file join [file dirname [file normalize [info script]]] hybrid_core tcl init.tcl]
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.35"
+    variable VERSION "0.37"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -213,8 +213,8 @@ proc ::MeshSeamWeld::showPanel {} {
     }
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "连续节点直接作为开放路径执行。单点及不连续边界种子由 HyperMesh 原生 *findedges 为每个源组件建立临时自由边组件：自由边点只处理所在闭环，内部点处理该组件全部闭合自由边。每条路径在执行前即时准备目标单元；imprint 后以最近节点作为锚点，再沿当前目标网格拓扑恢复唯一连续路径，ruled 不使用 imprint 前节点。PLOTEL 连接关系批量读取，长循环会定期处理界面事件；运行流程不导出 FEM，也不调用 Python。" \
-        "Continuous nodes execute directly as an open path. For single points and disconnected boundary seeds, native HyperMesh *findedges creates a temporary free-edge component per source component: a free-edge point selects its loop, while an internal point selects every closed free edge in that component. Each target patch is prepared immediately before execution; after imprint, closest nodes are anchors for reconstructing a unique continuous path on the current target topology, and ruled never uses pre-imprint nodes. PLOTEL connectivity is read in bulk and long loops periodically pump UI events. No FEM export or Python runtime planning is used."]
+        "连续节点直接作为开放路径执行。单点及不连续边界种子由 HyperMesh 原生 *findedges 为每个源组件建立临时自由边组件：自由边点只处理所在闭环，内部点处理该组件全部闭合自由边。每条路径在执行前即时准备目标单元；imprint 后以最近节点为引导，沿当前目标网格拓扑恢复连续路径，目标路径节点数可与源路径不同。外围圆筒会自动补充径向 patch，周向离散数量不同时使用 TRI3/QUAD4 拓扑拉链建带。PLOTEL 连接关系批量读取，长循环会定期处理界面事件；运行流程不导出 FEM，也不调用 Python。" \
+        "Continuous nodes execute directly as an open path. For single points and disconnected boundary seeds, native HyperMesh *findedges creates a temporary free-edge component per source component: a free-edge point selects its loop, while an internal point selects every closed free edge in that component. Each target patch is prepared immediately before execution; after imprint, closest nodes guide a continuous target-topology path whose node count may differ from the source. Surrounding cylindrical targets use radial patch assistance, and unequal circumferential discretizations are joined with a TRI3/QUAD4 topology zipper. PLOTEL connectivity is read in bulk and long loops periodically pump UI events. No FEM export or Python runtime planning is used."]
     grid $w.main.note -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -1344,6 +1344,33 @@ proc ::MeshSeamWeld::dot {a b} {
     expr {[lindex $a 0]*[lindex $b 0] + [lindex $a 1]*[lindex $b 1] + [lindex $a 2]*[lindex $b 2]}
 }
 
+proc ::MeshSeamWeld::cross {a b} {
+    return [list \
+        [expr {[lindex $a 1]*[lindex $b 2] - [lindex $a 2]*[lindex $b 1]}] \
+        [expr {[lindex $a 2]*[lindex $b 0] - [lindex $a 0]*[lindex $b 2]}] \
+        [expr {[lindex $a 0]*[lindex $b 1] - [lindex $a 1]*[lindex $b 0]}]]
+}
+
+proc ::MeshSeamWeld::circumcenterFromPath {nodeIds} {
+    if {[llength $nodeIds] < 3} { return {} }
+    set first [::MeshSeamWeld::nodeXYZ [lindex $nodeIds 0]]
+    set middle [::MeshSeamWeld::nodeXYZ \
+        [lindex $nodeIds [expr {[llength $nodeIds] / 2}]]]
+    set last [::MeshSeamWeld::nodeXYZ [lindex $nodeIds end]]
+    set u [::MeshSeamWeld::vsub $middle $first]
+    set v [::MeshSeamWeld::vsub $last $first]
+    set normal [::MeshSeamWeld::cross $u $v]
+    set normal2 [::MeshSeamWeld::dot $normal $normal]
+    if {$normal2 <= 1.0e-16} { return {} }
+    set term1 [::MeshSeamWeld::vscale \
+        [::MeshSeamWeld::cross $v $normal] [::MeshSeamWeld::dot $u $u]]
+    set term2 [::MeshSeamWeld::vscale \
+        [::MeshSeamWeld::cross $normal $u] [::MeshSeamWeld::dot $v $v]]
+    return [::MeshSeamWeld::vadd $first \
+        [::MeshSeamWeld::vscale [::MeshSeamWeld::vadd $term1 $term2] \
+            [expr {1.0 / (2.0 * $normal2)}]]]
+}
+
 proc ::MeshSeamWeld::dist2 {a b} {
     set d [::MeshSeamWeld::vsub $a $b]
     return [::MeshSeamWeld::dot $d $d]
@@ -2079,12 +2106,17 @@ proc ::MeshSeamWeld::targetNodesFromPostImprintTopology {sourceNodes targetComps
         $targetElemIds $targetComps]
     set anchorNodes [::MeshSeamWeld::closestTargetAnchors \
         $sourceNodes $targetComps $targetElemIds]
-    set targetNodes [::MeshSeamWeld::matchContinuousTargetPathNodes \
-        $sourceNodes $candidateNodes $closedLoop $anchorNodes]
-    if {[llength $targetNodes] != [llength $sourceNodes] ||
+    if {[catch {
+        set targetNodes [::MeshSeamWeld::matchContinuousTargetPathNodes \
+            $sourceNodes $candidateNodes $closedLoop $anchorNodes]
+    } equalCountErr]} {
+        set targetNodes [::MeshSeamWeld::matchVariableTargetPathNodes \
+            $sourceNodes $candidateNodes $closedLoop $anchorNodes]
+    }
+    if {[llength $targetNodes] < [expr {$closedLoop ? 3 : 2}] ||
         [llength [lsort -integer -unique $targetNodes]] !=
-            [llength $sourceNodes]} {
-        error "Post-imprint topology matching did not return a unique target node for every source node."
+            [llength $targetNodes]} {
+        error "Post-imprint topology matching did not return a usable unique target path."
     }
     return $targetNodes
 }
@@ -2373,6 +2405,101 @@ proc ::MeshSeamWeld::limitTargetTrackingStates {states limit} {
         dict set limited [lindex $row 1] [lindex $row 0]
     }
     return $limited
+}
+
+proc ::MeshSeamWeld::shortestTargetGraphPath {neighborGraph candidateAllowed startNode endNode} {
+    if {$startNode == $endNode} { return [list $startNode] }
+    if {![dict exists $candidateAllowed $startNode] ||
+        ![dict exists $candidateAllowed $endNode] ||
+        ![dict exists $neighborGraph $startNode]} {
+        return {}
+    }
+    set queue [list $startNode]
+    set queueIndex 0
+    set parents [dict create $startNode ""]
+    while {$queueIndex < [llength $queue]} {
+        set current [lindex $queue $queueIndex]
+        incr queueIndex
+        foreach neighbor [dict get $neighborGraph $current] {
+            if {![dict exists $candidateAllowed $neighbor] ||
+                [dict exists $parents $neighbor]} {
+                continue
+            }
+            dict set parents $neighbor $current
+            if {$neighbor == $endNode} {
+                set path [list $endNode]
+                set cursor $endNode
+                while {[dict get $parents $cursor] ne ""} {
+                    set cursor [dict get $parents $cursor]
+                    set path [linsert $path 0 $cursor]
+                }
+                return $path
+            }
+            lappend queue $neighbor
+        }
+        ::MeshSeamWeld::responsiveCheckpoint $queueIndex 256
+    }
+    return {}
+}
+
+proc ::MeshSeamWeld::matchVariableTargetPathNodes {sourceNodes candidateNodes {closedLoop 0} {anchorNodes {}}} {
+    variable lastLocalTargetEdges
+
+    set candidateNodes [lsort -integer -unique $candidateNodes]
+    if {[llength $anchorNodes] == 0} {
+        set anchorNodes [::MeshSeamWeld::nearestCandidateAnchorsFromCoordinates \
+            $sourceNodes $candidateNodes]
+    }
+    if {[llength $anchorNodes] != [llength $sourceNodes]} {
+        error "The post-imprint anchor count does not match the source path."
+    }
+
+    # Consecutive duplicate anchors are expected when the source boundary is
+    # finer than a surrounding cylindrical target.  Keep the ordered angular
+    # landmarks, then recover every intervening target-mesh edge rather than
+    # requiring exactly one target edge per source node.
+    set landmarks {}
+    foreach anchor $anchorNodes {
+        if {[llength $landmarks] == 0 || [lindex $landmarks end] != $anchor} {
+            lappend landmarks $anchor
+        }
+    }
+    if {$closedLoop && [llength $landmarks] > 1 &&
+        [lindex $landmarks 0] == [lindex $landmarks end]} {
+        set landmarks [lrange $landmarks 0 end-1]
+    }
+    set minimum [expr {$closedLoop ? 3 : 2}]
+    if {[llength [lsort -integer -unique $landmarks]] < $minimum} {
+        error "Too few distinct target landmarks were found for a continuous target path."
+    }
+
+    set neighborGraph [::MeshSeamWeld::targetNeighborGraphFromEdges \
+        $lastLocalTargetEdges]
+    set candidateAllowed [dict create]
+    foreach nodeId $candidateNodes { dict set candidateAllowed $nodeId 1 }
+    set segmentCount [expr {$closedLoop ? [llength $landmarks] : [llength $landmarks] - 1}]
+    set targetPath [list [lindex $landmarks 0]]
+    for {set index 0} {$index < $segmentCount} {incr index} {
+        set startNode [lindex $landmarks $index]
+        set endNode [lindex $landmarks \
+            [expr {($index + 1) % [llength $landmarks]}]]
+        set segment [::MeshSeamWeld::shortestTargetGraphPath \
+            $neighborGraph $candidateAllowed $startNode $endNode]
+        if {[llength $segment] < 2} {
+            error "No target-mesh path connects landmarks $startNode and $endNode."
+        }
+        if {$closedLoop && $index == $segmentCount - 1} {
+            set targetPath [concat $targetPath [lrange $segment 1 end-1]]
+        } else {
+            set targetPath [concat $targetPath [lrange $segment 1 end]]
+        }
+    }
+    if {[llength [lsort -integer -unique $targetPath]] != [llength $targetPath]} {
+        error "The landmark-guided target path self-intersects or revisits a target node."
+    }
+    ::HybridCore::log INFO \
+        "imprint target_path=landmark_graph source_nodes=[llength $sourceNodes] landmarks=[llength $landmarks] target_nodes=[llength $targetPath] closed_loop=$closedLoop"
+    return $targetPath
 }
 
 proc ::MeshSeamWeld::matchContinuousTargetPathNodes {sourceNodes candidateNodes {closedLoop 0} {anchorNodes {}}} {
@@ -2995,7 +3122,7 @@ proc ::MeshSeamWeld::markTargetElementsForProjection {targetComps markId} {
     error "Could not mark target elements for local projection."
 }
 
-proc ::MeshSeamWeld::projectNodesToTargetComponents {sourceNodes targetComps} {
+proc ::MeshSeamWeld::projectNodesToTargetComponents {sourceNodes targetComps {closedLoop 0}} {
     if {[llength [info commands hm_getclosestnode]] == 0} {
         error "hm_getclosestnode is unavailable."
     }
@@ -3022,10 +3149,96 @@ proc ::MeshSeamWeld::projectNodesToTargetComponents {sourceNodes targetComps} {
         incr projectedCount
         ::MeshSeamWeld::responsiveCheckpoint $projectedCount 64
     }
+
+    # A closed source boundary may sit inside a surrounding cylindrical target.
+    # On a coarse cylinder, nearest-node queries made at the inner radius can
+    # collapse several angular positions onto one target node.  That leaves the
+    # local patch without enough circumferential seed elements even though the
+    # actual target surface surrounds the complete loop.  When that specific
+    # signature is present, estimate the enclosing radius from the first-pass
+    # targets and query once more along each center-to-boundary ray.  These
+    # nodes enlarge only the local patch; imprint still uses the original
+    # source path, so ordinary parallel/open welds retain their old behavior.
+    set patchNodes [::MeshSeamWeld::uniq [dict values $projected]]
+    set radialAssist 0
+    set sourceCount [llength $sourceNodes]
+    set uniqueCount [llength $patchNodes]
+    set minimumCoverage [expr {int(ceil(0.75 * max(1, $sourceCount)))}]
+    set projectionCenter {}
+    if {$closedLoop} {
+        set projectionCenter [::MeshSeamWeld::pathCenter $sourceNodes]
+    } elseif {$sourceCount >= 3} {
+        set projectionCenter [::MeshSeamWeld::circumcenterFromPath $sourceNodes]
+    }
+    if {$sourceCount >= 3 && $uniqueCount < $minimumCoverage &&
+        [dict size $errors] == 0 && [llength $projectionCenter] == 3} {
+        set center $projectionCenter
+        set sourceRadiusTotal 0.0
+        set validSourceRadii 0
+        foreach sourceNode $sourceNodes {
+            set radial [::MeshSeamWeld::vsub \
+                [::MeshSeamWeld::nodeXYZ $sourceNode] $center]
+            set radius [expr {sqrt([::MeshSeamWeld::dot $radial $radial])}]
+            if {$radius > 1.0e-9} {
+                set sourceRadiusTotal [expr {$sourceRadiusTotal + $radius}]
+                incr validSourceRadii
+            }
+        }
+        set targetRadiusTotal 0.0
+        set validTargetRadii 0
+        foreach targetNode $patchNodes {
+            if {[catch {
+                set radial [::MeshSeamWeld::vsub \
+                    [::MeshSeamWeld::nodeXYZ $targetNode] $center]
+                set radius [expr {sqrt([::MeshSeamWeld::dot $radial $radial])}]
+            }]} { continue }
+            if {$radius > 1.0e-9} {
+                set targetRadiusTotal [expr {$targetRadiusTotal + $radius}]
+                incr validTargetRadii
+            }
+        }
+        if {$validSourceRadii > 0 && $validTargetRadii > 0} {
+            set sourceRadius [expr {$sourceRadiusTotal / $validSourceRadii}]
+            set targetRadius [expr {$targetRadiusTotal / $validTargetRadii}]
+            if {$targetRadius > 1.15 * $sourceRadius} {
+                set assistedNodes {}
+                set assistedCount 0
+                foreach sourceNode $sourceNodes {
+                    set radial [::MeshSeamWeld::vsub \
+                        [::MeshSeamWeld::nodeXYZ $sourceNode] $center]
+                    set radius [expr {sqrt([::MeshSeamWeld::dot $radial $radial])}]
+                    if {$radius <= 1.0e-9} { continue }
+                    set probe [::MeshSeamWeld::vadd $center \
+                        [::MeshSeamWeld::vscale $radial \
+                            [expr {$targetRadius / $radius}]]]
+                    foreach {x y z} $probe break
+                    set queryErr ""
+                    if {[catch {
+                        set targetNode [hm_getclosestnode $x $y $z 1 2]
+                    } queryErr] || ![string is integer -strict $targetNode] ||
+                        $targetNode <= 0} {
+                        continue
+                    }
+                    lappend assistedNodes $targetNode
+                    incr assistedCount
+                    ::MeshSeamWeld::responsiveCheckpoint $assistedCount 64
+                }
+                set assistedNodes [::MeshSeamWeld::uniq $assistedNodes]
+                if {[llength $assistedNodes] > $uniqueCount} {
+                    set radialAssist 1
+                    set patchNodes [::MeshSeamWeld::uniq \
+                        [concat $patchNodes $assistedNodes]]
+                    ::HybridCore::log INFO \
+                        "target patch radial_assist source_nodes=$sourceCount direct_seeds=$uniqueCount radial_seeds=[llength $assistedNodes] source_radius=$sourceRadius target_radius=$targetRadius"
+                }
+            }
+        }
+    }
     catch {*clearmark nodes 2}
     catch {*clearmark elems 1}
     catch {*clearmark elements 1}
-    return [dict create projected $projected errors $errors]
+    return [dict create projected $projected errors $errors \
+        patch_nodes $patchNodes radial_assist $radialAssist]
 }
 
 proc ::MeshSeamWeld::expandTargetElementPatch {seedElemIds targetComps {markId 1} {layers ""}} {
@@ -3150,7 +3363,7 @@ proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}
     return $jobs
 }
 
-proc ::MeshSeamWeld::prepareCurrentTargetPatch {sourceNodes targetComps} {
+proc ::MeshSeamWeld::prepareCurrentTargetPatch {sourceNodes targetComps {closedLoop 0}} {
     variable nodeXYZCache
     set sourceNodes [::MeshSeamWeld::uniq $sourceNodes]
     set sourceCoordinates [::HybridCore::readNodeCoordinatesBulk $sourceNodes \
@@ -3160,7 +3373,7 @@ proc ::MeshSeamWeld::prepareCurrentTargetPatch {sourceNodes targetComps} {
     }
 
     set projection [::MeshSeamWeld::projectNodesToTargetComponents \
-        $sourceNodes $targetComps]
+        $sourceNodes $targetComps $closedLoop]
     set projectedMap [dict get $projection projected]
     set projectionErrors [dict get $projection errors]
     set projectedNodes {}
@@ -3173,9 +3386,15 @@ proc ::MeshSeamWeld::prepareCurrentTargetPatch {sourceNodes targetComps} {
         }
         lappend projectedNodes [dict get $projectedMap $sourceNode]
     }
+    set patchNodes $projectedNodes
+    if {[dict exists $projection patch_nodes]} {
+        set patchNodes [dict get $projection patch_nodes]
+    }
     set targetElements [::MeshSeamWeld::localTargetPatchFromProjectedNodes \
-        $projectedNodes $targetComps]
+        $patchNodes $targetComps]
     return [dict create projected_nodes $projectedNodes \
+        patch_nodes $patchNodes \
+        radial_assist [::MeshSeamWeld::dictValueOr $projection radial_assist 0] \
         target_components $targetComps target_elements $targetElements]
 }
 
@@ -3226,6 +3445,49 @@ proc ::MeshSeamWeld::directStripQuadNodeLists {sourceNodes targetNodes {closedLo
     }
     return [::MeshSeamWeld::directStructuredStripQuadNodeLists \
         $crossChains $closedLoop]
+}
+
+proc ::MeshSeamWeld::unequalStripElementNodeLists {sourceNodes targetNodes {closedLoop 0}} {
+    set sourceCount [llength $sourceNodes]
+    set targetCount [llength $targetNodes]
+    if {$sourceCount < [expr {$closedLoop ? 3 : 2}] ||
+        $targetCount < [expr {$closedLoop ? 3 : 2}]} {
+        error "Too few nodes for unequal strip creation."
+    }
+    set sourceSegments [expr {$closedLoop ? $sourceCount : $sourceCount - 1}]
+    set targetSegments [expr {$closedLoop ? $targetCount : $targetCount - 1}]
+    set sourceIndex 0
+    set targetIndex 0
+    set elements {}
+    set epsilon 1.0e-10
+    while {$sourceIndex < $sourceSegments || $targetIndex < $targetSegments} {
+        set sourceNode [lindex $sourceNodes [expr {$sourceIndex % $sourceCount}]]
+        set targetNode [lindex $targetNodes [expr {$targetIndex % $targetCount}]]
+        set nextSourceParameter [expr {$sourceIndex < $sourceSegments ?
+            double($sourceIndex + 1) / $sourceSegments : 2.0}]
+        set nextTargetParameter [expr {$targetIndex < $targetSegments ?
+            double($targetIndex + 1) / $targetSegments : 2.0}]
+        if {abs($nextSourceParameter - $nextTargetParameter) <= $epsilon} {
+            set nextSource [lindex $sourceNodes \
+                [expr {($sourceIndex + 1) % $sourceCount}]]
+            set nextTarget [lindex $targetNodes \
+                [expr {($targetIndex + 1) % $targetCount}]]
+            lappend elements [list $sourceNode $nextSource $nextTarget $targetNode]
+            incr sourceIndex
+            incr targetIndex
+        } elseif {$nextSourceParameter < $nextTargetParameter} {
+            set nextSource [lindex $sourceNodes \
+                [expr {($sourceIndex + 1) % $sourceCount}]]
+            lappend elements [list $sourceNode $nextSource $targetNode]
+            incr sourceIndex
+        } else {
+            set nextTarget [lindex $targetNodes \
+                [expr {($targetIndex + 1) % $targetCount}]]
+            lappend elements [list $sourceNode $nextTarget $targetNode]
+            incr targetIndex
+        }
+    }
+    return $elements
 }
 
 proc ::MeshSeamWeld::createTrackedNodeAtXYZ {xyz} {
@@ -3315,6 +3577,34 @@ proc ::MeshSeamWeld::createDirectSingleLayerStrip {sourceNodes targetNodes outpu
     return [::MeshSeamWeld::createDirectStructuredStrip \
         $sourceNodes $targetNodes 1 $outputCompName $outputCompId \
         $beforeOutputElems $closedLoop]
+}
+
+proc ::MeshSeamWeld::createDirectUnequalStrip {sourceNodes targetNodes outputCompName outputCompId beforeOutputElems {closedLoop 0}} {
+    catch {*currentcollector component $outputCompName}
+    catch {*currentcollector components $outputCompName}
+    set elementPlans [::MeshSeamWeld::unequalStripElementNodeLists \
+        $sourceNodes $targetNodes $closedLoop]
+    set elementIndex 0
+    foreach elementNodes $elementPlans {
+        incr elementIndex
+        set config [expr {[llength $elementNodes] == 3 ? 103 : 104}]
+        if {[catch {
+            eval *createlist nodes 1 $elementNodes
+            *createelement $config 1 1 1
+        } createErr]} {
+            error "Failed to create unequal weld strip element $elementIndex: $createErr"
+        }
+        ::MeshSeamWeld::responsiveCheckpoint $elementIndex 64
+    }
+    set elemIds [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
+        [::MeshSeamWeld::componentElementIds $outputCompId]]
+    if {[llength $elemIds] != [llength $elementPlans]} {
+        error "Unequal weld strip created [llength $elemIds]/[llength $elementPlans] expected elements."
+    }
+    ::MeshSeamWeld::moveElemsToComponent $elemIds $outputCompName
+    ::HybridCore::log INFO \
+        "weld_mesh creation_mode=direct_topology_zipper source_nodes=[llength $sourceNodes] target_nodes=[llength $targetNodes] elements=[llength $elemIds] closed_loop=$closedLoop"
+    return $elemIds
 }
 
 proc ::MeshSeamWeld::monotonicClosestNodePairs {sourceNodes targetNodes} {
@@ -3420,9 +3710,23 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
 
     set completeCorrespondence [expr {
         [llength $sourceNodes] == [llength $targetNodes]}]
-    if {$completeCorrespondence && [llength $targetComps] > 0} {
-        set completeCorrespondence [::MeshSeamWeld::targetPathIsContinuous \
+    set targetContinuous 1
+    if {[llength $targetComps] > 0} {
+        set targetContinuous [::MeshSeamWeld::targetPathIsContinuous \
             $targetNodes $targetComps $closedLoop]
+    }
+    if {$completeCorrespondence && [llength $targetComps] > 0} {
+        set completeCorrespondence $targetContinuous
+    }
+
+    # Source and target circumferences commonly have different mesh counts.
+    # When both paths are topologically continuous, connect them as a zipper
+    # of TRI3/QUAD4 elements instead of discarding every non-1:1 section.
+    if {!$completeCorrespondence && $targetContinuous &&
+        [llength $sourceNodes] != [llength $targetNodes]} {
+        return [::MeshSeamWeld::createDirectUnequalStrip \
+            $sourceNodes $targetNodes $outputCompName $outputCompId \
+            $beforeOutputElems $closedLoop]
     }
 
     if {!$completeCorrespondence} {
@@ -4029,7 +4333,7 @@ proc ::MeshSeamWeld::runAction {} {
                 }
                 if {[catch {
                     set currentTarget [::MeshSeamWeld::prepareCurrentTargetPatch $sourceNodes \
-                        $jobTargetComps]
+                        $jobTargetComps $jobClosedLoop]
                     set jobTargetComps [dict get $currentTarget target_components]
                     set jobTargetElems [dict get $currentTarget target_elements]
                     dict set job target_components $jobTargetComps
@@ -4198,5 +4502,5 @@ proc ::MeshSeamWeld::run {} {
 # exporter.tcl as opt-in legacy helpers, but do not load Python/FEM commands
 # into the normal module runtime.
 foreach hybridFile {executor.tcl workflow.tcl} {
-    source [file join $::MeshSeamWeld::MODULE_DIR tcl $hybridFile]
+    ::HWFlow::sourceUtf8 [file join $::MeshSeamWeld::MODULE_DIR tcl $hybridFile]
 }

@@ -112,6 +112,7 @@ proc ::hmtoolkit::seam::ui::show {{settingsOnly 0} {initialContext {}}} {
         {angle_parallel_max "平行角度上限" "Parallel angle max"}
         {angle_perpendicular_min "垂直角度下限" "Perpendicular angle min"}
         {distance_tolerance "距离容差" "Distance tolerance"}
+        {stitch_tolerance "拓扑缝合容差" "Topology stitch tolerance"}
         {min_seam_length "最小焊缝长度" "Minimum seam length"}
         {point_spacing "分布点间距" "Point spacing"}
         {auto_accept_confidence "自动接受置信度" "Auto-accept confidence"}
@@ -149,14 +150,14 @@ proc ::hmtoolkit::seam::ui::show {{settingsOnly 0} {initialContext {}}} {
     button $window.buttons.close -text [::HWFlow::txt "关闭" "Close"] -command ::hmtoolkit::seam::ui::close
     pack $window.buttons.close $window.buttons.save -side right -padx 4
     wm protocol $window WM_DELETE_WINDOW ::hmtoolkit::seam::ui::close
-    bind $window <Escape> ::hmtoolkit::seam::ui::close
+    bind $window <Escape> ::hmtoolkit::seam::ui::handle_escape
     ::hmtoolkit::seam::ui::center $window
     return $window
 }
 
 proc ::hmtoolkit::seam::ui::save_settings {} {
     variable ::hmtoolkit::seam::config
-    foreach key {angle_parallel_max angle_perpendicular_min distance_tolerance min_seam_length point_spacing auto_accept_confidence review_confidence} {
+    foreach key {angle_parallel_max angle_perpendicular_min distance_tolerance stitch_tolerance min_seam_length point_spacing auto_accept_confidence review_confidence} {
         if {![string is double -strict $config($key)] || $config($key) <= 0.0} {
             ::hmtoolkit::seam::ui::set_status "$key must be a positive number."
             return 0
@@ -332,17 +333,78 @@ proc ::hmtoolkit::seam::ui::create_candidate {} {
 
 proc ::hmtoolkit::seam::ui::run_precise {strategy} {
     variable ::hmtoolkit::seam::runtime
-    if {$runtime(context_data) ne "" && $strategy in {T_PATH T_LIST L_SURF L_LIST CONNECT PROJECT}} {
-        set candidates [::hmtoolkit::seam::ui::analyze_context $runtime(context_data) $strategy]
-        if {[llength $candidates] == 0} {
-            ::hmtoolkit::seam::ui::set_status [::HWFlow::txt "传入范围内没有找到适用于该精确类型的候选。" "No candidate for this precise type was found in the incoming scope."]
-        } else {
-            ::hmtoolkit::seam::ui::set_status [::HWFlow::txt "已针对传入范围完成精确识别，请复核后确认创建。" "Precise recognition used the incoming scope; review and confirm creation."]
+    if {$strategy in {T_PATH T_LIST L_SURF L_LIST CONNECT PROJECT}} {
+        return [::hmtoolkit::seam::ui::run_continuous $strategy]
+    }
+    ::hmtoolkit::seam::ui::dismiss_window
+    set result [::hmtoolkit::seam::interactive::run $strategy]
+    ::hmtoolkit::seam::ui::show_result $result
+    return $result
+}
+
+proc ::hmtoolkit::seam::ui::show_result {result} {
+    if {[dict exists $result message]} {
+        set message [dict get $result message]
+        ::hmtoolkit::seam::ui::set_status $message
+        if {[dict exists $result success] && ![dict get $result success] &&
+            (![dict exists $result cancelled] || ![dict get $result cancelled])} {
+            catch {hm_errormessage $message}
         }
+    }
+    return $result
+}
+
+proc ::hmtoolkit::seam::ui::run_continuous {strategy} {
+    variable ::hmtoolkit::seam::runtime
+    if {$runtime(active_strategy) ne ""} {
+        return [dict create success 0 cancelled 0 message [::HWFlow::txt \
+            "已有连续创建任务正在运行。" "A continuous creation task is already active."]]
+    }
+
+    set runtime(active_strategy) $strategy
+    set completed 0
+    set result [dict create success 0 cancelled 1 message "Operation cancelled."]
+    ::hmtoolkit::seam::ui::set_status [::HWFlow::txt \
+        "已进入连续创建模式；完成一次后可继续选择，按 Esc 退出。" \
+        "Continuous creation is active; select again after each result, or press Esc to exit."]
+    ::hmtoolkit::seam::ui::dismiss_window
+
+    set code [catch {
+        while {$runtime(active_strategy) eq $strategy} {
+            set result [::hmtoolkit::seam::interactive::run $strategy]
+            if {[dict exists $result cancelled] && [dict get $result cancelled]} {
+                break
+            }
+            if {[dict exists $result success] && [dict get $result success]} {
+                incr completed
+            }
+            ::hmtoolkit::seam::ui::show_result $result
+            if {[dict exists $result message]} {
+                ::hmtoolkit::seam::ui::set_status "[dict get $result message]  [::HWFlow::txt {继续选择，按 Esc 退出。} {Select again, or press Esc to exit.}]"
+            }
+            catch {update idletasks}
+        }
+    } value options]
+    set runtime(active_strategy) ""
+    if {$code} {
+        return -options $options $value
+    }
+
+    ::hmtoolkit::seam::ui::set_status [::HWFlow::txt \
+        "已退出连续创建模式，本次完成 $completed 次。" \
+        "Continuous creation ended after $completed completed operation(s)."]
+    return $result
+}
+
+proc ::hmtoolkit::seam::ui::handle_escape {} {
+    variable ::hmtoolkit::seam::runtime
+    if {$runtime(active_strategy) ne ""} {
+        set runtime(active_strategy) ""
+        ::hmtoolkit::seam::ui::set_status [::HWFlow::txt \
+            "正在退出连续创建模式。" "Exiting continuous creation mode."]
         return
     }
-    set result [::hmtoolkit::seam::interactive::run $strategy]
-    if {[dict exists $result message]} { ::hmtoolkit::seam::ui::set_status [dict get $result message] }
+    ::hmtoolkit::seam::ui::close
 }
 
 proc ::hmtoolkit::seam::ui::shortcut_accept_context {context} {
@@ -386,16 +448,17 @@ proc ::hmtoolkit::seam::ui::shortcut_selector_panel {} {
 }
 
 proc ::hmtoolkit::seam::ui::run_shortcut {} {
-    variable ::hmtoolkit::seam::config
-    ::hmtoolkit::seam::config::load
-    if {$config(shortcut_selector_mode) eq "CONFIG"} {
-        return [::hmtoolkit::seam::ui::shortcut_select_scope $config(shortcut_scope)]
-    }
-    return [::hmtoolkit::seam::ui::shortcut_selector_panel]
+    return [::hmtoolkit::seam::open_panel]
 }
 
-proc ::hmtoolkit::seam::ui::close {} {
+proc ::hmtoolkit::seam::ui::dismiss_window {} {
     variable window
     ::hmtoolkit::seam::ui::restore_view
     catch {destroy $window}
+}
+
+proc ::hmtoolkit::seam::ui::close {} {
+    variable ::hmtoolkit::seam::runtime
+    set runtime(active_strategy) ""
+    ::hmtoolkit::seam::ui::dismiss_window
 }

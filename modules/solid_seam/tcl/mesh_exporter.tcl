@@ -25,7 +25,8 @@ proc ::SolidSeam::exportSelectedFem {} {
             if {[llength [hm_getmark elems 1]] == 0 || [llength [hm_getmark nodes 1]] == 0} {
                 error [::SolidSeam::txt "Component $componentId 中没有可导出的网格。" "Component $componentId contains no exportable mesh."]
             }
-            *feoutput_select $template $path 1 0 0
+            ::HWFlow::runHyperMeshIo export \
+                [list *feoutput_select $template $path 1 0 0] $path
         } err opts]
         catch {*clearmark elems 1}; catch {*clearmark nodes 1}
         if {$code} { return -options $opts $err }

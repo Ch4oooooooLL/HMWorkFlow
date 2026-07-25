@@ -82,17 +82,28 @@ class FemGeneratorTests(unittest.TestCase):
             + self.model.groups["PROCESSABLE_NARROW_QUAD"]
         )
         regions = [{"region_id": "Region_0001", "failed_elements": automatic_ids, "anchor_nodes": []}]
-        actions = plan_optimization_actions(elements, automatic_ids, self.model.nodes, regions)
+        actions = plan_optimization_actions(
+            elements,
+            automatic_ids,
+            self.model.nodes,
+            regions,
+            allow_internal_quad_expansion=True,
+        )
         by_element = {action["element_id"]: action["action_type"] for action in actions}
         actions_by_element = {}
         for action in actions:
             actions_by_element.setdefault(action["element_id"], []).append(action)
         self.assertTrue(all(by_element[element_id] == "split_quad" for element_id in self.model.groups["PROCESSABLE_SPLIT_QUAD"]))
         self.assertTrue(all(by_element[element_id] == "collapse_short_edge" for element_id in self.model.groups["PROCESSABLE_SKINNY_TRIA"]))
-        self.assertTrue(all(by_element[element_id] == "collapse_short_edge" for element_id in self.model.groups["PROCESSABLE_NARROW_QUAD"]))
+        self.assertTrue(all(by_element[element_id] == "expand_internal_quad" for element_id in self.model.groups["PROCESSABLE_NARROW_QUAD"]))
         self.assertTrue(all(
-            len(actions_by_element[element_id]) == 2
-            and len({frozenset((action["node_a"], action["node_b"])) for action in actions_by_element[element_id]}) == 2
+            len(actions_by_element[element_id]) == 1
+            and len({
+                actions_by_element[element_id][0]["node_a"],
+                actions_by_element[element_id][0]["node_b"],
+                actions_by_element[element_id][0]["reference_a"],
+                actions_by_element[element_id][0]["reference_b"],
+            }) == 4
             for element_id in self.model.groups["PROCESSABLE_NARROW_QUAD"]
         ))
 

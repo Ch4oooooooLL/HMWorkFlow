@@ -1,8 +1,8 @@
 set hybridCoreTclDir [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] hybrid_core tcl]
 if {![namespace exists ::HybridCore]} {
-    source [file join $hybridCoreTclDir init.tcl]
+    source -encoding utf-8 [file join $hybridCoreTclDir init.tcl]
 } else {
-    source [file join $hybridCoreTclDir incremental_import.tcl]
+    source -encoding utf-8 [file join $hybridCoreTclDir incremental_import.tcl]
 }
 unset hybridCoreTclDir
 proc ::RB2Bolt::runPythonPlanning {elemIds {progressStart 10.0} {progressEnd 65.0}} {

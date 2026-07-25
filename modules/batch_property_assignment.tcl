@@ -4,7 +4,8 @@
 # Recognized key fields:
 #   Vxx_<part>_T<thickness><ignored text>_..._<material>
 #   <text containing SEAM>...T<thickness><ignored text> (material is Steel)
-# Existing properties and 1D-name keywords BEAM/RBE/BUSH/SPRING are skipped.
+# HyperMesh-native empty components, existing properties, and 1D-name
+# keywords BEAM/RBE/BUSH/SPRING are skipped.
 #
 # Failed/unrecognized components stay untouched.  An empty component
 # collector is created in PROPERTY_ASSIGNMENT_REVIEW so the Model Browser
@@ -102,6 +103,25 @@ proc ::BatchPropertyAssignment::allEntityIds {entityTypes} {
 
 proc ::BatchPropertyAssignment::allComponentIds {} {
     return [::BatchPropertyAssignment::allEntityIds {comps components}]
+}
+
+proc ::BatchPropertyAssignment::nativeEmptyComponentIds {} {
+    # This is the Tcl command behind HyperMesh's Delete > preview empty
+    # operation.  It applies HyperMesh's own component-empty definition in a
+    # single database scan, including geometry and attributes, instead of
+    # approximating emptiness by checking only elements.
+    catch {*clearmark comps 2}
+    if {[catch {*EntityPreviewEmpty comps 2} previewError]} {
+        catch {*clearmark comps 2}
+        error "HyperMesh empty-component preview failed: $previewError"
+    }
+    set emptyIds {}
+    if {[catch {set emptyIds [hm_getmark comps 2]} markError]} {
+        catch {*clearmark comps 2}
+        error "cannot read HyperMesh empty-component mark: $markError"
+    }
+    catch {*clearmark comps 2}
+    return [lsort -integer -unique $emptyIds]
 }
 
 proc ::BatchPropertyAssignment::componentName {componentId} {
@@ -299,6 +319,7 @@ proc ::BatchPropertyAssignment::execute {} {
     variable REVIEW_ASSEMBLY
     variable REVIEW_PREFIX
     set componentIds [::BatchPropertyAssignment::allComponentIds]
+    set emptyComponentIds [::BatchPropertyAssignment::nativeEmptyComponentIds]
     set sourceRows {}
     foreach componentId $componentIds {
         set name [::BatchPropertyAssignment::componentName $componentId]
@@ -308,6 +329,7 @@ proc ::BatchPropertyAssignment::execute {} {
 
     set total [llength $sourceRows]
     set assignedCount 0
+    set skippedEmpty {}
     set skippedExisting {}
     set skippedOneDimensional {}
     set createdProperties {}
@@ -323,6 +345,11 @@ proc ::BatchPropertyAssignment::execute {} {
                 [::HWFlow::txt "$index / $total" "$index / $total"] 1}
         }
 
+        if {$componentId in $emptyComponentIds} {
+            lappend skippedEmpty $componentName
+            ::BatchPropertyAssignment::appendProgress "$componentName: HyperMesh 识别为空 component，跳过"
+            continue
+        }
         if {[::BatchPropertyAssignment::componentHasAnyProperty $componentId]} {
             lappend skippedExisting $componentName
             ::BatchPropertyAssignment::appendProgress "$componentName: 已有关联 Property，跳过"
@@ -377,6 +404,8 @@ proc ::BatchPropertyAssignment::execute {} {
     return [dict create \
         scanned $total \
         assigned $assignedCount \
+        skipped_empty [llength $skippedEmpty] \
+        skipped_empty_names $skippedEmpty \
         skipped_existing [llength $skippedExisting] \
         skipped_existing_names $skippedExisting \
         skipped_1d [llength $skippedOneDimensional] \
@@ -390,8 +419,8 @@ proc ::BatchPropertyAssignment::execute {} {
 proc ::BatchPropertyAssignment::runAction {} {
     set title [::HWFlow::txt "批量赋予 Property 和材料" "Batch Property and Material Assignment"]
     set prompt [::HWFlow::txt \
-        "将扫描全部 component，从普通件名称提取 T 后数字和最后的材料字段；名称含 SEAM 时只提取厚度。已有 Property，以及名称含 BEAM/RBE/BUSH/SPRING 的 1D component 会直接跳过。\n\n无法识别、材料缺失或赋予失败的 component 会以空 collector 名称副本列入 PROPERTY_ASSIGNMENT_REVIEW；原 component 不会被移动。是否继续？" \
-        "Scan all components, extracting the number after T and the final material field for regular parts; names containing SEAM only contribute thickness. Components with an existing property and 1D names containing BEAM/RBE/BUSH/SPRING are skipped.\n\nUnrecognized or failed components will be listed as empty name-only collectors in PROPERTY_ASSIGNMENT_REVIEW; source components are not moved. Continue?"]
+        "将扫描全部 component，并先使用 HyperMesh 原生功能识别和跳过空 component；随后从普通件名称提取 T 后数字和最后的材料字段，名称含 SEAM 时只提取厚度。已有 Property，以及名称含 BEAM/RBE/BUSH/SPRING 的 1D component 也会直接跳过。\n\n无法识别、材料缺失或赋予失败的非空 component 会以空 collector 名称副本列入 PROPERTY_ASSIGNMENT_REVIEW；原 component 不会被移动。是否继续？" \
+        "Scan all components and first use HyperMesh's native empty-component detection to skip empty components. Then extract the number after T and the final material field for regular parts; names containing SEAM only contribute thickness. Components with an existing property and 1D names containing BEAM/RBE/BUSH/SPRING are also skipped.\n\nUnrecognized or failed non-empty components will be listed as empty name-only collectors in PROPERTY_ASSIGNMENT_REVIEW; source components are not moved. Continue?"]
     if {[llength [info commands tk_messageBox]] > 0} {
         set answer [tk_messageBox -icon question -type yesno -default no -title $title -message $prompt]
         if {$answer ne "yes"} {return}
@@ -413,6 +442,7 @@ proc ::BatchPropertyAssignment::runAction {} {
 
     set scanned [dict get $result scanned]
     set assigned [dict get $result assigned]
+    set skippedEmpty [dict get $result skipped_empty]
     set skippedExisting [dict get $result skipped_existing]
     set skippedOneDimensional [dict get $result skipped_1d]
     set properties [dict get $result property_names]
@@ -425,8 +455,8 @@ proc ::BatchPropertyAssignment::runAction {} {
     }
 
     set message [::HWFlow::txt \
-        "批量赋予完成。\n\n扫描 component：$scanned\n成功赋予：$assigned\n已有 Property 跳过：$skippedExisting\n1D 关键词跳过：$skippedOneDimensional\nProperty 分类数：[llength $properties]\n待人工复核：[llength $failures]\n复核 assembly：[dict get $result review_assembly]" \
-        "Batch assignment complete.\n\nComponents scanned: $scanned\nAssigned: $assigned\nSkipped with existing property: $skippedExisting\nSkipped by 1D keyword: $skippedOneDimensional\nProperty groups: [llength $properties]\nManual review: [llength $failures]\nReview assembly: [dict get $result review_assembly]"]
+        "批量赋予完成。\n\n扫描 component：$scanned\n成功赋予：$assigned\nHyperMesh 识别空组件跳过：$skippedEmpty\n已有 Property 跳过：$skippedExisting\n1D 关键词跳过：$skippedOneDimensional\nProperty 分类数：[llength $properties]\n待人工复核：[llength $failures]\n复核 assembly：[dict get $result review_assembly]" \
+        "Batch assignment complete.\n\nComponents scanned: $scanned\nAssigned: $assigned\nSkipped as empty by HyperMesh: $skippedEmpty\nSkipped with existing property: $skippedExisting\nSkipped by 1D keyword: $skippedOneDimensional\nProperty groups: [llength $properties]\nManual review: [llength $failures]\nReview assembly: [dict get $result review_assembly]"]
     if {[llength $failures] > 0} {
         set preview {}
         foreach row [lrange $failures 0 7] {

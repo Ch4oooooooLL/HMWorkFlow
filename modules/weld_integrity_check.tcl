@@ -1,9 +1,9 @@
 # Mesh-post weld integrity review module for HyperMesh 2019.
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] workflow_common.tcl]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] workflow_common.tcl]
 }
 if {![namespace exists ::HybridCore]} {
-    source [file join [file dirname [file normalize [info script]]] hybrid_core tcl init.tcl]
+    ::HWFlow::sourceUtf8 [file join [file dirname [file normalize [info script]]] hybrid_core tcl init.tcl]
 }
 
 namespace eval ::WeldIntegrityCheck {
@@ -43,5 +43,5 @@ namespace eval ::WeldIntegrityCheck {
 }
 
 foreach fileName {core.tcl exporter.tcl review.tcl ui.tcl} {
-    source [file join $::WeldIntegrityCheck::MODULE_DIR tcl $fileName]
+    ::HWFlow::sourceUtf8 [file join $::WeldIntegrityCheck::MODULE_DIR tcl $fileName]
 }

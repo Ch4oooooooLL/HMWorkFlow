@@ -60,7 +60,11 @@ class Operation:
         }
 
     def dedupe_key(self) -> Tuple[object, ...]:
-        if self.operation_type in ("collapse_short_edge", "expand_free_edge"):
+        if self.operation_type in (
+            "collapse_short_edge",
+            "expand_free_edge",
+            "expand_triangle_short_edge",
+        ):
             first = int(self.legacy_action.get("node_a", 0))
             second = int(self.legacy_action.get("node_b", 0))
             return (self.operation_type, edge_key(first, second))
@@ -71,6 +75,8 @@ class Operation:
 PRIORITY = {
     "collapse_short_edge": 0,
     "expand_free_edge": 1,
+    "expand_internal_quad": 1,
+    "expand_triangle_short_edge": 1,
     "split_quad": 2,
     "manual_review": 3,
 }
@@ -108,6 +114,19 @@ def adapt_existing_actions(actions: Iterable[Mapping[str, object]], state: MeshS
             affected_nodes.update(
                 {int(action.get("reference_a", 0)), int(action.get("reference_b", 0))}
             )
+        elif action_type == "expand_triangle_short_edge":
+            moving = {int(action["node_a"]), int(action["node_b"])}
+            access.write_nodes.update(moving)
+            access.write_elements.update(state.affected_elements(moving, rings=0))
+        elif action_type == "expand_internal_quad":
+            move_mode = int(action.get("move_mode", 0))
+            moving = set()
+            if move_mode in (0, 1):
+                moving.update((int(action["node_a"]), int(action["node_b"])))
+            if move_mode in (0, 2):
+                moving.update((int(action["reference_a"]), int(action["reference_b"])))
+            access.write_nodes.update(moving)
+            access.write_elements.update(state.affected_elements(moving, rings=0))
         operation_id = "OP_{:06d}".format(index)
         operations.append(
             Operation(
@@ -123,6 +142,7 @@ def adapt_existing_actions(actions: Iterable[Mapping[str, object]], state: MeshS
                 metadata={
                     "region_id": str(action["region_id"]),
                     "reason": str(action.get("reason", "")),
+                    "chain_id": int(action.get("split_method", 0)),
                     "hm_managed_entity_ids": action_type in ("split_quad", "collapse_short_edge"),
                 },
                 legacy_action=action,

@@ -269,9 +269,11 @@ proc ::RB2Bolt::importIncrementalFem {payload {progressStart 65.0} {progressEnd 
     *createstringarray 2 "ASSIGNPROP_BYHMCOMMENTS " "ASSIGNPROP_ONELEMS "
     set code [catch {
         if {$reuseExistingNodeIds} {
-            *feinputwithdata2 $reader [file nativename $incrementalFem] 1 0 0 0 0 1 2 1 0
+            ::HWFlow::runHyperMeshIo import [list *feinputwithdata2 $reader \
+                [file nativename $incrementalFem] 1 0 0 0 0 1 2 1 0]
         } else {
-            *feinputwithdata2 $reader [file nativename $incrementalFem] 0 0 0 0 0 1 2 1 0
+            ::HWFlow::runHyperMeshIo import [list *feinputwithdata2 $reader \
+                [file nativename $incrementalFem] 0 0 0 0 0 1 2 1 0]
         }
     } importError importOptions]
     if {$code} {

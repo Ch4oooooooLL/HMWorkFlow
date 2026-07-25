@@ -4,7 +4,7 @@
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
 
 namespace eval ::HWShortcut {
@@ -655,7 +655,7 @@ proc ::HWShortcut::loaderBlock {} {
     lappend lines [list set hmworkflowBootstrap $bootstrap]
     lappend lines {if {[file exists $hmworkflowBootstrap]} {
     if {[catch {
-        source $hmworkflowBootstrap
+        source -encoding utf-8 $hmworkflowBootstrap
     } hmworkflowShortcutError]} {
         puts "HMWorkFlow shortcut initialization failed:"
         puts $hmworkflowShortcutError

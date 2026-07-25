@@ -216,7 +216,8 @@ proc ::HybridCore::importRigidDelta {title summary centerResolver nodesResolver 
     ::HybridCore::progressUpdate $progressStart $title "Importing incremental RIGIDS FEM..." 1
     *createstringarray 2 "ASSIGNPROP_BYHMCOMMENTS " "ASSIGNPROP_ONELEMS "
     set code [catch {
-        *feinputwithdata2 $reader [file nativename $incrementalFem] 0 0 0 0 0 1 2 1 0
+        ::HWFlow::runHyperMeshIo import [list *feinputwithdata2 $reader \
+            [file nativename $incrementalFem] 0 0 0 0 0 1 2 1 0]
     } importError importOptions]
     if {$code} {
         ::HybridCore::cleanupIncrementalEntities $elementIds $nodeIds $componentIds

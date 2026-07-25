@@ -140,6 +140,19 @@ proc ::hmtoolkit::seam::selector::list_panel {mode listId prompt} {
     return [dict create valid 1 ids $ids]
 }
 
+proc ::hmtoolkit::seam::selector::surface_list_panel {listId prompt} {
+    catch {*createlist surfs $listId}
+    *createlistpanel surfs $listId $prompt
+    set ids {}
+    catch {set ids [hm_getlist surfs $listId]}
+    catch {*createlist surfs $listId}
+    set ids [lsort -integer -unique $ids]
+    if {[llength $ids] == 0} {
+        return [dict create valid 0 cancelled 1 message "Operation cancelled."]
+    }
+    return [dict create valid 1 ids $ids]
+}
+
 proc ::hmtoolkit::seam::selector::surfaces_for_lines {lineIds} {
     set surfaces {}
     foreach lineId $lineIds {
@@ -196,10 +209,13 @@ proc ::hmtoolkit::seam::selector::select_analysis_scope {scope} {
 proc ::hmtoolkit::seam::selector::select_strategy_input {strategy} {
     switch -- $strategy {
         T_PATH - T_LIST - L_LIST {
-            set mode [expr {$strategy eq "T_PATH" ? "PATH" : "LIST"}]
-            set lines [::hmtoolkit::seam::selector::list_panel $mode 1 "Select seam lines"]
+            set lines [::hmtoolkit::seam::selector::list_panel PATH 1 "Select seam lines"]
             if {![dict get $lines valid]} { return $lines }
-            set targets [::hmtoolkit::seam::selector::mark_panel surfs 2 "Select target surfaces"]
+            if {$strategy eq "L_LIST"} {
+                set targets [::hmtoolkit::seam::selector::surface_list_panel 2 "Select one or more target surfaces"]
+            } else {
+                set targets [::hmtoolkit::seam::selector::mark_panel surfs 2 "Select target surfaces"]
+            }
             if {![dict get $targets valid]} { return $targets }
             set source [::hmtoolkit::seam::selector::surfaces_for_lines [dict get $lines ids]]
             return [dict create valid 1 seam_lines [dict get $lines ids] source_surfs $source target_surfs [dict get $targets ids] \
@@ -216,19 +232,25 @@ proc ::hmtoolkit::seam::selector::select_strategy_input {strategy} {
                 target_components [::hmtoolkit::seam::selector::components_for_surfaces [dict get $target ids]]]
         }
         CONNECT {
-            set first [::hmtoolkit::seam::selector::list_panel LIST 1 "Select the first edge group"]
+            set first [::hmtoolkit::seam::selector::list_panel PATH 1 "Select the first edge group"]
             if {![dict get $first valid]} { return $first }
-            set second [::hmtoolkit::seam::selector::list_panel LIST 2 "Select the second edge group"]
+            set second [::hmtoolkit::seam::selector::list_panel PATH 2 "Select the second edge group"]
             if {![dict get $second valid]} { return $second }
             set surfaces [::hmtoolkit::seam::selector::surfaces_for_lines [concat [dict get $first ids] [dict get $second ids]]]
             return [dict create valid 1 first_lines [dict get $first ids] second_lines [dict get $second ids] \
                 source_components [::hmtoolkit::seam::selector::components_for_surfaces $surfaces]]
         }
-        PROJECT - SPLIT {
-            set lines [::hmtoolkit::seam::selector::mark_panel lines 2 "Select lines to project/split"]
+        PROJECT {
+            set lines [::hmtoolkit::seam::selector::list_panel PATH 1 "Select projection lines"]
             if {![dict get $lines valid]} { return $lines }
-            set count [expr {$strategy eq "PROJECT" ? 1 : ""}]
-            set target [::hmtoolkit::seam::selector::mark_panel surfs 1 "Select target surfaces" $count]
+            set target [::hmtoolkit::seam::selector::surface_list_panel 2 "Select one or more target surfaces"]
+            if {![dict get $target valid]} { return $target }
+            return [dict create valid 1 seam_lines [dict get $lines ids] target_surfs [dict get $target ids]]
+        }
+        SPLIT {
+            set lines [::hmtoolkit::seam::selector::mark_panel lines 2 "Select lines to split with"]
+            if {![dict get $lines valid]} { return $lines }
+            set target [::hmtoolkit::seam::selector::mark_panel surfs 1 "Select target surfaces"]
             if {![dict get $target valid]} { return $target }
             return [dict create valid 1 seam_lines [dict get $lines ids] target_surfs [dict get $target ids]]
         }

@@ -7,6 +7,7 @@ namespace eval ::hmtoolkit::seam {
         angle_perpendicular_min   75.0
         distance_tolerance        1.0
         endpoint_merge_tolerance  0.1
+        stitch_tolerance          0.2
         min_seam_length           5.0
         point_spacing             7.0
         area_tolerance            1.0e-6
@@ -34,6 +35,7 @@ namespace eval ::hmtoolkit::seam {
         shortcut_panel_scope COMPONENT_PAIR
         prompt_value ""
         prompt_ok 0
+        active_strategy ""
     }
 }
 

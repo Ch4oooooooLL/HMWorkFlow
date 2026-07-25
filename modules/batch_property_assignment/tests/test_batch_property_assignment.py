@@ -108,6 +108,7 @@ class BatchPropertyAssignmentNamingTests(unittest.TestCase):
         self.tcl.eval(
             r"""
 rename ::BatchPropertyAssignment::allComponentIds ::BatchPropertyAssignment::allComponentIds_real
+rename ::BatchPropertyAssignment::nativeEmptyComponentIds ::BatchPropertyAssignment::nativeEmptyComponentIds_real
 rename ::BatchPropertyAssignment::componentName ::BatchPropertyAssignment::componentName_real
 rename ::BatchPropertyAssignment::materialIdByName ::BatchPropertyAssignment::materialIdByName_real
 rename ::BatchPropertyAssignment::componentHasAnyProperty ::BatchPropertyAssignment::componentHasAnyProperty_real
@@ -115,9 +116,10 @@ rename ::BatchPropertyAssignment::isIgnoredOneDimensionalName ::BatchPropertyAss
 rename ::BatchPropertyAssignment::ensureProperty ::BatchPropertyAssignment::ensureProperty_real
 rename ::BatchPropertyAssignment::assignProperty ::BatchPropertyAssignment::assignProperty_real
 rename ::BatchPropertyAssignment::ensureReviewEntry ::BatchPropertyAssignment::ensureReviewEntry_real
-proc ::BatchPropertyAssignment::allComponentIds {} {return {1 2 3 4 5}}
+proc ::BatchPropertyAssignment::allComponentIds {} {return {1 2 3 4 5 6}}
+proc ::BatchPropertyAssignment::nativeEmptyComponentIds {} {return {6}}
 proc ::BatchPropertyAssignment::componentName {id} {
-    return [dict get {1 V01_FLOOR_T10_Q355 2 SEAM_T20 3 BAD_NAME 4 V01_DONE_T3_Q355 5 auto_RBE2_output} $id]
+    return [dict get {1 V01_FLOOR_T10_Q355 2 SEAM_T20 3 BAD_NAME 4 V01_DONE_T3_Q355 5 auto_RBE2_output 6 BAD_EMPTY_NAME} $id]
 }
 proc ::BatchPropertyAssignment::materialIdByName {name} {
     return [dict get {Q355 101 Steel 102} $name]
@@ -142,8 +144,13 @@ proc ::BatchPropertyAssignment::ensureReviewEntry {componentName} {
 """
         )
         result = self.tcl.call("::BatchPropertyAssignment::execute")
-        self.assertEqual(self.tcl.call("dict", "get", result, "scanned"), 5)
+        self.assertEqual(self.tcl.call("dict", "get", result, "scanned"), 6)
         self.assertEqual(self.tcl.call("dict", "get", result, "assigned"), 2)
+        self.assertEqual(self.tcl.call("dict", "get", result, "skipped_empty"), 1)
+        self.assertEqual(
+            self.tcl.splitlist(self.tcl.call("dict", "get", result, "skipped_empty_names")),
+            ("BAD_EMPTY_NAME",),
+        )
         self.assertEqual(self.tcl.call("dict", "get", result, "skipped_existing"), 1)
         self.assertEqual(self.tcl.call("dict", "get", result, "skipped_1d"), 1)
         self.assertEqual(
@@ -154,6 +161,23 @@ proc ::BatchPropertyAssignment::ensureReviewEntry {componentName} {
         property_calls = self.tcl.splitlist(self.tcl.eval("set ::propertyCalls"))
         self.assertEqual(self.tcl.splitlist(property_calls[0]), ("Q355_T10", "10.0", "101"))
         self.assertEqual(self.tcl.splitlist(property_calls[1]), ("SEAM_T20", "20.0", "102"))
+
+    def test_native_empty_detection_uses_hypermesh_preview_empty_once(self):
+        self.tcl.eval(
+            r"""
+set ::previewEmptyCalls {}
+proc *clearmark {entityType markId} {}
+proc *EntityPreviewEmpty {entityType markId} {
+    lappend ::previewEmptyCalls [list $entityType $markId]
+}
+proc hm_getmark {entityType markId} {return {9 3 9}}
+"""
+        )
+        result = self.tcl.call("::BatchPropertyAssignment::nativeEmptyComponentIds")
+        self.assertEqual(self.tcl.splitlist(result), (3, 9))
+        calls = self.tcl.splitlist(self.tcl.eval("set ::previewEmptyCalls"))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.tcl.splitlist(calls[0]), ("comps", "2"))
 
 
 class BatchPropertyAssignmentIntegrationPolicyTests(unittest.TestCase):
@@ -183,6 +207,14 @@ class BatchPropertyAssignmentIntegrationPolicyTests(unittest.TestCase):
         self.assertIn("cardimage=PSHELL", body)
         self.assertIn("*attributeupdatedouble properties $propertyId 95", body)
         self.assertIn("materialid", body)
+
+    def test_empty_components_are_filtered_before_property_checks(self):
+        source = MODULE.read_text(encoding="utf-8")
+        body = source.split("proc ::BatchPropertyAssignment::execute", 1)[1].split(
+            "\nproc ::BatchPropertyAssignment::", 1
+        )[0]
+        self.assertIn("nativeEmptyComponentIds", body)
+        self.assertLess(body.index("componentId in $emptyComponentIds"), body.index("componentHasAnyProperty"))
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
 
 namespace eval ::RB2W {
@@ -734,6 +734,40 @@ proc ::RB2W::resolveUnusedRBE2InternalIds {solverIds} {
             set solverInfo ""
             foreach entityType {elems elements} {
                 if {![catch {set solverInfo [hm_getsolverid $entityType $internalId -byid]}] && [llength $solverInfo] > 0} {
+                    break
+                }
+            }
+            if {[llength $solverInfo] == 0} { continue }
+            set solverId [lindex $solverInfo 0]
+            if {[info exists requested($solverId)] && ![info exists resolved($solverId)]} {
+                set resolved($solverId) $internalId
+            }
+        }
+    }
+
+    # HM2019 can reject every rigid-link mark selector for some solver
+    # profiles, even though the RBE2 cards were exported correctly.  In that
+    # case scan the database element IDs and compare their solver IDs.  This is
+    # deliberately the last fallback because it is slower on large models,
+    # but it does not depend on element config/card-image query support.
+    set needFullScan 0
+    foreach solverId $solverIds {
+        if {![info exists resolved($solverId)]} { set needFullScan 1; break }
+    }
+    if {$needFullScan} {
+        set allElementIds {}
+        catch {*clearmark elems 2}
+        catch {*clearmark elements 2}
+        if {![catch {*createmark elems 2 all}]} {
+            catch {set allElementIds [hm_getmark elems 2]}
+        }
+        catch {*clearmark elems 2}
+        catch {*clearmark elements 2}
+        foreach internalId $allElementIds {
+            set solverInfo ""
+            foreach entityType {elems elements} {
+                if {![catch {set solverInfo [hm_getsolverid $entityType $internalId -byid]}] &&
+                    [llength $solverInfo] > 0} {
                     break
                 }
             }
@@ -2387,6 +2421,7 @@ proc ::RB2W::runCurrentSelection {} {
         }
         set compTotal [llength $comps]
         set compIndex 0
+        set eligibleComps {}
         foreach c $comps {
             incr compIndex
             set cname [RB2W::getComponentName $c]
@@ -2402,7 +2437,10 @@ proc ::RB2W::runCurrentSelection {} {
                     continue
                 }
             }
-            set result [RB2W::processComponent $c $compIndex $compTotal]
+            lappend eligibleComps $c
+        }
+        if {[llength $eligibleComps] > 0} {
+            set result [RB2W::processComponents $eligibleComps]
             set totalCreated [expr {$totalCreated + [lindex $result 0]}]
             set totalSkipped [expr {$totalSkipped + [lindex $result 1]}]
             set totalCandidates [expr {$totalCandidates + [lindex $result 2]}]
@@ -2485,5 +2523,5 @@ proc ::RB2W::runSettings {} {
 }
 
 foreach hybridFile {bridge.tcl exporter.tcl executor.tcl workflow.tcl} {
-    source [file join $::RB2W::MODULE_DIR tcl $hybridFile]
+    ::HWFlow::sourceUtf8 [file join $::RB2W::MODULE_DIR tcl $hybridFile]
 }

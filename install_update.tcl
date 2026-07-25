@@ -31,7 +31,7 @@ proc ::HWInstaller::reloadHybridCore {} {
         namespace delete ::HybridCore
     }
 
-    source $hybridCoreInit
+    source -encoding utf-8 $hybridCoreInit
     if {[llength [info commands ::HybridCore::scheduleInstanceWorker]] == 0} {
         error "HMWorkFlow hybrid Python core did not initialize: $hybridCoreInit"
     }
@@ -50,7 +50,7 @@ proc ::HWInstaller::run {} {
     if {![file exists $coreFile]} {
         error "HMWorkFlow core file not found: $coreFile"
     }
-    source $coreFile
+    source -encoding utf-8 $coreFile
     if {![::HWToolkit::ensureCoreLoaded]} {
         error "HMWorkFlow common modules could not be loaded."
     }

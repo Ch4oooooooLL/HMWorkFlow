@@ -989,9 +989,21 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#mod-cbush-creator" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M7,3V6H5V8H7V16H5V18H7V21H9V18H15V21H17V18H19V16H17V8H19V6H17V3H15V6H9V3H7M9,8H15V16H9V8Z"/></svg>
+                        创建 CBUSH
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#mod-contact-setup" class="nav-link" onclick="activateLink(this)">
                         <svg viewBox="0 0 24 24"><path d="M12,6A6,6 0 0,1 18,12A6,6 0 0,1 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,8A4,4 0 0,0 8,12A4,4 0 0,0 12,16A4,4 0 0,0 16,12A4,4 0 0,0 12,8Z"/></svg>
                         接触创建
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#mod-adhesive-connector" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M7,2H17V7L14,11V20A2,2 0 0,1 12,22A2,2 0 0,1 10,20V11L7,7V2M9,4V6L12,10L15,6V4H9Z"/></svg>
+                        模型打胶
                     </a>
                 </li>
 
@@ -1016,7 +1028,7 @@
                     <svg viewBox="0 0 24 24"><path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"/></svg>
                     <div class="alert-content">
                         <h4>提示：关于已隐藏的模块说明</h4>
-                        <p>本项目包含部分底层与准备工作流模块（例如 Component 分类、材料分配、中面提取、自动 Washer 划分、铸件网格等），这些模块由于仅在开发或快捷键中隐式调用，在主面板中已被设为隐藏，使用本指南时无需关注。您只需处理主面板上可见的 7 大核心模块。</p>
+                        <p>本项目包含部分底层与准备工作流模块（例如 Component 分类、材料分配、中面提取、自动 Washer 划分、铸件网格等），这些模块由于仅在开发或快捷键中隐式调用，在主面板中已被设为隐藏，使用本指南时无需关注。您只需处理主面板上可见的 9 大核心模块。</p>
                     </div>
                 </div>
 
@@ -1091,6 +1103,17 @@
                         </a>
                     </div>
 
+                    <!-- CBUSH Creator Card -->
+                    <div class="dashboard-card" id="card-cbush">
+                        <div class="card-header">
+                            <span class="card-title">创建 CBUSH</span>
+                            <span class="card-badge connector">连接</span>
+                        </div>
+                        <div class="card-path">cbush_creator.tcl</div>
+                        <div class="card-desc">选择一个或多个源节点，分别在全局 Z+5 处创建临时节点，并以 Spring config 21 / CBUSH type 6 连接。</div>
+                        <a href="#mod-cbush-creator" class="card-btn">查看使用说明</a>
+                    </div>
+
                     <!-- Contact Setup Card -->
                     <div class="dashboard-card" id="card-contact">
                         <div class="card-header">
@@ -1103,6 +1126,17 @@
                             <svg viewBox="0 0 24 24"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/></svg>
                             查看详情 & 参数
                         </a>
+                    </div>
+
+                    <!-- Adhesive Connector Card -->
+                    <div class="dashboard-card" id="card-adhesive">
+                        <div class="card-header">
+                            <span class="card-title">模型打胶</span>
+                            <span class="card-badge connector">连接</span>
+                        </div>
+                        <div class="card-path">adhesive_connector.tcl</div>
+                        <div class="card-desc">以 elems 定义 Area location、以 comps 定义 links，清洗投影越界单元后创建 adhesives。</div>
+                        <a href="#mod-adhesive-connector" class="card-btn">查看使用说明</a>
                     </div>
                 </div>
             </section>
@@ -1470,7 +1504,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             该模块（内部命令为 <code>::RB2W::runAction</code>）主要用于为已划分 Washer 网格的钣金壳（Shell）圆孔批量生成刚性连接单元。刚性类型可选 <code>RBE2</code> 或 <code>RBE3</code>，用于适配刚性传力或分布式耦合的建模需要：
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
-                            <li><strong>自动识别标准 Washer 孔环</strong>：扫描选定 Component 的自由边（Free Edges）圆孔，自动筛选孔径处于 <code>6.0mm ~ 30.0mm</code> 之间的孔。</li>
+                            <li><strong>自动识别标准 Washer 孔环</strong>：将用户所选的全部 Components 一次性导出为合并 OptiStruct FEM，由 Python 批量扫描自由边（Free Edges）圆孔并生成增量 FEM，再导回当前 HyperMesh 会话；默认筛选孔径处于 <code>6.0mm ~ 30.0mm</code> 之间的孔。</li>
                             <li><strong>椭圆孔（Oval Holes）适应性</strong>：支持椭圆孔识别，并具有中心偏移容差与长短轴拟合校对功能。</li>
                             <li><strong>防重复建模机制</strong>：在执行前，工具会按孔边界节点集合检查已有 RIGIDS；还可检查源组件与已有输出组件（例如 <code>AUTO_RBE2_&lt;Source&gt;</code>）。发现重复候选会跳过并报告，防止重复建模。</li>
                             <li><strong>未使用 RBE2 清理</strong>：在 More / 设置子页点击按钮后直接导出全模型 FEM，并由 Python 批量检查所有 RBE2。只有中心节点除自身外未被任何其他单元引用的 RBE2 才会被预选；被 CBEAM、其他 RBE2、RBE3 或任意其他单元连接的候选均视为已使用。识别后自动进入 Delete 面板供人工复核。</li>
@@ -1707,15 +1741,37 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 </div>
             </section>
 
+            <!-- Module: CBUSH Creator -->
+            <section id="mod-cbush-creator" class="module-section" data-module="cbush_creator">
+                <h1 class="section-title">6. 创建 CBUSH (CBUSH Creator)</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>源节点 Z+5 CBUSH 快速创建</span></div><div class="detail-path-badge">modules/cbush_creator.tcl</div></div>
+                    <p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">启动后直接打开 HyperMesh 原生节点选择器。选择一个或多个节点并中键确认后，工具逐个读取所属 component，在相同 X/Y、全局 Z+5 处创建临时节点，再创建 <code>Spring config 21 / CBUSH type 6</code> 单元。同一 source component 中的节点会复用同一个 CBUSH 输出 component。</p>
+                    <div class="step-list"><div class="step-item"><span class="step-num">1</span><div class="step-title">选择源节点</div><div class="step-detail">可选择一个或多个节点；中键确认，Esc 取消。</div></div><div class="step-item"><span class="step-num">2</span><div class="step-title">批量创建</div><div class="step-detail">输出 component 名为 <code>CBUSH_&lt;源 component 名称&gt;</code>，每个临时节点的 Z 坐标增加 5；单点失败不影响其余节点。</div></div><div class="step-item"><span class="step-num">3</span><div class="step-title">检查求解属性</div><div class="step-detail">模块仅创建 CBUSH 拓扑；请按项目要求分配并检查 PBUSH 属性、方向和坐标系。</div></div></div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>组件归属必须唯一</h4><p>源节点无法识别所属 component，或同时关联多个 component 时，工具会停止。CBUSH 创建失败时，本次新建的临时节点会自动删除。</p></div></div>
+                </div>
+            </section>
+
             <!-- Module: Contact Setup -->
             <section id="mod-contact-setup" class="module-section" data-module="contact_setup">
-                <h1 class="section-title">6. 接触创建 (Contact Setup)</h1>
+                <h1 class="section-title">7. 接触创建 (Contact Setup)</h1>
                 <div class="module-detail"><div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>两侧 Face 接触面与接触组创建</span></div><div class="detail-path-badge">modules/contact_setup.tcl</div></div>
                     <div class="detail-tabs-nav"><button class="detail-tab-btn active" onclick="switchTab(this, 'contact-desc')">功能与原理</button><button class="detail-tab-btn" onclick="switchTab(this, 'contact-steps')">使用步骤</button><button class="detail-tab-btn" onclick="switchTab(this, 'contact-params')">参数配置表</button><button class="detail-tab-btn" onclick="switchTab(this, 'contact-safety')">安全边界</button></div>
                     <div class="detail-tab-pane active" id="contact-desc"><p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">模块在一次连续选择会话中调用两次 HyperMesh 原生 Face 选择器，再以双向邻近关系筛出空间公共覆盖部分。节点与坐标使用 mark 批量读取，随后创建法向相向的 contact surface 及 OptiStruct CONTACT group。</p></div>
                     <div class="detail-tab-pane" id="contact-steps"><div class="step-list"><div class="step-item"><span class="step-num">1</span><div class="step-title">连续选择两侧 Face</div><div class="step-detail">确认 A 侧后会直接进入 B 侧选择，完成两侧后才恢复工具窗口。</div></div><div class="step-item"><span class="step-num">2</span><div class="step-title">定义接触</div><div class="step-detail">设置 SLIDE、STICK 或 FREEZE 类型和主面策略。</div></div><div class="step-item"><span class="step-num">3</span><div class="step-title">创建并修剪</div><div class="step-detail">从公共覆盖区域创建相向接触面/组；如有需要，使用 Trim 移除单元。</div></div></div></div>
                     <div class="detail-tab-pane" id="contact-params"><div class="param-table-container"><table class="param-table"><thead><tr><th>参数 Key</th><th>默认值</th><th>说明与作用</th></tr></thead><tbody><tr><td><code>contact_type</code></td><td><code>STICK</code></td><td>OptiStruct CONTACT 的 <code>TYPE</code>，可选 <code>SLIDE</code>、<code>STICK</code>、<code>FREEZE</code>。</td></tr><tr><td><code>main_side</code></td><td><code>AUTO</code></td><td>主面策略：自动、第一次选择或第二次选择。</td></tr><tr><td><code>result_prefix</code></td><td><code>AUTO_CONTACT</code></td><td>生成接触面和接触 group 的名称前缀。</td></tr><tr><td><code>try_group</code></td><td><code>1</code></td><td>是否创建并校验 OptiStruct CONTACT group。</td></tr></tbody></table></div></div>
                     <div class="detail-tab-pane" id="contact-safety"><div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>接触定义需要求解器级复核</h4><p>自动主面和参考单元法向校正仅提供起点；接触方向、法向、覆盖范围、摩擦值及接触卡是否被当前求解器完全支持，均应在导出前检查。修剪操作会修改生成的接触面选择范围。</p></div></div><ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>不是通用的间隙搜索或复杂接触自动化工具；接触范围以两次 Face 选择为准。</li><li>两次选择不能包含相同单元；创建前应确认选择的是相向两侧。</li></ul></div>
+                </div>
+            </section>
+
+            <!-- Module: Adhesive Connector -->
+            <section id="mod-adhesive-connector" class="module-section" data-module="adhesive_connector">
+                <h1 class="section-title">8. 模型打胶 (Adhesive Connector)</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>Area / adhesives 创建与越界清洗</span></div><div class="detail-path-badge">modules/adhesive_connector.tcl</div></div>
+                    <p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">模块连续调用两次 HyperMesh 原生选择器：第一次选择 <code>elems</code> 作为 location，第二次选择至少两个 <code>comps</code> 作为 links。创建固定使用 <code>Area / adhesives / no-skip post script</code>。</p>
+                    <div class="step-list"><div class="step-item"><span class="step-num">1</span><div class="step-title">选择 location 与 links</div><div class="step-detail">先选打胶区域壳单元并中键确认，再选择需要连接的组件。</div></div><div class="step-item"><span class="step-num">2</span><div class="step-title">设置参数</div><div class="step-detail"><code>Tolerance=50</code>、<code>Coats=1</code>；厚度固定为 <code>const_thickness</code>，默认值 <code>1</code>。</div></div><div class="step-item"><span class="step-num">3</span><div class="step-title">清洗并创建</div><div class="step-detail">HyperMesh 原生多线程投影会检查每个 location elem 的全部节点；任一节点未被任一非自身目标组件接受，即剔除整个单元。</div></div></div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>投影范围是硬性条件</h4><p>目标组件完整网格不再读入 Tcl；原生搜索直接支持 shell/solid faces，并与 connector 投影规则保持一致。创建后还会检查 connector 是否为 REALIZED。首次投产前请在目标 HM2019 / OptiStruct 环境做 smoke test。</p></div></div>
                 </div>
             </section>
 

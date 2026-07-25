@@ -7,10 +7,10 @@
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
 if {![namespace exists ::HybridCore]} {
-    source [file join [file dirname [file normalize [info script]]] hybrid_core tcl init.tcl]
+    ::HWFlow::sourceUtf8 [file join [file dirname [file normalize [info script]]] hybrid_core tcl init.tcl]
 }
 
 namespace eval ::LocalMeshOptimizer {
@@ -39,6 +39,7 @@ namespace eval ::LocalMeshOptimizer {
         currentReportDir ""
         currentReportPath ""
         backupPath ""
+        recoveryPath ""
         sourceModelPath ""
         lastOutputModel ""
         running 0
@@ -80,6 +81,7 @@ namespace eval ::LocalMeshOptimizer {
         NARROW_TARGET_ASPECT 1.5
         CONTROLLED_EDGE_GROWTH 1.75
         ALLOW_CONTROLLED_FREE_EDGE_MOVE 1
+        ALLOW_INTERNAL_QUAD_EXPANSION 0
         PROTECT_FREE_EDGES 1
         PROTECT_COMPONENT_BOUNDARIES 1
         PROTECT_HOLE_EDGES 1
@@ -806,6 +808,7 @@ proc ::LocalMeshOptimizer::writeTask {scopeIds failedIds} {
         "  \"enable_performance_stats\": [::LocalMeshOptimizer::jsonBool $ui(ENABLE_PERFORMANCE_STATS)]," \
         "  \"debug_batch_files\": [::LocalMeshOptimizer::jsonBool $ui(DEBUG_BATCH_FILES)]," \
         "  \"allow_controlled_free_edge_move\": [::LocalMeshOptimizer::jsonBool $ui(ALLOW_CONTROLLED_FREE_EDGE_MOVE)]," \
+        "  \"allow_internal_quad_expansion\": [::LocalMeshOptimizer::jsonBool $ui(ALLOW_INTERNAL_QUAD_EXPANSION)]," \
         "  \"checked_elements\": [llength $scopeIds]," \
         "  \"failed_before\": [llength $runtime(failedElements)]," \
         "  \"optimizable_failed_before\": [llength $failedIds]," \
@@ -994,12 +997,15 @@ proc ::LocalMeshOptimizer::pythonProgressPulse {stage} {
     if {![file isfile $path]} { return }
     set data [::HWFlow::readTextFile $path]
     if {![regexp {"percent"\s*:\s*([0-9.]+)} $data -> pythonPercent]} { return }
+    set pythonMessage ""
+    catch {regexp {"message"\s*:\s*"([^"]*)"} $data -> pythonMessage}
     if {$stage eq "build-regions"} {
         set percent [expr {83.0 + 0.15 * double($pythonPercent)}]
     } else {
         set percent [expr {96.0 + 0.03 * double($pythonPercent)}]
     }
-    catch {::LocalMeshOptimizer::optimizationProgress $percent [::LocalMeshOptimizer::txt "Python 后台处理中" "Python background processing"] [::LocalMeshOptimizer::txt "阶段：$stage；Python=$pythonPercent%" "Stage: $stage; Python=$pythonPercent%"] 0}
+    if {$pythonMessage eq ""} { set pythonMessage [::LocalMeshOptimizer::txt "阶段：$stage" "Stage: $stage"] }
+    catch {::LocalMeshOptimizer::optimizationProgress $percent [::LocalMeshOptimizer::txt "Python 后台处理中" "Python background processing"] "$pythonMessage；Python=$pythonPercent%" 0}
 }
 
 proc ::LocalMeshOptimizer::runPythonLegacy {stage taskPath} {
@@ -1305,6 +1311,20 @@ proc ::LocalMeshOptimizer::qualityWorsened {before after {topologyAllowance 0}} 
     return 0
 }
 
+proc ::LocalMeshOptimizer::finalQualityGuardCheck {} {
+    variable runtime
+    set finalScope [::LocalMeshOptimizer::markScope 1]
+    set finalQuality [::LocalMeshOptimizer::nativeQualityCheck $finalScope 89.0 2.0 [::LocalMeshOptimizer::txt "最终全范围检查" "Final whole-scope check"] full]
+    set finalIds [dict get $finalQuality failedIds]
+    set newFailures [::LocalMeshOptimizer::listDifference $finalIds $runtime(failedElements)]
+    set newFailuresOutside [::LocalMeshOptimizer::listDifference $newFailures $runtime(optimizedElements)]
+    set allowedFinal [expr {[llength $runtime(failedElements)] + $runtime(topologyFailureAllowance)}]
+    if {[llength $finalIds] > $allowedFinal || [llength $newFailuresOutside] > 0} {
+        error "overall quality guard failed: initial=[llength $runtime(failedElements)] final=[llength $finalIds] topology_allowance=$runtime(topologyFailureAllowance) new_failures_outside=[llength $newFailuresOutside]"
+    }
+    return $finalQuality
+}
+
 proc ::LocalMeshOptimizer::nodeCoordinateMap {nodeIds} {
     set result [dict create]
     set total [llength $nodeIds]
@@ -1388,13 +1408,14 @@ proc ::LocalMeshOptimizer::readOptimizationActions {} {
     foreach line [lrange $lines 1 end] {
         if {[string trim $line] eq ""} { continue }
         set fields [split $line ,]
-        if {[llength $fields] != 12} { error "Damaged optimization action row: $line" }
+        if {[llength $fields] != 14} { error "Damaged optimization action row: $line" }
         set action [dict create \
             regionId [lindex $fields 0] actionId [lindex $fields 1] actionType [lindex $fields 2] \
             elementId [lindex $fields 3] edgeIndex [lindex $fields 4] \
             nodeA [lindex $fields 5] nodeB [lindex $fields 6] \
             referenceA [lindex $fields 7] referenceB [lindex $fields 8] \
-            targetDistance [lindex $fields 9] splitMethod [lindex $fields 10] reason [lindex $fields 11]]
+            targetDistance [lindex $fields 9] targetDistanceB [lindex $fields 10] \
+            moveMode [lindex $fields 11] splitMethod [lindex $fields 12] reason [lindex $fields 13]]
         dict lappend result [dict get $action regionId] $action
     }
     return $result
@@ -1524,6 +1545,7 @@ proc ::LocalMeshOptimizer::planSettingsSignature {} {
         OPTIMIZATION_LEVEL ADJACENCY_LAYERS FEATURE_ANGLE MAX_REGION_ELEMENTS
         SKINNY_TRIANGLE_RATIO NARROW_QUAD_RATIO NARROW_TARGET_ASPECT
         CONTROLLED_EDGE_GROWTH ALLOW_CONTROLLED_FREE_EDGE_MOVE
+        ALLOW_INTERNAL_QUAD_EXPANSION
         EXCLUDE_WASHER_ELEMENTS PROTECT_FREE_EDGES PROTECT_COMPONENT_BOUNDARIES
         PROTECT_HOLE_EDGES PROTECT_FEATURE_EDGES PROTECT_RIGID_NODES
         PROTECT_WELD_NODES PROTECT_USER_NODES NO_CROSS_COMPONENT_MOVEMENT
@@ -1714,6 +1736,48 @@ proc ::LocalMeshOptimizer::targetCoordinateFromReference {nodeId referenceId tar
     return [list $x $y $z]
 }
 
+proc ::LocalMeshOptimizer::symmetricExpansionTargets {nodeA nodeB finalDistance} {
+    set pointA [::LocalMeshOptimizer::nodeCoordinate $nodeA]
+    set pointB [::LocalMeshOptimizer::nodeCoordinate $nodeB]
+    set dx [expr {double([lindex $pointA 0]) - double([lindex $pointB 0])}]
+    set dy [expr {double([lindex $pointA 1]) - double([lindex $pointB 1])}]
+    set dz [expr {double([lindex $pointA 2]) - double([lindex $pointB 2])}]
+    set current [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
+    if {$current <= 1.0e-12} { error "Cannot symmetrically expand coincident nodes $nodeA and $nodeB" }
+    if {![string is double -strict $finalDistance] || $finalDistance <= 0.0} {
+        error "Invalid symmetric expansion target: $finalDistance"
+    }
+    if {$current >= $finalDistance} { return [list $pointA $pointB] }
+    set displacement [expr {(double($finalDistance) - $current) / 2.0}]
+    set ux [expr {$dx/$current}]
+    set uy [expr {$dy/$current}]
+    set uz [expr {$dz/$current}]
+    set targetA [list \
+        [expr {double([lindex $pointA 0]) + $ux*$displacement}] \
+        [expr {double([lindex $pointA 1]) + $uy*$displacement}] \
+        [expr {double([lindex $pointA 2]) + $uz*$displacement}]]
+    set targetB [list \
+        [expr {double([lindex $pointB 0]) - $ux*$displacement}] \
+        [expr {double([lindex $pointB 1]) - $uy*$displacement}] \
+        [expr {double([lindex $pointB 2]) - $uz*$displacement}]]
+    return [list $targetA $targetB]
+}
+
+proc ::LocalMeshOptimizer::accumulateMoveProposal {nodeId target group moveXVar moveYVar moveZVar moveCountVar moveGroupVar} {
+    upvar 1 $moveXVar moveX $moveYVar moveY $moveZVar moveZ $moveCountVar moveCount $moveGroupVar moveGroup
+    if {![info exists moveCount($nodeId)]} {
+        set moveX($nodeId) 0.0
+        set moveY($nodeId) 0.0
+        set moveZ($nodeId) 0.0
+        set moveCount($nodeId) 0
+        set moveGroup($nodeId) $group
+    }
+    set moveX($nodeId) [expr {$moveX($nodeId) + double([lindex $target 0])}]
+    set moveY($nodeId) [expr {$moveY($nodeId) + double([lindex $target 1])}]
+    set moveZ($nodeId) [expr {$moveZ($nodeId) + double([lindex $target 2])}]
+    incr moveCount($nodeId)
+}
+
 proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds regionElements anchorIds {progressBase -1.0} {progressSpan 0.0} {batchMode 0}} {
     variable ui
     set applied 0
@@ -1722,8 +1786,9 @@ proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds r
     set touchedNodes {}
     set dirtyElements {}
     set operationResults {}
-    set freeOperationIds {}
-    set freeActionCount 0
+    set moveOperationIds {}
+    set moveActionCount 0
+    set moveMethods {}
     set topologyChangeCount 0
     array set moveX {}
     array set moveY {}
@@ -1817,18 +1882,95 @@ proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds r
             foreach pair [list [list $nodeA [dict get $action referenceA]] [list $nodeB [dict get $action referenceB]]] {
                 set nodeId [lindex $pair 0]
                 set target [::LocalMeshOptimizer::targetCoordinateFromReference $nodeId [lindex $pair 1] [dict get $action targetDistance]]
-                if {![info exists moveCount($nodeId)]} {
-                    set moveX($nodeId) 0.0; set moveY($nodeId) 0.0; set moveZ($nodeId) 0.0; set moveCount($nodeId) 0
-                    set moveGroup($nodeId) [dict get $action splitMethod]
-                }
-                set moveX($nodeId) [expr {$moveX($nodeId) + double([lindex $target 0])}]
-                set moveY($nodeId) [expr {$moveY($nodeId) + double([lindex $target 1])}]
-                set moveZ($nodeId) [expr {$moveZ($nodeId) + double([lindex $target 2])}]
-                incr moveCount($nodeId)
+                ::LocalMeshOptimizer::accumulateMoveProposal $nodeId $target [dict get $action splitMethod] moveX moveY moveZ moveCount moveGroup
             }
             set touchedNodes [concat $touchedNodes [list $nodeA $nodeB [dict get $action referenceA] [dict get $action referenceB]]]
-            incr freeActionCount
-            lappend freeOperationIds $actionId
+            incr moveActionCount
+            lappend moveOperationIds $actionId
+            lappend moveMethods expand_free_edge
+            continue
+        } elseif {$type eq "expand_triangle_short_edge"} {
+            set nodeA [dict get $action nodeA]
+            set nodeB [dict get $action nodeB]
+            if {[lsearch -exact $anchorIds $nodeA] >= 0 || [lsearch -exact $anchorIds $nodeB] >= 0} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "triangle expansion touches protected node"]
+                continue
+            }
+            if {[llength [::LocalMeshOptimizer::currentShellEdgeByNodes $nodeA $nodeB $elementId $regionElements]] != 2} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "triangle short edge no longer exists"]
+                continue
+            }
+            lassign [::LocalMeshOptimizer::symmetricExpansionTargets $nodeA $nodeB [dict get $action targetDistance]] targetA targetB
+            ::LocalMeshOptimizer::accumulateMoveProposal $nodeA $targetA 0 moveX moveY moveZ moveCount moveGroup
+            ::LocalMeshOptimizer::accumulateMoveProposal $nodeB $targetB 0 moveX moveY moveZ moveCount moveGroup
+            set touchedNodes [concat $touchedNodes [list $nodeA $nodeB]]
+            incr moveActionCount
+            lappend moveOperationIds $actionId
+            lappend moveMethods expand_triangle_short_edge
+            continue
+        } elseif {$type eq "expand_internal_quad"} {
+            if {!$ui(ALLOW_INTERNAL_QUAD_EXPANSION)} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "internal quad expansion disabled"]
+                continue
+            }
+            set nodeA [dict get $action nodeA]
+            set nodeB [dict get $action nodeB]
+            set referenceA [dict get $action referenceA]
+            set referenceB [dict get $action referenceB]
+            set quadNodes [list $nodeA $nodeB $referenceA $referenceB]
+            set moveMode [dict get $action moveMode]
+            if {$moveMode == 0} {
+                set movingNodes $quadNodes
+            } elseif {$moveMode == 1} {
+                set movingNodes [list $nodeA $nodeB]
+            } elseif {$moveMode == 2} {
+                set movingNodes [list $referenceA $referenceB]
+            } else {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "invalid internal quad move mode"]
+                continue
+            }
+            set protected 0
+            foreach nodeId $movingNodes {
+                if {[lsearch -exact $anchorIds $nodeId] >= 0} { set protected 1; break }
+            }
+            if {$protected} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "internal quad expansion touches protected node"]
+                continue
+            }
+            if {[catch {set currentQuadNodes [hm_getvalue elems id=$elementId dataname=nodes]}] ||
+                [llength $currentQuadNodes] != 4 ||
+                [lsort -integer -unique $currentQuadNodes] ne [lsort -integer -unique $quadNodes]} {
+                incr manual
+                lappend operationResults [dict create operationId $actionId status validation_failed message "internal quad nodes no longer match source"]
+                continue
+            }
+            if {$moveMode == 0} {
+                lassign [::LocalMeshOptimizer::symmetricExpansionTargets $nodeA $referenceA [dict get $action targetDistance]] targetA targetReferenceA
+                lassign [::LocalMeshOptimizer::symmetricExpansionTargets $nodeB $referenceB [dict get $action targetDistanceB]] targetB targetReferenceB
+                set proposals [list \
+                    [list $nodeA $targetA] [list $nodeB $targetB] \
+                    [list $referenceA $targetReferenceA] [list $referenceB $targetReferenceB]]
+            } elseif {$moveMode == 1} {
+                set proposals [list \
+                    [list $nodeA [::LocalMeshOptimizer::targetCoordinateFromReference $nodeA $referenceA [dict get $action targetDistance]]] \
+                    [list $nodeB [::LocalMeshOptimizer::targetCoordinateFromReference $nodeB $referenceB [dict get $action targetDistanceB]]]]
+            } else {
+                set proposals [list \
+                    [list $referenceA [::LocalMeshOptimizer::targetCoordinateFromReference $referenceA $nodeA [dict get $action targetDistance]]] \
+                    [list $referenceB [::LocalMeshOptimizer::targetCoordinateFromReference $referenceB $nodeB [dict get $action targetDistanceB]]]]
+            }
+            foreach proposal $proposals {
+                ::LocalMeshOptimizer::accumulateMoveProposal [lindex $proposal 0] [lindex $proposal 1] [dict get $action splitMethod] moveX moveY moveZ moveCount moveGroup
+            }
+            set touchedNodes [concat $touchedNodes $movingNodes]
+            incr moveActionCount
+            lappend moveOperationIds $actionId
+            lappend moveMethods expand_internal_quad
             continue
         } else {
             error "Unknown optimization action: $type"
@@ -1897,12 +2039,11 @@ proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds r
         lappend methods split_quad
         ::LocalMeshOptimizer::log INFO "batched quad split method=$method operations=$count" $regionId $round *splitelements $count $count
     }
-    if {$freeActionCount > 0} {
+    if {$moveActionCount > 0} {
         set moveStarted [clock milliseconds]
-        # Convert all element-level proposals into one displacement per free
-        # boundary node. Shared nodes receive the average of their neighbouring
-        # short-edge targets, which is the required direction compromise on a
-        # curved boundary. Quantized unit directions (~6 degree bins) and 15%
+        # Convert all element-level proposals into one displacement per moved
+        # node. Shared free-boundary nodes receive the average of neighbouring
+        # targets. Quantized unit directions (~6 degree bins) and 15%
         # logarithmic distance bins create straight/near-straight movement
         # blocks. Each block is selected and translated with one native command
         # instead of issuing one *nodemodify per node.
@@ -1957,13 +2098,13 @@ proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds r
             *translatemark nodes 1 1 $distance
             incr moveBlockCount
         }
-        set applied [expr {$applied + $freeActionCount}]
-        ::LocalMeshOptimizer::performanceIncr operation_total $freeActionCount
+        set applied [expr {$applied + $moveActionCount}]
+        ::LocalMeshOptimizer::performanceIncr operation_total $moveActionCount
         ::LocalMeshOptimizer::performanceIncr hm_command_calls [expr {$moveBlockCount * 3}]
         ::LocalMeshOptimizer::performanceAdd hm_topology_operations [expr {([clock milliseconds] - $moveStarted) / 1000.0}]
-        foreach operationId $freeOperationIds { lappend operationResults [dict create operationId $operationId status success message ""] }
-        lappend methods expand_free_edge
-        ::LocalMeshOptimizer::log INFO "coordinated free-edge expansion actions=$freeActionCount nodes=[array size moveCount] direction_blocks=$moveBlockCount" $regionId $round *translatemark $freeActionCount [array size moveCount]
+        foreach operationId $moveOperationIds { lappend operationResults [dict create operationId $operationId status success message ""] }
+        set methods [concat $methods $moveMethods]
+        ::LocalMeshOptimizer::log INFO "coordinated node expansion actions=$moveActionCount nodes=[array size moveCount] direction_blocks=$moveBlockCount" $regionId $round *translatemark $moveActionCount [array size moveCount]
     }
     return [dict create applied $applied topologyChangeCount $topologyChangeCount methods [::LocalMeshOptimizer::uniq $methods] manual $manual touchedNodes [::LocalMeshOptimizer::uniq $touchedNodes] dirtyElements [::LocalMeshOptimizer::uniq $dirtyElements] operationResults $operationResults]
 }
@@ -2017,6 +2158,7 @@ proc ::LocalMeshOptimizer::saveModelSnapshot {path} {
 }
 
 proc ::LocalMeshOptimizer::restoreSnapshot {path} {
+    variable runtime
     set restoreStarted [clock milliseconds]
     if {![file isfile $path]} { error [::LocalMeshOptimizer::txt "恢复快照不存在：$path" "Recovery snapshot does not exist: $path"] }
     # Reading replaces a modified database and may otherwise show a modal
@@ -2027,6 +2169,10 @@ proc ::LocalMeshOptimizer::restoreSnapshot {path} {
         error [::LocalMeshOptimizer::txt "恢复模型快照失败：$err" "Could not restore model snapshot: $err"]
     }
     catch {::HWFlow::refreshBrowser}
+    # *readfile replaces the database and may also reset the active native
+    # quality context. Force the next check to reload the selected criteria.
+    set runtime(criteriaLoadedPath) ""
+    set runtime(criteriaLoadedMtime) -1
     ::LocalMeshOptimizer::performanceIncr model_restores
     ::LocalMeshOptimizer::performanceAdd model_restore [expr {([clock milliseconds] - $restoreStarted) / 1000.0}]
     return 1
@@ -2071,11 +2217,13 @@ proc ::LocalMeshOptimizer::startOptimization {} {
     set runtime(running) 0
     if {$code} {
         set recovery [::LocalMeshOptimizer::txt "模型尚未修改或没有可用快照。" "The model was not modified or no snapshot is available."]
-        if {$runtime(backupPath) ne "" && [file isfile $runtime(backupPath)]} {
-            if {[catch {::LocalMeshOptimizer::restoreSnapshot $runtime(backupPath)} restoreErr]} {
-                set recovery [::LocalMeshOptimizer::txt "自动恢复失败：$restoreErr；请手工打开 $runtime(backupPath)。" "Automatic restore failed: $restoreErr; open $runtime(backupPath) manually."]
+        set recoveryPath $runtime(recoveryPath)
+        if {$recoveryPath eq "" || ![file isfile $recoveryPath]} { set recoveryPath $runtime(backupPath) }
+        if {$recoveryPath ne "" && [file isfile $recoveryPath]} {
+            if {[catch {::LocalMeshOptimizer::restoreSnapshot $recoveryPath} restoreErr]} {
+                set recovery [::LocalMeshOptimizer::txt "自动恢复失败：$restoreErr；请手工打开 $recoveryPath。" "Automatic restore failed: $restoreErr; open $recoveryPath manually."]
             } else {
-                set recovery [::LocalMeshOptimizer::txt "已自动恢复优化前模型。" "The pre-task model was restored automatically."]
+                set recovery [::LocalMeshOptimizer::txt "已自动恢复最近安全检查点。" "The latest safe checkpoint was restored automatically."]
             }
         }
         catch {::LocalMeshOptimizer::ensureProgress [::LocalMeshOptimizer::txt "优化异常，正在保存诊断结果..." "Optimization failed; saving diagnostics..."]}
@@ -2119,8 +2267,9 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
     set taskInitialFailed [llength $runtime(failedElements)]
     set runtime(sourceModelPath) [::LocalMeshOptimizer::modelPath]
     set runtime(backupPath) [file join $runtime(taskDir) before.hm]
+    set runtime(recoveryPath) $runtime(backupPath)
     set progressOpened [::HWFlow::progressOpen "Local Mesh Optimizer" [::LocalMeshOptimizer::txt "正在保存优化前模型..." "Saving the pre-task model..."] 1]
-    catch {::HWFlow::progressUpdate 2.0 [::LocalMeshOptimizer::txt "正在保存唯一的任务前快照" "Saving the only pre-task snapshot"] [file tail $runtime(backupPath)] 1}
+    catch {::HWFlow::progressUpdate 2.0 [::LocalMeshOptimizer::txt "正在保存任务前安全快照" "Saving the pre-task safety snapshot"] [file tail $runtime(backupPath)] 1}
     if {[catch {::LocalMeshOptimizer::saveModelSnapshot $runtime(backupPath)} err]} {
         set message [::LocalMeshOptimizer::txt "优化未开始，模型未修改。$err" "Optimization did not start; the model was not modified. $err"]
         ::LocalMeshOptimizer::setStatus ERROR $message
@@ -2128,6 +2277,9 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
         return 0
     }
     catch {::HWFlow::progressUpdate 8.0 [::LocalMeshOptimizer::txt "任务前模型已保存，开始逐区域优化" "Pre-task model saved; starting region optimization"] "" 1}
+    set checkpointDir [file join $runtime(taskDir) region_checkpoints]
+    file mkdir $checkpointDir
+    set acceptedRegionCheckpoints {}
     set resultLines [list "region_id,final_failed_count,rounds,optimization_methods,elapsed_seconds,status,rollback_count,message"]
     set cancelled 0
     set taskRolledBack 0
@@ -2140,6 +2292,15 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
         incr regionIndex
         set regionId [dict get $region regionId]
         set elements [dict get $region expanded]
+        set allowanceBeforeRegion $runtime(topologyFailureAllowance)
+        set optimizedBeforeRegion $runtime(optimizedElements)
+        set regionCheckpointPath [file join $checkpointDir [format {%04d_%s_before.hm} $regionIndex $regionId]]
+        if {[catch {::LocalMeshOptimizer::saveModelSnapshot $regionCheckpointPath} checkpointErr]} {
+            set taskRolledBack 1
+            set taskRollbackReason "could not save region checkpoint for $regionId: $checkpointErr"
+            break
+        }
+        set runtime(recoveryPath) $regionCheckpointPath
         set components [dict get $region components]
         set plannedAnchors [dict get $region anchors]
         set anchors [::LocalMeshOptimizer::existingNodeIds $plannedAnchors]
@@ -2171,6 +2332,9 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
         set methodsUsed {}
         set regionElapsed 0.0
         set cachedQuality ""
+        set regionRollbackRequested 0
+        set regionRollbackReason ""
+        set regionModified 0
         if {[::HWFlow::progressCancelled] || [file exists [file join $runtime(taskDir) cancel.flag]]} { set cancelled 1; break }
         set regionBase [expr {10.0 + 78.0 * ($regionIndex - 1) / double($totalRegions)}]
         set regionSpan [expr {78.0 / double($totalRegions)}]
@@ -2223,10 +2387,10 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
             }
             if {[catch {set actionResult [uplevel #0 $executionCommand]} actionErr]} {
                 incr rollbacks
-                set taskRolledBack 1
-                set taskRollbackReason "planned topology action failed in $regionId: $actionErr"
-                set message "$taskRollbackReason; restoring pre-task model"
-                set status task_rolled_back
+                set regionRollbackRequested 1
+                set regionRollbackReason "planned topology action failed in $regionId: $actionErr"
+                set message "$regionRollbackReason; restoring region checkpoint"
+                set status region_rolled_back
                 break
             }
             if {[dict get $actionResult applied] == 0} {
@@ -2235,15 +2399,16 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
                 break
             }
             set methodsUsed [::LocalMeshOptimizer::uniq [concat $methodsUsed [dict get $actionResult methods]]]
+            set regionModified 1
             set roundTopologyAllowance [dict get $actionResult topologyChangeCount]
             set runtime(topologyFailureAllowance) [expr {$runtime(topologyFailureAllowance) + $roundTopologyAllowance}]
             catch {::LocalMeshOptimizer::optimizationProgress [expr {$roundBase + 0.74*$roundSpan}] [::LocalMeshOptimizer::txt "正在刷新局部连接关系" "Refreshing local connectivity"] "$roundContext；applied=[dict get $actionResult applied]" 1}
             if {[catch {set currentElements [::LocalMeshOptimizer::currentRegionElements $regionNodes $components $currentElements [dict get $actionResult touchedNodes]]} refreshErr]} {
                 incr rollbacks
-                set taskRolledBack 1
-                set taskRollbackReason "region connectivity refresh failed in $regionId: $refreshErr"
-                set status task_rolled_back
-                set message "$taskRollbackReason; restoring pre-task model"
+                set regionRollbackRequested 1
+                set regionRollbackReason "region connectivity refresh failed in $regionId: $refreshErr"
+                set status region_rolled_back
+                set message "$regionRollbackReason; restoring region checkpoint"
                 break
             }
             if {$ui(SCOPE_TYPE) eq "elements"} {
@@ -2252,18 +2417,18 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
             catch {::LocalMeshOptimizer::optimizationProgress [expr {$roundBase + 0.82*$roundSpan}] [::LocalMeshOptimizer::txt "正在核验保护节点" "Verifying protected nodes"] "$roundContext；anchors=[llength $anchors]" 1}
             if {[catch {set movedAnchors [::LocalMeshOptimizer::movedAnchorNodes $anchorCoordinates 1.0e-9]} anchorVerifyErr]} {
                 incr rollbacks
-                set taskRolledBack 1
-                set taskRollbackReason "protected-node verification failed in $regionId: $anchorVerifyErr"
-                set status task_rolled_back
-                set message "$taskRollbackReason; restoring pre-task model"
+                set regionRollbackRequested 1
+                set regionRollbackReason "protected-node verification failed in $regionId: $anchorVerifyErr"
+                set status region_rolled_back
+                set message "$regionRollbackReason; restoring region checkpoint"
                 break
             }
             if {[llength $movedAnchors] > 0} {
                 incr rollbacks
-                set taskRolledBack 1
-                set taskRollbackReason "protected nodes moved in $regionId: [lrange $movedAnchors 0 20]"
-                set status task_rolled_back
-                set message "$taskRollbackReason; restoring pre-task model"
+                set regionRollbackRequested 1
+                set regionRollbackReason "protected nodes moved in $regionId: [lrange $movedAnchors 0 20]"
+                set status region_rolled_back
+                set message "$regionRollbackReason; restoring region checkpoint"
                 ::LocalMeshOptimizer::log ERROR $message $regionId $round planned_actions [llength $anchors] [llength $movedAnchors]
                 break
             }
@@ -2277,10 +2442,10 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
             }
             if {[catch {set dirtyAfter [::LocalMeshOptimizer::nativeQualityCheck $recheckElements [expr {$roundBase + 0.86*$roundSpan}] [expr {0.10*$roundSpan}] [::LocalMeshOptimizer::txt "$roundContext，修改后脏区复检" "$roundContext, post-change dirty-region recheck"]]} recheckErr]} {
                 incr rollbacks
-                set taskRolledBack 1
-                set taskRollbackReason "region recheck failed in $regionId: $recheckErr"
-                set status task_rolled_back
-                set message "$taskRollbackReason; restoring pre-task model"
+                set regionRollbackRequested 1
+                set regionRollbackReason "region recheck failed in $regionId: $recheckErr"
+                set status region_rolled_back
+                set message "$regionRollbackReason; restoring region checkpoint"
                 break
             }
             if {$ui(ENABLE_INCREMENTAL_RECHECK)} {
@@ -2297,10 +2462,10 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
             if {$afterCount == 0} { set status success; set runtime(optimizedElements) [::LocalMeshOptimizer::uniq [concat $runtime(optimizedElements) $currentElements]]; break }
             if {[::LocalMeshOptimizer::qualityWorsened $before $after $roundTopologyAllowance]} {
                 incr rollbacks
-                set taskRolledBack 1
-                set taskRollbackReason "quality worsened beyond topology replacement allowance in $regionId: before=$beforeCount after=$afterCount allowance=$roundTopologyAllowance"
-                set status task_rolled_back
-                set message "$taskRollbackReason; restoring pre-task model"
+                set regionRollbackRequested 1
+                set regionRollbackReason "quality worsened beyond topology replacement allowance in $regionId: before=$beforeCount after=$afterCount allowance=$roundTopologyAllowance"
+                set status region_rolled_back
+                set message "$regionRollbackReason; restoring region checkpoint"
                 break
             }
             set runtime(optimizedElements) [::LocalMeshOptimizer::uniq [concat $runtime(optimizedElements) $currentElements]]
@@ -2314,68 +2479,97 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
                 ::LocalMeshOptimizer::log WARN $message $regionId $round planned_actions $beforeCount $afterCount
             }
         }
-        if {$cancelled} {
+        if {$cancelled && $regionModified} {
             incr rollbacks
+            set regionRollbackRequested 1
+            set regionRollbackReason "cancel requested"
             set status cancelled
-            set taskRolledBack 1
-            set taskRollbackReason "cancel requested"
-            set message "cancel requested; restoring pre-task model"
+            set message "cancel requested; restoring current region checkpoint"
+        }
+        if {$regionRollbackRequested} {
+            if {[catch {::LocalMeshOptimizer::restoreSnapshot $regionCheckpointPath} regionRestoreErr]} {
+                set taskRolledBack 1
+                set taskRollbackReason "could not restore region checkpoint for $regionId: $regionRestoreErr"
+                set status task_rolled_back
+                set message $taskRollbackReason
+            } else {
+                set runtime(topologyFailureAllowance) $allowanceBeforeRegion
+                set runtime(optimizedElements) $optimizedBeforeRegion
+                set runtime(recoveryPath) $regionCheckpointPath
+                set currentFailed $initialFailed
+                set cachedQuality ""
+                if {!$cancelled} { set status region_rolled_back }
+                ::LocalMeshOptimizer::log WARN "$regionRollbackReason; current region restored, earlier accepted regions retained" $regionId $round region_restore 1 1
+            }
         }
         set regionElapsed [expr {([clock milliseconds] - $regionStart) / 1000.0}]
         catch {::LocalMeshOptimizer::optimizationProgress [expr {$regionBase + $regionSpan}] [::LocalMeshOptimizer::txt "$regionId 处理完成" "$regionId complete"] [::LocalMeshOptimizer::txt "区域 $regionIndex/$totalRegions；状态=$status；当前失败=$currentFailed；轮次=$rounds" "Region $regionIndex/$totalRegions; status=$status; current failures=$currentFailed; rounds=$rounds"] 1}
         lappend resultLines [join [list $regionId $currentFailed $rounds [join $methodsUsed {;}] $regionElapsed $status $rollbacks [::LocalMeshOptimizer::csvQuote $message]] ,]
+        if {$regionModified && !$regionRollbackRequested && !$taskRolledBack} {
+            lappend acceptedRegionCheckpoints [dict create \
+                path $regionCheckpointPath \
+                allowance $allowanceBeforeRegion \
+                optimized $optimizedBeforeRegion \
+                regionId $regionId \
+                initialFailed $initialFailed \
+                resultIndex [expr {[llength $resultLines] - 1}]]
+        }
         if {$cancelled || $taskRolledBack} { break }
-    }
-    if {$cancelled && !$taskRolledBack} {
-        set taskRolledBack 1
-        set taskRollbackReason "cancel requested"
     }
     set finalFailed [llength $runtime(failedElements)]
     set output ""
+    set incrementalRollbackOccurred 0
     if {$taskRolledBack} {
-        ::LocalMeshOptimizer::log WARN "$taskRollbackReason; restoring the only pre-task snapshot"
-        if {[catch {::LocalMeshOptimizer::restoreSnapshot $runtime(backupPath)} restoreErr]} {
-            ::LocalMeshOptimizer::log ERROR "Whole-task restore failed: $restoreErr"
-            error [::LocalMeshOptimizer::txt "优化异常，且恢复优化前模型失败：$restoreErr。请手工打开 $runtime(backupPath)" "Optimization failed and the pre-task model could not be restored: $restoreErr. Open $runtime(backupPath) manually."]
+        set recoveryPath $runtime(recoveryPath)
+        if {$recoveryPath eq "" || ![file isfile $recoveryPath]} { set recoveryPath $runtime(backupPath) }
+        ::LocalMeshOptimizer::log WARN "$taskRollbackReason; restoring latest safe checkpoint: $recoveryPath"
+        if {[catch {::LocalMeshOptimizer::restoreSnapshot $recoveryPath} restoreErr]} {
+            ::LocalMeshOptimizer::log ERROR "Safe-checkpoint restore failed: $restoreErr"
+            error [::LocalMeshOptimizer::txt "优化异常，且恢复最近安全检查点失败：$restoreErr。请手工打开 $recoveryPath" "Optimization failed and the latest safe checkpoint could not be restored: $restoreErr. Open $recoveryPath manually."]
         }
-        catch {::LocalMeshOptimizer::ensureProgress [::LocalMeshOptimizer::txt "任务前模型已恢复，正在生成报告..." "Pre-task model restored; generating report..."]}
-        catch {::HWFlow::progressUpdate 92.0 [::LocalMeshOptimizer::txt "任务前模型已恢复" "Pre-task model restored"] $taskRollbackReason 1}
-        set finalFailed $taskInitialFailed
+        catch {::LocalMeshOptimizer::ensureProgress [::LocalMeshOptimizer::txt "最近安全检查点已恢复，正在生成报告..." "Latest safe checkpoint restored; generating report..."]}
+        catch {::HWFlow::progressUpdate 92.0 [::LocalMeshOptimizer::txt "最近安全检查点已恢复" "Latest safe checkpoint restored"] $taskRollbackReason 1}
         set rollbackStatus [expr {$cancelled ? "cancelled" : "task_rolled_back"}]
-        set resultLines [list "region_id,final_failed_count,rounds,optimization_methods,elapsed_seconds,status,rollback_count,message"]
-        foreach region $regions {
-            lappend resultLines [join [list [dict get $region regionId] [llength [dict get $region failed]] 0 "" 0 $rollbackStatus 1 [::LocalMeshOptimizer::csvQuote "$taskRollbackReason; pre-task model restored"]] ,]
-        }
+        lappend resultLines [join [list task_recovery $finalFailed 0 "" 0 $rollbackStatus 1 [::LocalMeshOptimizer::csvQuote "$taskRollbackReason; latest safe checkpoint restored"]] ,]
     } else {
-        set guardPassed 1
-        if {[catch {
+        set guardPassed 0
+        set guardErr ""
+        while {1} {
             catch {::LocalMeshOptimizer::optimizationProgress 89.0 [::LocalMeshOptimizer::txt "正在执行最终全范围质量守卫" "Running final whole-scope quality guard"] [::LocalMeshOptimizer::txt "仅复检最终模型，不重新加载 criteria" "Checking the final model without reloading criteria"] 1}
-            set finalScope [::LocalMeshOptimizer::markScope 1]
-            set finalQuality [::LocalMeshOptimizer::nativeQualityCheck $finalScope 89.0 2.0 [::LocalMeshOptimizer::txt "最终全范围检查" "Final whole-scope check"] full]
-            set finalIds [dict get $finalQuality failedIds]
-            set newFailures [::LocalMeshOptimizer::listDifference $finalIds $runtime(failedElements)]
-            set newFailuresOutside [::LocalMeshOptimizer::listDifference $newFailures $runtime(optimizedElements)]
-            set finalFailed [llength $finalIds]
-            set allowedFinal [expr {[llength $runtime(failedElements)] + $runtime(topologyFailureAllowance)}]
-            if {$finalFailed > $allowedFinal || [llength $newFailuresOutside] > 0} {
-                error "overall quality guard failed: initial=[llength $runtime(failedElements)] final=$finalFailed topology_allowance=$runtime(topologyFailureAllowance) new_failures_outside=[llength $newFailuresOutside]"
+            if {![catch {set finalQuality [::LocalMeshOptimizer::finalQualityGuardCheck]} guardErr]} {
+                set finalIds [dict get $finalQuality failedIds]
+                set finalFailed [llength $finalIds]
+                set runtime(failedElements) $finalIds
+                set guardPassed 1
+                break
             }
-            set runtime(failedElements) $finalIds
-        } guardErr]} {
-            set guardPassed 0
-            ::LocalMeshOptimizer::log ERROR "$guardErr; restoring whole-task snapshot"
-            ::LocalMeshOptimizer::restoreSnapshot $runtime(backupPath)
-            catch {::LocalMeshOptimizer::ensureProgress [::LocalMeshOptimizer::txt "整体质量守卫未通过，模型已恢复" "Overall quality guard failed; model restored"]}
-            catch {::HWFlow::progressUpdate 92.0 [::LocalMeshOptimizer::txt "任务前模型已恢复" "Pre-task model restored"] $guardErr 1}
-            set finalFailed [llength $runtime(failedElements)]
-            set taskRolledBack 1
-            set taskRollbackReason $guardErr
-            set resultLines [list "region_id,final_failed_count,rounds,optimization_methods,elapsed_seconds,status,rollback_count,message"]
-            foreach region $regions {
-                lappend resultLines [join [list [dict get $region regionId] [llength [dict get $region failed]] 0 "" 0 task_rolled_back 1 [::LocalMeshOptimizer::csvQuote "$guardErr; pre-task model restored"]] ,]
+            if {[llength $acceptedRegionCheckpoints] == 0} {
+                set taskRolledBack 1
+                set taskRollbackReason "final quality guard still failed at earliest safe checkpoint: $guardErr"
+                ::LocalMeshOptimizer::log ERROR $taskRollbackReason
+                break
             }
+            set checkpoint [lindex $acceptedRegionCheckpoints end]
+            set acceptedRegionCheckpoints [lrange $acceptedRegionCheckpoints 0 end-1]
+            set checkpointPath [dict get $checkpoint path]
+            set checkpointRegion [dict get $checkpoint regionId]
+            ::LocalMeshOptimizer::log WARN "$guardErr; rolling back latest accepted region $checkpointRegion to $checkpointPath"
+            if {[catch {::LocalMeshOptimizer::restoreSnapshot $checkpointPath} incrementalRestoreErr]} {
+                set taskRolledBack 1
+                set taskRollbackReason "could not incrementally restore $checkpointRegion: $incrementalRestoreErr"
+                ::LocalMeshOptimizer::log ERROR $taskRollbackReason
+                break
+            }
+            set runtime(topologyFailureAllowance) [dict get $checkpoint allowance]
+            set runtime(optimizedElements) [dict get $checkpoint optimized]
+            set runtime(recoveryPath) $checkpointPath
+            set incrementalRollbackOccurred 1
+            set resultIndex [dict get $checkpoint resultIndex]
+            set rollbackMessage "final quality guard rejected this region; region checkpoint restored: $guardErr"
+            lset resultLines $resultIndex [join [list $checkpointRegion [dict get $checkpoint initialFailed] 0 "" 0 final_guard_rolled_back 1 [::LocalMeshOptimizer::csvQuote $rollbackMessage]] ,]
+            catch {::HWFlow::progressUpdate 91.0 [::LocalMeshOptimizer::txt "最终守卫未通过，已撤销最近区域" "Final guard failed; latest region rolled back"] $checkpointRegion 1}
         }
-        if {$guardPassed && $ui(AUTO_SAVE_MODEL)} {
+        if {$guardPassed && !$cancelled && $ui(AUTO_SAVE_MODEL)} {
             set output [::LocalMeshOptimizer::outputModelPath]
             catch {::LocalMeshOptimizer::optimizationProgress 93.0 [::LocalMeshOptimizer::txt "正在保存最终优化模型" "Saving final optimized model"] [file tail $output] 1}
             if {[catch {::LocalMeshOptimizer::saveModelSnapshot $output} saveErr]} { ::LocalMeshOptimizer::log ERROR "Output model save failed: $saveErr"; set output "" }
@@ -2384,7 +2578,7 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
     }
     ::HWFlow::writeTextFile [file join $runtime(taskDir) region_results.txt] [join $resultLines "\n"]
     set elapsed [expr {([clock milliseconds] - $taskStart) / 1000.0}]
-    set topologyPartial [expr {!$taskRolledBack && !$cancelled && $finalFailed > $taskInitialFailed}]
+    set topologyPartial [expr {!$taskRolledBack && !$cancelled && ($finalFailed > $taskInitialFailed || $incrementalRollbackOccurred)}]
     set taskStatus [expr {$cancelled ? "cancelled" : ($taskRolledBack ? "task_rolled_back" : ($topologyPartial ? "partial_success" : "complete"))}]
     ::LocalMeshOptimizer::writeResultJson $runtime(checkedElements) $taskInitialFailed $finalFailed $cancelled $output $elapsed $taskStatus
     ::LocalMeshOptimizer::writePerformanceMetrics
@@ -2398,9 +2592,9 @@ proc ::LocalMeshOptimizer::startOptimizationCore {} {
     if {$reportCode} { ::LocalMeshOptimizer::log ERROR "Report finalize failed: $reportErr" }
     if {!$ui(DEBUG_BATCH_FILES)} { catch {file delete -force [file join $runtime(taskDir) batches]} }
     if {$taskRolledBack} {
-        set ui(RESULT_TEXT) [::LocalMeshOptimizer::txt "优化未保留：已恢复任务前模型。原因：$taskRollbackReason；报告：[::LocalMeshOptimizer::reportDir]" "Optimization was not retained; the pre-task model was restored. Reason: $taskRollbackReason; report: [::LocalMeshOptimizer::reportDir]"]
+        set ui(RESULT_TEXT) [::LocalMeshOptimizer::txt "优化异常：已恢复最近安全检查点。原因：$taskRollbackReason；报告：[::LocalMeshOptimizer::reportDir]" "Optimization failed; the latest safe checkpoint was restored. Reason: $taskRollbackReason; report: [::LocalMeshOptimizer::reportDir]"]
     } elseif {$topologyPartial} {
-        set ui(RESULT_TEXT) [::LocalMeshOptimizer::txt "任务部分完成：失败单元ID数量由 $taskInitialFailed 变为 $finalFailed，增长未超出局部拓扑替换额度且未扩散到优化区域外。请人工复核相关区域。输出：$output；报告：[::LocalMeshOptimizer::reportDir]" "Task partially completed: failed entity IDs changed from $taskInitialFailed to $finalFailed, within the local topology-replacement allowance and without spreading outside optimized regions. Review the affected regions. Output: $output; report: [::LocalMeshOptimizer::reportDir]"]
+        set ui(RESULT_TEXT) [::LocalMeshOptimizer::txt "任务部分完成：最终质量守卫仅撤销了不安全的最近区域，较早的合格优化已保留。失败单元ID数量由 $taskInitialFailed 变为 $finalFailed。请人工复核相关区域。输出：$output；报告：[::LocalMeshOptimizer::reportDir]" "Task partially completed: the final guard rolled back only unsafe recent regions and retained earlier accepted improvements. Failed entity IDs changed from $taskInitialFailed to $finalFailed. Review the affected regions. Output: $output; report: [::LocalMeshOptimizer::reportDir]"]
     } else {
         set ui(RESULT_TEXT) [::LocalMeshOptimizer::txt "任务结束。输出：$output；报告：[::LocalMeshOptimizer::reportDir]" "Task finished. Output: $output; report: [::LocalMeshOptimizer::reportDir]"]
     }
@@ -2711,7 +2905,7 @@ proc ::LocalMeshOptimizer::showPanel {} {
 
     labelframe $w.main.protection -text [::LocalMeshOptimizer::txt "D. 保护选项" "D. Protection"] -padx 8 -pady 8
     grid $w.main.protection -row 6 -column 0 -sticky ew -pady {0 8}
-    set options {{EXCLUDE_WASHER_ELEMENTS "排除 Washer 网格（人工处理）" "Exclude washer mesh (manual)"} {PROTECT_FREE_EDGES "保护自由边" "Protect free edges"} {PROTECT_COMPONENT_BOUNDARIES "保护组件边界" "Protect component boundaries"} {PROTECT_HOLE_EDGES "保护孔边" "Protect hole edges"} {PROTECT_FEATURE_EDGES "保护特征边" "Protect feature edges"} {PROTECT_RIGID_NODES "保护刚性连接节点" "Protect rigid nodes"} {PROTECT_WELD_NODES "保护焊缝连接节点" "Protect weld nodes"} {PROTECT_USER_NODES "保护用户固定节点" "Protect user anchors"} {NO_CROSS_COMPONENT_MOVEMENT "禁止跨组件移动" "No cross-component movement"} {PRESERVE_GEOMETRY_ASSOCIATION "保持节点几何关联" "Preserve geometry association"}}
+    set options {{EXCLUDE_WASHER_ELEMENTS "排除 Washer 网格（人工处理）" "Exclude washer mesh (manual)"} {ALLOW_INTERNAL_QUAD_EXPANSION "允许中部超窄四边形向两侧最小幅度扩展（默认关闭）" "Expand internal ultra-narrow quads to both sides (off by default)"} {PROTECT_FREE_EDGES "保护自由边" "Protect free edges"} {PROTECT_COMPONENT_BOUNDARIES "保护组件边界" "Protect component boundaries"} {PROTECT_HOLE_EDGES "保护孔边" "Protect hole edges"} {PROTECT_FEATURE_EDGES "保护特征边" "Protect feature edges"} {PROTECT_RIGID_NODES "保护刚性连接节点" "Protect rigid nodes"} {PROTECT_WELD_NODES "保护焊缝连接节点" "Protect weld nodes"} {PROTECT_USER_NODES "保护用户固定节点" "Protect user anchors"} {NO_CROSS_COMPONENT_MOVEMENT "禁止跨组件移动" "No cross-component movement"} {PRESERVE_GEOMETRY_ASSOCIATION "保持节点几何关联" "Preserve geometry association"}}
     set index 0
     foreach item $options {
         set key [lindex $item 0]

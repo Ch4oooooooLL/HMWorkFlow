@@ -15,10 +15,19 @@ from mesh_model import load_json, read_mesh
 from rbe2_duplicate_detector import annotate, duplicate_groups, index
 from result_validator import validate
 from result_writer import write_result
+from shell_fem_reader import read_shell_fem_bundle
 from shell_topology import build
 from washer_detector import validate_hole, validate_washer
 
 SPEC = importlib.util.spec_from_file_location("washer_schema", str(MODULE_DIR / "schema.py")); MOD = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(MOD)
+
+
+def read_analysis_mesh(path):
+    if path.suffix.lower() == ".json":
+        header = load_json(path)
+        if header.get("format") == "hm_selected_components_fem":
+            return read_shell_fem_bundle(path)
+    return read_mesh(path)
 
 
 def detect(request, model, existing, logger):
@@ -54,7 +63,7 @@ def main(argv=None):
     for name in ("request","mesh","existing","delta","output","tcl-output","log"): p.add_argument("--"+name, required=True, type=Path)
     a=p.parse_args(argv); logger=create_logger("shell_washer_hole_rbe2", a.log)
     try:
-        started=time.perf_counter(); request=MOD.validate_request(load_json(a.request)); model=read_mesh(a.mesh); existing=MOD.validate_existing(load_json(a.existing)); read_time=time.perf_counter()-started
+        started=time.perf_counter(); request=MOD.validate_request(load_json(a.request)); model=read_analysis_mesh(a.mesh); existing=MOD.validate_existing(load_json(a.existing)); read_time=time.perf_counter()-started
         started=time.perf_counter(); candidates,rejected=detect(request,model,existing,logger); detect_time=time.perf_counter()-started
         started=time.perf_counter(); manifest=write_rigid_incremental_fem(a.delta,candidates,request); write_time=time.perf_counter()-started
         result=new_result("shell_washer_hole_rbe2",request["run_id"]); result["candidates"]=candidates; result["summary"]={"candidate_count":len(candidates),"rejected_count":len(rejected),"rejected":rejected,"duplicate_groups":duplicate_groups(existing),**manifest}; result["performance"]["read_seconds"]=round(read_time,6); result["performance"]["detect_seconds"]=round(detect_time,6); result["performance"]["write_seconds"]=round(write_time,6)

@@ -106,6 +106,88 @@ class IncrementalImportContractTests(unittest.TestCase):
             self.assertGreater(result["summary"]["planned_create_count"], 0)
             self.assertIn("RBE2,", paths["rigids.fem"].read_text(encoding="utf-8"))
 
+    def test_cli_batches_selected_components_into_distinct_output_collectors(self):
+        model1, _ = annulus()
+        model2, _ = annulus()
+        node_offset, element_offset = 100, 100
+        nodes = dict(model1.nodes)
+        nodes.update({node_id + node_offset: (xyz[0] + 25.0, xyz[1], xyz[2]) for node_id, xyz in model2.nodes.items()})
+        elements = dict(model1.elements)
+        elements.update({
+            element_id + element_offset: Element(
+                element_id + element_offset,
+                2,
+                element.element_type,
+                tuple(node_id + node_offset for node_id in element.node_ids),
+            )
+            for element_id, element in model2.elements.items()
+        })
+        model = MeshModel(
+            {1: Component(1, "SHELL_A", "SHELL"), 2: Component(2, "SHELL_B", "SHELL")},
+            nodes,
+            elements,
+        )
+        settings = dict(MOD.DEFAULTS)
+        settings.update({
+            "rigidType": "RBE2",
+            "dof": "123456",
+            "outputComponentNames": {"1": "AUTO_RBE2_SHELL_A", "2": "AUTO_RBE2_SHELL_B"},
+        })
+        request = {
+            "schema_version": "1.0", "module": "shell_washer_hole_rbe2",
+            "run_id": "washer-batch-integration", "hypermesh_version": "2019",
+            "selected_component_ids": [1, 2], "settings": settings,
+            "id_state": {"max_node_id": max(model.nodes), "max_element_id": max(model.elements), "max_component_id": 2},
+            "entity_registry": {"components": {}, "properties": {}, "materials": {}},
+            "options": {"debug": False, "keep_runtime_files": True},
+        }
+        mesh = {
+            "schema_version": "1.0",
+            "components": [
+                {"component_id": 1, "component_name": "SHELL_A", "mesh_class": "SHELL"},
+                {"component_id": 2, "component_name": "SHELL_B", "mesh_class": "SHELL"},
+            ],
+            "nodes": [[node_id, *xyz] for node_id, xyz in model.nodes.items()],
+            "elements": [{
+                "element_id": element.element_id,
+                "component_id": element.component_id,
+                "element_type": element.element_type,
+                "node_ids": list(element.node_ids),
+            } for element in model.elements.values()],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = {name: root / name for name in ("request.json", "mesh.json", "existing.json", "rigids.fem", "result.json", "result.tcl", "operation.log")}
+            paths["request.json"].write_text(json.dumps(request), encoding="utf-8")
+            paths["mesh.json"].write_text(json.dumps(mesh), encoding="utf-8")
+            paths["existing.json"].write_text(json.dumps({"rbe2": []}), encoding="utf-8")
+            code = cli_main(["--request", str(paths["request.json"]), "--mesh", str(paths["mesh.json"]), "--existing", str(paths["existing.json"]), "--delta", str(paths["rigids.fem"]), "--output", str(paths["result.json"]), "--tcl-output", str(paths["result.tcl"]), "--log", str(paths["operation.log"])])
+            self.assertEqual(code, 0)
+            result = json.loads(paths["result.json"].read_text(encoding="utf-8"))
+            self.assertEqual(result["summary"]["planned_create_count"], 2)
+            self.assertEqual(
+                {row["source_component_id"] for row in result["candidates"]},
+                {1, 2},
+            )
+            delta = paths["rigids.fem"].read_text(encoding="utf-8")
+            self.assertIn('"AUTO_RBE2_SHELL_A"', delta)
+            self.assertIn('"AUTO_RBE2_SHELL_B"', delta)
+            generated_components = {row["generated_component_id"] for row in result["candidates"]}
+            self.assertEqual(len(generated_components), 2)
+
+    def test_tcl_workflow_invokes_python_once_for_all_eligible_components(self):
+        workflow = self.source("tcl/workflow.tcl")
+        bridge = self.source("tcl/bridge.tcl")
+        exporter = self.source("tcl/exporter.tcl")
+        module = self.source("../shell_washer_hole_rbe2.tcl")
+        self.assertIn("proc ::RB2W::processComponents {compIds}", workflow)
+        self.assertIn("runPythonRecognition $compIds", workflow)
+        self.assertIn("proc ::RB2W::runPythonRecognition {compIds", bridge)
+        self.assertIn("exportHybridInputs $taskDir $runId $compIds", bridge)
+        self.assertIn("selected_component_ids", exporter)
+        self.assertIn("set result [RB2W::processComponents $eligibleComps]", module)
+        self.assertNotIn("set result [RB2W::processComponent $c", module)
+
 
 class UnusedRBE2CleanupTests(unittest.TestCase):
     @classmethod
@@ -251,6 +333,41 @@ class UnusedRBE2CleanupTests(unittest.TestCase):
         result = interp.eval("::RB2W::resolveUnusedRBE2InternalIds {300 999}")
         self.assertEqual(interp.splitlist(interp.eval("dict get {%s} internal_ids" % result)), ("701",))
         self.assertEqual(interp.splitlist(interp.eval("dict get {%s} unresolved_solver_ids" % result)), ("999",))
+
+    def test_solver_id_resolution_scans_all_elements_when_rigid_mark_filter_is_unavailable(self):
+        interp = tkinter.Tcl()
+        interp.eval("source {%s}" % self.source_path.as_posix())
+        interp.eval(
+            "proc hm_getidpools {args} {error {pool API unavailable}}; "
+            "proc hm_getinternalid {args} {error {pool API unavailable}}; "
+            "proc hm_getsolverid {entityType internalId searchType} {"
+            "if {$internalId == 901} {return {700 SHELL_IDPOOL}}; "
+            "if {$internalId == 902} {return {300 RIGID_IDPOOL}}; "
+            "error {not found}}; "
+            "rename ::RB2W::elemIsRBE2 ::RB2W::elemIsRBE2_original; "
+            "proc ::RB2W::elemIsRBE2 {eid} {return 0}; "
+            "rename ::RB2W::markRigidLinkCandidates ::RB2W::markRigidLinkCandidates_original; "
+            "proc ::RB2W::markRigidLinkCandidates {markId} {return {0 {} {}}}; "
+            "set ::elementMark {}; "
+            "proc *createmark {entityType markId args} {"
+            "if {[lindex $args 0] eq {all}} {set ::elementMark {901 902}; return}; "
+            "if {[lindex $args 0] eq {by id only}} {set args [lrange $args 1 end]}; "
+            "set ::elementMark $args}; "
+            "proc *clearmark {args} {set ::elementMark {}}; "
+            "proc *marktousermark {args} {}; "
+            "proc hm_getmark {entityType markId} {return $::elementMark}"
+        )
+        result = interp.eval("::RB2W::resolveUnusedRBE2InternalIds {300}")
+        self.assertEqual(
+            interp.splitlist(interp.eval("dict get {%s} internal_ids" % result)),
+            ("902",),
+        )
+        self.assertEqual(
+            interp.splitlist(interp.eval("dict get {%s} unresolved_solver_ids" % result)),
+            (),
+        )
+        self.assertEqual(interp.eval("::RB2W::markUnusedRBE2ForDelete {300}"), "elems")
+        self.assertEqual(interp.splitlist(interp.eval("hm_getmark elems 1")), ("902",))
 
     def test_equal_solver_and_internal_ids_do_not_scan_all_rbe2(self):
         interp = tkinter.Tcl()

@@ -8,7 +8,7 @@
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
 
 namespace eval ::GeomCleanup {

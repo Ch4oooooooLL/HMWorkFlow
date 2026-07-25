@@ -144,6 +144,14 @@ namespace eval ::HWToolkit {
             proc     "::RB2Bolt::runAction"
             settings_proc "::RB2Bolt::runSettings"
         }
+        cbush_creator {
+            group    "Connector"
+            label_zh "创建 CBUSH"
+            label_en "Create CBUSH"
+            desc_zh  "选择一个或多个源节点，分别在全局 Z+5 处创建临时节点，并生成 CBUSH 连接。"
+            desc_en  "Select source nodes, create temporary nodes at global Z+5, and connect them with CBUSH."
+            proc     "::CBushCreator::runAction"
+        }
         contact_setup {
             group    "Connector"
             label_zh "接触创建"
@@ -152,6 +160,15 @@ namespace eval ::HWToolkit {
             desc_en  "Pick opposing face elements in two passes and create trimmable contact surfaces directly."
             proc     "::ContactSetup::runAction"
             settings_proc "::ContactSetup::runSettings"
+        }
+        adhesive_connector {
+            group    "Connector"
+            label_zh "模型打胶"
+            label_en "Adhesive Connector"
+            desc_zh  "以 elems 定义 Area location、以 comps 定义 links，清洗越界单元后创建 adhesives。"
+            desc_en  "Create Area adhesives from element locations after removing elements outside the linked-component footprint."
+            proc     "::AdhesiveConnector::runAction"
+            settings_proc "::AdhesiveConnector::runSettings"
         }
         solid_seam_connector {
             group    "Connector"
@@ -209,7 +226,7 @@ proc ::HWToolkit::sourceOneModule {key {info ""}} {
         }
         return 0
     }
-    if {[catch {uplevel #0 [list source $f]} err]} {
+    if {[catch {uplevel #0 [list source -encoding utf-8 $f]} err]} {
         set msg [::HWFlow::txt "模块 $key 加载失败：\n$err" "Failed to load module $key:\n$err"]
         catch {puts "HMWorkFlow: $msg"}
         if {!$QUIET_ERRORS && [llength [info commands tk_messageBox]] > 0} {
@@ -323,6 +340,7 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::SeamSurf::savePanelState}
     catch {::GeomCleanup::savePanelState}
     catch {::ContactSetup::savePanelState}
+    catch {::AdhesiveConnector::savePanelState}
     catch {::LocalMeshOptimizer::savePanelState}
     catch {::WeldIntegrityCheck::saveConfig}
 
@@ -358,6 +376,7 @@ proc ::HWToolkit::clearExistingWindows {} {
         .geometry_seam_thickness
         .geometry_cleanup
         .contact_setup
+        .adhesive_connector
         .batch_mesh_washer
         .casting_tetramesh
         .mesh_seam_weld

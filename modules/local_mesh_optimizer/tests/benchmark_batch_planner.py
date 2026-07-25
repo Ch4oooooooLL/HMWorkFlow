@@ -16,6 +16,7 @@ from adjacency import ShellElement
 from batch_planner import plan_batches, prevalidate_operation
 from mesh_state import MeshState
 from operation_model import adapt_existing_actions, deduplicate_operations
+from quality_simulator import optimize_operation_candidate
 
 
 def benchmark(element_count: int, batch_size: int) -> dict:
@@ -53,10 +54,16 @@ def benchmark(element_count: int, batch_size: int) -> dict:
     adaptation_seconds = time.perf_counter() - started
     started = time.perf_counter()
     for operation in operations:
-        valid, reason = prevalidate_operation(operation, state)
+        valid, reason, _detail = optimize_operation_candidate(
+            operation, state, {"maximum_aspect_ratio": 10.0}
+        )
+        if valid:
+            valid, reason = prevalidate_operation(operation, state)
         operation.validation = {"valid": valid, "reason": reason}
         if not valid:
             operation.status = "validation_failed"
+    quality_simulation_seconds = time.perf_counter() - started
+    started = time.perf_counter()
     batches, conflicts = plan_batches(operations, batch_size)
     batch_seconds = time.perf_counter() - started
     # Split operations sharing method 2 are issued once per generated batch.
@@ -69,8 +76,9 @@ def benchmark(element_count: int, batch_size: int) -> dict:
         "timings_seconds": {
             "mesh_state_build": state_seconds,
             "operation_adaptation": adaptation_seconds,
-            "presimulation_conflict_batching": batch_seconds,
-            "total_python_batch_planning": state_seconds + adaptation_seconds + batch_seconds,
+            "quality_presimulation": quality_simulation_seconds,
+            "conflict_batching": batch_seconds,
+            "total_python_batch_planning": state_seconds + adaptation_seconds + quality_simulation_seconds + batch_seconds,
         },
         "counts": {
             "legacy_split_hm_command_calls": element_count,

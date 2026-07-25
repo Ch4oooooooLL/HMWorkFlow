@@ -8,6 +8,7 @@
 
 namespace eval ::HWFlow {
     variable VERSION "0.2"
+    variable SUPPORTED_HYPERWORKS_YEARS {2019 2022}
     variable ROOT_DIR [file dirname [file dirname [file normalize [info script]]]]
     variable GLOBAL_CONFIG_FILE [file join $ROOT_DIR "config.yaml"]
     variable CONFIG_DIR [file join $ROOT_DIR "config"]
@@ -47,6 +48,15 @@ namespace eval ::HWFlow {
     variable UI_BACKEND "tk"
     variable UI_WINDOWS
     catch {array set UI_WINDOWS {}}
+    variable NATIVE_PANEL_ACTIVE 0
+    variable MODEL_IO_ACTIVE 0
+}
+
+# Tcl's default source encoding follows the embedding application on some
+# HyperWorks releases.  All repository scripts are UTF-8, so never let the
+# Windows ANSI code page decode UI text before it reaches hwtk/Tk.
+proc ::HWFlow::sourceUtf8 {path} {
+    return [uplevel #0 [list source -encoding utf-8 $path]]
 }
 
 proc ::HWFlow::globalConfigFile {} {
@@ -128,6 +138,43 @@ proc ::HWFlow::currentSolverContext {} {
     return [dict create profile $profile template $template]
 }
 
+proc ::HWFlow::hyperWorksVersion {} {
+    set version ""
+    if {[llength [info commands hm_info]] > 0} {
+        catch {set version [string trim [hm_info -appinfo VERSION]]}
+    }
+    return $version
+}
+
+proc ::HWFlow::hyperWorksYear {{version ""}} {
+    if {$version eq ""} {
+        set version [::HWFlow::hyperWorksVersion]
+    }
+    if {[regexp {(20[0-9][0-9])} $version -> year]} {
+        return $year
+    }
+    return ""
+}
+
+proc ::HWFlow::hyperWorksCompatibility {{version ""}} {
+    variable SUPPORTED_HYPERWORKS_YEARS
+    if {$version eq ""} {
+        set version [::HWFlow::hyperWorksVersion]
+    }
+    set year [::HWFlow::hyperWorksYear $version]
+    if {$year eq ""} {
+        return unknown
+    }
+    if {[lsearch -exact $SUPPORTED_HYPERWORKS_YEARS $year] < 0} {
+        return unsupported
+    }
+    switch -- $year {
+        2019 { return legacy }
+        2022 { return new }
+    }
+    return unsupported
+}
+
 proc ::HWFlow::preflightCheck {name status detail} {
     return [dict create name $name status $status detail $detail]
 }
@@ -167,16 +214,16 @@ proc ::HWFlow::engineeringPreflight {{refresh 0}} {
         lappend checks [::HWFlow::preflightCheck solver PASS "profile='$profile' template='$template'"]
     }
 
-    set hmVersion ""
-    if {[llength [info commands hm_info]] > 0} {catch {set hmVersion [hm_info -appinfo VERSION]}}
+    set hmVersion [::HWFlow::hyperWorksVersion]
+    set hmCompatibility [::HWFlow::hyperWorksCompatibility $hmVersion]
     if {$hmVersion eq ""} {
         set warned 1
         lappend checks [::HWFlow::preflightCheck hypermesh WARNING "HyperMesh version could not be queried"]
-    } elseif {![string match "*2019*" $hmVersion]} {
+    } elseif {$hmCompatibility ni {legacy new}} {
         set warned 1
-        lappend checks [::HWFlow::preflightCheck hypermesh WARNING "Validated baseline is HM2019; current version is $hmVersion"]
+        lappend checks [::HWFlow::preflightCheck hypermesh WARNING "Supported versions are HyperMesh 2019 and HyperWorks 2022; current version is $hmVersion"]
     } else {
-        lappend checks [::HWFlow::preflightCheck hypermesh PASS $hmVersion]
+        lappend checks [::HWFlow::preflightCheck hypermesh PASS "$hmVersion ($hmCompatibility interface)"]
     }
 
     if {[llength [info commands ::HybridCore::workerAlive]] > 0} {
@@ -543,6 +590,73 @@ proc ::HWFlow::keepWindowTopmost {w} {
     catch {raise $w}
 }
 
+# HyperWorks 2022 redirects the legacy selection-panel commands to guide-bar
+# widgets.  A partially active context can make *createmarkpanel reject the
+# mark even though selection itself remains available.  Retry with the
+# supported edit widget, while preventing nested callbacks from opening two
+# selectors against the same pair of global marks.
+proc ::HWFlow::invokeNativeMarkPanel {entityType markId prompt args} {
+    variable NATIVE_PANEL_ACTIVE
+    if {$NATIVE_PANEL_ACTIVE} {
+        error "A HyperMesh entity selector is already active"
+    }
+    set NATIVE_PANEL_ACTIVE 1
+    catch {*clearmark $entityType $markId}
+    set command [concat [list *createmarkpanel $entityType $markId $prompt] $args]
+    set code [catch {uplevel #0 $command} err opts]
+    if {$code && [::HWFlow::hyperWorksCompatibility] eq "new" &&
+        [llength [info commands *editmarkpanel]] > 0} {
+        catch {*clearmark $entityType $markId}
+        catch {update idletasks}
+        set command [concat [list *editmarkpanel $entityType $markId $prompt] $args]
+        set code [catch {uplevel #0 $command} err opts]
+    }
+    set NATIVE_PANEL_ACTIVE 0
+    if {$code} { return -options $opts $err }
+    return [hm_getmark $entityType $markId]
+}
+
+# Model translators may display an overwrite/import message behind a modal
+# toolkit window in HyperWorks 2022, which looks like a hung Tcl command.  All
+# native FEM I/O goes through this single-session guard: stale task output is
+# removed, the next translator confirmation is answered, and busy state is
+# cleared on both success and error.
+proc ::HWFlow::runHyperMeshIo {operation command {outputPath ""}} {
+    variable MODEL_IO_ACTIVE
+    if {$MODEL_IO_ACTIVE} {
+        error "A HyperMesh model import/export operation is already active"
+    }
+    if {$operation ni {import export}} {
+        error "Unsupported HyperMesh model I/O operation: $operation"
+    }
+    set MODEL_IO_ACTIVE 1
+    set setupCode [catch {
+        if {$operation eq "export" && $outputPath ne "" && [file exists $outputPath]} {
+            if {![file isfile $outputPath]} {
+                error "Export target is not a regular file: $outputPath"
+            }
+            file delete -force $outputPath
+        }
+        if {[llength [info commands grab]] > 0} {
+            set grabbed [grab current]
+            if {$grabbed ne ""} { catch {grab release $grabbed} }
+        }
+        catch {update idletasks}
+        if {[llength [info commands hm_answernext]] > 0} {
+            hm_answernext yes
+        }
+    } setupError setupOptions]
+    if {$setupCode} {
+        set MODEL_IO_ACTIVE 0
+        return -options $setupOptions $setupError
+    }
+    set code [catch {uplevel #0 $command} result options]
+    set MODEL_IO_ACTIVE 0
+    catch {update idletasks}
+    if {$code} { return -options $options $result }
+    return $result
+}
+
 # HyperMesh mark panels are native modal UI.  Temporarily unpost only windows
 # owned by this toolkit, rather than every Tcl toplevel in the HyperMesh
 # process.  This preserves compatibility with HM2019 selection panels while
@@ -560,7 +674,7 @@ proc ::HWFlow::nativeMarkPanel {entityType markId prompt args} {
         catch {update}
     }
 
-    set code [catch {*createmarkpanel $entityType $markId $prompt {*}$args} err opts]
+    set code [catch {set selected [::HWFlow::invokeNativeMarkPanel $entityType $markId $prompt {*}$args]} err opts]
     foreach state $windows {
         lassign $state w mapped
         if {![winfo exists $w]} { continue }
@@ -569,7 +683,7 @@ proc ::HWFlow::nativeMarkPanel {entityType markId prompt args} {
     }
     catch {update idletasks}
     if {$code} { return -options $opts $err }
-    return [hm_getmark $entityType $markId]
+    return $selected
 }
 
 proc ::HWFlow::nativePanelSessionBegin {} {
@@ -598,9 +712,7 @@ proc ::HWFlow::nativePanelSessionEnd {windows} {
 }
 
 proc ::HWFlow::nativeMarkPanelInSession {entityType markId prompt args} {
-    catch {*clearmark $entityType $markId}
-    *createmarkpanel $entityType $markId $prompt {*}$args
-    return [hm_getmark $entityType $markId]
+    return [::HWFlow::invokeNativeMarkPanel $entityType $markId $prompt {*}$args]
 }
 
 # Run consecutive native selection panels while toolkit windows remain hidden.
@@ -626,9 +738,7 @@ proc ::HWFlow::nativeMarkPanelSequence {requests} {
             set markId [lindex $request 1]
             set prompt [lindex $request 2]
             set panelArgs [lrange $request 3 end]
-            catch {*clearmark $entityType $markId}
-            *createmarkpanel $entityType $markId $prompt {*}$panelArgs
-            set selected [hm_getmark $entityType $markId]
+            set selected [::HWFlow::invokeNativeMarkPanel $entityType $markId $prompt {*}$panelArgs]
             lappend selections $selected
             if {[llength $selected] == 0} { break }
         }

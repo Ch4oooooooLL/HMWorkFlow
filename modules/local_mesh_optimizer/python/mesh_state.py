@@ -38,6 +38,7 @@ class MeshState:
         self.elements: Dict[int, ShellElement] = dict(elements)
         self.node_to_elements: Dict[int, Set[int]] = {}
         self.edge_to_elements: Dict[Edge, Set[int]] = {}
+        self.node_signature_to_elements: Dict[Tuple[int, ...], Set[int]] = {}
         self.element_neighbors: Dict[int, Set[int]] = {}
         self.component_elements: Dict[int, Set[int]] = {}
         self.deleted_nodes: Set[int] = set()
@@ -53,6 +54,7 @@ class MeshState:
     def _build_indices(self) -> None:
         self.node_to_elements.clear()
         self.edge_to_elements.clear()
+        self.node_signature_to_elements.clear()
         self.component_elements.clear()
         for element in self.elements.values():
             self.component_elements.setdefault(element.component_id, set()).add(element.element_id)
@@ -60,6 +62,8 @@ class MeshState:
                 self.node_to_elements.setdefault(node, set()).add(element.element_id)
             for edge in self._element_edges(element):
                 self.edge_to_elements.setdefault(edge, set()).add(element.element_id)
+            signature = tuple(sorted(element.nodes))
+            self.node_signature_to_elements.setdefault(signature, set()).add(element.element_id)
         self._rebuild_neighbors(set(self.elements))
 
     def _rebuild_neighbors(self, element_ids: Set[int]) -> None:
@@ -105,6 +109,8 @@ class MeshState:
             self.node_to_elements.setdefault(node, set()).add(element.element_id)
         for edge in self._element_edges(element):
             self.edge_to_elements.setdefault(edge, set()).add(element.element_id)
+        signature = tuple(sorted(element.nodes))
+        self.node_signature_to_elements.setdefault(signature, set()).add(element.element_id)
         self._rebuild_neighbors({element.element_id})
 
     def remove_element(self, element_id: int) -> Optional[ShellElement]:
@@ -124,6 +130,12 @@ class MeshState:
                 owners.discard(element_id)
                 if not owners:
                     self.edge_to_elements.pop(edge, None)
+        signature = tuple(sorted(element.nodes))
+        signature_owners = self.node_signature_to_elements.get(signature)
+        if signature_owners is not None:
+            signature_owners.discard(element_id)
+            if not signature_owners:
+                self.node_signature_to_elements.pop(signature, None)
         owners = self.component_elements.get(element.component_id)
         if owners is not None:
             owners.discard(element_id)

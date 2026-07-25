@@ -1,6 +1,6 @@
 # HyperMesh 2019 bridge self-test. This file does not modify the model.
 set selfTestDir [file dirname [file normalize [info script]]]
-source [file join $selfTestDir init.tcl]
+source -encoding utf-8 [file join $selfTestDir init.tcl]
 
 set workspace [::HybridCore::createTaskWorkspace hybrid_core_self_test]
 set taskDir [dict get $workspace task_dir]

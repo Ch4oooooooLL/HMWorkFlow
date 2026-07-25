@@ -28,6 +28,7 @@ from mesh_state import MeshState
 from operation_model import adapt_existing_actions, deduplicate_operations
 from optimization_planner import plan_optimization_actions
 from performance_metrics import PerformanceMetrics
+from quality_simulator import optimize_operation_candidate, optimize_operation_group
 from region_builder import (
     build_regions,
     feature_edges,
@@ -63,6 +64,28 @@ def _regions_have_disjoint_nodes(regions: Sequence[dict], elements: Mapping[int,
             return False
         claimed.update(nodes)
     return True
+
+
+def _presimulation_groups(operations: Sequence[object]) -> list:
+    groups = []
+    coordinated = {}
+    for operation in operations:
+        chain_id = int(operation.legacy_action.get("split_method", 0))
+        if operation.operation_type in ("expand_free_edge", "expand_internal_quad") and chain_id > 0:
+            key = (
+                str(operation.metadata.get("region_id", "")),
+                operation.operation_type,
+                chain_id,
+            )
+            group = coordinated.get(key)
+            if group is None:
+                group = []
+                coordinated[key] = group
+                groups.append(group)
+            group.append(operation)
+        else:
+            groups.append([operation])
+    return groups
 
 
 def _path(task_dir: Path, task: Dict[str, object], key: str, default: str) -> Path:
@@ -146,7 +169,7 @@ def build(task_path: Path) -> int:
         atomic_write_text(task_dir / "region_tasks.txt", "region_id,failed_elements,expanded_elements,components,anchor_nodes\n")
         atomic_write_text(
             task_dir / "optimization_actions.txt",
-            "region_id,action_id,action_type,element_id,edge_index,node_a,node_b,reference_a,reference_b,target_distance,split_method,reason\n",
+            "region_id,action_id,action_type,element_id,edge_index,node_a,node_b,reference_a,reference_b,target_distance,target_distance_b,move_mode,split_method,reason\n",
         )
         write_batch_artifacts(task_dir, [], [], [])
         atomic_write_json(task_dir / "python_performance_metrics.json", metrics.to_dict())
@@ -189,7 +212,9 @@ def build(task_path: Path) -> int:
                 max_expanded_elements=int(task.get("macro_max_elements", 10000)),
             )
     metrics.increment("execution_regions", len(regions))
+    _progress(task_dir, "generating_candidates", 52.0, "正在生成局部优化候选")
     with metrics.measure("candidate_generation"):
+        quality_limits = metadata.get("quality_limits", {})
         planner_common = {
             "elements": elements,
             "coordinates": coordinates,
@@ -199,9 +224,17 @@ def build(task_path: Path) -> int:
                 bool(task.get("allow_controlled_free_edge_move", True))
                 and str(task.get("optimization_level", "standard")) != "quick"
             ),
+            "allow_internal_quad_expansion": bool(
+                task.get("allow_internal_quad_expansion", False)
+            ),
             "skinny_triangle_ratio": float(task.get("skinny_triangle_ratio", 2.5)),
             "narrow_quad_ratio": float(task.get("narrow_quad_ratio", 2.5)),
             "narrow_target_aspect": float(task.get("narrow_target_aspect", 1.5)),
+            "minimum_length": float(quality_limits.get("minimum_length", 0.0)),
+            "maximum_aspect_ratio": (
+                float(quality_limits["maximum_aspect_ratio"])
+                if "maximum_aspect_ratio" in quality_limits else None
+            ),
         }
         requested_workers = max(1, min(8, int(task.get("analysis_workers", 1))))
         can_parallelize = (
@@ -218,7 +251,14 @@ def build(task_path: Path) -> int:
                 jobs.append(job)
             with ProcessPoolExecutor(max_workers=min(requested_workers, len(jobs))) as executor:
                 actions = [action for result in executor.map(_plan_one_region, jobs) for action in result]
-            action_priority = {"collapse_short_edge": 0, "expand_free_edge": 1, "split_quad": 2, "manual_review": 3}
+            action_priority = {
+                "collapse_short_edge": 0,
+                "expand_free_edge": 1,
+                "expand_internal_quad": 1,
+                "expand_triangle_short_edge": 1,
+                "split_quad": 2,
+                "manual_review": 3,
+            }
             actions.sort(
                 key=lambda action: (
                     str(action["region_id"]),
@@ -236,6 +276,10 @@ def build(task_path: Path) -> int:
                 **planner_common
             )
             metrics.increment("serial_region_planning")
+    logging.info(
+        "Candidate generation complete: regions=%d actions=%d",
+        len(regions), len(actions),
+    )
     actions_by_region: Dict[str, list] = {}
     for action in actions:
         actions_by_region.setdefault(str(action["region_id"]), []).append(action)
@@ -243,12 +287,16 @@ def build(task_path: Path) -> int:
     # anchors remain protected except for explicitly planned moving nodes.
     for region in regions:
         region_actions = actions_by_region.get(str(region["region_id"]), [])
-        controlled_nodes = {
-            int(node)
-            for action in region_actions
-            if action["action_type"] == "expand_free_edge"
-            for node in (action["node_a"], action["node_b"])
-        }
+        controlled_nodes = set()
+        for action in region_actions:
+            if action["action_type"] in ("expand_free_edge", "expand_triangle_short_edge"):
+                controlled_nodes.update((int(action["node_a"]), int(action["node_b"])))
+            elif action["action_type"] == "expand_internal_quad":
+                move_mode = int(action.get("move_mode", 0))
+                if move_mode in (0, 1):
+                    controlled_nodes.update((int(action["node_a"]), int(action["node_b"])))
+                if move_mode in (0, 2):
+                    controlled_nodes.update((int(action["reference_a"]), int(action["reference_b"])))
         region["anchor_nodes"] = sorted(
             set(region["anchor_nodes"]).difference(controlled_nodes.difference(user_anchor_nodes))
         )
@@ -262,19 +310,67 @@ def build(task_path: Path) -> int:
         for region in regions
     }
     presimulation = bool(task.get("enable_presimulation", True))
+    _progress(
+        task_dir, "simulating_quality", 68.0,
+        "正在进行 Python 质量预模拟：0/{}".format(len(operations)),
+    )
     with metrics.measure("candidate_presimulation"):
-        for operation in operations:
+        operation_groups = _presimulation_groups(operations)
+        progress_interval = max(25, len(operations) // 50) if operations else 1
+        processed_operations = 0
+        last_progress = 0
+        for operation_group in operation_groups:
             if presimulation:
-                valid, reason = prevalidate_operation(
-                    operation,
-                    mesh_state,
-                    region_anchors.get(str(operation.metadata.get("region_id", "")), user_anchor_nodes),
+                quality_valid, quality_reason, quality_detail = optimize_operation_group(
+                    operation_group, mesh_state, quality_limits
                 )
+                if quality_valid:
+                    validations = [
+                        prevalidate_operation(
+                            operation,
+                            mesh_state,
+                            region_anchors.get(str(operation.metadata.get("region_id", "")), user_anchor_nodes),
+                            validate_movement_geometry=len(operation_group) == 1,
+                        )
+                        for operation in operation_group
+                    ]
+                    valid = all(item[0] for item in validations)
+                    reason = "ok" if valid else "coordinated_group_member_invalid:{}".format(
+                        next(item[1] for item in validations if not item[0])
+                    )
+                else:
+                    valid, reason = False, quality_reason
             else:
-                valid, reason = (operation.operation_type != "manual_review", "disabled")
-            operation.validation = {"valid": valid, "reason": reason, "layer": "python_precheck"}
-            if not valid and operation.operation_type != "manual_review":
-                operation.status = "validation_failed"
+                valid = all(operation.operation_type != "manual_review" for operation in operation_group)
+                reason = "disabled"
+                quality_reason, quality_detail = "disabled", {"accepted_scale": 1.0}
+            for operation in operation_group:
+                operation.validation = {
+                    "valid": valid,
+                    "reason": reason,
+                    "layer": "python_precheck",
+                    "quality_simulation": {
+                        "result": quality_reason,
+                        "detail": quality_detail,
+                    },
+                }
+                if not valid and operation.operation_type != "manual_review":
+                    operation.status = "validation_failed"
+            processed_operations += len(operation_group)
+            if processed_operations - last_progress >= progress_interval or processed_operations == len(operations):
+                last_progress = processed_operations
+                percent = 68.0 + 17.0 * processed_operations / max(1, len(operations))
+                _progress(
+                    task_dir, "simulating_quality", percent,
+                    "正在进行 Python 质量预模拟：{}/{}".format(
+                        processed_operations, len(operations)
+                    ),
+                )
+                if (task_dir / "cancel.flag").exists():
+                    _progress(task_dir, "cancelled", 100.0, "用户已取消")
+                    return EXIT_CANCELLED
+    logging.info("Candidate quality simulation complete: operations=%d", len(operations))
+    _progress(task_dir, "batching_operations", 88.0, "正在分析动作冲突并生成批次")
     with metrics.measure("conflict_analysis_and_batching"):
         batches, conflicts = plan_batches(
             operations,
@@ -288,6 +384,11 @@ def build(task_path: Path) -> int:
     metrics.increment("executable_batches", len(batches))
     metrics.increment("executable_operations", sum(len(batch.operations) for batch in batches))
     metrics.increment("conflict_edges", len(conflicts))
+    executable_actions = [
+        operation.legacy_action for operation in operations
+        if operation.validation.get("valid", False)
+    ]
+    _progress(task_dir, "writing_plan", 94.0, "正在写入 Tcl 执行计划")
     for region in regions:
         region_actions = actions_by_region.get(str(region["region_id"]), [])
         region["planned_actions"] = region_actions
@@ -313,10 +414,10 @@ def build(task_path: Path) -> int:
     action_fields = (
         "region_id", "action_id", "action_type", "element_id", "edge_index",
         "node_a", "node_b", "reference_a", "reference_b", "target_distance",
-        "split_method", "reason",
+        "target_distance_b", "move_mode", "split_method", "reason",
     )
     action_rows = [",".join(action_fields)]
-    for action in actions:
+    for action in executable_actions:
         action_rows.append(",".join(str(action[field]) for field in action_fields))
     atomic_write_text(task_dir / "optimization_actions.txt", "\n".join(action_rows) + "\n")
     atomic_write_json(task_dir / "python_performance_metrics.json", metrics.to_dict())

@@ -95,16 +95,30 @@ class BinaryMeshContractTests(unittest.TestCase):
         self.assertEqual(tuple(model.elements), (1,))
 
     def test_hybrid_exporters_use_binary_mesh_data_plane(self):
-        exporters = (
-            ROOT / "modules" / "auto_hole_rbe2" / "tcl" / "exporter.tcl",
-            ROOT / "modules" / "shell_washer_hole_rbe2" / "tcl" / "exporter.tcl",
-            ROOT / "modules" / "mesh_seam_weld" / "tcl" / "exporter.tcl",
-        )
+        exporters = (ROOT / "modules" / "mesh_seam_weld" / "tcl" / "exporter.tcl",)
         for exporter in exporters:
             source = exporter.read_text(encoding="utf-8")
             with self.subTest(exporter=exporter.parent.parent.name):
                 self.assertIn("::HybridCore::writeBinaryMesh", source)
                 self.assertIn("mesh.hmwf", source)
+
+    def test_auto_hole_exports_the_generated_faces_component_as_native_fem(self):
+        exporter = ROOT / "modules" / "auto_hole_rbe2" / "tcl" / "exporter.tcl"
+        source = exporter.read_text(encoding="utf-8")
+        self.assertIn('*createmark elems 1 "by component id" $faceComponentId', source)
+        self.assertIn("surface_faces.fem", source)
+        self.assertIn("surface_faces_manifest.json", source)
+        self.assertIn("*feoutput_select", source)
+        self.assertNotIn("::HybridCore::writeBinaryMesh", source)
+
+    def test_shell_washer_uses_one_native_selected_component_fem(self):
+        exporter = ROOT / "modules" / "shell_washer_hole_rbe2" / "tcl" / "exporter.tcl"
+        source = exporter.read_text(encoding="utf-8")
+        self.assertIn("exportSelectedComponentsFem", source)
+        self.assertIn("selected_components.fem", source)
+        self.assertIn("selected_components_manifest.json", source)
+        self.assertIn("*feoutput_select", source)
+        self.assertNotIn("::HybridCore::writeBinaryMesh", source)
 
     def test_bolt_exporter_uses_the_solver_fem_data_plane(self):
         exporter = ROOT / "modules" / "rbe2_bolt_connector" / "tcl" / "exporter.tcl"

@@ -8,26 +8,41 @@ proc ::AutoHoleRBE2::executePythonCandidatesLegacy {payload} {
 }
 
 proc ::AutoHoleRBE2::executePythonCandidates {payload} {
-    variable cfg
-    variable stat
-    set summary [dict get $payload summary]
-    set candidates [dict get $payload candidates]
-    set skipped 0
-    foreach row $candidates {
-        if {[dict get $row recommended_action] ne "CREATE"} { incr skipped }
+    # Python only identifies and groups the wall-node sets.  HyperMesh/Tcl is
+    # the authoritative creator so node IDs never cross an import/renumbering
+    # boundary before *rigidlink is called.
+    return [::AutoHoleRBE2::executePythonCandidatesLegacy $payload]
+}
+
+proc ::AutoHoleRBE2::resolveCandidateWallNodes {solverNodeIds} {
+    set poolNames {}
+    foreach entityType {nodes node} {
+        if {![catch {set names [hm_getidpools $entityType name]}]} {
+            set poolNames [concat $poolNames $names]
+        }
     }
-    if {[catch {
-        set imported [::HybridCore::importRigidDelta "Solid Through-Hole RIGIDS" $summary \
-            [list ::AutoHoleRBE2::rigidCenterNode] [list ::AutoHoleRBE2::elemNodes] 70.0 96.0]
-    } importError]} {
-        ::HybridCore::log WARN "incremental RIGIDS import failed; using legacy Tcl creation: $importError"
-        return [::AutoHoleRBE2::executePythonCandidatesLegacy $payload]
+    set poolNames [lsort -unique $poolNames]
+    set result {}
+    foreach solverId [::AutoHoleRBE2::uniq $solverNodeIds] {
+        set internalId ""
+        foreach poolName $poolNames {
+            if {[catch {set candidate [hm_getinternalid $poolName $solverId -bypoolname]}]} {
+                continue
+            }
+            if {$candidate ne "" && $candidate != 0} {
+                set internalId $candidate
+                break
+            }
+        }
+        if {$internalId eq "" && [::AutoHoleRBE2::hybridNodeExists $solverId]} {
+            set internalId $solverId
+        }
+        if {$internalId eq ""} {
+            error "Cannot resolve FEM solver node ID $solverId to a HyperMesh node"
+        }
+        lappend result $internalId
     }
-    set created [dict get $imported created]
-    set stat(created) $created
-    set stat(skippedExisting) $skipped
-    catch {::AutoHoleRBE2::refreshComponentBrowser $cfg(resultCompName)}
-    return [dict create created $created skipped $skipped failed 0 incremental_fem [dict get $summary incremental_fem]]
+    return $result
 }
 
 proc ::AutoHoleRBE2::executePythonCandidatesBulk {payload} {
@@ -47,7 +62,7 @@ proc ::AutoHoleRBE2::executePythonCandidatesBulk {payload} {
             ::HybridCore::log INFO "candidate=$candidateId skipped existing=[dict get $candidate existing_rbe2_id]"
             continue
         }
-        set wallNodes [dict get $candidate wall_node_ids]
+        set wallNodes [::AutoHoleRBE2::resolveCandidateWallNodes [dict get $candidate wall_node_ids]]
         set centerNode ""; set elementId ""
         set code [catch {
             if {!$resultCompReady} {

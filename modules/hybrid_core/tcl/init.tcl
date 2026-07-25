@@ -49,7 +49,7 @@ foreach fileName {
     detached_task.tcl
     result_loader.tcl
 } {
-    source [file join $::HybridCore::TCL_DIR $fileName]
+    source -encoding utf-8 [file join $::HybridCore::TCL_DIR $fileName]
 }
 
 ::HybridCore::initializeStorage

@@ -50,6 +50,37 @@ class _EntryBundle:
         self.root = root
         self.entry_module = entry_module
         self.modules = modules
+        self.source_fingerprints = _source_fingerprints(modules)
+
+    def capture_new_sources(self) -> None:
+        for path, fingerprint in _source_fingerprints(self.modules).items():
+            self.source_fingerprints.setdefault(path, fingerprint)
+
+    def source_changed(self) -> bool:
+        for path, expected in self.source_fingerprints.items():
+            try:
+                if _file_fingerprint(Path(path)) != expected:
+                    return True
+            except OSError:
+                return True
+        return False
+
+
+def _file_fingerprint(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _source_fingerprints(modules: Dict[str, object]) -> Dict[str, str]:
+    result = {}
+    for module in modules.values():
+        filename = getattr(module, "__file__", None)
+        if not filename:
+            continue
+        path = Path(filename).resolve()
+        if path.suffix.lower() != ".py" or not path.is_file():
+            continue
+        result[str(path)] = _file_fingerprint(path)
+    return result
 
 
 class _EntryLoader:
@@ -73,15 +104,49 @@ class _EntryLoader:
             return
         bundle = self.bundles[self.active]
         bundle.modules.update(self._capture(bundle.root))
+        bundle.capture_new_sources()
         for name, module in list(bundle.modules.items()):
             if sys.modules.get(name) is module:
                 sys.modules.pop(name, None)
 
+    def _discard(self, entry: Path, bundle: _EntryBundle) -> None:
+        for name, module in list(bundle.modules.items()):
+            if sys.modules.get(name) is module:
+                sys.modules.pop(name, None)
+            cached = getattr(module, "__cached__", None)
+            if not cached:
+                continue
+            cached_path = Path(cached).resolve()
+            try:
+                cached_path.relative_to(bundle.root)
+            except ValueError:
+                continue
+            if cached_path.suffix.lower() == ".pyc":
+                try:
+                    cached_path.unlink()
+                except OSError:
+                    pass
+        self.bundles.pop(entry, None)
+        if self.active == entry:
+            self.active = None
+        importlib.invalidate_caches()
+
     def activate(self, entry: Path):
         if self.active == entry:
-            return self.bundles[entry].entry_module
-        self._deactivate()
+            active_bundle = self.bundles[entry]
+            active_bundle.modules.update(self._capture(active_bundle.root))
+            active_bundle.capture_new_sources()
+            if not active_bundle.source_changed():
+                return active_bundle.entry_module
+            self._deactivate()
+            self._discard(entry, active_bundle)
+        else:
+            self._deactivate()
         cached = self.bundles.get(entry)
+        if cached is not None:
+            if cached.source_changed():
+                self._discard(entry, cached)
+                cached = None
         if cached is not None:
             sys.modules.update(cached.modules)
             self.active = entry
@@ -111,6 +176,7 @@ class _EntryLoader:
         if self.active is not None:
             bundle = self.bundles[self.active]
             bundle.modules.update(self._capture(bundle.root))
+            bundle.capture_new_sources()
 
 
 _ENTRY_LOADER = _EntryLoader()

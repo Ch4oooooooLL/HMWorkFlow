@@ -655,6 +655,53 @@ ENDDATA
             interp.eval("::MeshSeamWeld::localTargetPatchFromProjectedNodes {11 12} {9}"),
             "201 202 203",
         )
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_closed_loop_projection_adds_radial_seeds_for_surrounding_cylinder(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::MeshSeamWeld::nodeXYZ ::MeshSeamWeld::nodeXYZ_real")
+        interp.eval("array set ::xyz {1 {1 0 0} 2 {0 1 0} 3 {-1 0 0} 4 {0 -1 0} 11 {5 0 0} 12 {0 5 0} 13 {-5 0 0} 14 {0 -5 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {id} {return $::xyz($id)}")
+        interp.eval("proc *clearmark {args} {}; proc *createmark {args} {}")
+        # At the inner loop all source nodes collapse to one coarse target
+        # node.  Queries near the estimated enclosing radius recover the
+        # circumferential target seeds needed by the local imprint patch.
+        interp.eval("proc hm_getclosestnode {x y z elemMark nodeMark} {if {abs($x) < 2.0 && abs($y) < 2.0} {return 11}; if {abs($x) >= abs($y)} {expr {$x >= 0 ? 11 : 13}} else {expr {$y >= 0 ? 12 : 14}}}")
+        interp.eval("set p [::MeshSeamWeld::projectNodesToTargetComponents {1 2 3 4} {9} 1]")
+        self.assertEqual(interp.eval("dict get $p radial_assist"),"1")
+        self.assertEqual(
+            {int(v) for v in interp.eval("dict get $p patch_nodes").split()},
+            {11,12,13,14},
+        )
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_open_projection_does_not_add_radial_seeds(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::MeshSeamWeld::nodeXYZ ::MeshSeamWeld::nodeXYZ_real")
+        interp.eval("array set ::xyz {1 {0 0 0} 2 {1 0 0} 3 {2 0 0} 11 {5 0 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {id} {return $::xyz($id)}")
+        interp.eval("proc *clearmark {args} {}; proc *createmark {args} {}; proc hm_getclosestnode {args} {return 11}")
+        interp.eval("set p [::MeshSeamWeld::projectNodesToTargetComponents {1 2 3} {9} 0]")
+        self.assertEqual(interp.eval("dict get $p radial_assist"),"0")
+        self.assertEqual(interp.eval("dict get $p patch_nodes"),"11")
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_open_circular_arc_projection_adds_radial_cylinder_seeds(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::MeshSeamWeld::nodeXYZ ::MeshSeamWeld::nodeXYZ_real")
+        interp.eval("array set ::xyz {1 {1 0 0} 2 {0 1 0} 3 {-1 0 0} 11 {5 0 0} 12 {0 5 0} 13 {-5 0 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {id} {return $::xyz($id)}")
+        interp.eval("proc *clearmark {args} {}; proc *createmark {args} {}")
+        interp.eval("proc hm_getclosestnode {x y z elemMark nodeMark} {if {abs($x) < 2.0 && abs($y) < 2.0} {return 11}; if {abs($x) >= abs($y)} {expr {$x >= 0 ? 11 : 13}} else {return 12}}")
+        interp.eval("set p [::MeshSeamWeld::projectNodesToTargetComponents {1 2 3} {9} 0]")
+        self.assertEqual(interp.eval("dict get $p radial_assist"),"1")
+        self.assertEqual(
+            {int(v) for v in interp.eval("dict get $p patch_nodes").split()},
+            {11,12,13},
+        )
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_latest_id_survives_undo_zero(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
@@ -736,6 +783,43 @@ ENDDATA
         self.assertEqual(
             interp.eval("::MeshSeamWeld::matchContinuousTargetPathNodes {1 2 3 4} {11 12 13 14} 1 {11 11 13 14}"),
             "11 12 13 14",
+        )
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_surrounding_cylinder_recovers_closed_target_ring_with_different_node_count(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        result=interp.eval("""
+rename ::MeshSeamWeld::nodeXYZ ::MeshSeamWeld::nodeXYZ_real
+array set ::xyz {}
+set source {}
+set target {}
+set edges [dict create]
+for {set i 0} {$i < 4} {incr i} {
+    set id [expr {$i + 1}]; set a [expr {2.0*acos(-1.0)*$i/4.0}]
+    set ::xyz($id) [list [expr {cos($a)}] [expr {sin($a)}] 0.0]
+    lappend source $id
+}
+for {set i 0} {$i < 8} {incr i} {
+    set id [expr {11 + $i}]; set a [expr {2.0*acos(-1.0)*$i/8.0}]
+    set ::xyz($id) [list [expr {5.0*cos($a)}] [expr {5.0*sin($a)}] 0.0]
+    lappend target $id
+    dict set edges [::MeshSeamWeld::canonicalEdgeKey $id [expr {11 + (($i + 1) % 8)}]] 1
+}
+proc ::MeshSeamWeld::nodeXYZ {id} {return $::xyz($id)}
+set ::MeshSeamWeld::lastLocalTargetEdges $edges
+::MeshSeamWeld::matchVariableTargetPathNodes $source $target 1 {11 13 15 17}
+""")
+        self.assertEqual(tuple(interp.splitlist(result)),tuple(str(11+i) for i in range(8)))
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_surrounding_cylinder_recovers_open_target_arc_with_different_node_count(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("set ::MeshSeamWeld::lastLocalTargetEdges [dict create 11,12 1 12,13 1 13,14 1 14,15 1]")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::matchVariableTargetPathNodes {1 2 3} {11 12 13 14 15} 0 {11 13 15}"),
+            "11 12 13 14 15",
         )
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_fifty_one_node_loop_recovers_from_one_duplicate_anchor(self):
@@ -842,6 +926,28 @@ list $path [llength [lsort -integer -unique $path]]
                 ("3","1","101","103"),("103","101","11","13"),
             ],
         )
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_unequal_closed_paths_generate_continuous_zipper_elements(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        elems=interp.splitlist(interp.eval(
+            "::MeshSeamWeld::unequalStripElementNodeLists {1 2 3 4} {11 12 13 14 15 16 17 18} 1"
+        ))
+        parsed=[tuple(interp.splitlist(elem)) for elem in elems]
+        self.assertEqual(len(parsed),8)
+        self.assertTrue(all(len(elem) in (3,4) for elem in parsed))
+        self.assertEqual({node for elem in parsed for node in elem},{str(i) for i in range(1,5)}|{str(i) for i in range(11,19)})
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_unequal_open_paths_generate_continuous_zipper_elements(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        elems=interp.splitlist(interp.eval(
+            "::MeshSeamWeld::unequalStripElementNodeLists {1 2 3} {11 12 13 14 15} 0"
+        ))
+        self.assertEqual(len(elems),4)
+        self.assertTrue(all(len(interp.splitlist(elem)) in (3,4) for elem in elems))
     def test_all_cross_layers_bypass_ruled_surface_automesh(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         ruled=module.split("proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths",1)[1].split("proc ::MeshSeamWeld::legacyRuledMeshBetweenNodePaths",1)[0]

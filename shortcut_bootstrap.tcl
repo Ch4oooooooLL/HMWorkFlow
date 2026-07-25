@@ -11,7 +11,7 @@ if {[catch {
     if {![file exists $hmworkflowCore]} {
         error "Core file not found: $hmworkflowCore"
     }
-    source $hmworkflowCore
+    source -encoding utf-8 $hmworkflowCore
     set ::HWToolkit::QUIET_ERRORS 1
 
     if {![::HWToolkit::ensureCoreLoaded]} {
@@ -22,7 +22,7 @@ if {[catch {
         if {![file exists $shortcutFile]} {
             error "Shortcut manager not found: $shortcutFile"
         }
-        source $shortcutFile
+        source -encoding utf-8 $shortcutFile
     }
     ::HWShortcut::initialize startup
 
@@ -31,7 +31,7 @@ if {[catch {
         error "Hybrid Python core not found: $hybridCoreInit"
     }
     if {[llength [info commands ::HybridCore::scheduleInstanceWorker]] == 0} {
-        source $hybridCoreInit
+        source -encoding utf-8 $hybridCoreInit
     }
     ::HybridCore::scheduleInstanceWorker
 } hmworkflowShortcutError]} {

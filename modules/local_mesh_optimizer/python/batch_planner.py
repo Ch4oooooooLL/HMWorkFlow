@@ -26,10 +26,61 @@ def _triangle_area(first: Point, second: Point, third: Point) -> float:
     return 0.5 * math.sqrt(sum(value * value for value in cross))
 
 
+def _symmetric_targets(first: Point, second: Point, final_distance: float) -> Tuple[Point, Point]:
+    vector = tuple(first[index] - second[index] for index in range(3))
+    current = math.sqrt(sum(value * value for value in vector))
+    if current <= 1.0e-14 or not math.isfinite(final_distance) or final_distance < current - 1.0e-12:
+        raise ValueError("invalid_symmetric_expansion_distance")
+    if final_distance <= current + 1.0e-12:
+        return first, second
+    displacement = (final_distance - current) / 2.0
+    unit = tuple(value / current for value in vector)
+    return (
+        tuple(first[index] + unit[index] * displacement for index in range(3)),
+        tuple(second[index] - unit[index] * displacement for index in range(3)),
+    )
+
+
+def _one_sided_target(node: Point, reference: Point, final_distance: float) -> Point:
+    vector = tuple(node[index] - reference[index] for index in range(3))
+    current = math.sqrt(sum(value * value for value in vector))
+    if current <= 1.0e-14 or not math.isfinite(final_distance) or final_distance < current - 1.0e-12:
+        raise ValueError("invalid_one_sided_expansion_distance")
+    if final_distance <= current + 1.0e-12:
+        return node
+    return tuple(reference[index] + vector[index] * final_distance / current for index in range(3))
+
+
+def _area_vector(points: Sequence[Point]) -> Point:
+    vector = [0.0, 0.0, 0.0]
+    for index, point in enumerate(points):
+        following = points[(index + 1) % len(points)]
+        vector[0] += (point[1] - following[1]) * (point[2] + following[2])
+        vector[1] += (point[2] - following[2]) * (point[0] + following[0])
+        vector[2] += (point[0] - following[0]) * (point[1] + following[1])
+    return tuple(vector)
+
+
+def _movement_preserves_shells(state: MeshState, targets: Mapping[int, Point]) -> bool:
+    affected = state.affected_elements(targets, rings=0)
+    for element_id in affected:
+        element = state.elements[element_id]
+        original = _area_vector([state.nodes[node] for node in element.nodes])
+        moved = _area_vector([targets.get(node, state.nodes[node]) for node in element.nodes])
+        original_norm = math.sqrt(sum(value * value for value in original))
+        moved_norm = math.sqrt(sum(value * value for value in moved))
+        if original_norm <= 1.0e-14 or moved_norm <= max(1.0e-14, original_norm * 1.0e-8):
+            return False
+        if sum(original[index] * moved[index] for index in range(3)) <= 0.0:
+            return False
+    return True
+
+
 def prevalidate_operation(
     operation: Operation,
     state: MeshState,
     protected_nodes: Optional[Set[int]] = None,
+    validate_movement_geometry: bool = True,
 ) -> Tuple[bool, str]:
     protected_nodes = set(protected_nodes or set())
     if operation.operation_type == "manual_review":
@@ -54,8 +105,7 @@ def prevalidate_operation(
             return False, "unsupported_split_method"
         if any(_triangle_area(*(state.nodes[node] for node in triangle)) <= 1.0e-14 for triangle in triangles):
             return False, "split_would_create_zero_area_triangle"
-        existing = {tuple(sorted(element.nodes)) for element in state.elements.values() if len(element.nodes) == 3}
-        if any(tuple(sorted(triangle)) in existing for triangle in triangles):
+        if any(state.node_signature_to_elements.get(tuple(sorted(triangle))) for triangle in triangles):
             return False, "split_would_create_duplicate_triangle"
     elif operation.operation_type == "collapse_short_edge":
         first = int(action.get("node_a", 0))
@@ -77,6 +127,75 @@ def prevalidate_operation(
             return False, "move_node_or_reference_missing"
         if len(state.edge_to_elements.get(edge_key(first, second), set())) != 1:
             return False, "edge_no_longer_free"
+    elif operation.operation_type == "expand_triangle_short_edge":
+        first = int(action.get("node_a", 0))
+        second = int(action.get("node_b", 0))
+        if {first, second}.intersection(protected_nodes):
+            return False, "move_touches_protected_node"
+        if first not in state.nodes or second not in state.nodes:
+            return False, "move_node_missing"
+        if not state.edge_to_elements.get(edge_key(first, second)):
+            return False, "triangle_short_edge_no_longer_exists"
+        try:
+            target_first, target_second = _symmetric_targets(
+                state.nodes[first], state.nodes[second], float(action.get("target_distance", 0.0))
+            )
+        except (TypeError, ValueError):
+            return False, "invalid_triangle_expansion_distance"
+        if not _movement_preserves_shells(
+            state, {first: target_first, second: target_second}
+        ):
+            return False, "triangle_expansion_would_invert_or_collapse_shell"
+    elif operation.operation_type == "expand_internal_quad":
+        element = state.elements[operation.source_elements[0]]
+        if len(element.nodes) != 4:
+            return False, "internal_expansion_requires_quad"
+        first = int(action.get("node_a", 0))
+        second = int(action.get("node_b", 0))
+        reference_first = int(action.get("reference_a", 0))
+        reference_second = int(action.get("reference_b", 0))
+        all_nodes = {first, second, reference_first, reference_second}
+        if all_nodes != set(element.nodes):
+            return False, "internal_expansion_nodes_do_not_match_quad"
+        move_mode = int(action.get("move_mode", 0))
+        moving = set()
+        if move_mode in (0, 1):
+            moving.update((first, second))
+        if move_mode in (0, 2):
+            moving.update((reference_first, reference_second))
+        if move_mode not in (0, 1, 2):
+            return False, "invalid_internal_quad_move_mode"
+        if moving.intersection(protected_nodes):
+            return False, "move_touches_protected_node"
+        try:
+            target_first, target_reference_first = _symmetric_targets(
+                state.nodes[first], state.nodes[reference_first],
+                float(action.get("target_distance", 0.0)),
+            )
+            target_second, target_reference_second = _symmetric_targets(
+                state.nodes[second], state.nodes[reference_second],
+                float(action.get("target_distance_b", action.get("target_distance", 0.0))),
+            )
+        except (KeyError, TypeError, ValueError):
+            return False, "invalid_internal_quad_expansion_distance"
+        targets = {}
+        try:
+            if move_mode == 0:
+                targets.update({first: target_first, second: target_second, reference_first: target_reference_first, reference_second: target_reference_second})
+            elif move_mode == 1:
+                targets.update({
+                    first: _one_sided_target(state.nodes[first], state.nodes[reference_first], float(action.get("target_distance", 0.0))),
+                    second: _one_sided_target(state.nodes[second], state.nodes[reference_second], float(action.get("target_distance_b", action.get("target_distance", 0.0)))),
+                })
+            else:
+                targets.update({
+                    reference_first: _one_sided_target(state.nodes[reference_first], state.nodes[first], float(action.get("target_distance", 0.0))),
+                    reference_second: _one_sided_target(state.nodes[reference_second], state.nodes[second], float(action.get("target_distance_b", action.get("target_distance", 0.0)))),
+                })
+        except (KeyError, TypeError, ValueError):
+            return False, "invalid_internal_quad_expansion_distance"
+        if validate_movement_geometry and not _movement_preserves_shells(state, targets):
+            return False, "internal_quad_expansion_would_invert_or_collapse_shell"
     else:
         return False, "unknown_operation_type"
     return True, "ok"
@@ -88,6 +207,11 @@ def _sets_conflict(first: Operation, second: Operation) -> Optional[str]:
         # The Tcl executor accumulates both endpoint proposals, averages shared
         # nodes, and then moves each direction block only once.
         return None
+    if first.operation_type == "expand_internal_quad" and second.operation_type == "expand_internal_quad":
+        first_chain = int(first.legacy_action.get("split_method", 0))
+        second_chain = int(second.legacy_action.get("split_method", 0))
+        if first_chain > 0 and first_chain == second_chain:
+            return None
     a, b = first.access, second.access
     if a.write_nodes.intersection(b.write_nodes):
         return "shared_write_node"
@@ -183,12 +307,17 @@ def plan_batches(operations: Sequence[Operation], max_operations: int = 200) -> 
     }
     groups: Dict[Tuple[str, str, str], List[List[Operation]]] = {}
     for operation in executable:
-        coordination = "free_edge" if operation.operation_type == "expand_free_edge" else "default"
+        chain_id = int(operation.legacy_action.get("split_method", 0))
+        coordination = (
+            "{}:{}".format(operation.operation_type, chain_id)
+            if operation.operation_type in ("expand_free_edge", "expand_internal_quad") and chain_id > 0
+            else "default"
+        )
         key = (operation.stage, str(operation.metadata.get("region_id", "")), coordination)
         buckets = groups.setdefault(key, [])
         placed = False
         for bucket in buckets:
-            if coordination != "free_edge" and len(bucket) >= max(1, max_operations):
+            if coordination == "default" and len(bucket) >= max(1, max_operations):
                 continue
             if any(frozenset((operation.operation_id, other.operation_id)) in incompatible for other in bucket):
                 continue
@@ -226,7 +355,9 @@ def _legacy_tcl_dict(operation: Operation) -> str:
         ("elementId", "element_id"), ("edgeIndex", "edge_index"),
         ("nodeA", "node_a"), ("nodeB", "node_b"),
         ("referenceA", "reference_a"), ("referenceB", "reference_b"),
-        ("targetDistance", "target_distance"), ("splitMethod", "split_method"),
+        ("targetDistance", "target_distance"), ("targetDistanceB", "target_distance_b"),
+        ("moveMode", "move_mode"),
+        ("splitMethod", "split_method"),
         ("reason", "reason"),
     )
     fields = ["operationId", _tcl_quoted(operation.operation_id)]

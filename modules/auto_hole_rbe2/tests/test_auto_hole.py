@@ -11,7 +11,8 @@ from pathlib import Path
 from hmworkflow.auto_hole_rbe2.duplicate_detector import annotate, build_index
 from hmworkflow.auto_hole_rbe2.face_segmentation import segment_faces
 from hmworkflow.auto_hole_rbe2.hole_evaluator import evaluate
-from hmworkflow.auto_hole_rbe2.main import main as cli_main
+from hmworkflow.auto_hole_rbe2.main import detect, main as cli_main, read_analysis_mesh
+from hmworkflow.auto_hole_rbe2.surface_fem_reader import SurfaceFemError
 from hmworkflow.core.mesh_model import Component, Element, MeshModel
 from hmworkflow.auto_hole_rbe2.solid_surface import Face, extract
 
@@ -42,6 +43,47 @@ def tube_faces(count=8, radius=5.0, length=10.0, start_id=1, alternating=0.0):
         faces.append(Face("F{:03d}".format(start_id + index), start_id + index, ids, (-math.cos(radial_angle), -math.sin(radial_angle), 0.0)))
     model = MeshModel({1: Component(1, "SOLID", "SOLID")}, nodes, {
         face.element_id: Element(face.element_id, 1, "CHEXA", face.node_ids + face.node_ids) for face in faces
+    })
+    return model, faces
+
+
+def chamfered_tube_faces(
+    count=16, radius=5.0, outer_radius=10.0, length=10.0, chamfer_angle_deg=45.0,
+):
+    """A valid cylindrical wall joined to both openings by conical chamfers."""
+    nodes, faces = {}, []
+    chamfer_height = (outer_radius - radius) / math.tan(math.radians(chamfer_angle_deg))
+    layers = (
+        (outer_radius, -chamfer_height), (radius, 0.0),
+        (radius, length), (outer_radius, length + chamfer_height),
+    )
+    for layer, (layer_radius, z) in enumerate(layers):
+        for index in range(count):
+            angle = 2.0 * math.pi * index / count
+            nodes[layer * count + index + 1] = (
+                layer_radius * math.cos(angle), layer_radius * math.sin(angle), z,
+            )
+    element_id = 1
+    for band in range(3):
+        axial = -1.0 if band == 0 else 0.0 if band == 1 else 1.0
+        radial_scale = math.cos(math.radians(chamfer_angle_deg)) if band != 1 else 1.0
+        axial_scale = math.sin(math.radians(chamfer_angle_deg)) if band != 1 else 0.0
+        for index in range(count):
+            following = (index + 1) % count
+            ids = (
+                band * count + index + 1,
+                band * count + following + 1,
+                (band + 1) * count + following + 1,
+                (band + 1) * count + index + 1,
+            )
+            angle = 2.0 * math.pi * (index + 0.5) / count
+            faces.append(Face(
+                "F{:03d}".format(element_id), element_id, ids,
+                (-radial_scale * math.cos(angle), -radial_scale * math.sin(angle), axial * axial_scale),
+            ))
+            element_id += 1
+    model = MeshModel({1: Component(1, "SOLID", "SOLID")}, nodes, {
+        face.element_id: Element(face.element_id, 1, "CQUAD4", face.node_ids) for face in faces
     })
     return model, faces
 
@@ -110,6 +152,34 @@ class HoleEvaluationTests(unittest.TestCase):
         annotate(result, index)
         self.assertIsNone(result["existing_rbe2_id"])
 
+    def test_detection_recovers_cylindrical_wall_from_chamfered_patch(self):
+        model, faces = chamfered_tube_faces()
+        request = {"selected_component_ids": [1], "settings": self.settings(featureAngleDeg=78.0)}
+
+        candidates = detect(request, model, [], _NullLogger())[2]
+
+        self.assertEqual(len(segment_faces(faces, 78.0)[0]), 1)
+        self.assertEqual(len(candidates), 1)
+        self.assertAlmostEqual(candidates[0]["diameter"], 10.0)
+        self.assertEqual(len(candidates[0]["wall_node_ids"]), 32)
+        self.assertIn("ADAPTIVE_PATCH_REFINEMENT", candidates[0]["warnings"])
+
+    def test_refinement_does_not_skip_narrow_valid_feature_angle_window(self):
+        model, faces = chamfered_tube_faces(count=12, chamfer_angle_deg=35.0)
+        request = {"selected_component_ids": [1], "settings": self.settings(featureAngleDeg=78.0)}
+
+        candidates = detect(request, model, [], _NullLogger())[2]
+
+        self.assertEqual(len(candidates), 1)
+        self.assertAlmostEqual(candidates[0]["diameter"], 10.0)
+        self.assertGreater(candidates[0]["detection_feature_angle_deg"], 30.0)
+        self.assertLess(candidates[0]["detection_feature_angle_deg"], 35.0)
+
+
+class _NullLogger:
+    def exception(self, *_args, **_kwargs):
+        pass
+
 
 class SolidSurfaceTests(unittest.TestCase):
     def test_precomputed_shell_faces_are_consumed_directly(self):
@@ -145,6 +215,72 @@ class SolidSurfaceTests(unittest.TestCase):
         self.assertGreaterEqual(len(faces), 7)
 
 
+class NativeSurfaceFemTests(unittest.TestCase):
+    def test_missing_shell_cards_reports_actual_fem_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "surface_faces.fem").write_text(
+                "BEGIN BULK\nGRID,1,,0.0,0.0,0.0\nPLOTEL,2,1,1\nENDDATA\n",
+                encoding="utf-8",
+            )
+            manifest_path = root / "surface_faces_manifest.json"
+            manifest_path.write_text(json.dumps({
+                "format": "hm_surface_faces_fem",
+                "fem_path": "surface_faces.fem",
+                "source_component_id": 1,
+            }), encoding="utf-8")
+
+            with self.assertRaises(SurfaceFemError) as caught:
+                read_analysis_mesh(manifest_path)
+
+        message = str(caught.exception)
+        self.assertIn("GRID=1", message)
+        self.assertIn("CTRIA3/CQUAD4=0", message)
+        self.assertIn("PLOTEL=1", message)
+
+    def test_native_fem_bundle_preserves_free_face_connectivity_and_node_ids(self):
+        model, faces = tube_faces()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fem_path = root / "surface_faces.fem"
+            rows = ["BEGIN BULK"]
+            rows.extend(
+                "GRID,{0},,{1},{2},{3}".format(node_id + 100, *xyz)
+                for node_id, xyz in sorted(model.nodes.items())
+            )
+            rows.extend(
+                "CQUAD4,{0},1,{1}".format(
+                    index, ",".join(str(node_id + 100) for node_id in face.node_ids)
+                )
+                for index, face in enumerate(faces, 1)
+            )
+            rows.append("ENDDATA")
+            fem_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+            manifest_path = root / "surface_faces_manifest.json"
+            manifest_path.write_text(json.dumps({
+                "schema_version": "1.0",
+                "format": "hm_surface_faces_fem",
+                "fem_path": fem_path.name,
+                "source_component_id": 1,
+                "source_component_name": "SOLID",
+                "element_ids": list(range(1, len(faces) + 1)),
+            }), encoding="utf-8")
+
+            restored = read_analysis_mesh(manifest_path)
+            candidates = detect(
+                {"selected_component_ids": [1], "settings": dict(DEFAULTS)},
+                restored, [], _NullLogger(),
+            )[2]
+
+        self.assertEqual(set(restored.nodes), {node_id + 100 for node_id in model.nodes})
+        self.assertEqual(len(restored.elements), len(faces))
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(
+            candidates[0]["wall_node_ids"],
+            sorted(node_id + 100 for node_id in model.nodes),
+        )
+
+
 class SurfaceSegmentationPerformanceTests(unittest.TestCase):
     def test_many_disconnected_surface_faces_do_not_degrade_quadratically(self):
         count = 20000
@@ -170,19 +306,42 @@ class TclWorkflowContractTests(unittest.TestCase):
     def source(self, relative_path):
         return (Path(__file__).resolve().parents[1] / relative_path).read_text(encoding="utf-8")
 
-    def test_export_collects_free_face_node_ids_before_writing_mesh(self):
+    def test_export_uses_native_fem_for_generated_free_faces(self):
         source = self.source("tcl/exporter.tcl")
         self.assertIn("proc ::AutoHoleRBE2::collectHybridSurfaceFaces", source)
-        self.assertIn("proc ::AutoHoleRBE2::bulkFaceNodeMap", source)
-        self.assertIn("mark=2 dataname=nodes", source)
-        self.assertIn("proc ::AutoHoleRBE2::bulkNodeCoordinateMap", source)
-        self.assertIn("mark=2 dataname=coordinates", source)
-        self.assertNotIn("concat $allNodes", source)
-        self.assertNotIn('"by comps on mark"', source)
-        export_body = source[source.index("proc ::AutoHoleRBE2::exportHybridInputs"):]
+        self.assertIn("proc ::AutoHoleRBE2::exportHybridSurfaceFem", source)
+        self.assertIn("*feoutput_select", source)
+        self.assertIn('*createmark elems 1 "by component id" $faceComponentId', source)
+        self.assertIn('*createmark nodes 1 "by component id" $faceComponentId', source)
+        self.assertIn("surface_faces_manifest.json", source)
+        collect_body = source[
+            source.index("proc ::AutoHoleRBE2::collectHybridSurfaceFaces"):
+            source.index("proc ::AutoHoleRBE2::surfaceFemExportTemplate")
+        ]
+        self.assertNotIn("bulkFaceNodeMap", collect_body)
+        self.assertNotIn("hm_nodelist", collect_body)
+        self.assertNotIn("face_elements", source)
+        self.assertNotIn("writeHybridMesh $taskDir", source)
+
+    def test_generated_faces_are_mapped_to_optistruct_shell_types_before_export(self):
+        source = self.source("tcl/exporter.tcl")
+        self.assertIn("proc ::AutoHoleRBE2::prepareSurfaceFacesForFemExport", source)
+        self.assertIn("*elementtype 2 1", source)
+        self.assertIn("*elementtype 104 1", source)
+        self.assertIn("*elementsettypes 1", source)
         self.assertLess(
-            export_body.index("collectHybridSurfaceFaces"),
-            export_body.index("writeHybridMesh"),
+            source.index("prepareSurfaceFacesForFemExport $faceComponentId"),
+            source.index("*feoutput_select"),
+        )
+
+    def test_faces_component_is_deleted_only_after_candidate_execution(self):
+        exporter = self.source("tcl/exporter.tcl")
+        workflow = self.source("tcl/workflow.tcl")
+        export_body = exporter[exporter.index("proc ::AutoHoleRBE2::exportHybridSurfaceFem"):]
+        self.assertNotIn("deleteComponentByName", export_body)
+        self.assertLess(
+            workflow.index("executePythonCandidates $payload"),
+            workflow.index("deleteComponentByName"),
         )
 
     def test_candidate_creation_uses_bulk_ui_mode_and_single_validation(self):
@@ -196,16 +355,21 @@ class TclWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("hybridNodeExists $nodeId", executor)
         self.assertNotIn("rbe2DependentNodeKey $elementId", executor)
 
-    def test_python_delta_import_is_primary_and_legacy_creation_is_fallback(self):
+    def test_python_returns_wall_nodes_and_tcl_creation_is_primary(self):
         main_source = self.source("python/main.py")
         bridge = self.source("tcl/bridge.tcl")
-        exporter = self.source("tcl/exporter.tcl")
         executor = self.source("tcl/executor.tcl")
-        self.assertIn("write_rigid_incremental_fem", main_source)
-        self.assertIn("--delta", bridge)
-        self.assertIn("incrementalModelStateJson", exporter)
-        self.assertIn("importRigidDelta", executor)
+        self.assertNotIn("write_rigid_incremental_fem", main_source)
+        self.assertIn("--mesh", bridge)
         self.assertIn("executePythonCandidatesLegacy", executor)
+        self.assertIn("resolveCandidateWallNodes", executor)
+        self.assertIn("hm_getinternalid", executor)
+        primary = executor[
+            executor.index("proc ::AutoHoleRBE2::executePythonCandidates {payload}"):
+            executor.index("proc ::AutoHoleRBE2::executePythonCandidatesBulk {payload}")
+        ]
+        self.assertNotIn("importRigidDelta", primary)
+        self.assertIn("executePythonCandidatesLegacy", primary)
 
     def test_creation_failure_has_explicit_rollback(self):
         source = self.source("../auto_hole_rbe2.tcl")
@@ -217,8 +381,22 @@ class TclWorkflowContractTests(unittest.TestCase):
 
     def test_workflow_populates_completion_statistics(self):
         source = self.source("tcl/workflow.tcl")
-        for field in ("sourceElems", "freeFaces", "validFaces", "segments", "failed"):
+        for field in (
+            "sourceElems", "freeFaces", "validFaces", "segments", "candidates",
+            "adaptiveCandidates", "rejectReasons", "taskDir", "failed",
+        ):
             self.assertIn("stat({})".format(field), source)
+
+    def test_zero_candidate_run_surfaces_rejection_reasons_and_task_directory(self):
+        workflow = self.source("tcl/workflow.tcl")
+        main_source = self.source("../auto_hole_rbe2.tcl")
+        self.assertIn("No creatable holes were recognized", workflow)
+        self.assertIn("Rejection reasons", main_source)
+        self.assertIn("Diagnostics", main_source)
+
+    def test_bugfix_version_is_visible_to_confirm_the_loaded_module(self):
+        main_source = self.source("../auto_hole_rbe2.tcl")
+        self.assertIn('variable VERSION "1.1.2"', main_source)
 
     def test_python_result_caps_rejection_details_and_writes_once(self):
         source = self.source("python/main.py")
@@ -228,7 +406,7 @@ class TclWorkflowContractTests(unittest.TestCase):
 
 
 class IncrementalCliIntegrationTests(unittest.TestCase):
-    def test_surface_mesh_cli_writes_grid_and_rbe2_delta(self):
+    def test_surface_mesh_cli_returns_wall_nodes_for_tcl_creation(self):
         model, faces = tube_faces()
         settings = dict(DEFAULTS)
         settings.update({"rigidType": "RBE2", "dof": "123456", "outputComponentName": "RBE2_HOLE_AUTO"})
@@ -249,17 +427,15 @@ class IncrementalCliIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             request_path = root / "request.json"; mesh_path = root / "mesh.json"; existing_path = root / "existing.json"
-            delta_path = root / "rigids.fem"; result_path = root / "result.json"; tcl_path = root / "result.tcl"; log_path = root / "operation.log"
+            result_path = root / "result.json"; tcl_path = root / "result.tcl"; log_path = root / "operation.log"
             request_path.write_text(json.dumps(request), encoding="utf-8")
             mesh_path.write_text(json.dumps(mesh), encoding="utf-8")
             existing_path.write_text(json.dumps({"rbe2": []}), encoding="utf-8")
-            code = cli_main(["--request", str(request_path), "--mesh", str(mesh_path), "--existing", str(existing_path), "--delta", str(delta_path), "--output", str(result_path), "--tcl-output", str(tcl_path), "--log", str(log_path)])
+            code = cli_main(["--request", str(request_path), "--mesh", str(mesh_path), "--existing", str(existing_path), "--output", str(result_path), "--tcl-output", str(tcl_path), "--log", str(log_path)])
             self.assertEqual(code, 0)
             result = json.loads(result_path.read_text(encoding="utf-8"))
-            self.assertEqual(result["summary"]["planned_create_count"], 1)
-            delta = delta_path.read_text(encoding="utf-8")
-            self.assertIn("GRID,", delta)
-            self.assertIn("RBE2,", delta)
+            self.assertEqual(result["summary"]["candidate_count"], 1)
+            self.assertEqual(result["candidates"][0]["wall_node_ids"], sorted(model.nodes))
 
 
 if __name__ == "__main__":

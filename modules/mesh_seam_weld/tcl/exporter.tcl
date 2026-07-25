@@ -115,7 +115,8 @@ proc ::MeshSeamWeld::exportInternalComponentFemBundle {dir runId sourceComponent
         if {$elemCount == 0 || $nodeCount == 0} {
             error "Selected source/target components have no exportable shell mesh."
         }
-        *feoutput_select $exportTemplate $outputPath 1 0 0
+        ::HWFlow::runHyperMeshIo export \
+            [list *feoutput_select $exportTemplate $outputPath 1 0 0] $outputPath
     } err opts]
     catch {*clearmark elems 1}
     catch {*clearmark nodes 1}

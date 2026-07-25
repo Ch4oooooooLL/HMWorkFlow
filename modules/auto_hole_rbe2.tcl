@@ -1,5 +1,5 @@
 # ======================================================================
-# AutoHoleRBE2 v1.0
+# AutoHoleRBE2 v1.1.2
 # HyperMesh 2019 Tcl
 #
 # Purpose:
@@ -20,11 +20,11 @@
 # ======================================================================
 
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
 
 namespace eval ::AutoHoleRBE2 {
-    variable VERSION "1.0"
+    variable VERSION "1.1.2"
 
     variable cfg
     array set cfg {
@@ -1408,15 +1408,17 @@ proc ::AutoHoleRBE2::runCurrentSelection {} {
         set errMsg $err
         ::AutoHoleRBE2::warning $err
 
-        if {$cfg(deleteTempFaces)} {
-            catch {::AutoHoleRBE2::deleteComponentByName $cfg(faceCompName)}
-        }
+        catch {::AutoHoleRBE2::deleteComponentByName $cfg(faceCompName)}
 
         ::AutoHoleRBE2::clearMarks
     }
 
     if {!$failed} {
-        set msg [::HWFlow::txt "Solid Through-Hole RIGIDS v$VERSION finished.\n\n刚性类型：$rigidType\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n已创建 $rigidType：$stat(created)\n已跳过既有 RIGIDS：$stat(skippedExisting)\n创建失败：$stat(failed)" "Solid Through-Hole RIGIDS v$VERSION finished.\n\nRigid type: $rigidType\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nSmooth patches: $stat(segments)\nCreated $rigidType: $stat(created)\nSkipped existing RIGIDS: $stat(skippedExisting)\nCreation failures: $stat(failed)"]
+        set msg [::HWFlow::txt "Solid Through-Hole RIGIDS v$VERSION finished.\n\n刚性类型：$rigidType\n源单元数：$stat(sourceElems)\n自由面单元数：$stat(freeFaces)\n有效自由面数：$stat(validFaces)\n光顺面片数：$stat(segments)\n候选孔数：$stat(candidates)（自适应识别 $stat(adaptiveCandidates)）\n已创建 $rigidType：$stat(created)\n已跳过既有 RIGIDS：$stat(skippedExisting)\n创建失败：$stat(failed)" "Solid Through-Hole RIGIDS v$VERSION finished.\n\nRigid type: $rigidType\nSource elements: $stat(sourceElems)\nFree faces: $stat(freeFaces)\nValid free faces: $stat(validFaces)\nHole candidates: $stat(candidates) (adaptive $stat(adaptiveCandidates))\nCreated $rigidType: $stat(created)\nSkipped existing RIGIDS: $stat(skippedExisting)\nCreation failures: $stat(failed)"]
+
+        if {$stat(candidates) == 0} {
+            append msg [::HWFlow::txt "\n拒绝原因：$stat(rejectReasons)\n诊断目录：$stat(taskDir)" "\nRejection reasons: $stat(rejectReasons)\nDiagnostics: $stat(taskDir)"]
+        }
 
         if {$cfg(logFile) ne ""} {
             append msg [::HWFlow::txt "\n\n日志：$cfg(logFile)" "\n\nLog: $cfg(logFile)"]
@@ -1485,7 +1487,7 @@ proc ::AutoHoleRBE2::run {} {
 }
 
 set ::AutoHoleRBE2::MODULE_DIR [file join [file dirname [file normalize [info script]]] auto_hole_rbe2]
-source [file join $::AutoHoleRBE2::MODULE_DIR tcl bridge.tcl]
-source [file join $::AutoHoleRBE2::MODULE_DIR tcl exporter.tcl]
-source [file join $::AutoHoleRBE2::MODULE_DIR tcl executor.tcl]
-source [file join $::AutoHoleRBE2::MODULE_DIR tcl workflow.tcl]
+::HWFlow::sourceUtf8 [file join $::AutoHoleRBE2::MODULE_DIR tcl bridge.tcl]
+::HWFlow::sourceUtf8 [file join $::AutoHoleRBE2::MODULE_DIR tcl exporter.tcl]
+::HWFlow::sourceUtf8 [file join $::AutoHoleRBE2::MODULE_DIR tcl executor.tcl]
+::HWFlow::sourceUtf8 [file join $::AutoHoleRBE2::MODULE_DIR tcl workflow.tcl]

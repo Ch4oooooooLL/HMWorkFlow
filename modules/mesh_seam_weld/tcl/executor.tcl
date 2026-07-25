@@ -43,18 +43,27 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
         set targetNodes [::MeshSeamWeld::targetNodesFromImprintList \
             $sourceNodes "" 0]
         set targetMatchMode native_imprint_list
-        if {[llength $targetNodes] > 0 &&
-            ![::MeshSeamWeld::targetPathIsContinuous \
-                $targetNodes $targetComps $closedLoop]} {
-            # Preserve the successfully imprinted portions.  Mesh creation
-            # splits the source/target correspondence at missing target edges
-            # and skips only those local sections.
-            set targetMatchMode partial_native_imprint_list
+        set nativeContinuous 0
+        if {[llength $targetNodes] > 0} {
+            set nativeContinuous [::MeshSeamWeld::targetPathIsContinuous \
+                $targetNodes $targetComps $closedLoop]
         }
-        if {[llength $targetNodes] == 0} {
-            set targetNodes [::MeshSeamWeld::targetNodesFromPostImprintTopology \
-                $sourceNodes $targetComps $currentTargetElems $closedLoop]
-            set targetMatchMode post_imprint_topology
+        if {[llength $targetNodes] == 0 ||
+            [llength $targetNodes] != [llength $sourceNodes] ||
+            !$nativeContinuous} {
+            if {![catch {
+                set recoveredTargetNodes [::MeshSeamWeld::targetNodesFromPostImprintTopology \
+                    $sourceNodes $targetComps $currentTargetElems $closedLoop]
+            } recoveryErr]} {
+                set targetNodes $recoveredTargetNodes
+                set targetMatchMode post_imprint_topology
+            } elseif {[llength $targetNodes] > 0} {
+                # Preserve genuinely partial native results when full topology
+                # recovery is impossible; mesh creation may retain valid runs.
+                set targetMatchMode partial_native_imprint_list
+            } else {
+                error $recoveryErr
+            }
         }
     } targetErr]} {
         ::MeshSeamWeld::stageError TARGET_MATCH $targetErr

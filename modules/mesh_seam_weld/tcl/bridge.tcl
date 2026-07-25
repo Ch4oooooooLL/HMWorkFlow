@@ -1,4 +1,4 @@
-if {![namespace exists ::HybridCore]} { source [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] hybrid_core tcl init.tcl] }
+if {![namespace exists ::HybridCore]} { source -encoding utf-8 [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] hybrid_core tcl init.tcl] }
 proc ::MeshSeamWeld::runPythonPathStage {mode sourceNodes candidateNodes closedLoop {progressStart 10.0} {progressEnd 60.0}} {
     variable MODULE_DIR
     set ws [::HybridCore::createTaskWorkspace mesh_seam_weld]; set dir [dict get $ws task_dir]; set runId [dict get $ws run_id]

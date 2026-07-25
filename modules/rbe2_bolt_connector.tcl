@@ -33,7 +33,7 @@
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
-    source [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
+    source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "workflow_common.tcl"]
 }
 
 namespace eval ::RB2Bolt {
@@ -2658,5 +2658,5 @@ proc ::RB2Bolt::run {} {
 }
 
 foreach hybridFile {bridge.tcl exporter.tcl executor.tcl workflow.tcl} {
-    source [file join $::RB2Bolt::MODULE_DIR tcl $hybridFile]
+    ::HWFlow::sourceUtf8 [file join $::RB2Bolt::MODULE_DIR tcl $hybridFile]
 }

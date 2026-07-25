@@ -162,6 +162,13 @@ def write_rigid_incremental_fem(
         raise FemDeltaError("rigidType must be RBE2 or RBE3")
     dof = _dof(settings.get("dof", 123456))
     component_name = _safe_component_name(settings.get("outputComponentName", "AUTO_RBE2"))
+    raw_component_names = settings.get("outputComponentNames", {})
+    if not isinstance(raw_component_names, Mapping):
+        raise FemDeltaError("outputComponentNames must be an object")
+    component_names = {
+        str(source_id): _safe_component_name(name)
+        for source_id, name in raw_component_names.items()
+    }
     state = request.get("id_state")
     if not isinstance(state, Mapping):
         raise FemDeltaError("request.id_state is required for incremental import")
@@ -177,19 +184,24 @@ def write_rigid_incremental_fem(
         "$ Contains only new GRID and {} entities.".format(rigid_type),
         "BEGIN BULK",
     ]
-    if component_name in components:
-        component_id = components[component_name]
-        manifest["reused_component_ids"].append(component_id)
-    else:
-        component_id = allocator.reserve("component")
-        manifest["created_component_ids"].append(component_id)
-        lines.append('$HMNAME COMP {} "{}"'.format(component_id, component_name))
-
-    # Set the collector before the first GRID.  HyperMesh 2019 otherwise puts
-    # that first center node into an automatically created misc component.
-    lines.append("$HMCOMP ID {}".format(component_id))
+    resolved_components: Dict[str, int] = {}
 
     for candidate in selected:
+        source_id = str(candidate.get("source_component_id", candidate.get("component_id", "")))
+        output_name = component_names.get(source_id, component_name)
+        if output_name not in resolved_components:
+            if output_name in components:
+                resolved_components[output_name] = components[output_name]
+                manifest["reused_component_ids"].append(components[output_name])
+            else:
+                resolved_components[output_name] = allocator.reserve("component")
+                manifest["created_component_ids"].append(resolved_components[output_name])
+                lines.append('$HMNAME COMP {} "{}"'.format(resolved_components[output_name], output_name))
+        component_id = resolved_components[output_name]
+
+        # Set the collector before every GRID because a batch may alternate
+        # between source components and their distinct output collectors.
+        lines.append("$HMCOMP ID {}".format(component_id))
         center = _coordinates(candidate.get("center"))
         dependent = _positive_ids(
             candidate.get("dependent_node_ids", candidate.get("wall_node_ids", [])),

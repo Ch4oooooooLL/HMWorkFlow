@@ -93,6 +93,39 @@ class PersistentWorkerTests(unittest.TestCase):
 
             self.assertEqual((root / "imports.txt").read_text(encoding="utf-8"), "x")
 
+    def test_changed_entry_source_is_reloaded_without_restarting_hypermesh(self):
+        worker = load_worker()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = root / "main.py"
+            output = root / "result.txt"
+            entry.write_text(
+                "from pathlib import Path\n"
+                "def main(argv):\n"
+                "    Path(argv[0]).write_text('before')\n"
+                "    return 0\n",
+                encoding="utf-8",
+            )
+            request = {
+                "entry": str(entry),
+                "arguments": [str(output)],
+                "task_dir": str(root / "task-one"),
+            }
+            self.assertEqual(worker._run(request)[0], 0)
+            self.assertEqual(output.read_text(), "before")
+
+            entry.write_text(
+                "from pathlib import Path\n"
+                "def main(argv):\n"
+                "    Path(argv[0]).write_text('after-update')\n"
+                "    return 0\n",
+                encoding="utf-8",
+            )
+            request["task_dir"] = str(root / "task-two")
+            self.assertEqual(worker._run(request)[0], 0)
+
+            self.assertEqual(output.read_text(), "after-update")
+
     def test_switching_entries_restores_each_module_namespace_without_reimport(self):
         worker = load_worker()
         with tempfile.TemporaryDirectory() as directory:

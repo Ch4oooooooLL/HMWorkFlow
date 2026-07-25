@@ -21,6 +21,7 @@ def commands() -> List[Sequence[str]]:
         "modules/shell_washer_hole_rbe2/tests/run_tests.py",
     ]
     pytest_suites = [
+        "modules/cbush_creator/tests",
         "modules/contact_setup/tests",
         "modules/local_mesh_optimizer/tests",
         "modules/solid_seam/tests",

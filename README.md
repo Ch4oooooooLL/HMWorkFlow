@@ -10,15 +10,15 @@
 
 快捷键的首次安装、更新和恢复流程见 [快捷键安装与更新](doc/shortcut_installation.md)。请优先运行 `install_update.tcl`；`hw_toolkit.tcl` 保留为兼容入口。
 
-面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、批量 Property、局部网格优化、铸件四面体网格、RBE2、螺栓连接和接触设置。
+以 HyperMesh 2019 为已验证基线，并逐步兼容 HyperWorks 2022 新界面的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：组件分类、材料标识、中面抽取、几何清理、焊缝面、钣金网格与 washer、批量 Property、局部网格优化、铸件四面体网格、RBE2、螺栓连接、CBUSH、打胶和接触设置。
 
 局部网格优化模块的集成状态、使用步骤、HM2019 运行验证和已知限制见 [README_LocalMeshOptimizer.md](doc/README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定，并保留运行时错误处理、任务快照、复检和回滚。
 
 默认界面语言为中文。需要英文界面时，将项目根目录 `config.yaml` 中的 `workflow.language` 改为 `en_US`。
 
-界面基础设施已统一迁移到 HyperWorks 2019 内置的 `hwtk 1.0`。主面板、所有模块顶层窗口和公共进度窗口通过 `modules/workflow_common.tcl` 中的统一适配层创建；在非 HyperWorks Tcl 环境中会自动回退到 Tk/ttk。第一阶段保留各模块内部的既有参数控件和业务逻辑，后续可以按模块逐步替换为 hwtk 控件。
+界面基础设施已统一迁移到 `hwtk`。主面板、所有模块顶层窗口和公共进度窗口通过 `modules/workflow_common.tcl` 中的统一适配层创建；在非 HyperWorks Tcl 环境中会自动回退到 Tk/ttk。2019 与 2022 的启动链和模块加载器都会显式按 UTF-8 读取仓库脚本，避免 2022 新界面进程按 Windows ANSI 代码页读取中文而产生乱码。第一阶段保留各模块内部的既有参数控件和业务逻辑，后续可以按模块逐步替换为 hwtk 控件。
 
-窗口不再使用永久 `-topmost`。调用 HyperMesh 原生实体选择面板时，只临时隐藏由工具箱登记的窗口，不影响同一 HyperMesh 进程中的其他 Tcl 窗口。
+窗口不再使用永久 `-topmost`。调用 HyperMesh 原生实体选择面板时，只临时隐藏由工具箱登记的窗口，不影响同一 HyperMesh 进程中的其他 Tcl 窗口。HyperWorks 2022 若无法创建 panel mark，会自动改用新版选择条对应的 edit widget；原生 FEM 导入/导出则统一防重入并自动处理被遮挡的 translator 确认提示。
 
 ## 1. 快速启动
 
@@ -114,6 +114,7 @@ Connection
 5. `Shell Washer-Hole RBE2`：识别标准 washer 孔并创建 RBE2。
 6. `RBE2 Bolt Connector`：将成组 RBE2 中心节点连接为 CBEAM/CBAR 螺栓段。
 7. `Contact Setup`：分两次选择相向 Face 单元，创建 contact surface 和接触 group。
+8. `Adhesive Connector`：以 elems 定义打胶 location、以 comps 定义连接目标，清洗越界单元后创建 Area adhesives。
 
 典型输出包括：
 
@@ -177,7 +178,9 @@ AUTO_CONTACT_*
     |-- auto_hole_rbe2.tcl
     |-- shell_washer_hole_rbe2.tcl
     |-- rbe2_bolt_connector.tcl
+    |-- cbush_creator.tcl
     |-- contact_setup.tcl
+    |-- adhesive_connector.tcl
     |-- solid_seam_connector.tcl
     `-- solid_seam/
         |-- tcl/
@@ -246,7 +249,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 普通件只读取 `T` 后紧跟的数字作为厚度，并把最后一个下划线字段作为材料；例如 `V01_xxxx_T10aaa_355` 生成 `355_T10`。焊缝名称的其余后缀会被忽略，例如 `SEAM_T10_dff` 和 `SEAM_T10.surf` 都生成 `SEAM_T10`。
 
-材料必须已由用户创建。已经关联 Property 的 component，以及名称中包含 `BEAM`、`RBE`、`BUSH`、`SPRING`（不区分大小写）的 1D component 会直接跳过。无法识别、找不到材料、Property 创建失败或赋予校验失败的 component 不会被移动；模块只会在 `PROPERTY_ASSIGNMENT_REVIEW` assembly 中创建名为 `PROPERTY_REVIEW__<原component名>` 的空 component collector，作为人工复核名称清单，不复制网格、节点或几何。
+材料必须已由用户创建。模块会先调用 HyperMesh 原生的 `*EntityPreviewEmpty` 一次性识别空 component；这些 component 不再检查 Property、解析名称或进入人工复核。已经关联 Property 的 component，以及名称中包含 `BEAM`、`RBE`、`BUSH`、`SPRING`（不区分大小写）的 1D component 也会直接跳过。无法识别、找不到材料、Property 创建失败或赋予校验失败的非空 component 不会被移动；模块只会在 `PROPERTY_ASSIGNMENT_REVIEW` assembly 中创建名为 `PROPERTY_REVIEW__<原component名>` 的空 component collector，作为人工复核名称清单，不复制网格、节点或几何。
 
 ## 6. 模块功能和用法
 
@@ -491,7 +494,48 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 - 输出属性按孔径和属性卡命名，例如 `BOLT_D12_PBEAM`，避免 CBEAM/CBAR 只有几何线而没有求解刚度。
 - 只组织新建的一维连接单元，不移动源节点。
 
-### 6.11 Contact Setup
+### 6.11 CBUSH Creator
+
+入口：`::CBushCreator::runAction`
+
+功能：选择一个或多个已有节点，分别在相同 X/Y、全局 Z 坐标增加 5 的位置创建临时节点，并使用 `Spring config 21 / CBUSH type 6` 连接每组节点。
+
+用法：
+
+1. 在主面板运行 `创建 CBUSH`。
+2. 在原生节点选择器中选择一个或多个源节点并点击中键确认。
+3. 工具逐个创建临时节点和 CBUSH；某个节点失败时会继续处理其余节点，并在结果中列出失败原因。
+
+输出：
+
+- 临时节点坐标为 `(源 X, 源 Y, 源 Z + 5)`。
+- CBUSH 输出 component 命名为 `CBUSH_<源节点所属 component 名称>`。
+- 同一 source component 中的多个节点逐次执行时，会复用同一个 CBUSH 输出 component，不会创建带序号的重复 component。
+- 如果没有可识别的源 component，或源节点同时归属多个 component，工具会停止并提示，不会猜测名称。
+- 如果 CBUSH 创建失败，工具会删除本次新建的临时节点。
+
+### 6.12 Adhesive Connector
+
+入口：`::AdhesiveConnector::runAction`
+
+功能：按 HyperMesh `1D Connector > Area` 流程创建并实现 `adhesives`。第一次选择器选择 `elems` 作为 location，第二次选择器选择至少两个 `comps` 作为 links；固定使用 `no/skip post script`。
+
+用法：
+
+1. 在主面板运行 `模型打胶 / Adhesive Connector`。
+2. 点击 `选择 elems + comps`，先选择打胶区域壳单元并中键确认，再选择需要连接的组件并确认。
+3. 设置 `Tolerance`（默认 `50`）、`Coats`（默认 `1`）和 `Const thickness`（默认 `1`）。厚度类型固定为 `const_thickness`。
+4. 点击 `创建打胶`。模块先清洗 location elems，再调用 OptiStruct Area/adhesives realization。
+
+清洗规则：
+
+- 使用 HyperMesh 原生多线程投影搜索检查 location elem 的全部节点，不再把目标组件完整网格读入 Tcl。
+- 全部节点必须在 tolerance 内投影到每个非自身目标 component；任一节点失败时，整个 location elem 会被剔除，不会传给 connector 命令。
+- 原生投影直接以目标 component 的 shell/solid faces 为目标，与 connector 的投影规则保持一致。
+
+模块会从当前 HyperMesh `feconfig.cfg` 动态解析 OptiStruct 的精确 `adhesives` 类型 ID，创建后回读 connector state；未生成连接或存在非 `REALIZED` 连接时会报错。首次投产前仍需在目标 HM2019 环境完成一次 smoke test。
+
+### 6.13 Contact Setup
 
 入口：`::ContactSetup::run`
 
@@ -519,7 +563,7 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 - contact surface 创建时直接写入计算所得 `reverse_normals`；节点和坐标通过 mark 批量读取，不扫描整个 component。
 - 修改模式只会从当前 contact surface 中移除所选单元，不删除源 component 原始网格。
 
-### 6.12 Solid Seam Connector
+### 6.14 Solid Seam Connector
 
 入口：`::SolidSeam::run`
 
@@ -537,7 +581,7 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 
 完整识别验证可运行 `examples/SolidSeam_Validation/generate_fem.py`，并导入生成的单一组合模型 `SolidSeam_Combined_Validation.fem`。对应 manifest 给出了每组应选组件、参数和预期结果。
 
-### 6.13 网格焊缝完整性检查
+### 6.15 网格焊缝完整性检查
 
 入口：`::WeldIntegrityCheck::runAction`
 
@@ -572,7 +616,8 @@ hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|no
 
 ## 8. 开发和验证说明
 
-- 目标环境：HyperMesh 2019 Tcl/Tk。
+- 目标环境：HyperMesh 2019 Tcl/Tk（已验证基线）和 HyperWorks 2022 新界面（迁移兼容目标）。
+- 2022 当前覆盖启动、hwtk/Tk 窗口和 UTF-8 中文显示；各模块的 HyperMesh 原生命令仍需按模块在 2022 实机模型上逐步回归。
 - 本项目不依赖普通 Tcl 以外的第三方运行时，但核心命令依赖 HyperMesh。
 - 普通 Tcl 解释器可用于基础语法检查，不能验证 HyperMesh 命令行为。
 - 修改模块后，建议在 HyperMesh 中至少验证对应模块的窗口打开、选择流程、输出 component 和 Model Browser 刷新。

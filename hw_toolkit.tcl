@@ -13,7 +13,7 @@ if {[catch {
     if {![file exists $installerFile]} {
         error "Install/update file not found: $installerFile"
     }
-    source $installerFile
+    source -encoding utf-8 $installerFile
 } hwToolkitErr]} {
     catch {puts "HMWorkFlow startup failed: $hwToolkitErr"}
     if {[llength [info commands tk_messageBox]] > 0} {
