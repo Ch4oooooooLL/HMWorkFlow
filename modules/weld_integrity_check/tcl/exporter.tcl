@@ -1,46 +1,84 @@
-proc ::WeldIntegrityCheck::elementType {nodeIds} {
-    switch -- [llength $nodeIds] { 3 { return CTRIA3 } 4 { return CQUAD4 } default { return "" } }
+proc ::WeldIntegrityCheck::optistructExportTemplate {} {
+    set candidates {}
+    if {![catch {set templatesDir [hm_info -appinfo SPECIFIEDPATH TEMPLATES_DIR]}] &&
+        [string trim $templatesDir] ne ""} {
+        lappend candidates [file join $templatesDir feoutput optistruct optistruct]
+    }
+    if {![catch {set executableDir [hm_info -appinfo EXECUTABLEDIR]}] &&
+        [string trim $executableDir] ne ""} {
+        lappend candidates [file join $executableDir .. .. .. templates feoutput optistruct optistruct]
+    }
+    foreach candidate $candidates {
+        set normalized [file normalize $candidate]
+        if {[file isfile $normalized]} { return $normalized }
+    }
+    error [::WeldIntegrityCheck::txt \
+        "找不到 HyperMesh OptiStruct FEM 导出模板。" \
+        "Could not locate the HyperMesh OptiStruct FEM export template."]
+}
+
+proc ::WeldIntegrityCheck::componentElementIds {componentId} {
+    if {[llength [info commands ::HWFlow::getCompEntityIds]] > 0} {
+        return [::HWFlow::getCompEntityIds $componentId elems elems]
+    }
+    set ids {}
+    catch {*clearmark elems 2}
+    if {![catch {*createmark elems 2 "by comp id" $componentId}]} {
+        catch {set ids [hm_getmark elems 2]}
+    }
+    catch {*clearmark elems 2}
+    return [lsort -integer -unique $ids]
 }
 
 proc ::WeldIntegrityCheck::exportInput {componentIds} {
-    variable taskDir; variable ui; variable cfg
+    variable taskDir; variable ui; variable cfg; variable taskId
     set inputDir [file join $taskDir input]
-    set componentRows {}; set elementLines [list "element_id,component_id,element_type,node_ids"]; set allNodes {}; set shellCount 0; set shellComponentCount 0
+    set outputPath [file join $inputDir selected_components.fem]
+    set manifestPath [file join $inputDir mesh_manifest.json]
+    set exportTemplate [::WeldIntegrityCheck::optistructExportTemplate]
+    set componentRows {}
+    set elementCount 0
+
+    # Only component membership is queried through Tcl. HyperMesh performs the
+    # mesh serialization natively; Python reads connectivity and coordinates.
     foreach componentId $componentIds {
+        set elementIds [::WeldIntegrityCheck::componentElementIds $componentId]
+        if {[llength $elementIds] == 0} { continue }
         set name [::HWFlow::componentName $componentId]
         if {$name eq ""} { set name "COMP_$componentId" }
-        set componentShellCount 0
-        catch {*clearmark elems 1}
-        if {[catch {eval *createmark elems 1 "by comp id" $componentId} markErr]} {
-            ::WeldIntegrityCheck::log WARN "component element mark failed component=$componentId error=$markErr"
-            continue
-        }
-        foreach elementId [hm_getmark elems 1] {
-            if {[catch {set nodeIds [hm_getvalue elems id=$elementId dataname=nodes]}]} { continue }
-            set type [::WeldIntegrityCheck::elementType $nodeIds]
-            if {$type eq ""} { continue }
-            incr shellCount; incr componentShellCount; set allNodes [concat $allNodes $nodeIds]
-            lappend elementLines "$elementId,$componentId,$type,\"[join $nodeIds { }]\""
-        }
-        if {$componentShellCount > 0} {
-            incr shellComponentCount
-            lappend componentRows "  {\"id\": $componentId, \"name\": [::HybridCore::jsonString $name], \"entity_type\": \"shell\"}"
-        }
+        incr elementCount [llength $elementIds]
+        lappend componentRows "    {\"component_id\": $componentId, \"component_name\": [::HybridCore::jsonString $name], \"entity_type\": \"shell\", \"element_ids\": [::HybridCore::jsonIntArray $elementIds]}"
     }
-    if {$shellComponentCount < 2} { error [::WeldIntegrityCheck::txt "选择范围内至少需要两个包含有效 Shell 单元的 Component。" "At least two selected components must contain valid shell elements."] }
-    ::HybridCore::writeTextFile [file join $inputDir components.json] "\[\n[join $componentRows ,\n]\n\]\n"
-    set nodeLines [list "node_id,x,y,z"]
-    foreach nodeId [lsort -integer -unique $allNodes] {
-        if {[catch {set x [hm_getvalue nodes id=$nodeId dataname=x]}] || [catch {set y [hm_getvalue nodes id=$nodeId dataname=y]}] || [catch {set z [hm_getvalue nodes id=$nodeId dataname=z]}]} { continue }
-        lappend nodeLines "$nodeId,$x,$y,$z"
+    if {[llength $componentRows] < 2} {
+        error [::WeldIntegrityCheck::txt \
+            "选择范围内至少需要两个包含单元的 Component。" \
+            "At least two selected components must contain elements."]
     }
-    ::HybridCore::writeTextFile [file join $inputDir nodes.csv] "[join $nodeLines \n]\n"
-    ::HybridCore::writeTextFile [file join $inputDir elements.csv] "[join $elementLines \n]\n"
-    # HM2019 installations differ in their free-edge command surface. The
-    # stable shell connectivity is exported and Python derives incidence==1.
-    ::HybridCore::writeTextFile [file join $inputDir free_edges.csv] "component_id,node_1,node_2,owner_element\n"
+
+    catch {*clearmark elems 1}
+    catch {*clearmark nodes 1}
+    set exportStarted [clock milliseconds]
+    set code [catch {
+        eval *createmark elems 1 [list "by component id"] $componentIds
+        eval *createmark nodes 1 [list "by component id"] $componentIds
+        ::HWFlow::runHyperMeshIo export \
+            [list *feoutput_select $exportTemplate $outputPath 1 0 0] $outputPath
+    } err opts]
+    catch {*clearmark elems 1}
+    catch {*clearmark nodes 1}
+    if {$code} { return -options $opts $err }
+    if {![file isfile $outputPath] || [file size $outputPath] == 0} {
+        error "HyperMesh did not create the selected-component FEM export: $outputPath"
+    }
+
+    set componentJson [join $componentRows ",\n"]
+    set manifest "{\n  \"schema_version\": \"1.0\",\n  \"format\": \"hm_weld_integrity_fem\",\n  \"run_id\": [::HybridCore::jsonString $taskId],\n  \"fem_path\": \"selected_components.fem\",\n  \"fem_size\": [file size $outputPath],\n  \"components\": \[\n$componentJson\n  \]\n}\n"
+    ::HybridCore::writeTextFile $manifestPath $manifest
+
     set settings "{\n  \"max_search_distance\": $cfg(max_search_distance),\n  \"min_contact_length\": $cfg(min_contact_length),\n  \"min_continuous_nodes\": $cfg(min_continuous_nodes),\n  \"prefer_free_edges\": [::HybridCore::jsonBool $cfg(prefer_free_edges)],\n  \"ignore_shared_nodes\": [::HybridCore::jsonBool $cfg(ignore_shared_nodes)],\n  \"selected_component_ids\": [::HybridCore::jsonIntArray $componentIds],\n  \"excluded_component_ids\": [::HybridCore::jsonIntArray $ui(excludedCompIds)]\n}\n"
     ::HybridCore::writeTextFile [file join $inputDir settings.json] $settings
-    ::WeldIntegrityCheck::log INFO "exported components=[llength $componentRows] shell_elements=$shellCount nodes=[expr {[llength $nodeLines]-1}]"
-    return [dict create components [llength $componentRows] elements $shellCount nodes [expr {[llength $nodeLines]-1}]]
+
+    set exportMs [expr {[clock milliseconds] - $exportStarted}]
+    ::WeldIntegrityCheck::log INFO "native FEM exported components=[llength $componentRows] mapped_elements=$elementCount bytes=[file size $outputPath] export_ms=$exportMs"
+    return [dict create components [llength $componentRows] elements $elementCount bytes [file size $outputPath] export_ms $exportMs]
 }

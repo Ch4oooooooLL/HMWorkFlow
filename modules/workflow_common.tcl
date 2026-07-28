@@ -517,6 +517,13 @@ proc ::HWFlow::uiWidget {kind w args} {
         if {[llength [info commands ::$kind]] > 0} {
             lappend candidates ::$kind
         }
+    } elseif {$kind eq "separator"} {
+        if {[llength [info commands ::ttk::separator]] == 0} {
+            catch {package require tile}
+        }
+        if {[llength [info commands ::ttk::separator]] > 0} {
+            lappend candidates ::ttk::separator
+        }
     } elseif {$kind eq "notebook"} {
         if {[llength [info commands ::ttk::notebook]] == 0} {
             catch {package require tile}

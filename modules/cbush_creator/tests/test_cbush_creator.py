@@ -58,6 +58,7 @@ proc *springos {node1 node2 property vector directionNode ox oy oz useComponents
     lappend ::commands [list springos $node1 $node2 $property $vector $directionNode $ox $oy $oz $useComponents $systemId]
     set ::latest_elem 201
 }
+proc *setvalue {entity selector cid status} {lappend ::commands [list setvalue $entity $selector $cid $status]}
 """
         )
 
@@ -81,6 +82,7 @@ proc *springos {node1 node2 property vector directionNode ox oy oz useComponents
             ("springos", "7", "101", "", "0", "0", "0", "0", "0", "0", "0"),
             commands,
         )
+        self.assertIn(("setvalue", "elems", "id=201", "CID=0", "STATUS=1"), commands)
 
     def test_create_for_node_rejects_ambiguous_component_membership(self):
         self.tcl.eval(
@@ -173,6 +175,7 @@ proc *currentcollector args {}
 proc *createnode args {incr ::latest_node}
 proc *elementtype args {}
 proc *springos args {incr ::latest_elem}
+proc *setvalue args {}
 proc *createmark args {}
 proc *numbersmark args {}
 proc *clearmark args {}
@@ -196,6 +199,43 @@ proc *redraw args {}
             self.tcl.splitlist(self.tcl.eval("set ::component_requests")),
             ("CBUSH_V01_COMMON_T2_Q355", "CBUSH_V01_COMMON_T2_Q355"),
         )
+
+    def test_cid_update_failure_removes_created_element_and_node(self):
+        self.tcl.eval(
+            r"""
+rename ::CBushCreator::sourceComponentId ::CBushCreator::sourceComponentId_real
+rename ::CBushCreator::nodeCoordinates ::CBushCreator::nodeCoordinates_real
+rename ::HWFlow::componentName ::HWFlow::componentName_real
+rename ::HWFlow::createComponent ::HWFlow::createComponent_real
+proc ::CBushCreator::sourceComponentId {nodeId} {return 42}
+proc ::CBushCreator::nodeCoordinates {nodeId} {return {1 2 3}}
+proc ::HWFlow::componentName {componentId} {return SOURCE}
+proc ::HWFlow::createComponent {name color} {return 91}
+set ::latest_node 100
+set ::latest_elem 200
+set ::deleted_entities {}
+proc hm_latestentityid {entityType} {
+    if {$entityType eq "nodes"} {return $::latest_node}
+    return $::latest_elem
+}
+proc *currentcollector args {}
+proc *createnode args {set ::latest_node 101}
+proc *elementtype args {}
+proc *springos args {set ::latest_elem 201}
+proc *setvalue args {error {simulated CID failure}}
+proc *clearmark args {}
+proc *createmark {entity mark selector id} {set ::marked($entity) $id}
+proc *deletemark {entity mark} {lappend ::deleted_entities [list $entity $::marked($entity)]}
+"""
+        )
+
+        with self.assertRaises(tkinter.TclError) as context:
+            self.tcl.call("::CBushCreator::createForNode", 7)
+
+        self.assertIn("simulated CID failure", str(context.exception))
+        deleted = [self.tcl.splitlist(item) for item in self.tcl.splitlist(self.tcl.eval("set ::deleted_entities"))]
+        self.assertIn(("elems", "201"), deleted)
+        self.assertIn(("nodes", "101"), deleted)
 
     def test_run_action_accepts_multiple_selected_nodes(self):
         self.tcl.eval(

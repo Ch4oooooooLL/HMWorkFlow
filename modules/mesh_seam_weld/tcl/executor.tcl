@@ -38,12 +38,11 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
     }
     set targetStarted [clock milliseconds]
     if {[catch {
-        set currentTargetElems [::MeshSeamWeld::targetElementsAfterImprint \
-            $targetComps $targetElemIds]
         set targetNodes [::MeshSeamWeld::targetNodesFromImprintList \
             $sourceNodes "" 0]
         set targetMatchMode native_imprint_list
         set nativeContinuous 0
+        set currentTargetElems {}
         if {[llength $targetNodes] > 0} {
             set nativeContinuous [::MeshSeamWeld::targetPathIsContinuous \
                 $targetNodes $targetComps $closedLoop]
@@ -51,6 +50,12 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
         if {[llength $targetNodes] == 0 ||
             [llength $targetNodes] != [llength $sourceNodes] ||
             !$nativeContinuous} {
+            # Rebuild the post-imprint element scope only when the native
+            # result is incomplete.  A complete continuous list is already
+            # authoritative and must not fail merely because every old local
+            # element ID was replaced by remeshing.
+            set currentTargetElems [::MeshSeamWeld::targetElementsAfterImprint \
+                $targetComps $targetElemIds $sourceNodes $closedLoop]
             if {![catch {
                 set recoveredTargetNodes [::MeshSeamWeld::targetNodesFromPostImprintTopology \
                     $sourceNodes $targetComps $currentTargetElems $closedLoop]
@@ -99,7 +104,7 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
     }
     set meshMs [expr {[clock milliseconds] - $meshStarted}]
     set totalMs [expr {[clock milliseconds] - $totalStarted}]
-    ::HybridCore::log INFO "PERF mesh_seam_weld path=$pathIndex/$pathTotal nodes=[llength $sourceNodes] closed_loop=$closedLoop imprint_closed_loop=$imprintClosedLoop local_target_elems=[llength $targetElemIds] imprint_scope=$::MeshSeamWeld::lastImprintTargetMode imprint_core_elems=$::MeshSeamWeld::lastImprintCoreElemCount imprint_support_elems=$::MeshSeamWeld::lastImprintSupportElemCount imprint_target_elems=$::MeshSeamWeld::lastImprintTargetElemCount imprint_ms=$imprintMs target_match_ms=$targetMs mesh_create_ms=$meshMs total_ms=$totalMs"
+    ::HybridCore::log INFO "PERF mesh_seam_weld path=$pathIndex/$pathTotal nodes=[llength $sourceNodes] closed_loop=$closedLoop imprint_closed_loop=$imprintClosedLoop local_target_elems=[llength $targetElemIds] imprint_scope=$::MeshSeamWeld::lastImprintTargetMode imprint_core_elems=$::MeshSeamWeld::lastImprintCoreElemCount shared_external_elems=$::MeshSeamWeld::lastImprintSharedNeighborElemCount imprint_target_elems=$::MeshSeamWeld::lastImprintTargetElemCount imprint_ms=$imprintMs target_match_ms=$targetMs mesh_create_ms=$meshMs total_ms=$totalMs"
 
     if {$reportProgress || $pathIndex == $pathTotal} {
         set percent [expr {10.0 + 80.0 * $pathIndex / double(max(1, $pathTotal))}]

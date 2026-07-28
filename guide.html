@@ -1348,10 +1348,10 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
                             <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理。单点及不连续边界种子通过 HyperMesh 2019 原生 <code>*findedges</code> 为每个源 component 创建临时隐藏 PLOTEL 自由边组件；自由边点只提取包含该节点的闭环，内部点提取其所属整个 component 的全部闭合自由边。路径提取完成后临时组件立即清理，原有 <code>^edges</code> 会被保留和恢复。运行流程不导出 FEM，也不调用 Python。</li>
-                            <li><strong>印记区网格重构 (Remeshing)</strong>：在印记边界内，自动计算重构范围，并将投影线与目标网格强行对齐重划分。</li>
-                            <li><strong>自动生成 Ruled 连接带</strong>：自动利用两组特征点对齐，生成两个零件之间均匀的 shell 网格连接带，并将新生成的焊缝网格归类至指定组件。</li>
+                            <li><strong>印记区网格重构 (Remeshing)</strong>：将原始节点路径作为 Nodes 输入，将该路径投影到所选目标 components 后最近的几层单元作为 Elements 输入，调用 Mesh Edit imprint。与目标 patch 共节点、但不属于目标 patch 的平面外单元只记录诊断数量，不会混入 Elements 输入。</li>
+                            <li><strong>自动生成 Ruled 连接带</strong>：imprint 后重新取得位置已调整的目标节点；Ruled 第一侧始终使用原始 Nodes 输入，第二侧使用 imprint 后目标节点。两侧节点数量不必一一对应，并将新生成的焊缝网格归类至指定组件。</li>
                             <li><strong>局部失败隔离</strong>：每个闭环都在独立撤销事务中完成即时目标 patch、imprint、后置节点验证和连接带创建。任一阶段失败会回滚并跳过当前闭环，不会退化为整个目标 component 的 imprint，也不会保留部分焊缝。</li>
-                            <li><strong>批量性能与可靠性</strong>：原生自由边 PLOTEL 连接关系通过一次 mark 批量读取；每条路径执行前才统一投影全部源节点、一次反查所附着的目标壳单元并扩展两到三层 Elements，避免前一条路径重网格后留下过期目标单元 ID。imprint 后优先采用 HyperMesh 提供的结果节点列表；程序按几何方向建立单调节点对应，并将对应关系切分为连续有效区段。找不到对应节点或目标网格边不连续的局部区段会被跳过，其余区段仍正常创建。列表不可用时，仍通过当前局部 patch 的有界拓扑追踪恢复目标路径。边界遍历、投影、验证和连接带创建等长循环会按固定批次处理界面事件。</li>
+                            <li><strong>批量性能与可靠性</strong>：原生自由边 PLOTEL 连接关系通过一次 mark 批量读取；每条路径执行前才统一投影全部源节点、一次反查所附着的目标壳单元并扩展两到三层 Elements，避免前一条路径重网格后留下过期目标单元 ID。imprint 后优先采用 HyperMesh 提供的结果节点列表；列表不可用时，通过当前局部 patch 的有界拓扑追踪恢复目标路径。恢复出的整条目标路径直接作为 Ruled 第二侧，不因与源侧节点数不同而拆段。边界遍历、投影与验证等长循环会按固定批次处理界面事件。</li>
                             <li><strong>可反馈诊断</strong>：失败会按目标准备、imprint、目标匹配、目标连续性、automesh 或撤销事务分类，显示原因和检查建议，并在任务目录写出 UTF-8 纯文本 <code>mesh_seam_weld_failure_report.txt</code>。反馈问题时同时提供该文件和 <code>operation.log</code> 即可。</li>
                             <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
                         </ul>
@@ -1378,7 +1378,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">4</span>
                                 <div class="step-title">配置生成参数</div>
-                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐闭环即时准备当前目标网格的两到三层局部 patch，执行 <code>imprint_nodelist</code>，再按几何方向和闭环起点进行防扭曲对齐。随后逐节点建立对应关系，只对源、目标索引连续且目标网格边相邻的区段创建结构化连接带；找不到对应关系的局部区段会直接跳过。只有整条路径都不足以形成一个有效区段，或实际建带失败时，才回滚当前闭环并生成失败标记与报告。</div>
+                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐路径准备当前目标网格的两到三层局部 Elements patch，以原始节点列表和该 patch 执行 <code>imprint_nodelist</code>；随后重新获取 imprint 后目标节点并校正方向与闭环起点。最后把原始节点列表作为 Ruled 第一侧、目标节点作为第二侧直接建带。两侧节点数允许不同；闭合路径会显式创建首尾封口。</div>
                             </div>
                         </div>
                     </div>

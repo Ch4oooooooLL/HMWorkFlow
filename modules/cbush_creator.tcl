@@ -153,6 +153,27 @@ proc ::CBushCreator::deleteNodeIfPresent {nodeId} {
     catch {*clearmark nodes 2}
 }
 
+proc ::CBushCreator::deleteElementIfPresent {elementId} {
+    if {$elementId eq "" || $elementId == 0} {
+        return
+    }
+    catch {*clearmark elems 2}
+    catch {*createmark elems 2 "by id only" $elementId}
+    catch {*deletemark elems 2}
+    catch {*clearmark elems 2}
+}
+
+proc ::CBushCreator::setElementCidZero {elementId} {
+    # The systemId argument of *springos is not sufficient to make the CID
+    # field explicit in every supported HyperMesh version/profile.  Turn the
+    # card attribute on and write global system 0 after the element exists.
+    if {[catch {*setvalue elems id=$elementId CID=0 STATUS=1} setError]} {
+        error [::HWFlow::txt \
+            "无法将 CBUSH 单元 $elementId 的 CID 设置为 0：$setError" \
+            "Cannot set CID to 0 on CBUSH element $elementId: $setError"]
+    }
+}
+
 proc ::CBushCreator::createForNode {sourceNodeId} {
     variable OUTPUT_COLOR
 
@@ -204,6 +225,12 @@ proc ::CBushCreator::createForNode {sourceNodeId} {
         error [::HWFlow::txt \
             "CBUSH 创建命令已执行，但无法取得新单元 ID。" \
             "The CBUSH creation command ran, but the new element ID could not be determined."]
+    }
+
+    if {[catch {::CBushCreator::setElementCidZero $elementId} cidError]} {
+        ::CBushCreator::deleteElementIfPresent $elementId
+        ::CBushCreator::deleteNodeIfPresent $offsetNodeId
+        error $cidError
     }
 
     catch {*createmark elems 1 "by id only" $elementId}

@@ -73,17 +73,27 @@ proc runSharedNodeImprintSmoke {root outputDir} {
 
     ::MeshSeamWeld::runImprintNodeList \
         $sourceNodes [list $targetComp] 1 $targetElems
-    set supportCount $::MeshSeamWeld::lastImprintSupportElemCount
+    set sharedExternalCount $::MeshSeamWeld::lastImprintSharedNeighborElemCount
     set totalCount $::MeshSeamWeld::lastImprintTargetElemCount
     set mode $::MeshSeamWeld::lastImprintTargetMode
-    if {$supportCount < [llength $wallElems]} {
-        error "Expected both non-coplanar wall elements in the support halo; got $supportCount"
+    set markedTargets {}
+    catch {set markedTargets [hm_getmark elements 2]}
+    if {[llength $markedTargets] == 0} {
+        catch {set markedTargets [hm_getmark elems 2]}
     }
-    if {$mode ne "local_elements_shared_support"} {
-        error "Expected shared-support local imprint mode, got $mode"
+    foreach wallElem $wallElems {
+        if {[lsearch -exact $markedTargets $wallElem] >= 0} {
+            error "Non-coplanar wall element $wallElem was incorrectly added to the Mesh Edit Elements input"
+        }
+    }
+    if {$sharedExternalCount < [llength $wallElems]} {
+        error "Expected both non-coplanar wall elements in diagnostics; got $sharedExternalCount"
+    }
+    if {$mode ne "local_elements"} {
+        error "Expected local target-elements imprint mode, got $mode"
     }
     ::HybridCore::closeLog
-    return "target_component=$targetComp wall_component=$wallComp\ncore_elements=[llength $targetElems] support_elements=$supportCount total_imprint_elements=$totalCount\nmode=$mode"
+    return "target_component=$targetComp wall_component=$wallComp\ncore_elements=[llength $targetElems] shared_external_elements=$sharedExternalCount total_imprint_elements=$totalCount\nmode=$mode"
 }
 
 set code [catch {runSharedNodeImprintSmoke $root $outputDir} details options]

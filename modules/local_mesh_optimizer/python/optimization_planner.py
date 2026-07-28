@@ -216,6 +216,7 @@ def _quad_actions(
     minimum_length: float,
     maximum_aspect_ratio: Optional[float],
     user_anchor_nodes: Set[int],
+    support_action: bool = False,
 ) -> List[dict]:
     lengths = _edge_lengths(element, coordinates)
     pair_02 = (lengths[0] + lengths[2]) / 2.0
@@ -277,7 +278,8 @@ def _quad_actions(
         current_b = lengths[(edge_index + 1) % 4]
         target_a = max(current_a, passing_short)
         target_b = max(current_b, passing_short)
-        if target_a <= current_a + 1.0e-12 and target_b <= current_b + 1.0e-12:
+        if (target_a <= current_a + 1.0e-12 and target_b <= current_b + 1.0e-12
+                and not support_action):
             return [_action(region_id, action_id, "manual_review", element.element_id, "internal_quad_has_no_criteria_expansion_target")]
         reason = "narrow_internal_quad_symmetric_expansion"
         if weld_move_mode == 0:
@@ -321,6 +323,97 @@ def _quad_actions(
         "best_worst_triangle_score",
         split_method=2 if selected_is_shortest else 102,
     )]
+
+
+def _extend_narrow_quad_chains(
+    actions: List[dict],
+    failed_ids: Set[int],
+    regions: Sequence[dict],
+    elements: Mapping[int, ShellElement],
+    coordinates: Mapping[int, Point],
+    edge_owners: Mapping[Edge, List[int]],
+    blocked_edges: Set[Edge],
+    user_anchor_nodes: Set[int],
+    allow_free_edge_move: bool,
+    allow_internal_quad_expansion: bool,
+    narrow_quad_ratio: float,
+    narrow_target_aspect: float,
+    minimum_length: float,
+    maximum_aspect_ratio: Optional[float],
+) -> None:
+    """Grow failed narrow-quad seeds through the complete contiguous strip.
+
+    HyperMesh commonly reports only alternating cells of an otherwise uniform
+    narrow strip. Moving only those failed cells creates a saw-tooth boundary
+    and is correctly rejected by the quality simulator. Support actions make
+    every narrow quad between/around the failed seeds participate in the same
+    coordinated node-chain move.
+    """
+    region_map = {str(region["region_id"]): region for region in regions}
+    mandatory_nodes = set(user_anchor_nodes)
+    for edge in blocked_edges:
+        mandatory_nodes.update(edge)
+    expansion_types = {"expand_free_edge", "expand_internal_quad"}
+    existing = {
+        (str(action["region_id"]), str(action["action_type"]), int(action["element_id"]))
+        for action in actions
+        if action["action_type"] in expansion_types
+    }
+    queue = [action for action in actions if action["action_type"] in expansion_types]
+    queue_index = 0
+    while queue_index < len(queue):
+        seed = queue[queue_index]
+        queue_index += 1
+        seed_element = elements.get(int(seed["element_id"]))
+        if seed_element is None or len(seed_element.nodes) != 4:
+            continue
+        edge_index = int(seed["edge_index"]) - 1
+        if edge_index not in range(4):
+            continue
+        short_edges = ((edge_index - 1) % 4, (edge_index + 1) % 4)
+        for short_edge_index in short_edges:
+            for neighbor_id in edge_owners.get(_edge(seed_element, short_edge_index), []):
+                if neighbor_id == seed_element.element_id:
+                    continue
+                neighbor = elements.get(neighbor_id)
+                if (neighbor is None or len(neighbor.nodes) != 4 or
+                        neighbor.component_id != seed_element.component_id or
+                        any(node not in coordinates for node in neighbor.nodes)):
+                    continue
+                key = (str(seed["region_id"]), str(seed["action_type"]), neighbor_id)
+                if key in existing:
+                    continue
+                region = region_map.get(str(seed["region_id"]), {})
+                candidate = _quad_actions(
+                    str(seed["region_id"]),
+                    0,
+                    neighbor,
+                    elements,
+                    coordinates,
+                    edge_owners,
+                    set(region.get("anchor_nodes", [])).union(user_anchor_nodes),
+                    mandatory_nodes,
+                    allow_free_edge_move,
+                    allow_internal_quad_expansion,
+                    max(1.5, narrow_quad_ratio * 0.6),
+                    narrow_target_aspect,
+                    minimum_length,
+                    maximum_aspect_ratio,
+                    user_anchor_nodes,
+                    support_action=True,
+                )[0]
+                if candidate["action_type"] != seed["action_type"]:
+                    continue
+                # A weld strip must keep the selected moving side consistent
+                # along the whole chain. Local missing/mismatched neighbour
+                # ownership must not flip one cell to symmetric movement.
+                if str(seed.get("reason", "")).startswith("weld_strip_"):
+                    candidate["move_mode"] = int(seed.get("move_mode", 0))
+                if neighbor_id not in failed_ids:
+                    candidate["reason"] = "narrow_quad_chain_support"
+                actions.append(candidate)
+                queue.append(candidate)
+                existing.add(key)
 
 
 def plan_optimization_actions(
@@ -433,6 +526,22 @@ def plan_optimization_actions(
                     ))
             else:
                 actions.append(_action(region_id, action_index, "manual_review", element_id, "tria_not_matching_safe_collapse_rule"))
+    _extend_narrow_quad_chains(
+        actions,
+        failed_set,
+        regions,
+        elements,
+        coordinates,
+        edge_owners,
+        blocked_edges,
+        user_anchor_nodes,
+        allow_free_edge_move,
+        allow_internal_quad_expansion,
+        narrow_quad_ratio,
+        narrow_target_aspect,
+        minimum_length,
+        maximum_aspect_ratio,
+    )
     # A skinny triangle can share its short edge with another failed shell. A
     # midpoint node replacement intentionally removes that sliver and updates
     # the neighbour, so shared failure ownership alone is not a conflict.

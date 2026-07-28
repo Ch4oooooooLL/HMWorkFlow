@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+try:
+    from .fem_reader import read_fem_bundle
+except ImportError:  # Standalone HM2019 entry compatibility.
+    from fem_reader import read_fem_bundle
 
 
 def load_json(path: Path) -> Any:
@@ -12,22 +16,8 @@ def load_json(path: Path) -> Any:
 
 
 def load_inputs(input_dir: Path) -> Tuple[List[Dict[str, Any]], Dict[int, Tuple[float, float, float]], List[Dict[str, Any]], Dict[str, Any]]:
-    components = load_json(input_dir / "components.json")
     settings = load_json(input_dir / "settings.json")
-    nodes: Dict[int, Tuple[float, float, float]] = {}
-    with (input_dir / "nodes.csv").open("r", encoding="utf-8-sig", newline="") as stream:
-        for row in csv.DictReader(stream):
-            nodes[int(row["node_id"])] = (float(row["x"]), float(row["y"]), float(row["z"]))
-    elements: List[Dict[str, Any]] = []
-    with (input_dir / "elements.csv").open("r", encoding="utf-8-sig", newline="") as stream:
-        for row in csv.DictReader(stream):
-            node_ids = [int(value) for value in row["node_ids"].replace(";", " ").split()]
-            elements.append({
-                "element_id": int(row["element_id"]),
-                "component_id": int(row["component_id"]),
-                "element_type": row["element_type"],
-                "node_ids": node_ids,
-            })
+    components, nodes, elements = read_fem_bundle(input_dir / "mesh_manifest.json")
     return components, nodes, elements, settings
 
 

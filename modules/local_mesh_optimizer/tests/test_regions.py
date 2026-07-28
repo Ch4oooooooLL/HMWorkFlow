@@ -441,6 +441,55 @@ class RegionTests(unittest.TestCase):
             tcl_actions = (task_dir / "optimization_actions.txt").read_text(encoding="utf-8")
             self.assertNotIn("expand_internal_quad", tcl_actions)
 
+    def test_controller_writes_nonfailed_boundary_support_into_tcl_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task_dir = Path(directory)
+            criteria = task_dir / "rules.criteria"
+            criteria.write_text(
+                " 1 min length         1 1.0  5.0 4.0 3.0 1.0 0.5 1\n"
+                " 3 aspect ratio       1 1.0  1.0 2.0 4.0 5.0 10.0 0\n",
+                encoding="utf-8",
+            )
+            (task_dir / "element_connectivity.txt").write_text(
+                "element_id,component_id,n1,n2,n3,n4\n"
+                "1,1,1,2,6,5\n2,1,2,3,7,6\n3,1,3,4,8,7\n",
+                encoding="utf-8",
+            )
+            (task_dir / "node_coordinates.txt").write_text(
+                "node_id,x,y,z\n"
+                "1,0,0,0\n2,5,0,0\n3,10,0,0\n4,15,0,0\n"
+                "5,0,0.2,0\n6,5,0.2,0\n7,10,0.2,0\n8,15,0.2,0\n",
+                encoding="utf-8",
+            )
+            (task_dir / "failed_elements.txt").write_text("1\n3\n", encoding="utf-8")
+            (task_dir / "protected_edges.txt").write_text("n1,n2\n", encoding="utf-8")
+            (task_dir / "protected_nodes.txt").write_text("", encoding="utf-8")
+            task = task_dir / "task.json"
+            task.write_text(json.dumps({
+                "criteria_path": str(criteria),
+                "adjacency_layers": 1,
+                "max_region_elements": 100,
+                "optimization_level": "standard",
+                "allow_controlled_free_edge_move": True,
+                "protection": {"no_cross_component_movement": True, "feature_edges": False},
+            }), encoding="utf-8")
+
+            completed = subprocess.run(
+                [sys.executable, str(PYTHON_DIR / "optimizer_controller.py"), "--task", str(task)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
+            with (task_dir / "optimization_actions.txt").open(encoding="utf-8") as stream:
+                rows = list(csv.DictReader(stream))
+            expansions = [row for row in rows if row["action_type"] == "expand_free_edge"]
+            self.assertEqual({int(row["element_id"]) for row in expansions}, {1, 2, 3})
+            self.assertIn("narrow_quad_chain_support", {row["reason"] for row in expansions})
+            batch_text = "\n".join(
+                path.read_text(encoding="utf-8") for path in (task_dir / "batches").glob("*.tcl")
+            )
+            self.assertIn('elementId "2"', batch_text)
+
     def test_planner_splits_quad_using_scored_diagonal(self):
         elements = {10: ShellElement(10, 1, (1, 2, 3, 4))}
         coordinates = {
@@ -889,6 +938,38 @@ class RegionTests(unittest.TestCase):
         self.assertEqual(len(batches), 1)
         self.assertEqual(len(batches[0].operations), 3)
 
+    def test_failed_seed_extends_over_nonfailed_narrow_quad_support_chain(self):
+        elements = {
+            1: ShellElement(1, 1, (1, 2, 6, 5)),
+            2: ShellElement(2, 1, (2, 3, 7, 6)),
+            3: ShellElement(3, 1, (3, 4, 8, 7)),
+        }
+        coordinates = {
+            1: (0.0, 0.0, 0.0), 2: (5.0, 0.0, 0.0),
+            3: (10.0, 0.0, 0.0), 4: (15.0, 0.0, 0.0),
+            5: (0.0, 0.2, 0.0), 6: (5.0, 0.2, 0.0),
+            7: (10.0, 0.2, 0.0), 8: (15.0, 0.2, 0.0),
+        }
+        regions = [{
+            "region_id": "Region_0001",
+            "failed_elements": [1, 3],
+            "expanded_elements": [1, 2, 3],
+            "anchor_nodes": [],
+        }]
+
+        actions = plan_optimization_actions(
+            elements, [1, 3], coordinates, regions,
+            minimum_length=1.0, maximum_aspect_ratio=10.0,
+        )
+
+        expansions = [action for action in actions if action["action_type"] == "expand_free_edge"]
+        self.assertEqual({action["element_id"] for action in expansions}, {1, 2, 3})
+        self.assertEqual(len({action["split_method"] for action in expansions}), 1)
+        self.assertEqual(
+            next(action for action in expansions if action["element_id"] == 2)["reason"],
+            "narrow_quad_chain_support",
+        )
+
     def test_python_simulates_connected_free_edge_chain_as_one_move(self):
         elements = {
             1: ShellElement(1, 1, (1, 2, 6, 5)),
@@ -994,6 +1075,45 @@ class RegionTests(unittest.TestCase):
         )
         self.assertTrue(valid, (reason, detail))
 
+    def test_weld_failed_seed_moves_nonfailed_contiguous_strip_support(self):
+        elements = {
+            10: ShellElement(10, 10, (1, 2, 5, 4)),
+            11: ShellElement(11, 10, (2, 3, 6, 5)),
+            20: ShellElement(20, 20, (7, 8, 2, 1)),
+            21: ShellElement(21, 20, (8, 9, 3, 2)),
+            30: ShellElement(30, 30, (4, 5, 11, 10)),
+            31: ShellElement(31, 30, (5, 6, 12, 11)),
+            40: ShellElement(40, 10, (13, 1, 4, 14)),
+            41: ShellElement(41, 10, (3, 15, 16, 6)),
+        }
+        coordinates = {
+            1: (0.0, 0.0, 0.0), 2: (5.0, 0.0, 0.0), 3: (10.0, 0.0, 0.0),
+            4: (0.0, 0.2, 0.0), 5: (5.0, 0.2, 0.0), 6: (10.0, 0.2, 0.0),
+            7: (0.0, 0.0, -1.0), 8: (5.0, 0.0, -1.0), 9: (10.0, 0.0, -1.0),
+            10: (0.0, 1.2, 0.0), 11: (5.0, 1.2, 0.0), 12: (10.0, 1.2, 0.0),
+            13: (-1.0, 0.0, 0.0), 14: (-1.0, 0.2, 0.0),
+            15: (11.0, 0.0, 0.0), 16: (11.0, 0.2, 0.0),
+        }
+        regions = [{
+            "region_id": "Region_0001", "failed_elements": [10],
+            "expanded_elements": [10, 11], "anchor_nodes": [],
+        }]
+
+        actions = plan_optimization_actions(
+            elements, [10], coordinates, regions,
+            blocked_edges={(1, 2), (2, 3), (4, 5), (5, 6)},
+            allow_internal_quad_expansion=True,
+            minimum_length=1.0, maximum_aspect_ratio=10.0,
+        )
+
+        expansions = [action for action in actions if action["action_type"] == "expand_internal_quad"]
+        self.assertEqual({action["element_id"] for action in expansions}, {10, 11})
+        self.assertEqual({action["move_mode"] for action in expansions}, {1})
+        self.assertEqual(
+            next(action for action in expansions if action["element_id"] == 11)["reason"],
+            "narrow_quad_chain_support",
+        )
+
     def test_weld_strip_with_two_perpendicular_attachments_expands_both_sides(self):
         elements, coordinates, regions = self._weld_strip_case(True)
 
@@ -1014,6 +1134,15 @@ class RegionTests(unittest.TestCase):
             {"minimum_length": 1.0, "maximum_aspect_ratio": 10.0, "maximum_warpage": 15.0},
         )
         self.assertTrue(valid, (reason, detail))
+
+    def test_tcl_exports_one_ring_topology_context_and_executes_chain_support(self):
+        module = Path(__file__).resolve().parents[2] / "local_mesh_optimizer.tcl"
+        source = module.read_text(encoding="utf-8")
+
+        self.assertIn("proc ::LocalMeshOptimizer::scopeWithTopologyContext", source)
+        self.assertIn("set exportIds [::LocalMeshOptimizer::scopeWithTopologyContext $scopeIds]", source)
+        self.assertIn("set isExpansionChainSupport", source)
+        self.assertIn('eq "narrow_quad_chain_support"', source)
 
     def test_controller_does_not_disable_expansion_for_geometry_association(self):
         source = (PYTHON_DIR / "optimizer_controller.py").read_text(encoding="utf-8")

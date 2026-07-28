@@ -401,13 +401,13 @@ proc ::HWToolkit::showPanel {} {
     set w .hwtoolkit
     ::HWFlow::createTopLevel $w main
     wm title $w "HyperMesh Toolkit"
-    wm minsize $w 640 420
+    wm minsize $w 720 620
     wm resizable $w 1 1
 
     ::HWFlow::uiWidget frame $w.header
     pack $w.header -fill x -padx 12 -pady 10
     ::HWFlow::uiWidget label $w.header.title -text "HyperMesh Toolkit" -font [::HWFlow::uiFont header]
-    ::HWFlow::uiWidget label $w.header.subtitle -text [::HWFlow::txt "按类别选择工具；主入口和模块快捷键均由 HyperMesh 原生快捷键库维护。" "Select a tool by category; main and module shortcuts are maintained in the HyperMesh native key library."] -font [::HWFlow::uiFont default] -justify left -anchor w
+    ::HWFlow::uiWidget label $w.header.subtitle -text [::HWFlow::txt "全部工具按类别平铺展示；主入口和模块快捷键均由 HyperMesh 原生快捷键库维护。" "All tools are shown by category; main and module shortcuts are maintained in the HyperMesh native key library."] -font [::HWFlow::uiFont default] -justify left -anchor w
     pack $w.header.title -anchor w
     pack $w.header.subtitle -anchor w
     ::HWFlow::bindAutoWrap $w.header.subtitle 40
@@ -415,16 +415,22 @@ proc ::HWToolkit::showPanel {} {
     ::HWFlow::uiWidget frame $w.body
     pack $w.body -fill both -expand 1 -padx 12 -pady 4
 
-    ::HWFlow::uiWidget notebook $w.body.tabs
-    pack $w.body.tabs -fill both -expand 1
+    ::HWFlow::uiWidget frame $w.body.modules
+    pack $w.body.modules -fill both -expand 1
+    grid columnconfigure $w.body.modules 0 -weight 1
 
-    set tabIndex 0
-    foreach group {Geometry Mesh Connector} {
-        set tabPath $w.body.tabs.tab$tabIndex
-        ::HWFlow::uiWidget frame $tabPath
-        $w.body.tabs add $tabPath -text [::HWToolkit::groupText $group]
-        grid columnconfigure $tabPath 0 -weight 1
-        set innerRow 0
+    set bodyRow 0
+    set groupIndex 0
+    foreach group [::HWToolkit::moduleGroups] {
+        if {$groupIndex > 0} {
+            ::HWFlow::uiWidget separator $w.body.modules.separator_$groupIndex -orient horizontal
+            grid $w.body.modules.separator_$groupIndex -row $bodyRow -column 0 -sticky ew -pady {8 6}
+            incr bodyRow
+        }
+        ::HWFlow::uiWidget label $w.body.modules.group_$groupIndex -text [::HWToolkit::groupText $group] -font [::HWFlow::uiFont heading] -anchor w
+        grid $w.body.modules.group_$groupIndex -row $bodyRow -column 0 -sticky ew -pady {2 3}
+        incr bodyRow
+
         foreach {key info} $MODULES {
             if {![::HWToolkit::moduleVisible $info]} {
                 continue
@@ -433,26 +439,23 @@ proc ::HWToolkit::showPanel {} {
                 continue
             }
             set labelText [::HWToolkit::moduleText $info label]
-            ::HWFlow::uiWidget frame $tabPath.row_$key
-            ::HWFlow::uiWidget button $tabPath.row_$key.run -text $labelText -font [::HWFlow::uiFont module] -width 28 -anchor w -command [list ::HWToolkit::runModule $key]
-            ::HWFlow::uiWidget label $tabPath.row_$key.desc -text [::HWToolkit::moduleText $info desc] -font [::HWFlow::uiFont small] -justify left -anchor w
-            ::HWFlow::bindAutoWrap $tabPath.row_$key.desc 340
-            ::HWFlow::uiWidget button $tabPath.row_$key.settings -text [::HWFlow::txt "设置" "Settings"] -width 10 -command [list ::HWToolkit::settingsModule $key]
+            set row $w.body.modules.row_$key
+            ::HWFlow::uiWidget frame $row
+            ::HWFlow::uiWidget button $row.run -text $labelText -font [::HWFlow::uiFont module] -width 28 -anchor w -command [list ::HWToolkit::runModule $key]
+            ::HWFlow::uiWidget label $row.desc -text [::HWToolkit::moduleText $info desc] -font [::HWFlow::uiFont small] -justify left -anchor w
+            ::HWFlow::bindAutoWrap $row.desc 340
+            ::HWFlow::uiWidget button $row.settings -text [::HWFlow::txt "设置" "Settings"] -width 10 -command [list ::HWToolkit::settingsModule $key]
             set shortcutText [::HWToolkit::shortcutText $key]
-            ::HWFlow::uiWidget button $tabPath.row_$key.shortcut -text $shortcutText -width 16 -command [list ::HWShortcut::showForModule $key]
-            grid $tabPath.row_$key.run -row 0 -column 0 -sticky nw -padx {0 8}
-            grid $tabPath.row_$key.desc -row 0 -column 1 -sticky new -padx {0 8}
-            grid $tabPath.row_$key.settings -row 0 -column 2 -sticky n -padx {0 6}
-            grid $tabPath.row_$key.shortcut -row 0 -column 3 -sticky n
-            grid columnconfigure $tabPath.row_$key 1 -weight 1
-            grid $tabPath.row_$key -row $innerRow -column 0 -sticky ew -pady 6
-            incr innerRow
+            ::HWFlow::uiWidget button $row.shortcut -text $shortcutText -width 16 -command [list ::HWShortcut::showForModule $key]
+            grid $row.run -row 0 -column 0 -sticky nw -padx {0 8}
+            grid $row.desc -row 0 -column 1 -sticky new -padx {0 8}
+            grid $row.settings -row 0 -column 2 -sticky n -padx {0 6}
+            grid $row.shortcut -row 0 -column 3 -sticky n
+            grid columnconfigure $row 1 -weight 1
+            grid $row -row $bodyRow -column 0 -sticky ew -pady 4
+            incr bodyRow
         }
-        if {$innerRow == 0} {
-            ::HWFlow::uiWidget label $tabPath.empty -text [::HWFlow::txt "暂无可用工具" "No tools available"] -font [::HWFlow::uiFont default] -anchor center
-            grid $tabPath.empty -row 0 -column 0 -sticky ew -pady 18
-        }
-        incr tabIndex
+        incr groupIndex
     }
 
     ::HWFlow::uiWidget frame $w.foot
@@ -495,12 +498,9 @@ proc ::HWToolkit::refreshShortcutDisplays {} {
         return
     }
     foreach {key info} $MODULES {
-        set widget [lindex [winfo children .hwtoolkit.body.tabs] 0]
-        foreach tab [winfo children .hwtoolkit.body.tabs] {
-            set row "$tab.row_$key"
-            if {[winfo exists $row.shortcut]} {
-                catch {$row.shortcut configure -text [::HWToolkit::shortcutText $key]}
-            }
+        set row ".hwtoolkit.body.modules.row_$key"
+        if {[winfo exists $row.shortcut]} {
+            catch {$row.shortcut configure -text [::HWToolkit::shortcutText $key]}
         }
     }
 }

@@ -5,12 +5,12 @@
 ## 数据流
 
 1. Tcl 使用 HyperMesh 原生 Component mark panel 获取检查范围并排除指定组件。
-2. Tcl 将壳单元、节点、组件和设置写入 `runtime/tasks/weld_integrity_check/<run_id>/input/`。
-3. Python 从壳单元拓扑推导自由边，执行 AABB 粗筛、空间哈希近邻搜索、连续边区域提取、Component Pair 去重与指标汇总。
+2. Tcl 通过 HyperMesh 原生 OptiStruct 导出器一次写出检查范围 FEM，并生成轻量 Component/Element 归属 manifest 和设置。
+3. Python 解析 FEM 的 `GRID`、`CTRIA3`、`CQUAD4`，重建壳单元拓扑并推导自由边，然后执行 AABB 粗筛、空间哈希近邻搜索、连续边区域提取、Component Pair 去重与指标汇总。
 4. Python 写出 `output/result.json` 与安全 Tcl sidecar；Tcl 一次加载结果并打开交互审查窗口。
 5. 审查状态独立写入 `state/review_state.json`，不会重写大体积输入。
 
-输入文件为 `components.json`、`nodes.csv`、`elements.csv`、`free_edges.csv` 和 `settings.json`。HM2019 自由边命令在不同安装中存在差异，因此首版的 `free_edges.csv` 只保留稳定接口表头，实际自由边由 Python 按“壳边只被一个单元拥有”推导。
+输入文件为 `selected_components.fem`、`mesh_manifest.json` 和 `settings.json`。manifest 保留 HyperMesh Component 与 Element 的归属关系，避免把求解器 FEM 中的 Property ID 误当成 Component ID。HM2019 自由边命令在不同安装中存在差异，因此实际自由边统一由 Python 按“壳边只被一个单元拥有”推导。
 
 ## 使用
 

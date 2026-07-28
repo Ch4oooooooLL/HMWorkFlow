@@ -669,6 +669,39 @@ proc ::LocalMeshOptimizer::cancelRequested {} {
     return 0
 }
 
+proc ::LocalMeshOptimizer::scopeWithTopologyContext {scopeIds} {
+    # Python needs the shell elements on both sides of the checked scope to
+    # classify real free edges and component-to-component weld junctions. The
+    # extra one-ring elements are analysis context only; native quality checking
+    # still uses the original scopeIds.
+    array set context {}
+    array set nodes {}
+    foreach elementId $scopeIds {
+        set context($elementId) 1
+        if {![catch {set elementNodes [hm_getvalue elems id=$elementId dataname=nodes]}]} {
+            foreach nodeId $elementNodes { set nodes($nodeId) 1 }
+        }
+    }
+    set nodeIds [array names nodes]
+    set chunkSize 5000
+    for {set start 0} {$start < [llength $nodeIds]} {incr start $chunkSize} {
+        set chunk [lrange $nodeIds $start [expr {$start + $chunkSize - 1}]]
+        catch {*clearmark elems 2}
+        set marked 0
+        foreach selector {{by node id} {by nodes}} {
+            if {![catch {eval *createmark elems 2 [list $selector] $chunk}]} {
+                set marked 1
+                break
+            }
+        }
+        if {!$marked} { continue }
+        foreach elementId [hm_getmark elems 2] { set context($elementId) 1 }
+    }
+    set result [lsort -integer [array names context]]
+    ::LocalMeshOptimizer::log INFO "topology context export scope=[llength $scopeIds] context=[llength $result]"
+    return $result
+}
+
 proc ::LocalMeshOptimizer::exportScope {scopeIds} {
     variable runtime
     set exportStarted [clock milliseconds]
@@ -1109,7 +1142,8 @@ proc ::LocalMeshOptimizer::checkQuality {} {
         ::LocalMeshOptimizer::writeIdFile [file join $runtime(taskDir) washer_excluded_failed.txt] $runtime(washerExcludedFailed)
         ::LocalMeshOptimizer::writeIdFile [file join $runtime(taskDir) failed_elements.txt] $runtime(optimizationFailedElements)
         catch {::HWFlow::progressUpdate 40.0 [::LocalMeshOptimizer::txt "正在导出局部分析数据" "Exporting local-analysis data"] [::LocalMeshOptimizer::txt "采用分块写入，界面会持续更新。" "Data is streamed in chunks while the UI remains responsive."] 1}
-        ::LocalMeshOptimizer::exportScope $scopeIds
+        set exportIds [::LocalMeshOptimizer::scopeWithTopologyContext $scopeIds]
+        ::LocalMeshOptimizer::exportScope $exportIds
         set taskPath [::LocalMeshOptimizer::writeTask $scopeIds $runtime(optimizationFailedElements)]
         catch {::HWFlow::progressUpdate 83.0 [::LocalMeshOptimizer::txt "正在启动 Python 后台分析" "Starting Python background analysis"] "" 1}
         ::LocalMeshOptimizer::runPython build-regions $taskPath
@@ -1818,7 +1852,11 @@ proc ::LocalMeshOptimizer::runPlannedActions {regionId round actions failedIds r
             lappend operationResults [dict create operationId $actionId status skipped message manual_review]
             continue
         }
-        if {$type ne "collapse_short_edge" && [lsearch -exact $failedIds $elementId] < 0} {
+        set isExpansionChainSupport [expr {
+            $type in {"expand_free_edge" "expand_internal_quad"} &&
+            [dict get $action reason] eq "narrow_quad_chain_support"
+        }]
+        if {!$isExpansionChainSupport && $type ne "collapse_short_edge" && [lsearch -exact $failedIds $elementId] < 0} {
             if {[catch {hm_getvalue elems id=$elementId dataname=nodes}]} {
                 lappend operationResults [dict create operationId $actionId status entity_missing message "source element no longer exists"]
             } else {

@@ -283,10 +283,27 @@ def build(task_path: Path) -> int:
     actions_by_region: Dict[str, list] = {}
     for action in actions:
         actions_by_region.setdefault(str(action["region_id"]), []).append(action)
-    # Preserve the existing controlled-free-edge exception: region perimeter
-    # anchors remain protected except for explicitly planned moving nodes.
+    # Chain support quads may extend past the original adjacency-layer region.
+    # Include those source elements in Tcl's region scope so native rechecks and
+    # rollback accounting cover every cell whose nodes participate in the move.
     for region in regions:
         region_actions = actions_by_region.get(str(region["region_id"]), [])
+        support_elements = {
+            int(action["element_id"])
+            for action in region_actions
+            if action["action_type"] in ("expand_free_edge", "expand_internal_quad")
+        }
+        region["expanded_elements"] = sorted(
+            set(region.get("expanded_elements", [])).union(support_elements)
+        )
+        region["expanded_count"] = len(region["expanded_elements"])
+        region["components"] = sorted({
+            elements[element_id].component_id
+            for element_id in region["expanded_elements"]
+            if element_id in elements
+        })
+        # Preserve the controlled-boundary exception: automatic region anchors
+        # remain protected except for explicitly planned moving nodes.
         controlled_nodes = set()
         for action in region_actions:
             if action["action_type"] in ("expand_free_edge", "expand_triangle_short_edge"):
