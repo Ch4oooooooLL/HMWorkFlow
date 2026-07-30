@@ -64,14 +64,14 @@ namespace eval ::HWToolkit {
             shortcut_proc "::SeamSurf::runShortcut"
             settings_proc "::SeamSurf::runSettings"
         }
-        batch_mesh_washer {
+        batch_mesher {
             group    "Mesh"
-            hidden   1
-            label_zh "Sheet BatchMesh and Washer"
-            label_en "Sheet BatchMesh and Washer"
-            desc_zh  "对钣金中面/壳组件执行 BatchMesh，不修改几何，并按孔径标准忽略小孔或生成 washer。"
-            desc_en  "Run BatchMesh on sheet-metal midsurface/shell components and create washers by hole rules."
-            proc     "::BatchMeshWasher::run"
+            label_zh "BatchMesher 自动网格划分"
+            label_en "BatchMesher Automatic Meshing"
+            desc_zh  "按 Surface 最终拓扑连通域顺序执行 HyperMesh 2019 BatchMesher，完整使用用户 criteria/param。"
+            desc_en  "Run HyperMesh 2019 BatchMesher sequentially by final surface-topology connectivity using user criteria/param files."
+            proc     "::BatchMesher::runAction"
+            settings_proc "::BatchMesher::runSettings"
         }
         casting_tetramesh {
             group    "Mesh"
@@ -333,7 +333,7 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::MidSurf::savePanelState}
     catch {::AutoHoleRBE2::savePanelState}
     catch {::RB2W::savePanelState}
-    catch {::BatchMeshWasher::savePanelState}
+    catch {::BatchMesher::savePanelState}
     catch {::CastingTetMesh::savePanelState}
     catch {::MeshSeamWeld::saveState}
     catch {::RB2Bolt::saveState}
@@ -377,7 +377,7 @@ proc ::HWToolkit::clearExistingWindows {} {
         .geometry_cleanup
         .contact_setup
         .adhesive_connector
-        .batch_mesh_washer
+        .batch_mesher
         .casting_tetramesh
         .mesh_seam_weld
         .hwshortcut_manager

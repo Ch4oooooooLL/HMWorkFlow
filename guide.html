@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HyperMesh Toolkit 离线使用指南与配置手册</title>
+    <title>HMWorkFlow 离线使用指南与配置手册</title>
     <style>
         /* CSS Design System - Dark & Light Modes (Offline Compatible) */
         :root {
@@ -953,15 +953,45 @@
 
                 <div class="nav-category">核心工具模块</div>
                 <li class="nav-item">
+                    <a href="#mod-midsurf" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M5,11H19V13H5V11M7,16H17V18H7V16Z"/></svg>
+                        中面抽取
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#mod-geometry-cleanup" class="nav-link" onclick="activateLink(this)">
                         <svg viewBox="0 0 24 24"><path d="M19.14,12.94C19.14,12.77 19.17,12.6 19.17,12.43C19.17,12.26 19.14,12.09 19.14,11.92L21.19,10.3C21.38,10.15 21.43,9.88 21.31,9.67L19.38,6.32C19.26,6.1 18.98,6.03 18.77,6.11L16.36,7.09C15.86,6.7 15.31,6.39 14.71,6.14L14.35,3.56C14.31,3.33 14.12,3.16 13.88,3.16H10.04C9.8,3.16 9.61,3.33 9.57,3.56L9.21,6.14C8.61,6.39 8.06,6.7 7.56,7.09L5.15,6.11C4.94,6.03 4.66,6.1 4.54,6.32L2.61,9.67C2.49,9.88 2.54,10.15 2.73,10.3L4.78,11.92C4.78,12.09 4.75,12.26 4.75,12.43C4.75,12.6 4.78,12.77 4.78,12.94L2.73,14.56C2.54,14.71 2.49,14.98 2.61,15.19L4.54,18.54C4.66,18.76 4.94,18.83 5.15,18.75L7.56,17.77C8.06,18.16 8.61,18.47 9.21,18.72L9.57,21.3C9.61,21.53 9.8,21.7 10.04,21.7H13.88C14.12,21.7 14.31,21.53 14.35,21.3L14.71,18.72C15.31,18.47 15.86,18.16 16.36,17.77L18.77,18.75C18.98,18.83 19.26,18.76 19.38,18.54L21.31,15.19C21.43,14.98 21.38,14.71 21.19,14.56L19.14,12.94M12,15.6C10.25,15.6 8.83,14.18 8.83,12.43C8.83,10.68 10.25,9.26 12,9.26C13.75,9.26 15.17,10.68 15.17,12.43C15.17,14.18 13.75,15.6 12,15.6Z"/></svg>
                         几何清理
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#mod-geometry-seam" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M4,4H10V10H4V4M14,14H20V20H14V14M7,12H9V14H11V16H9V18H7V16H5V14H7V12M13,6H15V8H17V10H15V12H13V10H11V8H13V6Z"/></svg>
+                        几何焊缝
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#mod-batch-mesher" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M3,3H10V10H3V3M14,3H21V10H14V3M3,14H10V21H3V14M14,14H21V21H14V14Z"/></svg>
+                        BatchMesher 自动网格划分
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#mod-mesh-seam-weld" class="nav-link" onclick="activateLink(this)">
                         <svg viewBox="0 0 24 24"><path d="M17,15.64C16.39,15.64 15.89,16.14 15.89,16.75C15.89,17.36 16.39,17.86 17,17.86C17.61,17.86 18.11,17.36 18.11,16.75C18.11,16.14 17.61,15.64 17,15.64M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6C9.79,6 8,7.79 8,10C8,11.85 9.27,13.39 11,13.82V19H13V13.82C14.73,13.39 16,11.85 16,10C16,7.79 14.21,6 12,6M12,8C13.1,8 14,8.9 14,10C14,11.1 13.1,12 12,12C10.9,12 10,11.1 10,10C10,8.9 10.9,8 12,8Z"/></svg>
                         网格焊缝
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#mod-batch-property" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M4,3H20A2,2 0 0,1 22,5V19A2,2 0 0,1 20,21H4A2,2 0 0,1 2,19V5A2,2 0 0,1 4,3M4,7V11H10V7H4M12,7V11H20V7H12M4,13V17H10V13H4M12,13V17H20V13H12Z"/></svg>
+                        批量 Property
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#mod-local-mesh-optimizer" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M3,3H10V10H3V3M14,3H21V10H14V3M3,14H10V21H3V14M17.5,13L19,16L22,17.5L19,19L17.5,22L16,19L13,17.5L16,16L17.5,13Z"/></svg>
+                        局部网格优化
                     </a>
                 </li>
                 <li class="nav-item">
@@ -1006,6 +1036,12 @@
                         模型打胶
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a href="#mod-solid-seam" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M12,2L21,7V17L12,22L3,17V7L12,2M12,4.3L5,8.2V15.8L12,19.7L19,15.8V8.2L12,4.3M8,9H16V11H8V9M8,13H16V15H8V13Z"/></svg>
+                        实体焊缝
+                    </a>
+                </li>
 
             </ul>
 
@@ -1021,18 +1057,24 @@
         <main>
             <!-- Quick Start -->
             <section id="quick-start">
-                <h1 class="section-title">HyperMesh Toolkit 快速启动</h1>
-                <p class="section-desc">面向 HyperMesh 2019 的 Tcl/Tk 结构化前处理工具集。项目将常用的车身和结构件前处理动作组织成一个一体化主入口，规范化流程、提高网格与连接创建的效率。</p>
+                <h1 class="section-title">HMWorkFlow 快速启动</h1>
+                <p class="section-desc">以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 2022 新界面的 Tcl/Tk + Python 结构化前处理工具集。项目将常用的车身和结构件前处理动作组织成一个一体化主入口。</p>
 
                 <div class="alert-box info">
                     <svg viewBox="0 0 24 24"><path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"/></svg>
                     <div class="alert-content">
-                        <h4>提示：关于已隐藏的模块说明</h4>
-                        <p>本项目包含部分底层与准备工作流模块（例如 Component 分类、材料分配、中面提取、自动 Washer 划分、铸件网格等），这些模块由于仅在开发或快捷键中隐式调用，在主面板中已被设为隐藏，使用本指南时无需关注。您只需处理主面板上可见的 9 大核心模块。</p>
+                        <h4>主面板与隐藏模块</h4>
+                        <p>当前主面板显示 14 个可直接运行的模块，本指南均提供入口说明。Component 分类、材料分配、自动 Washer 划分和铸件网格仍作为隐藏的准备工作流保留，不计入这 14 个模块。</p>
                     </div>
                 </div>
 
                 <div class="card-grid">
+                    <div class="dashboard-card" id="card-midsurf">
+                        <div class="card-header"><span class="card-title">中面抽取</span><span class="card-badge geometry">几何</span></div>
+                        <div class="card-path">midsurf.tcl</div>
+                        <div class="card-desc">批量抽取钣金中面，自动解析或测量厚度，规范命名并归入 midsurf assembly。</div>
+                        <a href="#mod-midsurf" class="card-btn">查看使用说明</a>
+                    </div>
                     <!-- Geometry Card -->
                     <div class="dashboard-card" id="card-geom">
                         <div class="card-header">
@@ -1048,6 +1090,13 @@
                     </div>
 
                     <!-- Mesh Seam Weld Card -->
+                    <div class="dashboard-card" id="card-geometry-seam">
+                        <div class="card-header"><span class="card-title">几何焊缝</span><span class="card-badge geometry">几何</span></div>
+                        <div class="card-path">seam_surface.tcl</div>
+                        <div class="card-desc">识别 T 型、角接和搭接候选，复核策略后创建、编辑或删除几何焊缝。</div>
+                        <a href="#mod-geometry-seam" class="card-btn">查看使用说明</a>
+                    </div>
+
                     <div class="dashboard-card" id="card-mesh">
                         <div class="card-header">
                             <span class="card-title">网格焊缝</span>
@@ -1103,6 +1152,34 @@
                         </a>
                     </div>
 
+                    <div class="dashboard-card" id="card-batch-property">
+                        <div class="card-header"><span class="card-title">批量 Property</span><span class="card-badge mesh">网格</span></div>
+                        <div class="card-path">batch_property_assignment.tcl</div>
+                        <div class="card-desc">按组件命名批量创建或复用 PSHELL 与材料，并集中列出异常名称供复核。</div>
+                        <a href="#mod-batch-property" class="card-btn">查看使用说明</a>
+                    </div>
+
+                    <div class="dashboard-card" id="card-batch-mesher">
+                        <div class="card-header"><span class="card-title">BatchMesher 自动网格划分</span><span class="card-badge mesh">网格</span></div>
+                        <div class="card-path">batch_mesher.tcl</div>
+                        <div class="card-desc">按 Surface 最终拓扑连通域生成顺序任务，完整使用用户 criteria/param，并提供失败重试与 JSON 报告。</div>
+                        <a href="#mod-batch-mesher" class="card-btn">查看使用说明</a>
+                    </div>
+
+                    <div class="dashboard-card" id="card-local-optimizer">
+                        <div class="card-header"><span class="card-title">局部网格优化</span><span class="card-badge mesh">网格</span></div>
+                        <div class="card-path">local_mesh_optimizer.tcl</div>
+                        <div class="card-desc">根据 HyperMesh criteria 只优化失败区域，支持局部预模拟、连续窄条协调移动、逐区域复检与回滚。</div>
+                        <a href="#mod-local-mesh-optimizer" class="card-btn">查看使用说明</a>
+                    </div>
+
+                    <div class="dashboard-card" id="card-weld-integrity">
+                        <div class="card-header"><span class="card-title">焊缝完整性检查</span><span class="card-badge mesh">复核</span></div>
+                        <div class="card-path">weld_integrity_check.tcl</div>
+                        <div class="card-desc">筛选可能遗漏焊缝的 Shell Component Pair，逐项孤立、定位并记录人工审查状态。</div>
+                        <a href="#mod-weld-integrity-check" class="card-btn">查看使用说明</a>
+                    </div>
+
                     <!-- CBUSH Creator Card -->
                     <div class="dashboard-card" id="card-cbush">
                         <div class="card-header">
@@ -1137,6 +1214,13 @@
                         <div class="card-path">adhesive_connector.tcl</div>
                         <div class="card-desc">以 elems 定义 Area location、以 comps 定义 links，清洗投影越界单元后创建 adhesives。</div>
                         <a href="#mod-adhesive-connector" class="card-btn">查看使用说明</a>
+                    </div>
+
+                    <div class="dashboard-card" id="card-solid-seam">
+                        <div class="card-header"><span class="card-title">实体焊缝</span><span class="card-badge connector">连接</span></div>
+                        <div class="card-path">solid_seam_connector.tcl</div>
+                        <div class="card-desc">从实体外表面边识别焊缝候选，人工接受后按已验证 profile 创建 PENTA + RBE3。</div>
+                        <a href="#mod-solid-seam" class="card-btn">查看使用说明</a>
                     </div>
                 </div>
             </section>
@@ -1184,6 +1268,26 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             2. <strong>快捷键独立运行</strong>：通过快捷键直接调用的模块会直接以默认状态运行，<strong>不打开主窗口界面</strong>，保证了连续建模时的工作流速度。</p>
                         </div>
                     </div>
+                    <div class="alert-box info" style="margin-top: 16px;">
+                        <div class="alert-content">
+                            <h4>HyperWorks 2022 兼容范围</h4>
+                            <p>启动链和嵌套模块均显式按 UTF-8 加载，避免中文界面乱码；新版界面无法创建 panel mark 时会回退到 guide-bar 选择控件，原生 FEM 导入/导出也会串行执行并处理 translator 确认提示。当前 2022 覆盖启动、窗口和选择基础设施，各模块原生命令仍需按实际模型逐项回归；生产基线仍为 HyperMesh 2019。</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="mod-midsurf" class="module-section" data-module="midsurf">
+                <h1 class="section-title">中面抽取 (Midsurface Extraction)</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge geometry">几何</span><span>钣金中面批量抽取</span></div><div class="detail-path-badge">modules/midsurf.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">对选中的钣金几何 component 批量抽取中面，按 <code>CATEGORY_NAME_Tx_MATERIAL</code> 规则命名，并统一放入 <code>midsurf</code> assembly。源几何保留并隐藏。</p>
+                    <div class="step-list">
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">选择组件</div><div class="step-detail">在主面板进入“抽中面”，选择需要处理的钣金几何组件。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">确认抽取参数</div><div class="step-detail">检查抽取方法、阶梯对齐步数、中面位置和 R/T 比。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">执行并复核厚度</div><div class="step-detail">厚度优先读取组件名中的 <code>_Tx</code>，其次读取中面拓扑点厚度，最后按实体体积/中面面积测量。</div></div>
+                    </div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>抽取结果需要几何复核</h4><p>自动厚度测量和复杂折弯区域的中面位置可能受源几何质量影响；请检查输出厚度、自由边、重叠面及组件命名。</p></div></div>
                 </div>
             </section>
 
@@ -1323,6 +1427,26 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
             </section>
 
             <!-- Module: Mesh Seam Weld -->
+            <section id="mod-geometry-seam" class="module-section" data-module="seam_surface">
+                <h1 class="section-title">几何焊缝 (Geometry Seam)</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge geometry">几何</span><span>候选识别、复核与精确编辑</span></div><div class="detail-path-badge">modules/seam_surface.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">在局部几何范围内识别 T 型、角接和搭接接头。自动分析只生成候选和建议策略，创建前始终要求确认；也可直接使用精确创建、编辑和删除动作。</p>
+                    <div class="step-list">
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">选择分析范围</div><div class="step-detail">选择“两个组件”或“两组曲面”，再执行分析；快捷键可配置为面板选择或预设范围。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">复核候选</div><div class="step-detail">定位/孤立候选，检查接头类型、置信度和建议策略；必要时强制指定 T、Corner 或 Lap 类型及创建策略。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">确认创建或精确编辑</div><div class="step-detail">支持 T Path、T List、Lap Surface、Lap Edges、Connect、Project/Split，以及延伸、合并、拆分、替换点、分布点和删除。</div></div>
+                    </div>
+                    <table class="param-table"><thead><tr><th>关键参数</th><th>作用</th></tr></thead><tbody>
+                        <tr><td>平行/垂直角阈值</td><td>用于接头几何关系分类。</td></tr>
+                        <tr><td>距离与拓扑缝合容差</td><td>控制候选邻近判断和创建后的拓扑处理。</td></tr>
+                        <tr><td>最小焊缝长度、点间距</td><td>过滤短候选并控制分布点密度。</td></tr>
+                        <tr><td>厚度覆盖</td><td><code>0</code> 表示自动读取或询问；正值强制使用指定厚度。</td></tr>
+                    </tbody></table>
+                    <div class="alert-box warning"><div class="alert-content"><h4>受控功能，创建前必须确认</h4><p>自动分类和策略推荐不能替代工程判断。首次在目标 HyperMesh 版本使用时，应先以代表性模型验证曲面创建、trim、equivalence 和撤销行为。</p></div></div>
+                </div>
+            </section>
+
             <section id="mod-mesh-seam-weld" class="module-section" data-module="mesh_seam_weld">
                 <h1 class="section-title">2. 网格焊缝 (Mesh Seam Weld)</h1>
                 <div class="module-detail">
@@ -1446,7 +1570,58 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 </div>
             </section>
 
+            <section id="mod-batch-mesher" class="module-section" data-module="batch_mesher">
+                <h1 class="section-title">BatchMesher 自动网格划分</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge mesh">网格</span><span>HM2019 Surface 拓扑连通域顺序划分</span></div><div class="detail-path-badge">modules/batch_mesher.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">保存实际 Surface ID，使用 HyperMesh 2019 <code>by attached</code> 提取连通域；焊缝 Surface 与跨 component 拓扑连接不会被拆开。工具不生成参数，也不覆盖 param 内的 washer 规则。</p>
+                    <div class="step-list">
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">配置并验证</div><div class="step-detail">配置 HM2019 hmbatch.exe，管理 criteria/param 多预设，验证路径及测试无模型启动。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">选择并分析</div><div class="step-detail">手选、当前显示或全部 Surfaces；分析后复核大型、孤立及跨 component 连通域。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">顺序执行</div><div class="step-detail">每个未排除连通域生成一个任务；单一连通域整体执行。当前原生命令结束后才停止后续任务。</div></div>
+                        <div class="step-item"><span class="step-num">4</span><div class="step-title">复核与重试</div><div class="step-detail">查看任务状态、耗时和原始 Tcl 错误；单独重试失败任务并导出 run/result JSON。</div></div>
+                    </div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>执行前保存并复核拓扑</h4><p>运行前会验证 Surface ID 与全模型 Surface 集合。若 trim、缝合等操作保持全部 ID 不变，工具无法可靠感知，必须主动重新分析。当前版本只支持当前会话顺序执行，不做模型拆分、并行或合并。</p></div></div>
+                </div>
+            </section>
+
             <!-- Module: Weld Integrity Check -->
+            <section id="mod-batch-property" class="module-section" data-module="batch_property_assignment">
+                <h1 class="section-title">批量赋予 Property 和材料</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge mesh">网格</span><span>按命名规则批量建立 PSHELL</span></div><div class="detail-path-badge">modules/batch_property_assignment.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">扫描目标 component 名称，从 <code>Vxx_件号_Txx_材料</code> 或 <code>SEAM_Txx</code> 中解析厚度和材料，批量创建或复用 PSHELL Property，并把无法解析的名称集中列出供人工复核。</p>
+                    <div class="step-list">
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">规范组件名称</div><div class="step-detail">确认名称包含可解析的厚度与材料标识；焊缝组件可使用 <code>SEAM_Txx</code>。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">执行批量赋予</div><div class="step-detail">工具按名称匹配材料库，复用等价属性或创建新的 PSHELL，再赋给对应组件。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">处理异常清单</div><div class="step-detail">修正未识别厚度、材料或命名格式的组件后重新运行；已正确匹配的结果无需逐项重建。</div></div>
+                    </div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>命名不是最终工程校核</h4><p>批量规则减少重复操作，但材料牌号、厚度、卡片类型和单位制仍须与当前 OptiStruct 项目规范一致。</p></div></div>
+                </div>
+            </section>
+
+            <section id="mod-local-mesh-optimizer" class="module-section" data-module="local_mesh_optimizer">
+                <h1 class="section-title">局部网格优化 (Local Mesh Optimizer)</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge mesh">网格</span><span>Criteria 驱动的失败区域增量修复</span></div><div class="detail-path-badge">modules/local_mesh_optimizer.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">读取 HyperMesh <code>.criteria</code>，只对失败壳单元及必要邻域建立局部区域。Python 负责候选规划和保守质量预模拟，实际修改、局部复检和最终裁决始终由 HyperMesh 完成。</p>
+                    <div class="step-list">
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">定义范围与 Criteria</div><div class="step-detail">选择组件、单元、当前显示或全模型范围；可另选固定节点。浏览并确认 criteria 显示“HyperMesh 读取成功”。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">检查质量</div><div class="step-detail">先运行“检查质量”，确认失败数量和区域；设置邻接层数、轮次、特征角、优化级别及保护选项。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">增量优化</div><div class="step-detail">候选按区域执行。每个区域修改后立即复检；失败时只恢复当前区域，先前已通过的区域保留。</div></div>
+                        <div class="step-item"><span class="step-num">4</span><div class="step-title">复核与恢复</div><div class="step-detail">使用“显示失败”“显示已优化”和报告核对结果；必要时通过“恢复优化前模型”回到任务快照。</div></div>
+                    </div>
+                    <h3 class="sub-title">最新的窄条与焊缝优化逻辑</h3>
+                    <ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);">
+                        <li>细长四边形从失败种子沿完整连续条带扩展；中间未失败单元可作为受控支撑单元加入同一协调移动链，避免逐单元移动形成锯齿。</li>
+                        <li>勾选“允许中部超窄四边形向两侧最小幅度扩展”后，按 criteria 的最小边长与长宽比计算最低合格位移；该选项默认关闭。</li>
+                        <li>导出所选范围外一环壳拓扑作为只读上下文，识别独立焊缝 component 两侧法向：单侧近似垂直时平移该侧节点链，双侧近似垂直时对称外扩。</li>
+                        <li>质量预模拟限定在候选的一环局部子网格，并依次尝试 100%、75%、50% 和 25% 步长；可能新增失败或恶化综合惩罚的动作不会交给 Tcl。</li>
+                    </ul>
+                    <div class="alert-box warning"><div class="alert-content"><h4>Controlled 状态；保护项优先</h4><p>内部超窄四边形扩展必须显式开启。用户固定节点始终不可移动；刚性/焊缝自动保护尚未通过 HM2019 验证时保持关闭并置灰。停止请求会在安全阶段生效，原生 HyperMesh 命令执行中不能强制终止。</p></div></div>
+                </div>
+            </section>
+
             <section id="mod-weld-integrity-check" class="module-section" data-module="weld_integrity_check">
                 <h1 class="section-title">网格焊缝完整性检查 (Mesh Weld Integrity Check)</h1>
                 <div class="module-detail">
@@ -1457,12 +1632,12 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                         <button class="detail-tab-btn" onclick="switchTab(this, 'wic-params')">参数与限制</button>
                     </div>
                     <div class="detail-tab-pane active" id="wic-desc">
-                        <p style="font-size:14px; color:var(--text-secondary);">模块在主要网格和连接完成后，自动缩小人工漏焊检查范围。首版只分析 <strong>Shell–Shell</strong>：Python 从壳拓扑推导自由边，经过 Component AABB 粗筛、空间哈希近邻搜索和连续边区域过滤，按 Component Pair 汇总候选。它不会判断某处必须焊接，也不会创建焊缝或修改模型。</p>
+                        <p style="font-size:14px; color:var(--text-secondary);">模块在主要网格和连接完成后，自动缩小人工漏焊检查范围。首版只分析 <strong>Shell–Shell</strong>：HyperMesh 将所选组件原生导出为 OptiStruct FEM，并写入轻量 Element/Component 映射；Python 解析完整壳拓扑、推导自由边，再经过 Component AABB 粗筛、空间哈希近邻搜索和连续边区域过滤，按 Component Pair 汇总候选。它不会判断某处必须焊接，也不会创建焊缝或修改模型。</p>
                     </div>
                     <div class="detail-tab-pane" id="wic-steps">
                         <div class="step-list">
                             <div class="step-item"><span class="step-num">1</span><div class="step-title">定义检查范围</div><div class="step-detail">选择至少两个待检查 Component，或使用当前可见组件；可另选排除组件。</div></div>
-                            <div class="step-item"><span class="step-num">2</span><div class="step-title">执行检测</div><div class="step-detail">设置距离、最短连续长度和连续节点数后开始。结果按候选总长度排序。</div></div>
+                            <div class="step-item"><span class="step-num">2</span><div class="step-title">执行检测</div><div class="step-detail">设置距离、最短连续长度和连续节点数后开始。原生 FEM 导出、拓扑解析和候选检测完成后，结果按候选总长度排序。</div></div>
                             <div class="step-item"><span class="step-num">3</span><div class="step-title">逐组审查</div><div class="step-detail">使用孤立、高亮区域、上/下区域定位候选；完成后自动进入下一条待检查 Pair。</div></div>
                             <div class="step-item"><span class="step-num">4</span><div class="step-title">恢复与继续</div><div class="step-detail">完成项可在状态筛选中重新打开。恢复按钮和关闭报告都会还原进入模块前的 Component 显示集合；再次进入可继续上次审查。</div></div>
                         </div>
@@ -1775,6 +1950,21 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 </div>
             </section>
 
+            <section id="mod-solid-seam" class="module-section" data-module="solid_seam_connector">
+                <h1 class="section-title">实体焊缝 (Solid Seam Connector)</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>Solid 外表面焊缝候选与 PENTA realization</span></div><div class="detail-path-badge">modules/solid_seam_connector.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">从所选 Solid Components 的外表面边界边或特征边识别候选，支持双组件 Solid–Shell / Solid–Solid 和多组件 Solid×Shell 模式，并推荐 <code>PENTA_MIG_T/L/B</code> 或通用 <code>PENTA_MIG</code> realization。</p>
+                    <div class="step-list">
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">配置识别阈值</div><div class="step-detail">设置搜索距离、最短焊缝长度、特征角和有效采样比例。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">选择并识别</div><div class="step-detail">选择两个或更多组件。识别结果和日志写入 <code>temp/solid_seam/&lt;run_id&gt;/</code>。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">逐条复核</div><div class="step-detail">预览节点，接受或拒绝候选；可修改 PENTA 类型或反转 nodelist。</div></div>
+                        <div class="step-item"><span class="step-num">4</span><div class="step-title">创建已接受项</div><div class="step-detail">只 realization 已接受候选。单条失败独立记录，不中断后续候选。</div></div>
+                    </div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>默认禁止未经验证的 realization</h4><p>该模块为 Controlled 状态。必须先按 <code>modules/solid_seam/README.md</code> 从目标 HM2019 Command File 制作并启用已验证 profile；否则仓库会保持 realization 关闭，以防错误 connector 参数修改模型。</p></div></div>
+                </div>
+            </section>
+
             <!-- Configuration Rules -->
             <section id="config-rules">
                 <h1 class="section-title">配置文件与参数规则</h1>
@@ -1806,10 +1996,10 @@ QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
                 <!-- Washer Config -->
                 <div class="module-detail" style="margin-bottom: 24px;">
                     <div class="detail-header">
-                        <div class="detail-title">Washer 孔径网格划分规范 (washer_rules.txt)</div>
+                        <div class="detail-title">壳孔识别与局部优化排除规则 (washer_rules.txt)</div>
                         <div class="detail-path-badge">config/washer_rules.txt</div>
                     </div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">定义钣金件在进行 BatchMesh 网格划分时，针对不同直径大小螺栓孔对应的处理逻辑（如忽略、保留、生成 Washer 层数和网格密度等）：</p>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">该文件供壳孔 RIGIDS 与局部网格优化模块识别既有 washer 网格。BatchMesher 自动网格划分不读取此文件，washer 创建规则完全由用户选择的 <code>.param</code> 文件控制：</p>
                     <div class="code-container">
                         <div class="code-header">
                             <span>config/washer_rules.txt</span>

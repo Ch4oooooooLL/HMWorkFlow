@@ -62,12 +62,12 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
             } recoveryErr]} {
                 set targetNodes $recoveredTargetNodes
                 set targetMatchMode post_imprint_topology
-            } elseif {[llength $targetNodes] > 0} {
-                # Preserve genuinely partial native results when full topology
-                # recovery is impossible; mesh creation may retain valid runs.
-                set targetMatchMode partial_native_imprint_list
             } else {
-                error $recoveryErr
+                # A partial native list does not prove that the complete source
+                # path was imprinted.  Passing it to Ruled stretches the whole
+                # source boundary over the surviving fragment, which looks like
+                # an un-imprinted weld span and can create severely skewed cells.
+                error "The native imprint result was incomplete and the complete post-imprint target path could not be recovered: $recoveryErr"
             }
         }
     } targetErr]} {
@@ -80,6 +80,8 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
     }
     set targetNodes [::MeshSeamWeld::alignTargetPathNodes \
         $sourceNodes $targetNodes $closedLoop]
+    set targetNodes [::MeshSeamWeld::refineEqualTargetPathCorrespondence \
+        $sourceNodes $targetNodes $targetComps $closedLoop]
     set imprintNodes $targetNodes
     ::HybridCore::log INFO \
         "imprint target_match_mode=$targetMatchMode nodes=[llength $targetNodes] current_target_elements=[llength $currentTargetElems]"

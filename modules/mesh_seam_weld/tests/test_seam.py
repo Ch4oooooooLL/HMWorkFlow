@@ -985,15 +985,32 @@ list $path [llength [lsort -integer -unique $path]]
         ))
         self.assertEqual(len(elems),4)
         self.assertTrue(all(len(interp.splitlist(elem)) in (3,4) for elem in elems))
-    def test_all_cross_layers_use_native_ruled_surface_automesh(self):
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_anchored_unequal_strip_keeps_the_real_projected_corner_node(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 1} 2 {2 0 1} 3 {3 0 1} 11 {0 0 0} 12 {1 0 0} 13 {2 0 0} 14 {3 0 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        correspondence=interp.eval("::MeshSeamWeld::anchoredTargetCorrespondence {1 2 3} {11 12 13 14} 0")
+        self.assertEqual(interp.eval("dict get {{{}}} anchor_indices".format(correspondence)),"0 2 3")
+        elems=interp.splitlist(interp.eval(
+            "::MeshSeamWeld::anchoredUnequalStripElementNodeLists {1 2 3} {11 12 13 14} {0 2 3} 0"
+        ))
+        self.assertEqual(len(elems),3)
+        first_two=[tuple(interp.splitlist(elem)) for elem in elems[:2]]
+        self.assertTrue(any("13" in elem for elem in first_two))
+    def test_equal_paths_use_corner_safe_structured_mesh_and_unequal_paths_use_native_ruled(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         ruled=module.split("proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths",1)[1].split("proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths",1)[0]
         native=module.split("proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths",1)[1].split("proc ::MeshSeamWeld::pathCenter",1)[0]
         self.assertIn("createNativeRuledMeshBetweenNodePaths",ruled)
-        self.assertNotIn("createDirectStructuredStrip",ruled)
+        self.assertIn("createDirectStructuredStrip",ruled)
+        self.assertIn("createAnchoredStructuredStrip",ruled)
+        self.assertIn("anchoredTargetCorrespondence",ruled)
+        self.assertIn("maximumPathCrossDistance",ruled)
         self.assertIn("*linearsurfacebetweennodes 1 2 1",native)
         self.assertIn("*automesh",native)
-        self.assertNotIn("if {$crossDensity == 1}",native)
+        self.assertIn("maximumPathCrossDistance",native)
         self.assertIn("if {$closedLoop}",native)
         self.assertIn("createClosedStripElements",native)
         self.assertIn("*createmark nodes 1 -1",module)
@@ -1008,24 +1025,58 @@ list $path [llength [lsort -integer -unique $path]]
             ("12","11"),
         )
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_cross_density_uses_widest_interior_correspondence_not_only_endpoints(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 0} 2 {1 0 0} 3 {2 0 0} 11 {0 1 0} 12 {1 5 0} 13 {2 1 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        self.assertEqual(
+            float(interp.eval("::MeshSeamWeld::maximumPathCrossDistance {1 2 3} {11 12 13} 0")),
+            5.0,
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_equal_target_path_repairs_local_native_list_slip_by_geometric_correspondence(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 1} 2 {1 0 1} 3 {2 0 1} 4 {3 0 1} 11 {0 0 0} 12 {1 0 0} 13 {2 0 0} 14 {3 0 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        interp.eval("proc ::MeshSeamWeld::targetPathIsContinuous {nodes comps closed} {return 1}")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::refineEqualTargetPathCorrespondence {1 2 3 4} {11 13 12 14} {9} 0"),
+            "11 12 13 14",
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_equal_target_path_keeps_native_order_when_closest_mapping_is_not_continuous(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 1} 2 {1 0 1} 3 {2 0 1} 11 {0 0 0} 12 {1 0 0} 13 {2 0 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        interp.eval("proc ::MeshSeamWeld::targetPathIsContinuous {nodes comps closed} {return 0}")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::refineEqualTargetPathCorrespondence {1 2 3} {11 13 12} {9} 0"),
+            "11 13 12",
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_ruled_side_one_is_the_unchanged_mesh_edit_node_list(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
         interp.eval("rename ::MeshSeamWeld::alignTargetPathNodes ::MeshSeamWeld::alignTargetPathNodes_real")
         interp.eval("rename ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths_real")
+        interp.eval("rename ::MeshSeamWeld::anchoredTargetCorrespondence ::MeshSeamWeld::anchoredTargetCorrespondence_real")
         interp.eval("proc ::MeshSeamWeld::alignTargetPathNodes {source target closed} {return {14 13 12 11}}")
+        interp.eval("proc ::MeshSeamWeld::anchoredTargetCorrespondence {source target closed} {return {}}")
         interp.eval("proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths {source target comp closed} {set ::ruledInputs [list $source $target $closed]; return {901}}")
         self.assertEqual(
             interp.eval("::MeshSeamWeld::createRuledMeshBetweenNodePaths {1 2 3} {11 12 13 14} SEAM 1 {9}"),
             "901",
         )
         self.assertEqual(interp.eval("set ::ruledInputs"),"{1 2 3} {14 13 12 11} 1")
-    def test_unequal_and_equal_paths_both_use_native_ruled_creation(self):
+    def test_unequal_paths_keep_native_ruled_fallback(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         ruled=module.split("proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths",1)[1].split("proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths",1)[0]
         native=module.split("proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths",1)[1].split("proc ::MeshSeamWeld::pathCenter",1)[0]
         self.assertNotIn("contiguousMatchedNodeRuns",ruled)
-        self.assertNotIn("createDirectStructuredStrip",ruled)
+        self.assertIn("createDirectStructuredStrip",ruled)
         self.assertNotIn("Source and target node path counts do not match",native)
         self.assertIn("*linearsurfacebetweennodes 1 2 1",native)
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
@@ -1044,16 +1095,11 @@ list $path [llength [lsort -integer -unique $path]]
             [tuple(interp.splitlist(run)) for run in runs],
             [("1 2","11 12"),("4 5","14 15")],
         )
-    def test_partial_native_imprint_list_is_passed_whole_to_ruled(self):
-        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
-        ruled=module.split("proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths",1)[1].split("proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths",1)[0]
-        self.assertNotIn("monotonicClosestNodePairs",ruled)
-        self.assertNotIn("contiguousMatchedNodeRuns",ruled)
-        self.assertIn("createNativeRuledMeshBetweenNodePaths",ruled)
+    def test_partial_native_imprint_list_is_rejected_when_topology_recovery_fails(self):
         executor=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"executor.tcl").read_text(encoding="utf-8")
         fast=executor.split("proc ::MeshSeamWeld::processWeldPathTcl",1)[1]
-        self.assertIn("partial_native_imprint_list",fast)
-        self.assertIn("$targetComps",fast.split("createRuledMeshBetweenNodePaths",1)[1].split("]",1)[0])
+        self.assertNotIn("partial_native_imprint_list",fast)
+        self.assertIn("native imprint result was incomplete",fast)
     def test_executor_accepts_a_shorter_continuous_native_imprint_path(self):
         executor=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"executor.tcl").read_text(encoding="utf-8")
         fast=executor.split("proc ::MeshSeamWeld::processWeldPathTcl",1)[1]
@@ -1106,6 +1152,7 @@ list $path [llength [lsort -integer -unique $path]]
         self.assertIn("post_imprint_topology",after)
         self.assertNotIn("targetNodesFromClosestQuery",after)
         self.assertIn("targetPathIsContinuous",after)
+        self.assertIn("refineEqualTargetPathCorrespondence",after)
         ruled=after.split("createRuledMeshBetweenNodePaths",1)[0]
         self.assertNotIn("targetCandidatesAfterImprint",ruled)
         self.assertNotIn("targetPathNodesAfterImprint",ruled)

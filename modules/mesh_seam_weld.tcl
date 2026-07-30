@@ -3,8 +3,10 @@
 # HyperMesh 2019 Tcl/Tk
 #
 # Imprints a selected source node path to a bounded target mesh region, then
-# creates a ruled shell strip between the unchanged source path and the
-# post-imprint target path.  Temporary ruled geometry is removed after meshing.
+# creates a shell strip between the unchanged source path and the post-imprint
+# target path. Recoverable imprint anchors keep explicit structured
+# correspondence; only paths without a safe anchor mapping use temporary ruled
+# geometry, removed after meshing.
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -19,7 +21,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.40"
+    variable VERSION "0.43"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -2860,6 +2862,73 @@ proc ::MeshSeamWeld::alignTargetPathNodes {sourceNodes targetNodes {closedLoop 0
     return $bestPath
 }
 
+proc ::MeshSeamWeld::nearestAlignedTargetAnchors {sourceNodes targetNodes {closedLoop 0} {radius 8}} {
+    set count [llength $sourceNodes]
+    set anchors {}
+    for {set sourceIndex 0} {$sourceIndex < $count} {incr sourceIndex} {
+        set sourcePoint [::MeshSeamWeld::nodeXYZ [lindex $sourceNodes $sourceIndex]]
+        set bestNode ""
+        set bestDistance ""
+        catch {unset checked}
+        array set checked {}
+        for {set delta [expr {-$radius}]} {$delta <= $radius} {incr delta} {
+            set targetIndex [expr {$sourceIndex + $delta}]
+            if {$closedLoop} {
+                set targetIndex [expr {(($targetIndex % $count) + $count) % $count}]
+            } elseif {$targetIndex < 0 || $targetIndex >= $count} {
+                continue
+            }
+            if {[info exists checked($targetIndex)]} { continue }
+            set checked($targetIndex) 1
+            set candidateNode [lindex $targetNodes $targetIndex]
+            set distance [::MeshSeamWeld::dist2 $sourcePoint \
+                [::MeshSeamWeld::nodeXYZ $candidateNode]]
+            if {$bestNode eq "" || $distance < $bestDistance} {
+                set bestNode $candidateNode
+                set bestDistance $distance
+            }
+        }
+        lappend anchors $bestNode
+        ::MeshSeamWeld::responsiveCheckpoint [expr {$sourceIndex + 1}] 256
+    }
+    return $anchors
+}
+
+proc ::MeshSeamWeld::refineEqualTargetPathCorrespondence {sourceNodes targetNodes targetComps {closedLoop 0}} {
+    if {[llength $sourceNodes] != [llength $targetNodes] ||
+        [llength $sourceNodes] < 2} {
+        return $targetNodes
+    }
+
+    # hm_getlist nodes 2 can contain a topology-continuous path whose local
+    # order is not the original source-to-imprint correspondence.  A global
+    # rotate/reverse cannot repair that local slip.  Rebuild the one-to-one
+    # order from geometric anchors, but accept it only when every target is
+    # unique and the reordered target side is still a real target-mesh path.
+    # The global direction and cyclic offset are already aligned, so a bounded
+    # neighborhood is sufficient for the local slips observed in native list 2
+    # and keeps this validation linear for long production boundaries.
+    set geometricPath [::MeshSeamWeld::nearestAlignedTargetAnchors \
+        $sourceNodes $targetNodes $closedLoop]
+    if {[llength [lsort -integer -unique $geometricPath]] !=
+        [llength $geometricPath] ||
+        ![::MeshSeamWeld::targetPathIsContinuous \
+            $geometricPath $targetComps $closedLoop]} {
+        return $targetNodes
+    }
+
+    set currentCost [::MeshSeamWeld::pathPairingCost \
+        $sourceNodes $targetNodes $closedLoop]
+    set geometricCost [::MeshSeamWeld::pathPairingCost \
+        $sourceNodes $geometricPath $closedLoop]
+    if {$geometricCost + 1.0e-12 < $currentCost} {
+        ::HybridCore::log WARN \
+            "imprint target_path=geometric_one_to_one_refinement nodes=[llength $targetNodes] old_cost=$currentCost new_cost=$geometricCost"
+        return $geometricPath
+    }
+    return $targetNodes
+}
+
 proc ::MeshSeamWeld::targetPathEdgeSet {targetNodes targetComps} {
     variable elemNodesCache
     variable elemComponentCache
@@ -3714,6 +3783,83 @@ proc ::MeshSeamWeld::createDirectUnequalStrip {sourceNodes targetNodes outputCom
     return $elemIds
 }
 
+proc ::MeshSeamWeld::createAnchoredStructuredStrip {sourceNodes targetNodes anchorIndices crossDensity outputCompName outputCompId beforeOutputElems {closedLoop 0}} {
+    variable cfg
+    if {$crossDensity < 1 || [llength $anchorIndices] != [llength $sourceNodes]} {
+        error "Invalid anchored structured strip correspondence or cross density."
+    }
+    catch {*currentcollector component $outputCompName}
+    catch {*currentcollector components $outputCompName}
+
+    set crossChains {}
+    set intermediateNodeCount 0
+    for {set index 0} {$index < [llength $sourceNodes]} {incr index} {
+        set sourceNode [lindex $sourceNodes $index]
+        set targetNode [lindex $targetNodes [lindex $anchorIndices $index]]
+        set sourceXYZ [::MeshSeamWeld::nodeXYZ $sourceNode]
+        set targetXYZ [::MeshSeamWeld::nodeXYZ $targetNode]
+        set chain [list $sourceNode]
+        for {set layer 1} {$layer < $crossDensity} {incr layer} {
+            set ratio [expr {double($layer) / double($crossDensity)}]
+            set xyz {}
+            for {set axis 0} {$axis < 3} {incr axis} {
+                lappend xyz [expr {[lindex $sourceXYZ $axis] + $ratio *
+                    ([lindex $targetXYZ $axis] - [lindex $sourceXYZ $axis])}]
+            }
+            lappend chain [::MeshSeamWeld::createTrackedNodeAtXYZ $xyz]
+            incr intermediateNodeCount
+        }
+        lappend chain $targetNode
+        lappend crossChains $chain
+    }
+
+    set elementPlans {}
+    if {$crossDensity > 1} {
+        set innerChains {}
+        foreach chain $crossChains { lappend innerChains [lrange $chain 0 end-1] }
+        set elementPlans [::MeshSeamWeld::directStructuredStripQuadNodeLists \
+            $innerChains $closedLoop]
+    }
+    set finalSourceNodes {}
+    foreach chain $crossChains {
+        lappend finalSourceNodes [lindex $chain [expr {$crossDensity - 1}]]
+    }
+    set elementPlans [concat $elementPlans \
+        [::MeshSeamWeld::anchoredUnequalStripElementNodeLists \
+            $finalSourceNodes $targetNodes $anchorIndices $closedLoop]]
+
+    set createdPlanCount 0
+    foreach elementNodes $elementPlans {
+        set createPlans [list $elementNodes]
+        if {$cfg(mesh_elem_type) == 1 && [llength $elementNodes] == 4} {
+            set createPlans [list \
+                [lrange $elementNodes 0 2] \
+                [list [lindex $elementNodes 0] [lindex $elementNodes 2] \
+                    [lindex $elementNodes 3]]]
+        }
+        foreach createNodes $createPlans {
+            set config [expr {[llength $createNodes] == 3 ? 103 : 104}]
+            if {[catch {
+                eval *createlist nodes 1 $createNodes
+                *createelement $config 1 1 1
+            } createErr]} {
+                error "Failed to create anchored weld strip element: $createErr"
+            }
+            incr createdPlanCount
+        }
+        ::MeshSeamWeld::responsiveCheckpoint $createdPlanCount 64
+    }
+    set elemIds [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
+        [::MeshSeamWeld::componentElementIds $outputCompId]]
+    if {[llength $elemIds] != $createdPlanCount} {
+        error "Anchored weld strip created [llength $elemIds]/$createdPlanCount expected elements."
+    }
+    ::MeshSeamWeld::moveElemsToComponent $elemIds $outputCompName
+    ::HybridCore::log INFO \
+        "weld_mesh creation_mode=anchored_structured source_nodes=[llength $sourceNodes] target_nodes=[llength $targetNodes] cross_layers=$crossDensity intermediate_nodes=$intermediateNodeCount elements=[llength $elemIds] closed_loop=$closedLoop"
+    return $elemIds
+}
+
 proc ::MeshSeamWeld::monotonicClosestNodePairs {sourceNodes targetNodes} {
     if {[llength $sourceNodes] == 0 || [llength $targetNodes] == 0} {
         return {}
@@ -3798,7 +3944,119 @@ proc ::MeshSeamWeld::contiguousMatchedNodeRuns {pairs {targetEdges {}}} {
     return $runs
 }
 
+proc ::MeshSeamWeld::anchoredTargetCorrespondence {sourceNodes targetNodes {closedLoop 0}} {
+    set sourceCount [llength $sourceNodes]
+    set targetCount [llength $targetNodes]
+    if {$sourceCount < 2 || $targetCount < $sourceCount} { return {} }
+
+    set rawIndices {}
+    foreach sourceNode $sourceNodes {
+        set sourcePoint [::MeshSeamWeld::nodeXYZ $sourceNode]
+        set bestIndex -1
+        set bestDistance ""
+        for {set targetIndex 0} {$targetIndex < $targetCount} {incr targetIndex} {
+            set distance [::MeshSeamWeld::dist2 $sourcePoint \
+                [::MeshSeamWeld::nodeXYZ [lindex $targetNodes $targetIndex]]]
+            if {$bestIndex < 0 || $distance < $bestDistance} {
+                set bestIndex $targetIndex
+                set bestDistance $distance
+            }
+        }
+        lappend rawIndices $bestIndex
+    }
+    if {[llength [lsort -integer -unique $rawIndices]] != $sourceCount} {
+        return {}
+    }
+
+    if {$closedLoop} {
+        set firstIndex [lindex $rawIndices 0]
+        set targetNodes [::MeshSeamWeld::rotateList $targetNodes $firstIndex]
+        set anchorIndices {}
+        foreach rawIndex $rawIndices {
+            lappend anchorIndices [expr {(($rawIndex - $firstIndex) % $targetCount + $targetCount) % $targetCount}]
+        }
+    } else {
+        set firstIndex [lindex $rawIndices 0]
+        set lastIndex [lindex $rawIndices end]
+        if {$lastIndex <= $firstIndex} { return {} }
+        set targetNodes [lrange $targetNodes $firstIndex $lastIndex]
+        set anchorIndices {}
+        foreach rawIndex $rawIndices {
+            lappend anchorIndices [expr {$rawIndex - $firstIndex}]
+        }
+        set targetCount [llength $targetNodes]
+    }
+
+    set previous -1
+    foreach anchorIndex $anchorIndices {
+        if {$anchorIndex <= $previous || $anchorIndex < 0 || $anchorIndex >= $targetCount} {
+            return {}
+        }
+        set previous $anchorIndex
+    }
+    if {[lindex $anchorIndices 0] != 0 ||
+        (!$closedLoop && [lindex $anchorIndices end] != $targetCount - 1)} {
+        return {}
+    }
+    return [dict create target_nodes $targetNodes anchor_indices $anchorIndices]
+}
+
+proc ::MeshSeamWeld::anchoredUnequalStripElementNodeLists {sourceNodes targetNodes anchorIndices {closedLoop 0}} {
+    set sourceCount [llength $sourceNodes]
+    set targetCount [llength $targetNodes]
+    if {[llength $anchorIndices] != $sourceCount} {
+        error "Anchored strip correspondence does not match the source node count."
+    }
+    set segmentCount [expr {$closedLoop ? $sourceCount : $sourceCount - 1}]
+    set elements {}
+    for {set index 0} {$index < $segmentCount} {incr index} {
+        set nextIndex [expr {($index + 1) % $sourceCount}]
+        set startTarget [lindex $anchorIndices $index]
+        if {$closedLoop && $index == $segmentCount - 1} {
+            set targetSegment [concat [lrange $targetNodes $startTarget end] \
+                [list [lindex $targetNodes 0]]]
+        } else {
+            set endTarget [lindex $anchorIndices $nextIndex]
+            set targetSegment [lrange $targetNodes $startTarget $endTarget]
+        }
+        if {[llength $targetSegment] < 2} {
+            error "Anchored target segment [expr {$index + 1}] contains fewer than two nodes."
+        }
+        set sourceSegment [list [lindex $sourceNodes $index] \
+            [lindex $sourceNodes $nextIndex]]
+        set elements [concat $elements \
+            [::MeshSeamWeld::unequalStripElementNodeLists \
+                $sourceSegment $targetSegment 0]]
+    }
+    return $elements
+}
+
+proc ::MeshSeamWeld::maximumPathCrossDistance {sourceNodes targetNodes {closedLoop 0}} {
+    set sourceCount [llength $sourceNodes]
+    set targetCount [llength $targetNodes]
+    if {$sourceCount == 0 || $targetCount == 0} { return 0.0 }
+    set maximum 0.0
+    for {set sourceIndex 0} {$sourceIndex < $sourceCount} {incr sourceIndex} {
+        if {$sourceCount == $targetCount} {
+            set targetIndex $sourceIndex
+        } elseif {$closedLoop} {
+            set targetIndex [expr {int(floor(
+                double($sourceIndex)*$targetCount/$sourceCount + 0.5)) % $targetCount}]
+        } elseif {$sourceCount == 1 || $targetCount == 1} {
+            set targetIndex 0
+        } else {
+            set targetIndex [expr {int(floor(
+                double($sourceIndex)*($targetCount - 1)/($sourceCount - 1) + 0.5))}]
+        }
+        set distance [::MeshSeamWeld::distanceBetweenNodes \
+            [lindex $sourceNodes $sourceIndex] [lindex $targetNodes $targetIndex]]
+        if {$distance > $maximum} { set maximum $distance }
+    }
+    return $maximum
+}
+
 proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes outputCompName {closedLoop 0} {targetComps {}}} {
+    variable cfg
     if {[llength $sourceNodes] < 2 || [llength $targetNodes] < 2} {
         error "Too few nodes for weld mesh creation."
     }
@@ -3807,6 +4065,44 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
     # paths start in the same geometric neighborhood.
     set targetNodes [::MeshSeamWeld::alignTargetPathNodes \
         $sourceNodes $targetNodes $closedLoop]
+
+    # When imprint returned one target node for every source node, preserve
+    # that correspondence explicitly.  A single native ruled surface
+    # re-parameterizes both boundaries by arc length; at a sharp corner it can
+    # slide one side past the other and produce the fan-shaped/twisted cells
+    # seen in production models.  The structured path keeps every cross-chain
+    # anchored to its actual imprint mate, including the closed-loop seam.
+    set anchored [::MeshSeamWeld::anchoredTargetCorrespondence \
+        $sourceNodes $targetNodes $closedLoop]
+    if {[dict size $anchored] > 0 && !$cfg(create_geometry_surf)} {
+        set targetNodes [dict get $anchored target_nodes]
+        set anchorIndices [dict get $anchored anchor_indices]
+        if {[string trim $outputCompName] eq ""} {
+            set outputCompName $cfg(output_component)
+        }
+        set outputCompId [::MeshSeamWeld::ensureOutputComponent $outputCompName 11]
+        if {$outputCompId eq ""} {
+            error "Could not resolve the weld output component ID for $outputCompName."
+        }
+        set beforeOutputElems [::MeshSeamWeld::componentElementIds $outputCompId]
+        set anchorTargetNodes {}
+        foreach anchorIndex $anchorIndices {
+            lappend anchorTargetNodes [lindex $targetNodes $anchorIndex]
+        }
+        set maximumCrossLength [::MeshSeamWeld::maximumPathCrossDistance \
+            $sourceNodes $anchorTargetNodes $closedLoop]
+        set crossDensity [::MeshSeamWeld::meshDensityForLength \
+            $maximumCrossLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
+        if {[llength $sourceNodes] == [llength $targetNodes] &&
+            $cfg(mesh_elem_type) != 1} {
+            return [::MeshSeamWeld::createDirectStructuredStrip \
+                $sourceNodes $targetNodes $crossDensity $outputCompName \
+                $outputCompId $beforeOutputElems $closedLoop]
+        }
+        return [::MeshSeamWeld::createAnchoredStructuredStrip \
+            $sourceNodes $targetNodes $anchorIndices $crossDensity \
+            $outputCompName $outputCompId $beforeOutputElems $closedLoop]
+    }
     return [::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths \
         $sourceNodes $targetNodes $outputCompName $closedLoop]
 }
@@ -3837,15 +4133,13 @@ proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths {sourceNodes targetNo
     set pathMinimum [expr {max($pathMinimum, $cfg(mesh_path_param))}]
     set pathDensity [::MeshSeamWeld::meshDensityForLength \
         $pathLength $cfg(weld_mesh_size) $pathMinimum]
-    set crossStartLength [::MeshSeamWeld::distanceBetweenNodes \
-        [lindex $sourceNodes 0] [lindex $targetNodes 0]]
-    set crossEndLength [::MeshSeamWeld::distanceBetweenNodes \
-        [lindex $sourceNodes end] [lindex $targetNodes end]]
-    set crossStartDensity [::MeshSeamWeld::meshDensityForLength \
-        $crossStartLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
-    set crossEndDensity [::MeshSeamWeld::meshDensityForLength \
-        $crossEndLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
-    set crossDensity [expr {max($crossStartDensity, $crossEndDensity)}]
+    # Endpoints alone under-estimate the width on closed loops and on paths
+    # whose separation grows near a corner.  Sample the complete aligned path
+    # so the native fallback also keeps a sufficient number of cross layers.
+    set maximumCrossLength [::MeshSeamWeld::maximumPathCrossDistance \
+        $sourceNodes $targetNodes $closedLoop]
+    set crossDensity [::MeshSeamWeld::meshDensityForLength \
+        $maximumCrossLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
 
     # HyperMesh 2019 records show that ruled node-list creation followed by
     # *automesh can terminate the session in mode 3 (Mesh without surface).

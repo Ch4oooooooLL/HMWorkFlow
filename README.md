@@ -140,7 +140,7 @@ Connection
 ### 2.1 准备项目配置
 
 1. 检查 `config/materials.txt`，确认材料 key、显示名和材料参数符合当前项目。
-2. 检查 `config/mesh_rules.txt` 和 `config/washer_rules.txt`，确认钣金网格尺寸、孔径范围和 washer 规则。
+2. 在 `BatchMesher 自动网格划分` 中配置 HyperMesh 2019 `hmbatch.exe` 及用户维护的 `.criteria` / `.param` 预设；washer 行为完全由 `.param` 文件控制。
 3. 检查 `config/casting_mesh_rules.txt`，确认铸件三角面网格、质量迭代和 TetraMesh 参数。
 4. 检查 `config/seam_rules.txt`、`config/geometry_cleanup_rules.txt`、`config/contact_rules.txt`，确认焊缝面、几何清理和接触默认参数。
 
@@ -211,7 +211,6 @@ AUTO_CONTACT_*
 |-- config.yaml
 |-- config/
 |   |-- materials.txt
-|   |-- mesh_rules.txt
 |   |-- washer_rules.txt
 |   |-- seam_rules.txt
 |   |-- geometry_cleanup_rules.txt
@@ -224,7 +223,8 @@ AUTO_CONTACT_*
     |-- midsurf.tcl
     |-- geometry_cleanup.tcl
     |-- seam_surface.tcl
-    |-- batch_mesh_washer.tcl
+    |-- batch_mesher.tcl
+    |-- batch_mesher/
     |-- casting_tetramesh.tcl
     |-- batch_property_assignment.tcl
     |-- local_mesh_optimizer.tcl
@@ -267,7 +267,6 @@ workflow:
 | 文件 | 用途 |
 | --- | --- |
 | `materials.txt` | 材料标识库，供 Material Assignment 读取。 |
-| `mesh_rules.txt` | Sheet BatchMesh 默认参数。 |
 | `washer_rules.txt` | 孔径与 washer 规则。 |
 | `seam_rules.txt` | Seam Surface Creation 默认参数。 |
 | `geometry_cleanup_rules.txt` | Geometry Cleanup 默认参数。 |
@@ -421,42 +420,25 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - Line-Line 模式会按两侧特征点对应关系切分曲线段，并逐段创建 ruled 焊缝。
 - 单次失败时撤销本次几何修改并等待下一次选择。
 
-### 6.6 Sheet BatchMesh and Washer
+### 6.6 BatchMesher 自动网格划分
 
-入口：`::BatchMeshWasher::run`
+入口：`::BatchMesher::runAction`
 
-功能：对钣金中面或壳组件执行 BatchMesh，并按孔径标准忽略小孔、保留大孔或生成 washer。
+功能：以用户选择的 Surface ID 为执行数据，使用 HyperMesh 2019 `by attached` 提取最终几何拓扑连通域，并逐域顺序调用 BatchMesher。不会按 component 拆分，也不会生成或覆盖 criteria/param/washer 参数。
 
 用法：
 
-1. 在主面板运行 `Sheet BatchMesh and Washer`。
-2. 点击 `选择/重选组件`，选择钣金中面或壳网格 component。
-3. 检查网格尺寸、孔径识别范围、BatchMesh 参数和 washer 批量参数。
-4. 确认 `config/washer_rules.txt` 中的孔径规则符合项目标准。
-5. 点击开始执行。
+1. 在主面板运行 `BatchMesher 自动网格划分`。
+2. 配置并保存 criteria/param 预设以及 HyperMesh 2019 `hmbatch.exe`，并执行测试启动。
+3. 手动选择、选择当前显示或选择全部 surfaces。
+4. 点击 `分析几何连通性`，复核连通域、涉及 component 和诊断提示。
+5. 运行任务；失败任务可单独重试，运行前会重新验证 Surface ID 与模型 Surface 集合。
 
 输出：
 
-- 对选中 component 执行 BatchMesh。
-- 不修改原始几何。
-- 识别指定孔径范围内的孔。
-- 按规则忽略小孔、保留大孔或创建 washer。
-- 生成孔数量、washer 创建数量和失败数量等统计。
-
-washer 规则格式：
-
-```text
-hole_dia_min|hole_dia_max|action|hole_density|washer_layers|width_mode|widths|note
-6|9|washer|8|2|abs|4,6|6mm < D <= 9mm
-```
-
-`action` 支持：
-
-| action | 说明 |
-| --- | --- |
-| `ignore` | 忽略该孔径范围，不做特殊处理。 |
-| `washer` | 生成 washer。 |
-| `keep` | 保留孔，不生成 washer。 |
+- 每个不可拆分的 Surface 拓扑连通域对应一个任务；单一连通域自动整体执行。
+- 每个任务记录状态、耗时、Surface IDs、原始 Tcl 错误和独立日志。
+- 报告位于共享任务存储的 `batch_mesher/<run-id>/`，包含 `run.json`、`result.json`、`run.log` 和逐任务日志。
 
 ### 6.7 Casting TetraMesh
 
