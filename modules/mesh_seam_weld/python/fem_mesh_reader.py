@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -13,6 +14,13 @@ except ImportError:  # Standalone HM2019 entry compatibility.
 
 class FemMeshError(ValueError):
     pass
+
+
+def _triangle_area(first, second, third):
+    a = tuple(second[index] - first[index] for index in range(3))
+    b = tuple(third[index] - first[index] for index in range(3))
+    cross = (a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0])
+    return 0.5 * math.sqrt(sum(value*value for value in cross))
 
 
 def _compact_number(value, label, line_number):
@@ -90,6 +98,9 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
     component_id = int(component_id)
     nodes = {}
     pending_elements = []
+    properties = {}
+    materials = {}
+    unsupported_cards = {"CTRIA6", "CQUAD8", "CTETRA", "CPENTA", "CHEXA", "CPYRAM", "CWELD", "CSEAM", "CROD", "CONROD", "CBAR", "CBEAM", "RBE2", "RBE3", "CELAS1", "CELAS2", "CBUSH", "PLOTEL"}
     for line_number, fields in _raw_cards(Path(path)):
         card = fields[0].upper().rstrip("*")
         if card == "GRID":
@@ -108,22 +119,35 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
                 _compact_number(fields[4], "GRID Y", line_number),
                 _compact_number(fields[5], "GRID Z", line_number),
             )
+        elif card in unsupported_cards:
+            raise FemMeshError("unsupported element card {} at line {}".format(card, line_number))
         elif card in ("CTRIA3", "CQUAD4"):
             expected = 3 if card == "CTRIA3" else 4
             if len(fields) < 3 + expected:
                 raise FemMeshError("{} has too few fields at line {}".format(card, line_number))
             element_id = _positive_int(fields[1], "{} ID".format(card), line_number)
+            property_id = _positive_int(fields[2], "{} PID".format(card), line_number)
             node_ids = tuple(
                 _positive_int(value, "{} node".format(card), line_number)
                 for value in fields[3 : 3 + expected]
             )
-            pending_elements.append((line_number, element_id, card, node_ids))
+            if len(set(node_ids)) != len(node_ids):
+                raise FemMeshError("{} {} contains repeated nodes".format(card, element_id))
+            pending_elements.append((line_number, element_id, property_id, card, node_ids))
+        elif card == "PSHELL":
+            if len(fields) >= 4:
+                property_id = _positive_int(fields[1], "PSHELL PID", line_number)
+                properties[property_id] = {"material_id": _positive_int(fields[2], "PSHELL MID1", line_number), "thickness": _compact_number(fields[3], "PSHELL T", line_number)}
+        elif card == "MAT1":
+            material_id = _positive_int(fields[1], "MAT1 MID", line_number)
+            materials[material_id] = fields[2:]
 
     if not nodes:
         raise FemMeshError("FEM selection contains no GRID cards: {}".format(path))
     elements = {}
     known_node_ids = set(nodes)
-    for line_number, element_id, card, node_ids in pending_elements:
+    element_properties = {}
+    for line_number, element_id, property_id, card, node_ids in pending_elements:
         if element_id in elements:
             raise FemMeshError("duplicate element {} at line {}".format(element_id, line_number))
         missing = sorted(set(node_ids) - known_node_ids)
@@ -131,11 +155,21 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
             raise FemMeshError(
                 "{} {} references missing GRID IDs {}".format(card, element_id, missing)
             )
+        points = [nodes[node_id] for node_id in node_ids]
+        area = _triangle_area(points[0], points[1], points[2])
+        if card == "CQUAD4": area += _triangle_area(points[0], points[2], points[3])
+        if area <= 1.0e-12:
+            raise FemMeshError("{} {} is degenerate".format(card, element_id))
         elements[element_id] = Element(element_id, component_id, card, node_ids)
+        element_properties[element_id] = property_id
     if not elements:
         raise FemMeshError("FEM selection contains no CTRIA3/CQUAD4 cards: {}".format(path))
     component = Component(component_id, str(component_name), "SHELL")
-    return MeshModel({component_id: component}, nodes, elements)
+    model = MeshModel({component_id: component}, nodes, elements)
+    model.element_properties = element_properties
+    model.pshell = properties
+    model.materials = materials
+    return model
 
 
 def read_shell_fem_bundle(manifest_path):
@@ -145,7 +179,7 @@ def read_shell_fem_bundle(manifest_path):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         raise FemMeshError("invalid selected-component FEM manifest: {}".format(exc)) from exc
-    if manifest.get("format") != "hm_selected_components_fem":
+    if manifest.get("format") not in ("hm_selected_components_fem", "hm_auto_shell_seam_fem"):
         raise FemMeshError("unsupported FEM bundle format")
     entries = manifest.get("components")
     if not isinstance(entries, list) or not entries:
@@ -182,4 +216,9 @@ def read_shell_fem_bundle(manifest_path):
         elements[element_id] = Element(
             element_id, ownership[element_id], element.element_type, element.node_ids
         )
-    return MeshModel(components, raw_model.nodes, elements)
+    model = MeshModel(components, raw_model.nodes, elements)
+    model.element_properties = dict(getattr(raw_model, "element_properties", {}))
+    model.pshell = dict(getattr(raw_model, "pshell", {}))
+    model.materials = dict(getattr(raw_model, "materials", {}))
+    model.component_metadata = {int(entry["component_id"]): dict(entry) for entry in entries}
+    return model

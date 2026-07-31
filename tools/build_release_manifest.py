@@ -38,7 +38,7 @@ def build_manifest(source_root: Path) -> dict:
         .replace("+00:00", "Z"),
         "source_commit": _source_commit(source_root),
         "runtime_version": str(runtime_manifest.get("version", "unknown")),
-        "supported_hypermesh_versions": ["2019"],
+        "supported_hypermesh_versions": ["2019", "2022"],
         "solver_profiles": ["OptiStruct"],
         "config_schema_version": "2.0",
     }

@@ -73,6 +73,12 @@ proc ::BatchMesher::onTaskSelected {args} {
         if {[string length $preview] > 600} { set preview "[string range $preview 0 599]..." }
         append ui(task_detail) "\n$preview"
     }
+    if {[dict exists $task warning_message] && [dict get $task warning_message] ne ""} {
+        append ui(task_detail) "\n[::BatchMesher::txt {网格警告} {Meshing warning}]: [dict get $task warning_message]"
+    }
+    if {[dict exists $task packaging_status] && [dict get $task packaging_status] eq "failed"} {
+        append ui(task_detail) "\n[::BatchMesher::txt {结果封装失败} {Result packaging failed}]: [dict get $task packaging_error]"
+    }
 }
 
 proc ::BatchMesher::showSelectedGroup {isolate} {
@@ -98,13 +104,33 @@ proc ::BatchMesher::toggleSelectedGroupExcluded {excluded} {
 proc ::BatchMesher::retrySelectedTask {} {
     set id [::BatchMesher::selectedTaskId]
     if {$id eq ""} { error [::BatchMesher::txt "请先选择任务。" "Select a task first."] }
-    ::BatchMesher::retryTask $id
+    ::BatchMesher::retryBackgroundTask $id
 }
 
 proc ::BatchMesher::showFailedSurfaces {} {
     set task [::BatchMesher::taskById [::BatchMesher::selectedTaskId]]
     if {$task eq "" || [dict get $task status] ne "failed"} { error [::BatchMesher::txt "请选择失败任务。" "Select a failed task."] }
     ::BatchMesher::reviewSurfaces [dict get $task surface_ids]
+}
+
+proc ::BatchMesher::showFailureSummary {} {
+    variable runtime
+    set rows {}
+    foreach task $runtime(tasks) {
+        if {[dict get $task status] ne "failed"} { continue }
+        set group [::BatchMesher::groupById [dict get $task group_id]]
+        set components ""
+        if {$group ne ""} { set components [join [dict get $group component_names] {, }] }
+        set surfaceIds [dict get $task surface_ids]
+        set surfacePreview [lrange $surfaceIds 0 99]
+        if {[llength $surfaceIds] > 100} { lappend surfacePreview "... ([llength $surfaceIds] total)" }
+        set reason [string trim [dict get $task error_message]]
+        if {$reason eq ""} { set reason [::BatchMesher::txt "后台未返回详细错误，请查看任务日志。" "The worker returned no detail; inspect the task log."] }
+        if {[string length $reason] > 1200} { set reason "[string range $reason 0 1199]\n... [::BatchMesher::txt {完整错误见任务日志} {Full error in task log}]" }
+        lappend rows "[dict get $task task_id] / [dict get $task group_id]\nComponents: $components\nSurfaces: [join $surfacePreview {, }]\nReason: $reason\nLog: [dict get $task log_path]"
+    }
+    if {[llength $rows] == 0} { error [::BatchMesher::txt "没有失败任务。" "There are no failed tasks."] }
+    tk_messageBox -icon warning -title [::BatchMesher::txt "BatchMesher 失败汇总" "BatchMesher failure summary"] -message [join $rows "\n\n----------------\n\n"]
 }
 
 proc ::BatchMesher::refreshUi {} {
@@ -151,6 +177,8 @@ proc ::BatchMesher::showPanel {} {
     variable ui
     variable VERSION
     ::BatchMesher::loadState
+    set detectedRelease [::BatchMesher::supportedHyperMeshYear [::BatchMesher::hmVersion]]
+    if {$detectedRelease in {2019 2022}} { set ui(HYPERMESH_VERSION) $detectedRelease }
     catch {destroy .batch_mesher}
     set w .batch_mesher
     ::HWFlow::createTopLevel $w
@@ -163,11 +191,11 @@ proc ::BatchMesher::showPanel {} {
     grid rowconfigure $w.main 3 -weight 1
     grid rowconfigure $w.main 4 -weight 1
 
-    labelframe $w.main.config -text [::BatchMesher::txt "1. HyperMesh 2019 与网格预设" "1. HyperMesh 2019 and mesh preset"] -padx 6 -pady 6
+    labelframe $w.main.config -text [::BatchMesher::txt "1. HyperMesh 与网格预设" "1. HyperMesh and mesh preset"] -padx 6 -pady 6
     grid $w.main.config -row 0 -column 0 -sticky ew -pady {0 6}
     grid columnconfigure $w.main.config 1 -weight 1
     label $w.main.config.vl -text [::BatchMesher::txt "HyperMesh 版本" "HyperMesh version"]
-    label $w.main.config.version -text "2019"
+    label $w.main.config.version -textvariable ::BatchMesher::ui(HYPERMESH_VERSION)
     label $w.main.config.hl -text "hmbatch.exe"
     entry $w.main.config.h -textvariable ::BatchMesher::ui(HMBATCH_PATH)
     button $w.main.config.hb -text [::BatchMesher::txt "浏览" "Browse"] -command {::BatchMesher::browseFile HMBATCH_PATH .exe hmbatch.exe}
@@ -238,7 +266,7 @@ proc ::BatchMesher::showPanel {} {
         {restore "恢复排除" "Restore" {::BatchMesher::toggleSelectedGroupExcluded 0}}
     } { lassign $spec name zh en command; button $w.main.groups.actions.$name -text [::BatchMesher::txt $zh $en] -command [list ::BatchMesher::guarded $command]; pack $w.main.groups.actions.$name -side left -padx {0 4} }
 
-    labelframe $w.main.tasks -text [::BatchMesher::txt "4. 顺序任务" "4. Sequential tasks"] -padx 5 -pady 5
+    labelframe $w.main.tasks -text [::BatchMesher::txt "4. 并行独立任务" "4. Parallel independent tasks"] -padx 5 -pady 5
     grid $w.main.tasks -row 4 -column 0 -sticky nsew -pady {0 6}
     grid rowconfigure $w.main.tasks 0 -weight 1; grid columnconfigure $w.main.tasks 0 -weight 1
     ttk::treeview $w.main.tasks.tree -columns {group surfaces status elapsed} -show {tree headings} -height 7
@@ -250,16 +278,25 @@ proc ::BatchMesher::showPanel {} {
     grid $w.main.tasks.detail -row 1 -column 0 -sticky ew -pady {3 0}
     frame $w.main.tasks.actions; grid $w.main.tasks.actions -row 2 -column 0 -sticky ew -pady {4 0}
     foreach spec {
-        {start "开始运行" "Start" ::BatchMesher::runTasks}
-        {stop "停止后续任务" "Stop later tasks" ::BatchMesher::requestStop}
-        {cancel "取消当前（结束后停止）" "Cancel current (stop after it ends)" ::BatchMesher::requestStop}
+        {start "启动后台划分" "Start background meshing" ::BatchMesher::startBackgroundRun}
+        {stop "停止后续任务" "Stop later tasks" ::BatchMesher::stopLaunchingWorkers}
+        {cancel "终止全部后台进程" "Terminate all background processes" ::BatchMesher::terminateBackgroundRun}
         {retry "重试失败任务" "Retry failed" ::BatchMesher::retrySelectedTask}
         {failed "显示失败 Surfaces" "Show failed surfaces" ::BatchMesher::showFailedSurfaces}
-        {report "查看日志/导出报告" "Logs / report" ::BatchMesher::exportReport}
     } { lassign $spec name zh en command; button $w.main.tasks.actions.$name -text [::BatchMesher::txt $zh $en] -command [list ::BatchMesher::guarded $command]; pack $w.main.tasks.actions.$name -side left -padx {0 4} }
-    checkbutton $w.main.tasks.actions.continue -text [::BatchMesher::txt "失败后继续" "Continue after failure"] -variable ::BatchMesher::ui(CONTINUE_AFTER_FAILURE)
-    checkbutton $w.main.tasks.actions.backup -text [::BatchMesher::txt "运行前备份" "Backup before run"] -variable ::BatchMesher::ui(AUTO_BACKUP)
-    pack $w.main.tasks.actions.continue $w.main.tasks.actions.backup -side right -padx {4 0}
+    checkbutton $w.main.tasks.actions.continue -text [::BatchMesher::txt "失败后继续（推荐）" "Continue after failure (recommended)"] -variable ::BatchMesher::ui(CONTINUE_AFTER_FAILURE)
+    label $w.main.tasks.actions.snapshot -text [::BatchMesher::txt "后台运行会自动保存输入快照" "Background runs always save an input snapshot"]
+    label $w.main.tasks.actions.parallelLabel -text [::BatchMesher::txt "并行进程数" "Parallel workers"]
+    spinbox $w.main.tasks.actions.parallel -from 1 -to 16 -width 3 -textvariable ::BatchMesher::ui(PARALLEL_WORKERS)
+    pack $w.main.tasks.actions.continue $w.main.tasks.actions.snapshot $w.main.tasks.actions.parallel $w.main.tasks.actions.parallelLabel -side right -padx {4 0}
+    frame $w.main.tasks.results; grid $w.main.tasks.results -row 3 -column 0 -sticky ew -pady {4 0}
+    foreach spec {
+        {failures "查看失败汇总" "View failure summary" ::BatchMesher::showFailureSummary}
+        {import "手动重试完整结果导入" "Retry complete result import" ::BatchMesher::importBackgroundResult}
+        {report "打开日志/报告目录" "Open logs / report folder" ::BatchMesher::exportReport}
+    } { lassign $spec name zh en command; button $w.main.tasks.results.$name -text [::BatchMesher::txt $zh $en] -command [list ::BatchMesher::guarded $command]; pack $w.main.tasks.results.$name -side left -padx {0 4} }
+    checkbutton $w.main.tasks.results.console -text [::BatchMesher::txt "显示汇总 CMD 监视窗口" "Show consolidated CMD monitor"] -variable ::BatchMesher::ui(SHOW_CMD_WINDOW)
+    pack $w.main.tasks.results.console -side right -padx {4 0}
 
     frame $w.footer
     pack $w.footer -fill x -padx 10 -pady {0 8}

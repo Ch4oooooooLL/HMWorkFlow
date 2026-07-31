@@ -1,0 +1,28 @@
+fast_auto_enabled|1|enable reviewed automatic shell seam workflow
+search_distance|12.0|maximum source-to-target candidate distance
+min_seam_length|20.0|minimum accepted seam length
+min_path_nodes|3|minimum source path node count
+parallel_angle_max|15.0|maximum normal angle for lap classification
+perpendicular_angle_min|70.0|minimum normal angle for T/corner classification
+max_distance_variation_ratio|0.35|maximum normalized distance variation
+min_projection_coverage|0.75|minimum valid projection coverage
+min_overlap_ratio|0.60|minimum tangent projection overlap
+existing_path_search_width|20.0|target edge graph corridor half width
+max_target_path_offset|8.0|maximum target edge path distance from ideal projection
+max_node_move|2.0|maximum automatic target node movement
+max_node_move_ratio|0.25|max move relative to local average edge length
+snap_to_existing_node|0.20|merge projected point with existing node
+snap_to_existing_edge|0.20|treat projection as existing edge point
+allow_target_node_move|0|V2 guarded movement is implemented; opt in until HM validation
+allow_local_split|0|V3 conservative single-shell split is implemented; opt in until HM validation
+prefer_quad_weld|1|prefer CQUAD4 weld elements
+allow_weld_end_tria|1|allow CTRIA3 only at ends/transitions
+max_weld_tria_ratio|0.15|maximum triangle ratio in weld strip
+quality_guard_enabled|1|run Python and HyperMesh quality guards
+max_new_failed_elements|0|no new failed mother elements allowed
+existing_weld_search_distance|4.0|duplicate seam search distance
+exclude_existing_welds|1|exclude duplicate and overlapping SEAM_T components
+auto_accept_confidence|0.88|high-confidence candidate threshold
+review_confidence|0.60|manual review threshold
+keep_task_files|1|retain run artifacts
+execution_batch_size|25|max non-conflicting candidates per import batch

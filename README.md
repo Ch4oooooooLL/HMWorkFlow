@@ -140,7 +140,7 @@ Connection
 ### 2.1 准备项目配置
 
 1. 检查 `config/materials.txt`，确认材料 key、显示名和材料参数符合当前项目。
-2. 在 `BatchMesher 自动网格划分` 中配置 HyperMesh 2019 `hmbatch.exe` 及用户维护的 `.criteria` / `.param` 预设；washer 行为完全由 `.param` 文件控制。
+2. 在 `BatchMesher 自动网格划分` 中配置受支持的 HyperMesh 2019 或 2022 `hmbatch.exe` 及用户维护的 `.criteria` / `.param` 预设；hmbatch 可以与当前主会话版本不同，washer 行为完全由 `.param` 文件控制。
 3. 检查 `config/casting_mesh_rules.txt`，确认铸件三角面网格、质量迭代和 TetraMesh 参数。
 4. 检查 `config/seam_rules.txt`、`config/geometry_cleanup_rules.txt`、`config/contact_rules.txt`，确认焊缝面、几何清理和接触默认参数。
 
@@ -424,21 +424,23 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 入口：`::BatchMesher::runAction`
 
-功能：以用户选择的 Surface ID 为执行数据，使用 HyperMesh 2019 `by attached` 提取最终几何拓扑连通域，并逐域顺序调用 BatchMesher。不会按 component 拆分，也不会生成或覆盖 criteria/param/washer 参数。
+功能：支持 HyperMesh 2019 与实机验证的 HyperWorks 2022。以 Surface ID 为执行数据，使用 `by attached` 提取最终拓扑连通域，并启动相互隔离、数量可控的并行 hmbatch。2022 外部 worker 会加载 OptiStruct profile 和 criteria；版本探测覆盖 `19`、`19.x`、`2019.x` 和实机返回的 `22.000000`。
 
 用法：
 
 1. 在主面板运行 `BatchMesher 自动网格划分`。
-2. 配置并保存 criteria/param 预设以及 HyperMesh 2019 `hmbatch.exe`，并执行测试启动。
+2. 配置并保存 criteria/param 预设以及任一受支持的 2019/2022 `hmbatch.exe`，并执行测试启动；不要求与当前会话版本一致。
 3. 手动选择、选择当前显示或选择全部 surfaces。
 4. 点击 `分析几何连通性`，复核连通域、涉及 component 和诊断提示。
-5. 运行任务；失败任务可单独重试，运行前会重新验证 Surface ID 与模型 Surface 集合。
+5. 设置并行进程数后点击“启动后台划分”；每个活动连通域对应一个独立 hmbatch 和真实 PID，主 HyperMesh 与进度窗口保持响应。调度采用固定容量滑动窗口，任一任务结束就立即补充下一个任务，不等待同批全部结束。整次运行只打开一个汇总 CMD 窗口，显示目标/活动 worker 数、等待队列、阶段、PID 和任务统计；结束后三秒自动关闭。
+6. 后台结束后，2019/2022 均在空白 hmbatch 中聚合各 worker 的有效 FEM，自动偏移冲突 ID，保存干净的合并 HM 并统一导出最终 FEM，再一次性自动导入当前模型；完成提示会报告新增单元。失败时可点击“手动重试完整结果导入”，网格失败任务仍可单独后台重试。
 
 输出：
 
 - 每个不可拆分的 Surface 拓扑连通域对应一个任务；单一连通域自动整体执行。
-- 每个任务记录状态、耗时、Surface IDs、原始 Tcl 错误和独立日志。
-- 报告位于共享任务存储的 `batch_mesher/<run-id>/`，包含 `run.json`、`result.json`、`run.log` 和逐任务日志。
+- 每个任务记录状态、耗时、Surface IDs、Component 名称、原始 Tcl 错误和独立日志；失败默认不阻止后续任务。
+- `*hm_batchmesh2` 后只要新增了 Elements，任务就视为有可用结果；质量或迭代问题作为警告保留，不会删除网格。成功任务保存原生 HM 作为恢复文件，并按结果 Component 使用 `*feoutputwithdata` 输出包含完整 Elements/依赖的 FE-only FEM。合并 worker 在空白模型中用默认 OptiStruct reader 和 `overwrite_flag=0` 逐个导入 FEM、验证 Element 增量，再保存 `merged_result.hm` 和导出 `batchmesh_result.fem`。主会话优先导入完整原生 FE，跨版本不兼容时回退到唯一的最终合并 FEM。网格状态与结果封装状态相互独立。
+- 报告位于共享任务存储的 `batch_mesher/<run-id>/`，包含汇总状态、`monitor_batchmesher.cmd`、`monitor_status.txt`、各 worker 的 stdout/stderr、`run.json`、`result.json` 和逐任务日志。关闭汇总监视窗口不会终止后台任务。
 
 ### 6.7 Casting TetraMesh
 
@@ -637,7 +639,13 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 结果保存在 `runtime/tasks/weld_integrity_check/<run_id>/`：检查范围由 HyperMesh 原生导出为 `input/selected_components.fem`，轻量 Component/Element 归属保存在 `input/mesh_manifest.json`；FEM 拓扑解析、自由边提取和候选检测均由 Python 完成。JSON 与 Python 日志位于 `output/`，审查进度位于 `state/review_state.json`。关闭报告会自动清理 mark/编号并恢复显示；同一 HyperMesh 会话再次进入模块可继续上次审查。
 
-当前限制：只支持 Shell–Shell；距离搜索是自由边节点到目标网格节点的近似，不读取 CAD，不自动识别所有已有焊缝，不自动创建或修复焊缝。所有候选都需要工程人员在 HyperMesh 中确认。
+当前限制：完整性检查本身只支持 Shell–Shell 和人工审查；距离搜索是自由边节点到目标网格节点的近似，不读取 CAD。审查页的“创建焊缝”会显式转入下述自动壳焊缝流程，仍需工程人员再次确认后才修改模型。
+
+### 6.16 自动壳焊缝与快速创建
+
+`Mesh Seam Weld` 新增 `FAST_AUTO`，与原 `LEGACY_MANUAL` 手动路径并存。自动模式原生导出所选 Shell Component，由便携式 Python 识别并分类 `T_PATH/T_LIST/CONNECT/L_SURF/L_LIST/REVIEW`，用户明确接受后才生成创建计划。自动规划优先复用已有连续目标网格边，也可在显式开启后执行受控节点微调，或对单个 CTRIA3/CQUAD4 母单元执行保守局部切分；快速路径不调用 imprint、ruled surface、automesh 或 connector。
+
+应用前会写入任务安全快照，每个候选还会建立独立检查点；导入后复核新增 ID、connectivity 和相对原始基线新增的 HyperMesh 质量失败，单个候选失败只回滚该候选。结果位于 `runtime/tasks/mesh_seam_weld/<run_id>/output/`，包含 candidate、creation plan、候选独立增量 FEM、manifest、规划 JSON/HTML 报告及执行报告。焊缝 Property 无法可靠复用时会明确标记 `property_assignment_required`，可随后使用批量 Property 模块。受控节点微调和保守单母单元局部切分均已实现但默认关闭；模块状态为 `controlled`，仍需按 [协议与 HM2019 清单](doc/mesh_seam_auto_protocol.md) 完成真实 HyperMesh 验证。
 
 ## 7. 公共机制
 

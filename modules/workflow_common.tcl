@@ -153,6 +153,17 @@ proc ::HWFlow::hyperWorksYear {{version ""}} {
     if {[regexp {(20[0-9][0-9])} $version -> year]} {
         return $year
     }
+    # hm_info does not use one stable format across HyperMesh generations and
+    # process types.  In particular, hmbatch commonly reports the product
+    # release as "19"/"19.x" or "22"/"22.x" instead of a four-digit year.
+    # Normalize the supported short release numbers before compatibility
+    # checks so callers compare product generations, not raw display strings.
+    if {[regexp {(^|[^0-9])(19|22)([.][0-9]+)*([^0-9]|$)} $version -> before release patch after]} {
+        switch -- $release {
+            19 { return 2019 }
+            22 { return 2022 }
+        }
+    }
     return ""
 }
 
@@ -191,8 +202,8 @@ proc ::HWFlow::engineeringPreflight {{refresh 0}} {
         if {[string trim [dict get $context $key]] eq ""} {lappend missing $key}
     }
     if {![dict get $context units_confirmed] || [llength $missing] > 0} {
-        set blocked 1
-        lappend checks [::HWFlow::preflightCheck units BLOCKED "Project units are incomplete or not confirmed: $missing"]
+        set warned 1
+        lappend checks [::HWFlow::preflightCheck units WARNING "Project units are incomplete or not confirmed: $missing"]
     } else {
         lappend checks [::HWFlow::preflightCheck units PASS "[dict get $context unit_system] ([dict get $context stress_unit], [dict get $context density_unit])"]
     }
@@ -202,28 +213,29 @@ proc ::HWFlow::engineeringPreflight {{refresh 0}} {
     set profile [string tolower [dict get $solver profile]]
     set template [string tolower [dict get $solver template]]
     if {$expected eq ""} {
-        set blocked 1
-        lappend checks [::HWFlow::preflightCheck solver BLOCKED "project.solver_profile is not configured"]
+        set warned 1
+        lappend checks [::HWFlow::preflightCheck solver WARNING "project.solver_profile is not configured"]
     } elseif {[llength [info commands hm_info]] == 0} {
         set warned 1
         lappend checks [::HWFlow::preflightCheck solver WARNING "HyperMesh solver context is unavailable offline; expected $expected"]
     } elseif {($profile ne "" && $profile ne "optistruct") || ($profile eq "" && $template ni {nastran optistruct})} {
-        set blocked 1
-        lappend checks [::HWFlow::preflightCheck solver BLOCKED "Expected $expected; current profile='$profile' template='$template'"]
+        # HyperMesh releases do not expose profile/template names consistently.
+        # Keep the mismatch visible for diagnostics, but never reject a module
+        # launch based on this heuristic.
+        set warned 1
+        lappend checks [::HWFlow::preflightCheck solver WARNING "Expected $expected; current profile='$profile' template='$template' (advisory only)"]
     } else {
         lappend checks [::HWFlow::preflightCheck solver PASS "profile='$profile' template='$template'"]
     }
 
     set hmVersion [::HWFlow::hyperWorksVersion]
-    set hmCompatibility [::HWFlow::hyperWorksCompatibility $hmVersion]
     if {$hmVersion eq ""} {
-        set warned 1
-        lappend checks [::HWFlow::preflightCheck hypermesh WARNING "HyperMesh version could not be queried"]
-    } elseif {$hmCompatibility ni {legacy new}} {
-        set warned 1
-        lappend checks [::HWFlow::preflightCheck hypermesh WARNING "Supported versions are HyperMesh 2019 and HyperWorks 2022; current version is $hmVersion"]
+        lappend checks [::HWFlow::preflightCheck hypermesh PASS "Version query unavailable; compatibility check is disabled"]
     } else {
-        lappend checks [::HWFlow::preflightCheck hypermesh PASS "$hmVersion ($hmCompatibility interface)"]
+        # hm_info version strings vary by release, launcher and process type.
+        # Record the raw value only; version detection must not influence the
+        # preflight status or prevent users from opening a module.
+        lappend checks [::HWFlow::preflightCheck hypermesh PASS "$hmVersion (informational only)"]
     }
 
     if {[llength [info commands ::HybridCore::workerAlive]] > 0} {

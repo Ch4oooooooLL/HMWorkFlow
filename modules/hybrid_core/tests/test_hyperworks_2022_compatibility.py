@@ -61,7 +61,28 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
         self.assertIn("proc ::HWFlow::hyperWorksYear", common)
         self.assertIn("proc ::HWFlow::hyperWorksCompatibility", common)
         self.assertRegex(common, r"2022\s+\{\s*return\s+new")
-        self.assertIn('$hmCompatibility ni {legacy new}', common)
+        preflight = common[
+            common.index("proc ::HWFlow::engineeringPreflight") :
+            common.index("proc ::HWFlow::formatEngineeringPreflight")
+        ]
+        self.assertNotIn("hyperWorksCompatibility", preflight)
+        self.assertIn("informational only", preflight)
+
+    def test_short_hmbatch_release_values_are_normalized_to_years(self) -> None:
+        tcl = tkinter.Tcl()
+        tcl.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        cases = {
+            "19": "2019",
+            "HyperMesh 19.0": "2019",
+            "22.1": "2022",
+            "HyperWorks 2022.3": "2022",
+        }
+        for raw_version, expected_year in cases.items():
+            with self.subTest(raw_version=raw_version):
+                self.assertEqual(
+                    tcl.eval(f"::HWFlow::hyperWorksYear {{{raw_version}}}"),
+                    expected_year,
+                )
 
     def test_2022_mark_panel_falls_back_to_edit_widget_and_clears_busy_state(self) -> None:
         tcl = tkinter.Tcl()

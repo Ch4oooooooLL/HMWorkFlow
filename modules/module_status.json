@@ -9,7 +9,7 @@
     "auto_hole_rbe2": {"status": "production", "runtime": "HybridCore", "model_write": true},
     "shell_washer_hole_rbe2": {"status": "production", "runtime": "HybridCore", "model_write": true},
     "rbe2_bolt_connector": {"status": "production", "runtime": "HybridCore", "model_write": true},
-    "mesh_seam_weld": {"status": "production", "runtime": "HybridCore", "model_write": true},
+    "mesh_seam_weld": {"status": "controlled", "runtime": "HybridCore", "model_write": true, "requires_hm2019_smoke_test": true},
     "solid_seam_connector": {"status": "controlled", "runtime": "HybridCore", "model_write": true, "requires_verified_command_profile": true},
     "local_mesh_optimizer": {"status": "controlled", "runtime": "HybridCore detached task", "model_write": true},
     "weld_integrity_check": {"status": "review_only", "runtime": "HybridCore", "model_write": false},

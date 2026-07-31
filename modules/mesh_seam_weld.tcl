@@ -21,11 +21,36 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.43"
+    variable VERSION "0.50"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
     array set cfg {
+        run_mode              LEGACY_MANUAL
+        fast_auto_enabled     1
+        search_distance       12.0
+        min_seam_length       20.0
+        min_path_nodes        3
+        parallel_angle_max    15.0
+        perpendicular_angle_min 70.0
+        max_distance_variation_ratio 0.35
+        existing_path_search_width 20.0
+        max_target_path_offset 8.0
+        max_node_move         2.0
+        max_node_move_ratio   0.25
+        allow_target_node_move 0
+        allow_local_split     0
+        prefer_quad_weld      1
+        allow_weld_end_tria   1
+        max_weld_tria_ratio   0.15
+        quality_guard_enabled 1
+        max_new_failed_elements 0
+        existing_weld_search_distance 4.0
+        exclude_existing_welds 1
+        keep_task_files        1
+        auto_accept_confidence 0.88
+        review_confidence     0.60
+        execution_batch_size 25
         output_component       MESH_SEAM_WELD
         weld_mesh_size         8
         patch_expand_layers    2
@@ -90,6 +115,12 @@ namespace eval ::MeshSeamWeld {
 
 proc ::MeshSeamWeld::stateKeys {} {
     return {
+        run_mode fast_auto_enabled search_distance min_seam_length min_path_nodes
+        parallel_angle_max perpendicular_angle_min max_distance_variation_ratio
+        existing_path_search_width max_target_path_offset max_node_move max_node_move_ratio
+        allow_target_node_move allow_local_split prefer_quad_weld allow_weld_end_tria
+        max_weld_tria_ratio quality_guard_enabled max_new_failed_elements existing_weld_search_distance
+        exclude_existing_welds keep_task_files auto_accept_confidence review_confidence execution_batch_size
         output_component weld_mesh_size patch_expand_layers imprint_remain imprint_remesh_mode imprint_angle
         mesh_face_shape mesh_elem_type mesh_smooth_method mesh_smooth_tol
         mesh_size_control mesh_skew_control mesh_path_param
@@ -150,6 +181,7 @@ proc ::MeshSeamWeld::responsiveCheckpoint {completed {interval 128}} {
 
 proc ::MeshSeamWeld::loadState {} {
     variable cfg
+    ::MeshSeamWeld::loadAutoRules
     if {[llength [info commands ::HWFlow::applyStateToArray]] > 0} {
         ::HWFlow::applyStateToArray mesh_seam_weld ::MeshSeamWeld::cfg
     }
@@ -168,6 +200,32 @@ proc ::MeshSeamWeld::centerWindow {w} {
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
     wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
+}
+
+proc ::MeshSeamWeld::updateModeUi {} {
+    variable ui
+    set panel .mesh_seam_weld.main.param
+    if {![winfo exists $panel]} { return }
+    set autoState [expr {$ui(run_mode) eq "FAST_AUTO" ? "normal" : "disabled"}]
+    set manualState [expr {$ui(run_mode) eq "LEGACY_MANUAL" ? "normal" : "disabled"}]
+    foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_target_path_offset max_node_move} {
+        if {[winfo exists $panel.e_$key]} { $panel.e_$key configure -state $autoState }
+    }
+    foreach key {patch_expand_layers imprint_remain imprint_remesh_mode imprint_angle mesh_face_shape mesh_elem_type} {
+        if {[winfo exists $panel.e_$key]} { $panel.e_$key configure -state $manualState }
+    }
+    foreach widget {exclude_existing keep_tasks local_split node_move} {
+        if {[winfo exists $panel.$widget]} { $panel.$widget configure -state $autoState }
+    }
+    if {[winfo exists .mesh_seam_weld.main.note] && $ui(run_mode) eq "FAST_AUTO"} {
+        .mesh_seam_weld.main.note configure -text [::HWFlow::txt \
+            "自动模式只导出所选一阶壳网格，经用户复核后优先利用目标侧现有边路径直接创建 CQUAD4/CTRIA3。该路径不调用 imprint、ruled、automesh 或 connector；不安全候选进入人工处理。" \
+            "Automatic mode exports selected first-order shells and, after explicit review, creates CQUAD4/CTRIA3 directly on existing target edge paths. It never invokes imprint, ruled, automesh, or connectors; unsafe candidates remain manual review."]
+    } elseif {[winfo exists .mesh_seam_weld.main.note]} {
+        .mesh_seam_weld.main.note configure -text [::HWFlow::txt \
+            "兼容模式保留原有手动源节点路径、局部 Mesh Edit imprint 和 ruled/automesh 创建流程。" \
+            "Compatibility mode retains the original manual source-node path, local Mesh Edit imprint, and ruled/automesh creation workflow."]
+    }
 }
 
 proc ::MeshSeamWeld::showPanel {} {
@@ -192,10 +250,21 @@ proc ::MeshSeamWeld::showPanel {} {
     label $w.main.title -text [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -font [::HWFlow::uiFont heading]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
+    labelframe $w.main.mode -text [::HWFlow::txt "运行方式" "Run Mode"] -padx 8 -pady 8
+    grid $w.main.mode -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    radiobutton $w.main.mode.auto -text [::HWFlow::txt "自动识别并快速创建" "Automatic Detection and Fast Creation"] -variable ::MeshSeamWeld::ui(run_mode) -value FAST_AUTO -command ::MeshSeamWeld::updateModeUi
+    radiobutton $w.main.mode.manual -text [::HWFlow::txt "手动选择路径（兼容模式）" "Manual Path Selection (Compatibility)"] -variable ::MeshSeamWeld::ui(run_mode) -value LEGACY_MANUAL -command ::MeshSeamWeld::updateModeUi
+    pack $w.main.mode.auto $w.main.mode.manual -side left -padx {0 16}
     labelframe $w.main.param -text [::HWFlow::txt "参数" "Parameters"] -padx 8 -pady 8
-    grid $w.main.param -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    grid $w.main.param -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     set fields {
+        {search_distance "自动识别搜索距离" "Auto search distance"}
+        {min_seam_length "自动焊缝最小长度" "Minimum auto seam length"}
+        {parallel_angle_max "搭接平行角度" "Lap parallel angle"}
+        {perpendicular_angle_min "T 型垂直角度" "T perpendicular angle"}
+        {max_target_path_offset "目标路径最大偏移" "Maximum target path offset"}
+        {max_node_move "最大节点移动（当前默认禁用）" "Maximum node move (disabled by default)"}
         {output_component "未识别厚度时的输出组件" "Fallback output component"}
         {weld_mesh_size "焊缝网格尺寸" "Weld mesh size"}
         {patch_expand_layers "imprint 局部重绘扩展层数" "Imprint remesh layers"}
@@ -214,11 +283,19 @@ proc ::MeshSeamWeld::showPanel {} {
         grid $w.main.param.e_$key -row $row -column 1 -sticky w -pady 2
         incr row
     }
+    checkbutton $w.main.param.exclude_existing -text [::HWFlow::txt "排除已有 SEAM_T* 焊缝" "Exclude existing SEAM_T* welds"] -variable ::MeshSeamWeld::ui(exclude_existing_welds)
+    checkbutton $w.main.param.keep_tasks -text [::HWFlow::txt "保留任务文件" "Keep task files"] -variable ::MeshSeamWeld::ui(keep_task_files)
+    checkbutton $w.main.param.local_split -text [::HWFlow::txt "允许局部切分（未验证，默认关闭）" "Allow local split (unvalidated; off by default)"] -variable ::MeshSeamWeld::ui(allow_local_split)
+    checkbutton $w.main.param.node_move -text [::HWFlow::txt "允许受控目标节点微调" "Allow guarded target-node adjustment"] -variable ::MeshSeamWeld::ui(allow_target_node_move)
+    grid $w.main.param.exclude_existing -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.param.keep_tasks -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.param.node_move -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.param.local_split -row $row -column 0 -columnspan 2 -sticky w
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
         "连续节点直接作为开放路径执行。单点及不连续边界种子由 HyperMesh 原生 *findedges 为每个源组件建立临时自由边组件：自由边点只处理所在闭环，内部点处理该组件全部闭合自由边。每条路径在执行前即时准备目标组件上投影最近的几层单元，并以原始节点列表和该 Elements patch 调用 Mesh Edit imprint；随后重新获取已被 imprint 调整位置的目标节点。Ruled 的第一侧始终使用原始节点列表，第二侧使用 imprint 后目标节点，两侧数量不要求一一对应；闭环会显式补首尾封口。运行流程不导出 FEM，也不调用 Python。" \
         "Continuous nodes execute directly as an open path. For single points and disconnected boundary seeds, native HyperMesh *findedges creates a temporary free-edge component per source component. Each path prepares only the nearest projected element layers on the selected target components, then calls Mesh Edit imprint with the original node list and that Elements patch. The post-imprint target nodes are then reacquired. Ruled side 1 is always the original node list and side 2 is the post-imprint target list; equal node counts are not required. Closed loops receive an explicit end-to-start closure. No FEM export or Python runtime planning is used."]
-    grid $w.main.note -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    grid $w.main.note -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
@@ -231,6 +308,7 @@ proc ::MeshSeamWeld::showPanel {} {
 
     bind $w <Escape> "destroy .mesh_seam_weld"
     wm protocol $w WM_DELETE_WINDOW "destroy .mesh_seam_weld"
+    ::MeshSeamWeld::updateModeUi
     ::MeshSeamWeld::centerWindow $w
     tkwait window $w
 }
@@ -266,6 +344,15 @@ proc ::MeshSeamWeld::showMorePanel {} {
 proc ::MeshSeamWeld::acceptPanel {} {
     variable cfg
     variable ui
+
+    if {$ui(run_mode) eq "FAST_AUTO"} {
+        foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_target_path_offset max_node_move} {
+            if {![string is double -strict $ui($key)] || $ui($key) < 0} {
+                tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "$key 必须为非负数。" "$key must be non-negative."]
+                return
+            }
+        }
+    }
 
     if {[string trim $ui(output_component)] eq ""} {
         tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "输出组件不能为空。" "Output component cannot be empty."]
@@ -628,6 +715,26 @@ proc ::MeshSeamWeld::canonicalEdgeKey {a b} {
 proc ::MeshSeamWeld::componentFreeEdgeGraph {compId} {
     return [::MeshSeamWeld::freeEdgeGraphFromElements \
         [::MeshSeamWeld::componentElementIds $compId]]
+}
+
+proc ::MeshSeamWeld::loadAutoRules {} {
+    variable cfg
+    variable MODULE_DIR
+    set path [file join [file dirname [file dirname $MODULE_DIR]] config mesh_seam_auto_rules.txt]
+    if {![file isfile $path]} { return }
+    set channel [open $path r]
+    fconfigure $channel -encoding utf-8
+    set content [read $channel]
+    close $channel
+    foreach line [split $content "\n"] {
+        set line [string trim $line]
+        if {$line eq "" || [string index $line 0] eq "#"} { continue }
+        set fields [split $line |]
+        if {[llength $fields] < 2} { continue }
+        set key [string trim [lindex $fields 0]]
+        set value [string trim [lindex $fields 1]]
+        if {[info exists cfg($key)]} { set cfg($key) $value }
+    }
 }
 
 proc ::MeshSeamWeld::freeEdgeGraphFromElements {elemIds} {
@@ -4507,6 +4614,10 @@ proc ::MeshSeamWeld::clearFailureMarkerComponent {} {
 proc ::MeshSeamWeld::runAction {} {
     variable cfg
     ::MeshSeamWeld::loadState
+    if {[info exists cfg(run_mode)] && $cfg(run_mode) eq "FAST_AUTO"} {
+        ::MeshSeamWeld::runAutoWorkflow
+        return
+    }
     ::MeshSeamWeld::resetRunCaches
     ::MeshSeamWeld::clearTransientSelections
 
@@ -4817,9 +4928,8 @@ proc ::MeshSeamWeld::run {} {
     ::MeshSeamWeld::runAction
 }
 
-# The production path is fully Tcl/HyperMesh-native.  Keep bridge.tcl and
-# exporter.tcl as opt-in legacy helpers, but do not load Python/FEM commands
-# into the normal module runtime.
-foreach hybridFile {executor.tcl workflow.tcl} {
+# The legacy path remains Tcl-native. FAST_AUTO loads the Python/FEM bridge as
+# a separate, explicitly selected workflow and never calls imprint or ruled.
+foreach hybridFile {executor.tcl workflow.tcl auto_ui.tcl delta_import.tcl quality_validator.tcl fast_executor.tcl auto_workflow.tcl integrity_link.tcl} {
     ::HWFlow::sourceUtf8 [file join $::MeshSeamWeld::MODULE_DIR tcl $hybridFile]
 }

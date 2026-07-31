@@ -1,5 +1,5 @@
 # ============================================================================
-# BatchMesher automatic surface meshing - HyperMesh 2019 Tcl/Tk
+# BatchMesher automatic surface meshing - HyperMesh 2019/2022 Tcl/Tk
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -17,6 +17,7 @@ foreach batchMesherFile {
     connectivity.tcl
     logging.tcl
     executor.tcl
+    background.tcl
     ui.tcl
     main.tcl
 } {

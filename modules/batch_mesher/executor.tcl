@@ -4,12 +4,31 @@ proc ::BatchMesher::hmVersion {} {
     return $version
 }
 
-proc ::BatchMesher::requireHm2019 {} {
+proc ::BatchMesher::supportedHyperMeshYear {version} {
+    if {[llength [info commands ::HWFlow::hyperWorksYear]] > 0} {
+        return [::HWFlow::hyperWorksYear $version]
+    }
+    if {[regexp {(20[0-9][0-9])} $version -> year]} { return $year }
+    if {[regexp {^22([.]|$)} $version]} { return 2022 }
+    if {[regexp {^19([.]|$)} $version]} { return 2019 }
+    if {[regexp {(^|[^0-9])(19|22)([.][0-9]+)*([^0-9]|$)} $version -> before release patch after]} {
+        return [expr {$release eq "19" ? 2019 : 2022}]
+    }
+    return ""
+}
+
+proc ::BatchMesher::requireSupportedHyperMesh {} {
+    variable ui
     set version [::BatchMesher::hmVersion]
     if {$version eq ""} { error [::BatchMesher::txt "无法读取 HyperMesh 版本。" "Could not read the HyperMesh version."] }
-    if {![regexp {(^|[^0-9])2019([^0-9]|$)} $version]} { error [::BatchMesher::txt "本功能仅支持 HyperMesh 2019；当前版本：$version" "This feature supports HyperMesh 2019 only; current version: $version"] }
+    set year [::BatchMesher::supportedHyperMeshYear $version]
+    if {$year ni {2019 2022}} { error [::BatchMesher::txt "本功能仅支持 HyperMesh 2019 或 2022；当前版本：$version" "This feature supports HyperMesh 2019 or 2022 only; current version: $version"] }
+    set ui(HYPERMESH_VERSION) $year
     return $version
 }
+
+# Compatibility alias retained for callers from the original HM2019-only module.
+proc ::BatchMesher::requireHm2019 {} { return [::BatchMesher::requireSupportedHyperMesh] }
 
 proc ::BatchMesher::runProbeProcess {arguments stdoutPath stderrPath timeoutMs} {
     set pipeline [concat [list |] $arguments [list 2> $stderrPath]]
@@ -70,10 +89,11 @@ proc ::BatchMesher::testHmbatchStartup {} {
         error [::BatchMesher::txt "hmbatch 已退出但未生成探针结果；请查看日志：$stderr" "hmbatch exited without a probe result; see: $stderr"]
     }
     set version [string trim [::HWFlow::readTextFile $result]]
-    if {![regexp {(^|[^0-9])2019([^0-9]|$)} $version]} {
+    set year [::BatchMesher::supportedHyperMeshYear $version]
+    if {$year ni {2019 2022}} {
         catch {::HybridCore::finalizeTaskWorkspace $probeDir FAILED}
         set runtime(run_dir) ""
-        error [::BatchMesher::txt "所选 hmbatch 不是 2019 版本：$version" "The selected hmbatch is not version 2019: $version"]
+        error [::BatchMesher::txt "所选 hmbatch 不是受支持的 HyperMesh 2019/2022：$version" "The selected hmbatch is not a supported HyperMesh 2019/2022 executable: $version"]
     }
     catch {::HybridCore::finalizeTaskWorkspace $probeDir SUCCESS}
     set runtime(run_dir) ""
@@ -96,8 +116,8 @@ proc ::BatchMesher::saveBackup {} {
 # Official documented command contract: entity_type, mark_id, string_array=1,
 # number_of_strings=0, criteria_file, param_file.  No generated parameters are
 # passed, so the user's criteria/param (including washer rules) remain in force.
-proc ::BatchMesher::runBatchMesher2019 {surfaceIds criteriaPath paramPath} {
-    if {[llength [info commands *hm_batchmesh2]] == 0} { error "HyperMesh 2019 command *hm_batchmesh2 is unavailable" }
+proc ::BatchMesher::runBatchMesherNative {surfaceIds criteriaPath paramPath} {
+    if {[llength [info commands *hm_batchmesh2]] == 0} { error "HyperMesh command *hm_batchmesh2 is unavailable" }
     ::BatchMesher::markSurfaces 1 $surfaceIds
     set command [list *hm_batchmesh2 surfs 1 1 0 [file nativename $criteriaPath] [file nativename $paramPath]]
     set code [catch {uplevel #0 $command} result opts]
@@ -108,6 +128,13 @@ proc ::BatchMesher::runBatchMesher2019 {surfaceIds criteriaPath paramPath} {
         return -options $opts "*hm_batchmesh2 failed; surfaces=[llength $surfaceIds]; criteria=$criteriaPath; param=$paramPath; Tcl error=$detail"
     }
     return $result
+}
+
+proc ::BatchMesher::runBatchMesher {surfaceIds criteriaPath paramPath} {
+    return [::BatchMesher::runBatchMesherNative $surfaceIds $criteriaPath $paramPath]
+}
+proc ::BatchMesher::runBatchMesher2019 {surfaceIds criteriaPath paramPath} {
+    return [::BatchMesher::runBatchMesherNative $surfaceIds $criteriaPath $paramPath]
 }
 
 proc ::BatchMesher::replaceTask {index task} {
@@ -135,7 +162,7 @@ proc ::BatchMesher::executeTaskAt {index config} {
         if {[llength $existing] != [llength $ids]} {
             error "MODEL_STATE_STALE task=$taskId group=$groupId expected_surfaces=[llength $ids] existing_surfaces=[llength $existing]"
         }
-        ::BatchMesher::runBatchMesher2019 $ids [dict get $config criteria] [dict get $config param]
+        ::BatchMesher::runBatchMesherNative $ids [dict get $config criteria] [dict get $config param]
     } err opts]
     set endedMs [clock milliseconds]
     dict set task ended_at [clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S}]
@@ -145,7 +172,7 @@ proc ::BatchMesher::executeTaskAt {index config} {
         if {[dict exists $opts -errorinfo]} { append detail "\n" [dict get $opts -errorinfo] }
         dict set task status failed
         dict set task error_message $detail
-        ::BatchMesher::taskLog $task ERROR "failed surfaces=[llength $ids] Tcl_error=$detail; suggestion=verify HM2019 patch, criteria/param compatibility, license and surface topology"
+        ::BatchMesher::taskLog $task ERROR "failed surfaces=[llength $ids] Tcl_error=$detail; suggestion=verify the HyperMesh release, criteria/param compatibility, license and surface topology"
     } else {
         dict set task status completed
         ::BatchMesher::taskLog $task INFO "completed elapsed_seconds=[dict get $task elapsed_seconds]"
@@ -167,6 +194,9 @@ proc ::BatchMesher::cancelPendingTasks {fromIndex} {
 
 proc ::BatchMesher::requestStop {} {
     variable runtime
+    if {$runtime(running) && $runtime(background_pid) ne "" && [llength [info commands ::BatchMesher::terminateBackgroundRun]] > 0} {
+        return [::BatchMesher::terminateBackgroundRun]
+    }
     set runtime(stop_after_current) 1
     catch {::HWFlow::progressRequestCancel}
     ::BatchMesher::log WARN "stop requested; the active in-session BatchMesher command cannot be interrupted safely"
@@ -175,7 +205,7 @@ proc ::BatchMesher::requestStop {} {
 proc ::BatchMesher::runTasks {} {
     variable runtime
     variable ui
-    ::BatchMesher::requireHm2019
+    ::BatchMesher::requireSupportedHyperMesh
     set config [::BatchMesher::validateRunConfig]
     ::BatchMesher::verifyAnalysisFresh
     if {[llength $runtime(tasks)] == 0} { error [::BatchMesher::txt "没有可运行任务；请恢复至少一个被排除的连通域。" "No runnable tasks; restore at least one excluded group."] }
@@ -232,7 +262,7 @@ proc ::BatchMesher::runTasks {} {
 proc ::BatchMesher::retryTask {taskId} {
     variable runtime
     if {$runtime(running)} { error [::BatchMesher::txt "任务正在运行。" "Tasks are currently running."] }
-    ::BatchMesher::requireHm2019
+    ::BatchMesher::requireSupportedHyperMesh
     set config [::BatchMesher::validateRunConfig]
     ::BatchMesher::verifyAnalysisFresh
     set index -1

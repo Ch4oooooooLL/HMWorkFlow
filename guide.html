@@ -1103,7 +1103,7 @@
                             <span class="card-badge mesh">网格</span>
                         </div>
                         <div class="card-path">mesh_seam_weld.tcl</div>
-                        <div class="card-desc">提取网格边缘或自由边节点路径，投影并缝合到目标面，生成 ruled 网格焊缝片体。</div>
+                        <div class="card-desc">支持自动识别并复核壳焊缝候选，利用现有目标网格边直接创建壳焊缝；保留手动 imprint/ruled 兼容流程。</div>
                         <a href="#mod-mesh-seam-weld" class="card-btn">
                             <svg viewBox="0 0 24 24"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/></svg>
                             查看详情 & 参数
@@ -1162,7 +1162,7 @@
                     <div class="dashboard-card" id="card-batch-mesher">
                         <div class="card-header"><span class="card-title">BatchMesher 自动网格划分</span><span class="card-badge mesh">网格</span></div>
                         <div class="card-path">batch_mesher.tcl</div>
-                        <div class="card-desc">按 Surface 最终拓扑连通域生成顺序任务，完整使用用户 criteria/param，并提供失败重试与 JSON 报告。</div>
+                        <div class="card-desc">按 Surface 最终拓扑连通域启动独立 HM2019/2022 hmbatch，非阻塞显示进度，并在合并完整结果后一次性自动导入成功网格。</div>
                         <a href="#mod-batch-mesher" class="card-btn">查看使用说明</a>
                     </div>
 
@@ -1476,6 +1476,8 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <li><strong>自动生成 Ruled 连接带</strong>：imprint 后重新取得位置已调整的目标节点；Ruled 第一侧始终使用原始 Nodes 输入，第二侧使用 imprint 后目标节点。两侧节点数量不必一一对应，并将新生成的焊缝网格归类至指定组件。</li>
                             <li><strong>局部失败隔离</strong>：每个闭环都在独立撤销事务中完成即时目标 patch、imprint、后置节点验证和连接带创建。任一阶段失败会回滚并跳过当前闭环，不会退化为整个目标 component 的 imprint，也不会保留部分焊缝。</li>
                             <li><strong>批量性能与可靠性</strong>：原生自由边 PLOTEL 连接关系通过一次 mark 批量读取；每条路径执行前才统一投影全部源节点、一次反查所附着的目标壳单元并扩展两到三层 Elements，避免前一条路径重网格后留下过期目标单元 ID。imprint 后优先采用 HyperMesh 提供的结果节点列表；列表不可用时，通过当前局部 patch 的有界拓扑追踪恢复目标路径。恢复出的整条目标路径直接作为 Ruled 第二侧，不因与源侧节点数不同而拆段。边界遍历、投影与验证等长循环会按固定批次处理界面事件。</li>
+                            <li><strong>FAST_AUTO</strong>：自动识别 T、CONNECT 和搭接候选，用户明确接受后优先通过 <code>EXISTING_EDGE_PATH</code> 直接导入 CQUAD4/CTRIA3；显式开启后可使用受控节点微调或单母单元保守切分。该路径禁止 imprint、ruled 和 automesh，并在任务及每个候选应用前保存恢复快照。</li>
+                            <li><strong>LEGACY_MANUAL</strong>：保留原手动节点路径、局部 imprint 和 ruled/automesh 行为，只有用户明确选择兼容模式时执行。</li>
                             <li><strong>可反馈诊断</strong>：失败会按目标准备、imprint、目标匹配、目标连续性、automesh 或撤销事务分类，显示原因和检查建议，并在任务目录写出 UTF-8 纯文本 <code>mesh_seam_weld_failure_report.txt</code>。反馈问题时同时提供该文件和 <code>operation.log</code> 即可。</li>
                             <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
                         </ul>
@@ -1573,15 +1575,15 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
             <section id="mod-batch-mesher" class="module-section" data-module="batch_mesher">
                 <h1 class="section-title">BatchMesher 自动网格划分</h1>
                 <div class="module-detail">
-                    <div class="detail-header"><div class="detail-title"><span class="card-badge mesh">网格</span><span>HM2019 Surface 拓扑连通域顺序划分</span></div><div class="detail-path-badge">modules/batch_mesher.tcl</div></div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">保存实际 Surface ID，使用 HyperMesh 2019 <code>by attached</code> 提取连通域；焊缝 Surface 与跨 component 拓扑连接不会被拆开。工具不生成参数，也不覆盖 param 内的 washer 规则。</p>
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge mesh">网格</span><span>HM2019/2022 Surface 拓扑连通域并行划分</span></div><div class="detail-path-badge">modules/batch_mesher.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">保存实际 Surface ID，使用 <code>by attached</code> 提取连通域；焊缝 Surface 与跨 component 拓扑连接不会被拆开。2022 的外部 worker 与两进程并发已通过实机调查验证；完整车架复测后，最终聚合改为逐个导入可独立打开的 worker FEM，避免完整 HM 快照之间的冲突。</p>
                     <div class="step-list">
-                        <div class="step-item"><span class="step-num">1</span><div class="step-title">配置并验证</div><div class="step-detail">配置 HM2019 hmbatch.exe，管理 criteria/param 多预设，验证路径及测试无模型启动。</div></div>
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">配置并验证</div><div class="step-detail">配置任一受支持的 HM2019/2022 hmbatch.exe，管理 criteria/param 多预设并执行启动探针；不要求与当前会话版本一致。</div></div>
                         <div class="step-item"><span class="step-num">2</span><div class="step-title">选择并分析</div><div class="step-detail">手选、当前显示或全部 Surfaces；分析后复核大型、孤立及跨 component 连通域。</div></div>
-                        <div class="step-item"><span class="step-num">3</span><div class="step-title">顺序执行</div><div class="step-detail">每个未排除连通域生成一个任务；单一连通域整体执行。当前原生命令结束后才停止后续任务。</div></div>
-                        <div class="step-item"><span class="step-num">4</span><div class="step-title">复核与重试</div><div class="step-detail">查看任务状态、耗时和原始 Tcl 错误；单独重试失败任务并导出 run/result JSON。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">并行后台执行</div><div class="step-detail">每个活动连通域交给隔离 hmbatch，可配置 1–16 个并发进程；当前 HyperMesh 保持响应，进度窗口持续汇总状态与耗时。</div></div>
+                        <div class="step-item"><span class="step-num">4</span><div class="step-title">复核并导入</div><div class="step-detail">查看失败 Component、Surface IDs、原始 Tcl 错误和独立日志；确认后将成功任务汇总的单一 FEM 导入当前模型。</div></div>
                     </div>
-                    <div class="alert-box warning"><div class="alert-content"><h4>执行前保存并复核拓扑</h4><p>运行前会验证 Surface ID 与全模型 Surface 集合。若 trim、缝合等操作保持全部 ID 不变，工具无法可靠感知，必须主动重新分析。当前版本只支持当前会话顺序执行，不做模型拆分、并行或合并。</p></div></div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>完整结果自动导入</h4><p>并行只发生在彼此独立的连通域之间；同一拓扑连通域不会拆开。只要 BatchMesh 新增了 Elements，质量或迭代问题就作为警告而不是失败。worker HM 只作恢复文件；后台在空白模型中用 <code>*feinputwithdata2</code> 和 <code>overwrite_flag=0</code> 聚合各任务 FEM、验证每包单元增量，再保存一个干净的合并 HM。主会话一次性导入该完整结果；导入失败或没有新增单元时整批回滚。</p></div></div>
                 </div>
             </section>
 

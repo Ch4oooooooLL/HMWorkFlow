@@ -282,6 +282,7 @@ proc ::WeldIntegrityCheck::showReview {} {
     foreach spec {
         {isolate "孤立" "Isolate" ::WeldIntegrityCheck::isolateCurrent}
         {highlight "高亮区域" "Highlight Region" ::WeldIntegrityCheck::highlightCurrentRegion}
+        {create "创建焊缝" "Create Weld" {::WeldIntegrityCheck::OpenWeldCreator [::WeldIntegrityCheck::currentPair]}}
         {previous "上一组" "Previous Pair" {::WeldIntegrityCheck::movePair -1}}
         {next "下一组" "Next Pair" {::WeldIntegrityCheck::movePair 1}}
         {complete "完成" "Complete" ::WeldIntegrityCheck::toggleComplete}

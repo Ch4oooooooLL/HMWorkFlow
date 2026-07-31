@@ -16,7 +16,7 @@ proc ::BatchMesher::listIntersection {left right} {
 
 proc ::BatchMesher::surfaceSignature {ids} { return [join [::BatchMesher::uniqIds $ids] ,] }
 
-# HyperMesh 2019's "by attached" method is available on *appendmark.  Repeat
+# HyperMesh 2019/2022 "by attached" is available on *appendmark. Repeat
 # until the mark stabilizes so this remains correct on patch levels where one
 # call expands only one adjacency ring.  Non-target attached surfaces may be
 # traversed, but only target IDs are returned to the task.
@@ -62,9 +62,15 @@ proc ::BatchMesher::buildTasks {groups} {
     foreach group $groups {
         if {[dict get $group excluded]} { continue }
         incr index
+        set componentIds {}
+        set componentNames {}
+        if {[dict exists $group component_ids]} { set componentIds [dict get $group component_ids] }
+        if {[dict exists $group component_names]} { set componentNames [dict get $group component_names] }
         lappend tasks [dict create task_id [format T%03d $index] group_id [dict get $group group_id] \
-            surface_ids [dict get $group surface_ids] surface_count [dict get $group surface_count] status pending \
-            elapsed_seconds "" started_at "" ended_at "" error_message "" log_path ""]
+            surface_ids [dict get $group surface_ids] surface_count [dict get $group surface_count] \
+            component_ids $componentIds component_names $componentNames status pending \
+            elapsed_seconds "" started_at "" ended_at "" error_message "" warning_message "" \
+            packaging_status pending packaging_error "" log_path ""]
     }
     return $tasks
 }
@@ -100,7 +106,7 @@ proc ::BatchMesher::analyzeConnectivity {} {
     if {[llength $groups] == 1} {
         set ui(status_text) [::BatchMesher::txt "当前目标几何属于单一拓扑连通区域；为保持公共边及焊缝连续性，将作为一个整体任务执行。" "The target is one topology-connected region and will run as one task to preserve shared-edge and weld continuity."]
     } else {
-        set ui(status_text) [::BatchMesher::txt "连通性分析完成，将按连通域顺序执行。" "Connectivity analysis completed; groups will run sequentially."]
+        set ui(status_text) [::BatchMesher::txt "连通性分析完成；不同连通域可作为独立后台任务并行执行。" "Connectivity analysis completed; independent groups can run as parallel background tasks."]
     }
     ::BatchMesher::refreshUi
     return $groups

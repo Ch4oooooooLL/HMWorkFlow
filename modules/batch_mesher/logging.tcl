@@ -70,17 +70,24 @@ proc ::BatchMesher::groupJson {group indent} {
 }
 
 proc ::BatchMesher::taskJson {task indent} {
+    set componentNames {}
+    foreach name [dict get $task component_names] { lappend componentNames [::BatchMesher::jsonString $name] }
     return [join [list \
         "$indent{" \
         "$indent  \"task_id\": [::BatchMesher::jsonString [dict get $task task_id]]," \
         "$indent  \"group_id\": [::BatchMesher::jsonString [dict get $task group_id]]," \
         "$indent  \"surface_ids\": [::BatchMesher::jsonIdArray [dict get $task surface_ids]]," \
         "$indent  \"surface_count\": [dict get $task surface_count]," \
+        "$indent  \"component_ids\": [::BatchMesher::jsonIdArray [dict get $task component_ids]]," \
+        "$indent  \"component_names\": \[[join $componentNames ,]\]," \
         "$indent  \"status\": [::BatchMesher::jsonString [dict get $task status]]," \
         "$indent  \"elapsed_seconds\": [::BatchMesher::jsonNumberOrNull [dict get $task elapsed_seconds]]," \
         "$indent  \"started_at\": [::BatchMesher::jsonString [dict get $task started_at]]," \
         "$indent  \"ended_at\": [::BatchMesher::jsonString [dict get $task ended_at]]," \
         "$indent  \"error_message\": [::BatchMesher::jsonString [dict get $task error_message]]," \
+        "$indent  \"warning_message\": [::BatchMesher::jsonString [dict get $task warning_message]]," \
+        "$indent  \"packaging_status\": [::BatchMesher::jsonString [dict get $task packaging_status]]," \
+        "$indent  \"packaging_error\": [::BatchMesher::jsonString [dict get $task packaging_error]]," \
         "$indent  \"log_path\": [::BatchMesher::jsonString [dict get $task log_path]]" \
         "$indent}"] "\n"]
 }
@@ -93,6 +100,8 @@ proc ::BatchMesher::writeRunReport {{final 0}} {
     foreach group $runtime(groups) { lappend groupJson [::BatchMesher::groupJson $group "    "] }
     set taskJson {}
     foreach task $runtime(tasks) { lappend taskJson [::BatchMesher::taskJson $task "    "] }
+    set resultTaskIds {}
+    foreach taskId $runtime(background_task_ids) { lappend resultTaskIds [::BatchMesher::jsonString $taskId] }
     set endTime ""
     set elapsed null
     if {$runtime(run_finished_ms) > 0} {
@@ -110,11 +119,14 @@ proc ::BatchMesher::writeRunReport {{final 0}} {
     set lines [list \
         "{" \
         "  \"run_id\": [::BatchMesher::jsonString $runtime(run_id)]," \
-        "  \"hypermesh_version\": \"2019\"," \
+        "  \"hypermesh_version\": [::BatchMesher::jsonString $ui(HYPERMESH_VERSION)]," \
         "  \"hmbatch_path\": [::BatchMesher::jsonString $ui(HMBATCH_PATH)]," \
         "  \"criteria_path\": [::BatchMesher::jsonString $ui(CRITERIA_PATH)]," \
         "  \"param_path\": [::BatchMesher::jsonString $ui(PARAM_PATH)]," \
         "  \"model_path\": [::BatchMesher::jsonString [::BatchMesher::modelPath]]," \
+        "  \"result_fem_path\": [::BatchMesher::jsonString $runtime(result_fem_path)]," \
+        "  \"result_task_ids\": \[[join $resultTaskIds ,]\]," \
+        "  \"import_status\": [::BatchMesher::jsonString $runtime(import_status)]," \
         "  \"target_surface_count\": [llength $runtime(selected_surfaces)]," \
         "  \"connectivity_group_count\": [llength $runtime(groups)]," \
         "  \"started_at\": [::BatchMesher::jsonString [clock format [expr {$runtime(run_started_ms) / 1000}] -format {%Y-%m-%dT%H:%M:%S}]]," \

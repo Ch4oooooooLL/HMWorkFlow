@@ -4,7 +4,7 @@
   "build_time_utc": "generated-during-packaging",
   "source_commit": "generated-during-packaging",
   "runtime_version": "3.8.10",
-  "supported_hypermesh_versions": ["2019"],
+  "supported_hypermesh_versions": ["2019", "2022"],
   "solver_profiles": ["OptiStruct"],
   "config_schema_version": "2.0"
 }

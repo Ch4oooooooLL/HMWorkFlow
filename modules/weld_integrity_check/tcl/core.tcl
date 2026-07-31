@@ -131,7 +131,11 @@ proc ::WeldIntegrityCheck::runDetection {} {
     ::WeldIntegrityCheck::showReview
 }
 
-# Reserved extension point for future weld realization integration.
 proc ::WeldIntegrityCheck::OpenWeldCreator {pairData} {
-    error [::WeldIntegrityCheck::txt "当前版本仅检查，不自动创建焊缝。" "This version reviews candidates only and does not create welds."]
+    if {![namespace exists ::MeshSeamWeld]} {
+        set modulePath [file join [file dirname $::WeldIntegrityCheck::MODULE_DIR] mesh_seam_weld.tcl]
+        if {[file isfile $modulePath]} { ::HWFlow::sourceUtf8 $modulePath }
+    }
+    if {[llength [info commands ::MeshSeamWeld::openAutoCandidate]] == 0} { error [::WeldIntegrityCheck::txt "无法加载自动壳焊缝创建器。" "Could not load the automatic shell seam creator."] }
+    ::MeshSeamWeld::openAutoCandidate $pairData
 }

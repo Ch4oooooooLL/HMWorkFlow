@@ -1,5 +1,5 @@
 namespace eval ::BatchMesher {
-    variable VERSION "1.0"
+    variable VERSION "2.4"
     variable CONFIG_KEY "batch_mesher"
     variable TASK_STATUSES {pending running completed failed cancelled skipped}
     variable ui
@@ -19,6 +19,36 @@ namespace eval ::BatchMesher {
         run_finished_ms 0
         run_error ""
         last_log ""
+        background_pid ""
+        background_started_ms 0
+        background_after ""
+        background_state_path ""
+        background_task_ids {}
+        background_pending {}
+        background_active {}
+        background_outputs {}
+        background_phase ""
+        background_merge_pid ""
+        background_merge_launcher_pid ""
+        background_merge_dir ""
+        background_merge_stdout ""
+        background_merge_stderr ""
+        background_merge_state_path ""
+        background_snapshot ""
+        background_executable ""
+        background_criteria ""
+        background_param ""
+        background_criteria_mtime 0
+        background_criteria_size 0
+        background_param_mtime 0
+        background_param_size 0
+        background_export_template ""
+        background_release ""
+        background_monitor_status_path ""
+        background_monitor_done_path ""
+        result_fem_path ""
+        import_status ""
+        imported_result_paths {}
     }
 }
 
@@ -41,7 +71,9 @@ proc ::BatchMesher::setDefaults {} {
         CONTINUE_AFTER_FAILURE 1
         AUTO_BACKUP 1
         LARGE_GROUP_RATIO 0.8
-        FUTURE_PARALLEL_WORKERS 1
+        PARALLEL_WORKERS 2
+        BACKGROUND_POLL_MS 500
+        SHOW_CMD_WINDOW 1
         selected_text "No surfaces selected"
         summary_text "Not analyzed"
         status_text "Ready"
@@ -55,7 +87,7 @@ proc ::BatchMesher::loadState {} {
     variable ui
     ::BatchMesher::setDefaults
     set state [::HWFlow::loadState batch_mesher]
-    foreach key {HMBATCH_PATH ACTIVE_PRESET DEFAULT_PRESET CRITERIA_PATH PARAM_PATH PRESETS CONTINUE_AFTER_FAILURE AUTO_BACKUP LARGE_GROUP_RATIO FUTURE_PARALLEL_WORKERS} {
+    foreach key {HMBATCH_PATH ACTIVE_PRESET DEFAULT_PRESET CRITERIA_PATH PARAM_PATH PRESETS CONTINUE_AFTER_FAILURE AUTO_BACKUP LARGE_GROUP_RATIO PARALLEL_WORKERS SHOW_CMD_WINDOW} {
         if {[dict exists $state $key]} { set ui($key) [dict get $state $key] }
     }
     if {[catch {llength $ui(PRESETS)}] || [llength $ui(PRESETS)] == 0} {
@@ -72,7 +104,7 @@ proc ::BatchMesher::loadState {} {
 proc ::BatchMesher::saveState {} {
     variable ui
     set state [dict create]
-    foreach key {HMBATCH_PATH ACTIVE_PRESET DEFAULT_PRESET CRITERIA_PATH PARAM_PATH PRESETS CONTINUE_AFTER_FAILURE AUTO_BACKUP LARGE_GROUP_RATIO FUTURE_PARALLEL_WORKERS} {
+    foreach key {HMBATCH_PATH ACTIVE_PRESET DEFAULT_PRESET CRITERIA_PATH PARAM_PATH PRESETS CONTINUE_AFTER_FAILURE AUTO_BACKUP LARGE_GROUP_RATIO PARALLEL_WORKERS SHOW_CMD_WINDOW} {
         dict set state $key $ui($key)
     }
     ::HWFlow::saveState batch_mesher $state
@@ -196,6 +228,9 @@ proc ::BatchMesher::validateRunConfig {} {
     set param [::BatchMesher::validateReadableFile Parameter $ui(PARAM_PATH) .param]
     if {![string is double -strict $ui(LARGE_GROUP_RATIO)] || $ui(LARGE_GROUP_RATIO) <= 0 || $ui(LARGE_GROUP_RATIO) > 1} {
         error [::BatchMesher::txt "大型连通域阈值必须在 0 到 1 之间。" "Large-group ratio must be between 0 and 1."]
+    }
+    if {![string is integer -strict $ui(PARALLEL_WORKERS)] || $ui(PARALLEL_WORKERS) < 1 || $ui(PARALLEL_WORKERS) > 16} {
+        error [::BatchMesher::txt "并行 hmbatch 数量必须是 1 到 16 的整数。" "Parallel hmbatch count must be an integer from 1 to 16."]
     }
     set warnings {}
     set index [::BatchMesher::findPresetIndex $ui(ACTIVE_PRESET)]
