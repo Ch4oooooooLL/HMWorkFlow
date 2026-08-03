@@ -72,6 +72,14 @@ namespace eval ::MeshSeamWeld {
     variable ui
     array set ui {}
 
+    # The most recent completed weld batch can be restored as one user-facing
+    # operation.  Keep the snapshot outside the model so the native history
+    # entries used for per-path failure isolation remain independent.
+    variable lastUndoSnapshot ""
+    variable lastUndoSummary ""
+    variable lastUndoCreatedAt ""
+    variable undoInProgress 0
+
     # Per-run caches.  Large node paths previously repeated the same database
     # queries for element connectivity, node adjacency, and coordinates.
     variable elemNodesCache
@@ -191,6 +199,93 @@ proc ::MeshSeamWeld::saveState {} {
     if {[llength [info commands ::HWFlow::saveArrayState]] > 0} {
         ::HWFlow::saveArrayState mesh_seam_weld ::MeshSeamWeld::cfg
     }
+}
+
+proc ::MeshSeamWeld::saveUndoSnapshot {path} {
+    file mkdir [file dirname $path]
+    catch {hm_answernext yes}
+    if {[catch {uplevel #0 [list *writefile [file nativename $path] 1]} err opts]} {
+        return -options $opts $err
+    }
+    if {![file isfile $path] || [file size $path] == 0} {
+        error "HyperMesh did not create a valid mesh-seam undo snapshot"
+    }
+    return [file normalize $path]
+}
+
+proc ::MeshSeamWeld::undoAvailable {} {
+    variable lastUndoSnapshot
+    variable undoInProgress
+    return [expr {!$undoInProgress && $lastUndoSnapshot ne "" && [file isfile $lastUndoSnapshot] && [file size $lastUndoSnapshot] > 0}]
+}
+
+proc ::MeshSeamWeld::registerUndoSnapshot {path summary} {
+    variable lastUndoSnapshot
+    variable lastUndoSummary
+    variable lastUndoCreatedAt
+    if {![file isfile $path] || [file size $path] == 0} {
+        error "Cannot register missing mesh-seam undo snapshot: $path"
+    }
+    set lastUndoSnapshot [file normalize $path]
+    set lastUndoSummary $summary
+    set lastUndoCreatedAt [clock seconds]
+    return $lastUndoSnapshot
+}
+
+proc ::MeshSeamWeld::clearUndoRecord {} {
+    variable lastUndoSnapshot
+    variable lastUndoSummary
+    variable lastUndoCreatedAt
+    set lastUndoSnapshot ""
+    set lastUndoSummary ""
+    set lastUndoCreatedAt ""
+}
+
+proc ::MeshSeamWeld::restoreUndoSnapshot {} {
+    variable lastUndoSnapshot
+    if {$lastUndoSnapshot eq "" || ![file isfile $lastUndoSnapshot] || [file size $lastUndoSnapshot] == 0} {
+        error [::HWFlow::txt "没有可撤回的网格焊缝操作。" "There is no completed mesh-seam operation to undo."]
+    }
+    catch {hm_answernext yes}
+    if {[catch {uplevel #0 [list *readfile [file nativename $lastUndoSnapshot] 0]} err opts]} {
+        return -options $opts $err
+    }
+    catch {::HWFlow::refreshBrowser}
+    return $lastUndoSnapshot
+}
+
+proc ::MeshSeamWeld::undoLast {} {
+    variable lastUndoSnapshot
+    variable lastUndoSummary
+    variable undoInProgress
+    if {![::MeshSeamWeld::undoAvailable]} {
+        tk_messageBox -icon info -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] \
+            -message [::HWFlow::txt "没有可撤回的网格焊缝操作。" "There is no completed mesh-seam operation to undo."]
+        return 0
+    }
+    set detail $lastUndoSummary
+    if {$detail eq ""} {
+        set detail [::HWFlow::txt "最近一次网格焊缝批次" "the most recent mesh-seam batch"]
+    }
+    set answer [tk_messageBox -type yesno -icon question \
+        -title [::HWFlow::txt "撤回网格焊缝" "Undo Mesh Seam Weld"] \
+        -message [::HWFlow::txt \
+            "确定撤回$detail吗？这会恢复该批次开始前的模型状态，并覆盖该批次之后对模型所做的修改。" \
+            "Undo $detail? This restores the model state captured before that batch and overwrites model changes made afterwards."]]
+    if {$answer ne "yes"} { return 0 }
+    set undoInProgress 1
+    set code [catch {::MeshSeamWeld::restoreUndoSnapshot} err]
+    set undoInProgress 0
+    if {$code} {
+        tk_messageBox -icon error -title [::HWFlow::txt "撤回失败" "Undo Failed"] \
+            -message [::HWFlow::txt "网格焊缝撤回失败，原撤回点仍保留：\n$err" \
+                "Mesh seam weld undo failed; the undo point was retained:\n$err"]
+        return 0
+    }
+    ::MeshSeamWeld::clearUndoRecord
+    tk_messageBox -icon info -title [::HWFlow::txt "撤回完成" "Undo Complete"] \
+        -message [::HWFlow::txt "最近一次网格焊缝批次已撤回。" "The most recent mesh-seam batch was undone."]
+    return 1
 }
 
 proc ::MeshSeamWeld::centerWindow {w} {
@@ -4640,7 +4735,6 @@ proc ::MeshSeamWeld::runAction {} {
         tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "目标组件中没有可用网格单元。" "Target components contain no usable mesh elements."]
         return
     }
-    ::MeshSeamWeld::clearFailureMarkerComponent
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
@@ -4650,10 +4744,18 @@ proc ::MeshSeamWeld::runAction {} {
 
     set failureReportPath ""
     set sourceComponentIds {}
+    set batchTaskDir ""
+    set batchLogPath ""
+    set undoSnapshot ""
     set code [catch {
-        set batchTaskDir ""
-        set batchLogPath ""
         set batchStarted [clock milliseconds]
+        set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
+        set batchTaskDir [dict get $batchWorkspace task_dir]
+        set batchLogPath [file join $batchTaskDir operation.log]
+        set undoSnapshot [file join $batchTaskDir state before_manual_mesh_seam_weld.hm]
+        ::MeshSeamWeld::saveUndoSnapshot $undoSnapshot
+        ::MeshSeamWeld::clearUndoRecord
+        ::MeshSeamWeld::clearFailureMarkerComponent
         set prepareStarted [clock milliseconds]
         if {$closedSeedMode} {
             set sourceComponentIds [::MeshSeamWeld::componentIdsFromNodes $selectedNodes]
@@ -4680,9 +4782,6 @@ proc ::MeshSeamWeld::runAction {} {
             set sourcePaths [dict get $nativeSelection paths]
             set internalSingleNode [dict get $nativeSelection internal_single_node]
             set boundaryTraceMs [expr {[clock milliseconds] - $boundaryTraceStarted}]
-            set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
-            set batchTaskDir [dict get $batchWorkspace task_dir]
-            set batchLogPath [file join $batchTaskDir operation.log]
             set weldJobs [::MeshSeamWeld::prepareWeldJobs \
                 $sourcePaths $targetComps $progressOpened]
             set normalizedJobs {}
@@ -4708,9 +4807,6 @@ proc ::MeshSeamWeld::runAction {} {
                 error [::HWFlow::txt "没有识别到有效闭合自由边。" "No valid closed free-edge loop was found."]
             }
         } else {
-            set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
-            set batchTaskDir [dict get $batchWorkspace task_dir]
-            set batchLogPath [file join $batchTaskDir operation.log]
             set sourcePaths [list $selectedNodes]
             set weldJobs [::MeshSeamWeld::prepareWeldJobs $sourcePaths $targetComps $progressOpened]
         }
@@ -4832,6 +4928,7 @@ proc ::MeshSeamWeld::runAction {} {
     } err]
 
     if {$code} {
+        ::MeshSeamWeld::clearUndoRecord
         if {$batchTaskDir eq ""} {
             catch {
                 set fatalWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
@@ -4879,6 +4976,19 @@ proc ::MeshSeamWeld::runAction {} {
     set seamCompNames [::MeshSeamWeld::uniq $allSeamCompNames]
     set failedCount [llength $failureRecords]
     set successCount [expr {[llength $sourcePaths] - $failedCount}]
+    set undoRegistered 0
+    if {$successCount > 0 && $undoSnapshot ne ""} {
+        if {![catch {
+            ::MeshSeamWeld::registerUndoSnapshot $undoSnapshot \
+                [::HWFlow::txt \
+                    "最近一次网格焊缝批次（成功路径 $successCount）" \
+                    "the most recent mesh-seam batch ($successCount successful paths)"]
+        } undoRegisterErr]} {
+            set undoRegistered 1
+        } else {
+            ::HybridCore::log ERROR "mesh seam weld undo registration failed error=$undoRegisterErr"
+        }
+    }
     set plannedSourceNodes [::MeshSeamWeld::uniq [concat {*}$sourcePaths]]
     set msg [::HWFlow::txt \
         "网格焊缝完成。\n源选择模式：$sourceSelectionMode\n边界/路径数：[llength $sourcePaths]\n规划源节点：[llength $plannedSourceNodes]\n成功路径源节点：[llength $allSourceNodes]\n源组件：[llength $sourceCompIds]\n目标组件：[llength $targetComps]\n焊缝组件：[join $seamCompNames {, }]\n焊缝网格尺寸：$cfg(weld_mesh_size)\nimprint 目标路径节点：[llength $allImprintNodes]\n目标路径节点：[llength $allTargetNodes]\n新建焊缝单元：[llength $allWeldElems]" \
@@ -4902,6 +5012,11 @@ proc ::MeshSeamWeld::runAction {} {
     append msg [::HWFlow::txt \
         "\n性能日志：$batchLogPath" \
         "\nPerformance log: $batchLogPath"]
+    if {$undoRegistered} {
+        append msg [::HWFlow::txt \
+            "\n可撤回：可在工具箱的“网格焊缝”行点击“撤回”，恢复本次批次开始前的模型状态。" \
+            "\nUndo available: click “Undo” on the Mesh Seam Weld row in the toolkit to restore the state before this batch."]
+    }
     catch {::HybridCore::closeLog}
     tk_messageBox -icon $completionIcon -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $msg
 }

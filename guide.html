@@ -1478,6 +1478,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <li><strong>批量性能与可靠性</strong>：原生自由边 PLOTEL 连接关系通过一次 mark 批量读取；每条路径执行前才统一投影全部源节点、一次反查所附着的目标壳单元并扩展两到三层 Elements，避免前一条路径重网格后留下过期目标单元 ID。imprint 后优先采用 HyperMesh 提供的结果节点列表；列表不可用时，通过当前局部 patch 的有界拓扑追踪恢复目标路径。恢复出的整条目标路径直接作为 Ruled 第二侧，不因与源侧节点数不同而拆段。边界遍历、投影与验证等长循环会按固定批次处理界面事件。</li>
                             <li><strong>FAST_AUTO</strong>：自动识别 T、CONNECT 和搭接候选，用户明确接受后优先通过 <code>EXISTING_EDGE_PATH</code> 直接导入 CQUAD4/CTRIA3；显式开启后可使用受控节点微调或单母单元保守切分。该路径禁止 imprint、ruled 和 automesh，并在任务及每个候选应用前保存恢复快照。</li>
                             <li><strong>LEGACY_MANUAL</strong>：保留原手动节点路径、局部 imprint 和 ruled/automesh 行为，只有用户明确选择兼容模式时执行。</li>
+                            <li><strong>批次撤回</strong>：成功完成的手动或自动批次会保存一次批次前快照。回到工具箱，在“网格焊缝”行点击 <strong>“撤回”</strong> 可一次恢复该批次开始前的模型状态；撤回会覆盖该批次之后对模型所做的修改。</li>
                             <li><strong>可反馈诊断</strong>：失败会按目标准备、imprint、目标匹配、目标连续性、automesh 或撤销事务分类，显示原因和检查建议，并在任务目录写出 UTF-8 纯文本 <code>mesh_seam_weld_failure_report.txt</code>。反馈问题时同时提供该文件和 <code>operation.log</code> 即可。</li>
                             <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
                         </ul>
@@ -1505,6 +1506,11 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                                 <span class="step-num">4</span>
                                 <div class="step-title">配置生成参数</div>
                                 <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐路径准备当前目标网格的两到三层局部 Elements patch，以原始节点列表和该 patch 执行 <code>imprint_nodelist</code>；随后重新获取 imprint 后目标节点并校正方向与闭环起点。最后把原始节点列表作为 Ruled 第一侧、目标节点作为第二侧直接建带。两侧节点数允许不同；闭合路径会显式创建首尾封口。</div>
+                            </div>
+                            <div class="step-item">
+                                <span class="step-num">5</span>
+                                <div class="step-title">需要时撤回最近批次</div>
+                                <div class="step-detail">回到工具箱主面板，在 <strong>“网格焊缝”</strong> 所在行点击 <strong>“撤回”</strong> 并确认。撤回只保留最近一次成功批次，并会恢复该批次前的完整模型状态。</div>
                             </div>
                         </div>
                     </div>

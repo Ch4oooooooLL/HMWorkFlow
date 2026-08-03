@@ -86,10 +86,11 @@ namespace eval ::HWToolkit {
             group    "Mesh"
             label_zh "网格焊缝"
             label_en "Mesh Seam Weld"
-            desc_zh  "选择已有网格节点路径并投影到目标组件，创建焊缝连接带。"
-            desc_en  "Select an existing mesh node path, project to target components, and create a weld strip."
+            desc_zh  "选择已有网格节点路径并投影到目标组件，创建焊缝连接带；支持撤回最近一次批次。"
+            desc_en  "Select an existing mesh node path, project to target components, create a weld strip, and undo the most recent batch."
             proc     "::MeshSeamWeld::runAction"
             settings_proc "::MeshSeamWeld::runSettings"
+            undo_proc "::MeshSeamWeld::undoLast"
         }
         batch_property_assignment {
             group    "Mesh"
@@ -447,10 +448,16 @@ proc ::HWToolkit::showPanel {} {
             ::HWFlow::uiWidget button $row.settings -text [::HWFlow::txt "设置" "Settings"] -width 10 -command [list ::HWToolkit::settingsModule $key]
             set shortcutText [::HWToolkit::shortcutText $key]
             ::HWFlow::uiWidget button $row.shortcut -text $shortcutText -width 16 -command [list ::HWShortcut::showForModule $key]
+            set actionColumn 3
+            if {[dict exists $info undo_proc]} {
+                ::HWFlow::uiWidget button $row.undo -text [::HWFlow::txt "撤回" "Undo"] -width 10 -command [dict get $info undo_proc]
+                set actionColumn 4
+                grid $row.undo -row 0 -column 3 -sticky n -padx {0 6}
+            }
             grid $row.run -row 0 -column 0 -sticky nw -padx {0 8}
             grid $row.desc -row 0 -column 1 -sticky new -padx {0 8}
             grid $row.settings -row 0 -column 2 -sticky n -padx {0 6}
-            grid $row.shortcut -row 0 -column 3 -sticky n
+            grid $row.shortcut -row 0 -column $actionColumn -sticky n
             grid columnconfigure $row 1 -weight 1
             grid $row -row $bodyRow -column 0 -sticky ew -pady 4
             incr bodyRow

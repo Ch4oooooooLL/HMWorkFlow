@@ -72,6 +72,37 @@ class SeamTests(unittest.TestCase):
         body=workflow.split("proc ::MeshSeamWeld::processWeldPath",1)[1]
         self.assertIn("processWeldPathTcl",body)
         self.assertNotIn("processWeldPathPython",body)
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_tcl_mesh_seam_undo_record_registers_and_restores_one_batch(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("proc hm_answernext {args} {}; proc *readfile {path mode} {set ::undoReadPath $path}")
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot=Path(directory)/"before.hm"
+            snapshot.write_text("snapshot",encoding="ascii")
+            script="""
+set snapshot {%s}
+::MeshSeamWeld::registerUndoSnapshot $snapshot {batch summary}
+set available_before [::MeshSeamWeld::undoAvailable]
+::MeshSeamWeld::restoreUndoSnapshot
+set available_after_restore [::MeshSeamWeld::undoAvailable]
+""" % snapshot.as_posix()
+            interp.eval(script)
+            self.assertEqual(interp.eval("set available_before"),"1")
+            self.assertEqual(interp.eval("set undoReadPath").replace("\\","/"),snapshot.as_posix())
+            self.assertEqual(interp.eval("set available_after_restore"),"1")
+            interp.eval("::MeshSeamWeld::clearUndoRecord")
+            self.assertEqual(interp.eval("::MeshSeamWeld::undoAvailable"),"0")
+    def test_mesh_seam_toolkit_exposes_batch_undo_entrypoint(self):
+        core=(ROOT/"hw_toolkit_core.tcl").read_text(encoding="utf-8")
+        self.assertIn('undo_proc "::MeshSeamWeld::undoLast"',core)
+        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
+        self.assertIn("saveUndoSnapshot",module)
+        self.assertIn("registerUndoSnapshot",module)
+        self.assertIn("before_manual_mesh_seam_weld.hm",module)
+        auto=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"auto_workflow.tcl").read_text(encoding="utf-8")
+        self.assertIn("dict get $execution snapshot",auto)
+        self.assertIn("registerUndoSnapshot",auto)
     def test_all_free_edge_seed_counts_use_tcl_without_python_fallback(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
