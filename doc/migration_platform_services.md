@@ -8,7 +8,7 @@ OptiStruct、`mm_N_s_tonne`。
 
 `config.yaml` 的 `project` 段明确声明求解器和基本单位。任何会修改模型的工具入口会先
 执行统一预检，并返回 `PASS`、`WARNING` 或 `BLOCKED`。切换项目单位制时必须同时更新
-各单位字段，核查 `config/materials.txt` 中的工程量，然后重新设置：
+各单位字段，然后重新设置：
 
 ```yaml
 project:

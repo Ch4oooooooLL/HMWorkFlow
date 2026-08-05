@@ -181,6 +181,224 @@ proc ::hmtoolkit::seam::candidate::path_topology {lineIds endpointProvider {tole
     return [dict create kind $kind components $components end_nodes $ends branch_nodes $branches closed $closed]
 }
 
+# Return -1, 0 or 1 using a stable geometric ordering.  A coordinate-based
+# start point makes the result independent of mark/selection order.
+proc ::hmtoolkit::seam::candidate::compare_points {a b} {
+    for {set axis 0} {$axis < 3} {incr axis} {
+        set av [expr {double([lindex $a $axis])}]
+        set bv [expr {double([lindex $b $axis])}]
+        if {$av < $bv} { return -1 }
+        if {$av > $bv} { return 1 }
+    }
+    return 0
+}
+
+proc ::hmtoolkit::seam::candidate::canonical_node {nodeIds nodes} {
+    set selected [lindex $nodeIds 0]
+    foreach nodeId [lrange $nodeIds 1 end] {
+        if {[::hmtoolkit::seam::candidate::compare_points \
+            [lindex $nodes $nodeId] [lindex $nodes $selected]] < 0} {
+            set selected $nodeId
+        }
+    }
+    return $selected
+}
+
+# Convert an arbitrary list of geometry line IDs into one continuous path.
+# The returned line order follows the returned point order.  HyperMesh uses
+# the order of *createlist lines when constructing a ruled surface, so passing
+# mark order through unchanged can connect non-neighbouring segments and twist
+# the result.
+proc ::hmtoolkit::seam::candidate::ordered_line_path {lineIds endpointProvider {tolerance ""}} {
+    if {$tolerance eq ""} { set tolerance [::hmtoolkit::seam::config::get endpoint_merge_tolerance] }
+    if {[llength $lineIds] == 0} { error "A line path must not be empty" }
+    if {[llength [lsort -integer -unique $lineIds]] != [llength $lineIds]} {
+        error "A line path must not contain duplicate lines"
+    }
+
+    set nodes {}
+    set edges {}
+    array set incident {}
+    array set degree {}
+    foreach lineId $lineIds {
+        set samples [uplevel #0 [list $endpointProvider $lineId]]
+        if {[llength $samples] < 2} { error "Line $lineId has no readable endpoints" }
+        set pair {}
+        foreach point [list [lindex $samples 0] [lindex $samples end]] {
+            set nodeId [::hmtoolkit::seam::candidate::node_for_point $point $nodes $tolerance]
+            if {$nodeId < 0} {
+                lappend nodes $point
+                set nodeId [expr {[llength $nodes]-1}]
+            }
+            lappend pair $nodeId
+        }
+        set a [lindex $pair 0]
+        set b [lindex $pair 1]
+        if {$a == $b} { error "Line $lineId has coincident endpoints within the merge tolerance" }
+        set edgeIndex [llength $edges]
+        lappend edges [list $lineId $a $b]
+        foreach nodeId [list $a $b] {
+            if {![info exists incident($nodeId)]} {
+                set incident($nodeId) {}
+                set degree($nodeId) 0
+            }
+            lappend incident($nodeId) $edgeIndex
+            incr degree($nodeId)
+            if {$degree($nodeId) > 2} { error "Line path is branched at a shared endpoint" }
+        }
+    }
+
+    set ends {}
+    foreach nodeId [array names degree] {
+        if {$degree($nodeId) == 1} { lappend ends $nodeId }
+    }
+    if {[llength $ends] == 2} {
+        set closed 0
+        set start [::hmtoolkit::seam::candidate::canonical_node $ends $nodes]
+    } elseif {[llength $ends] == 0} {
+        set closed 1
+        set start [::hmtoolkit::seam::candidate::canonical_node [array names degree] $nodes]
+    } else {
+        error "Lines contain disconnected paths or incomplete endpoint pairs"
+    }
+
+    set current $start
+    set orderedLines {}
+    set orderedNodeIds [list $start]
+    array set used {}
+    while {[llength $orderedLines] < [llength $edges]} {
+        set choices {}
+        foreach edgeIndex $incident($current) {
+            if {![info exists used($edgeIndex)]} { lappend choices $edgeIndex }
+        }
+        if {[llength $choices] == 0} { break }
+        set chosen [lindex $choices 0]
+        # A closed path has two choices only for its first edge.  Pick the
+        # geometrically canonical direction so shuffled input is deterministic.
+        if {[llength $choices] > 1} {
+            foreach edgeIndex [lrange $choices 1 end] {
+                set edge [lindex $edges $edgeIndex]
+                set other [expr {[lindex $edge 1] == $current ? [lindex $edge 2] : [lindex $edge 1]}]
+                set selectedEdge [lindex $edges $chosen]
+                set selectedOther [expr {[lindex $selectedEdge 1] == $current ? [lindex $selectedEdge 2] : [lindex $selectedEdge 1]}]
+                set comparison [::hmtoolkit::seam::candidate::compare_points \
+                    [lindex $nodes $other] [lindex $nodes $selectedOther]]
+                if {$comparison < 0 || ($comparison == 0 && [lindex $edge 0] < [lindex $selectedEdge 0])} {
+                    set chosen $edgeIndex
+                }
+            }
+        }
+        set used($chosen) 1
+        set edge [lindex $edges $chosen]
+        lappend orderedLines [lindex $edge 0]
+        set current [expr {[lindex $edge 1] == $current ? [lindex $edge 2] : [lindex $edge 1]}]
+        lappend orderedNodeIds $current
+    }
+    if {[llength $orderedLines] != [llength $edges]} {
+        error "Lines contain disconnected paths"
+    }
+    if {$closed && $current != $start} { error "Closed line path traversal did not return to its start" }
+
+    set orderedPoints {}
+    foreach nodeId $orderedNodeIds { lappend orderedPoints [lindex $nodes $nodeId] }
+    return [dict create lines $orderedLines points $orderedPoints closed $closed]
+}
+
+proc ::hmtoolkit::seam::candidate::reverse_line_path {path} {
+    dict set path lines [lreverse [dict get $path lines]]
+    dict set path points [lreverse [dict get $path points]]
+    return $path
+}
+
+proc ::hmtoolkit::seam::candidate::closed_line_path_variant {path start reverse} {
+    set sourceLines [dict get $path lines]
+    set sourcePoints [lrange [dict get $path points] 0 end-1]
+    set count [llength $sourceLines]
+    set lines {}
+    set points {}
+    for {set offset 0} {$offset < $count} {incr offset} {
+        if {$reverse} {
+            set pointIndex [expr {($start-$offset+$count)%$count}]
+            set lineIndex [expr {($start-$offset-1+$count)%$count}]
+        } else {
+            set pointIndex [expr {($start+$offset)%$count}]
+            set lineIndex $pointIndex
+        }
+        lappend points [lindex $sourcePoints $pointIndex]
+        lappend lines [lindex $sourceLines $lineIndex]
+    }
+    lappend points [lindex $points 0]
+    return [dict create lines $lines points $points closed 1]
+}
+
+proc ::hmtoolkit::seam::candidate::closed_path_alignment_score {firstPath secondPath} {
+    set firstPoints [lrange [dict get $firstPath points] 0 end-1]
+    set secondPoints [lrange [dict get $secondPath points] 0 end-1]
+    set firstCount [llength $firstPoints]
+    set secondCount [llength $secondPoints]
+    if {$firstCount == $secondCount} {
+        set score 0.0
+        for {set index 0} {$index < $firstCount} {incr index} {
+            set score [expr {$score+[::hmtoolkit::seam::candidate::distance \
+                [lindex $firstPoints $index] [lindex $secondPoints $index]]}]
+        }
+        return $score
+    }
+    # With different segmentation counts, align the seam break and both local
+    # directions.  HyperMesh can interpolate the remaining unequal segments.
+    return [expr {
+        [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 0] [lindex $secondPoints 0]] +
+        [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 1] [lindex $secondPoints 1]] +
+        [::hmtoolkit::seam::candidate::distance [lindex $firstPoints end] [lindex $secondPoints end]]}]
+}
+
+# Order both paths and make their start/end correspondence agree.  This is the
+# final preparation step before *linearsurfacebetweenlines.
+proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second {endpointProvider ::hmtoolkit::seam::candidate::line_points} {tolerance ""}} {
+    set firstPath [::hmtoolkit::seam::candidate::ordered_line_path $first $endpointProvider $tolerance]
+    set secondPath [::hmtoolkit::seam::candidate::ordered_line_path $second $endpointProvider $tolerance]
+    if {[dict get $firstPath closed] != [dict get $secondPath closed]} {
+        error "Both edge groups must either be open paths or closed paths"
+    }
+
+    # Open paths have an unambiguous pairing: choose the orientation with the
+    # shorter pair of cross-path end connections.
+    if {![dict get $firstPath closed]} {
+        set firstPoints [dict get $firstPath points]
+        set secondPoints [dict get $secondPath points]
+        set same [expr {
+            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 0] [lindex $secondPoints 0]] +
+            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints end] [lindex $secondPoints end]]}]
+        set reversed [expr {
+            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 0] [lindex $secondPoints end]] +
+            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints end] [lindex $secondPoints 0]]}]
+        if {$reversed < $same} {
+            set secondPath [::hmtoolkit::seam::candidate::reverse_line_path $secondPath]
+        }
+    } else {
+        # A closed path has neither a natural start nor a natural direction.
+        # Try every cyclic start in both directions and keep the correspondence
+        # with the shortest cross-path connections.
+        set bestPath ""
+        set bestScore ""
+        set count [llength [dict get $secondPath lines]]
+        for {set start 0} {$start < $count} {incr start} {
+            foreach reverse {0 1} {
+                set variant [::hmtoolkit::seam::candidate::closed_line_path_variant \
+                    $secondPath $start $reverse]
+                set score [::hmtoolkit::seam::candidate::closed_path_alignment_score \
+                    $firstPath $variant]
+                if {$bestScore eq "" || $score < $bestScore} {
+                    set bestScore $score
+                    set bestPath $variant
+                }
+            }
+        }
+        set secondPath $bestPath
+    }
+    return [dict create first_lines [dict get $firstPath lines] second_lines [dict get $secondPath lines]]
+}
+
 proc ::hmtoolkit::seam::candidate::extract_pair {sourceSurf targetSurf sourceComponents targetComponents candidateId} {
     set tolerance [::hmtoolkit::seam::config::get distance_tolerance]
     set sourceSurfs [list $sourceSurf]

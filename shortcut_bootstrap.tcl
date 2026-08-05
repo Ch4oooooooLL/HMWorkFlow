@@ -5,7 +5,19 @@
 # Silent startup entry. This file must not open HMWorkFlow windows.
 # ============================================================================
 
-if {[catch {
+set hmworkflowBatchWorkerBootstrap [expr {
+    [info exists ::env(HMWORKFLOW_BATCH_WORKER)] &&
+    [string trim $::env(HMWORKFLOW_BATCH_WORKER)] eq "1"
+}]
+
+if {$hmworkflowBatchWorkerBootstrap} {
+    # BatchMesher hmbatch processes source their dedicated launcher Tcl.  They
+    # do not need UI shortcuts or the warm Python worker from an interactive
+    # HyperMesh session.  Skipping both also prevents an installed older copy
+    # of HMWorkFlow from populating the worker interpreter before its explicit
+    # launcher is sourced.
+    catch {puts "HMWorkFlow interactive bootstrap skipped for BatchMesher worker."}
+} elseif {[catch {
     set hmworkflowRoot [file dirname [file normalize [info script]]]
     set hmworkflowCore [file join $hmworkflowRoot "hw_toolkit_core.tcl"]
     if {![file exists $hmworkflowCore]} {
@@ -41,3 +53,5 @@ if {[catch {
     catch {puts "HMWorkFlow shortcut initialization failed:"}
     catch {puts $hmworkflowShortcutError}
 }
+
+unset hmworkflowBatchWorkerBootstrap

@@ -6,12 +6,12 @@ HMWorkFlow 是以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 20
 
 | 工作阶段 | 主要功能 | 解决的问题 |
 | --- | --- | --- |
-| 几何准备 | 组件分类与命名、材料标识、中面抽取、倒角/圆角/沉台清理、几何焊缝 | 统一模型结构和命名，减少逐件整理、手动抽中面和重复补面的工作量。 |
+| 几何准备 | 统一组件命名、中面抽取、倒角/圆角/沉台清理、几何焊缝 | 统一模型命名，减少手动抽中面和重复补面的工作量。 |
 | 网格处理 | 钣金 BatchMesh 与 washer、铸件 TetraMesh、网格焊缝、批量 Property、局部网格优化 | 将网格生成、属性赋予和局部质量修复串成可配置流程，只处理需要修改的区域。 |
 | 连接创建 | 壳孔/实体孔 RIGIDS、CBEAM/CBAR 螺栓、CBUSH、接触、打胶、实体焊缝 | 自动识别连接位置和几何关系，批量生成可用于 OptiStruct 的连接实体。 |
 | 质量复核 | 重复连接检查、结果回读校验、网格焊缝完整性检查、候选逐项审查 | 在修改模型前后保留明确的确认与校验环节，降低漏焊、重复创建和错误连接风险。 |
 
-典型工作流是：整理组件与材料 → 抽取/清理几何 → 生成并优化网格 → 创建孔连接、螺栓、焊缝、接触或打胶 → 执行完整性复核。各模块也可独立运行，不要求必须走完整流程。
+典型工作流是：确认组件基础命名 → 抽取/清理几何 → 生成并优化网格 → 在后续网格模块识别材料并赋予 Property → 创建孔连接、螺栓、焊缝、接触或打胶 → 执行完整性复核。各模块也可独立运行，不要求必须走完整流程。
 
 ## 相较 HyperMesh 原生手动操作的提升
 
@@ -19,7 +19,7 @@ HMWorkFlow 是以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 20
 
 | 工作内容 | HyperMesh 原生手动操作 | HMWorkFlow 自动化方式 | 主要效率提升 |
 | --- | --- | --- | --- |
-| 组件命名、材料与 Property | 逐个判断组件类型、修改名称、查找材料、创建或选择 Property，再逐个赋予。 | 扫描全部组件，从名称解析类型、厚度和材料，批量创建/复用 PSHELL；异常项单独生成复核清单。 | 人工工作量由“逐组件处理”降为“一次执行 + 只检查异常项”。 |
+| 组件命名、材料与 Property | 逐个修改名称、查找材料、创建或选择 Property，再逐个赋予。 | 扫描全部组件，从统一名称解析厚度和材料，批量创建/复用 PSHELL；异常项单独生成复核清单。 | 人工工作量由“逐组件处理”降为“一次执行 + 只检查异常项”。 |
 | 中面与几何清理 | 反复选择组件或局部面，设置参数，执行后再手动重命名和整理 collector。 | 保留原生几何能力，并自动读取厚度、连续处理局部特征、命名输出、归入 assembly，单次失败可撤销后继续。 | 省去重复设置、命名、归类和失败后的流程重启。 |
 | 壳孔/实体孔 RIGIDS | 逐孔识别边界或圆柱面，创建中心节点，选择从属节点并创建 RBE2/RIGIDS。 | 对选中组件批量识别有效孔、中心和节点环，自动跳过或合并重复连接并按源组件输出。 | 人工创建轮次由“孔数量 H 次”降为“每批 1 次”。 |
 | CBEAM/CBAR 螺栓 | 逐组查找 RIGIDS 中心节点、判断方向和孔径，再逐段创建并配置属性。 | 自动分组、排序和配对中心节点，按孔径创建/复用 PBEAM/PBAR，并批量生成连接段。 | 人工创建轮次由“连接段数量 S 次”降为“每批 1 次”。 |
@@ -55,7 +55,7 @@ HMWorkFlow 是以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 20
 
 ### 除效率之外的改进
 
-- **一致性**：统一命名、材料库、Property 规则、输出 collector、配置文件和 OptiStruct 工程上下文，减少不同操作者之间的结果差异。
+- **一致性**：统一命名、材料实体匹配、Property 规则、输出 collector、配置文件和 OptiStruct 工程上下文，减少不同操作者之间的结果差异。
 - **安全性**：增加求解器/单位制预检、重复项检测、候选预览、结果回读、失败隔离、任务快照和局部回滚。
 - **可追溯性**：保留任务目录、日志、候选结果和人工审查状态，便于复核问题来源。
 - **使用体验**：提供中英文界面、快捷键、进度/取消、窗口切换、Model Browser 刷新和用户状态保存。
@@ -141,43 +141,35 @@ HyperMesh 2019 会在读取 `hmcustom.tcl` 时直接恢复快捷键；HyperMesh 
 
 ### 2.1 准备项目配置
 
-1. 检查 `config/materials.txt`，确认材料 key、显示名和材料参数符合当前项目。
+1. 确认源组件保留 `Vxx_件号` 基础名称；中面完成后可运行 `读取 BOM 表` 模块，当前版本会给 `MIDSURFED` Assembly 中所有 component 统一赋予 Q355。
 2. 在 `BatchMesher 自动网格划分` 中配置受支持的 HyperMesh 2019 或 2022 `hmbatch.exe` 及用户维护的 `.criteria` / `.param` 预设；hmbatch 可以与当前主会话版本不同，washer 行为完全由 `.param` 文件控制。
 3. 检查 `config/casting_mesh_rules.txt`，确认铸件三角面网格、质量迭代和 TetraMesh 参数。
 4. 检查 `config/seam_rules.txt`、`config/geometry_cleanup_rules.txt`、`config/contact_rules.txt`，确认焊缝面、几何清理和接触默认参数。
 
 这些配置文件都是 `|` 分隔文本，模块面板中修改参数后，部分模块会把最新 UI 状态保存到 `config/*_state.txt`。
 
-### 2.2 建立组件命名和材料基础
+### 2.2 建立组件基础
 
-先在 `Organize` 中完成模型基础整理：
-
-1. 运行 `Component Classification`。
-2. 选择 `SHELL`、`SOLID` 或 `CASTING`，再选择对应 component。
-3. 点击 `应用类型`，组件会被重命名为 `CATEGORY_NAME`，例如 `SHELL_BRACKET`。
-4. 运行 `Material Assignment`。
-5. 从材料库选择材料 key，选择已分类 component。
-6. 点击 `应用材料标识`，组件会被重命名为 `CATEGORY_NAME_MATERIAL` 或保留已有厚度信息，例如 `SHELL_BRACKET_T2.0_Q235`。
-
-建议所有后续模块都基于这套命名继续处理，因为中面厚度、焊缝面厚度、washer 和连接输出都会读取或延续这些信息。
+抽中面前只需保证源组件名称保留 `Vxx_件号`，例如 `V01_BRACKET`；抽中面会根据名称和几何结果生成厚度字段。中面完成后，`读取 BOM 表` 模块当前会扫描 `MIDSURFED` Assembly 并统一设置 Q355，真实 BOM 文件读取将在后续版本实现。
 
 ### 2.3 处理钣金件
 
 钣金件建议按下面顺序执行：
 
 1. `Midsurface Extraction`：选择钣金几何 component，抽取中面。
-2. `Geometry Cleanup: Chamfer/Recess`：对倒角、圆角、沉台等影响中面或网格质量的位置做连续清理。
-3. `Seam Surface Creation`：在需要焊接的位置创建 `SEAM_Tx` 焊缝面。
-4. `Sheet BatchMesh and Washer`：对中面或壳 component 执行 BatchMesh，并按孔径规则生成 washer。
-5. `Shell Washer-Hole RBE2`：识别标准 washer 孔并创建 RBE2。
-6. `RBE2 Bolt Connector`：将成组 RBE2 中心节点连接为 CBEAM/CBAR 螺栓段。
-7. `Contact Setup`：分两次选择相向 Face 单元，创建 contact surface 和接触 group。
-8. `Adhesive Connector`：以 elems 定义打胶 location、以 comps 定义连接目标，清洗越界单元后创建 Area adhesives。
+2. `读取 BOM 表`：扫描 `MIDSURFED` Assembly，当前统一设置 Q355 并补充组件名材料后缀。
+3. `Geometry Cleanup: Chamfer/Recess`：对倒角、圆角、沉台等影响中面或网格质量的位置做连续清理。
+4. `Seam Surface Creation`：在需要焊接的位置创建 `SEAM_Tx` 焊缝面。
+5. `Sheet BatchMesh and Washer`：对中面或壳 component 执行 BatchMesh，并按孔径规则生成 washer。
+6. `Shell Washer-Hole RBE2`：识别标准 washer 孔并创建 RBE2。
+7. `RBE2 Bolt Connector`：将成组 RBE2 中心节点连接为 CBEAM/CBAR 螺栓段。
+8. `Contact Setup`：分两次选择相向 Face 单元，创建 contact surface 和接触 group。
+9. `Adhesive Connector`：以 elems 定义打胶 location、以 comps 定义连接目标，清洗越界单元后创建 Area adhesives。
 
 典型输出包括：
 
 ```text
-midsurf assembly
+MIDSURFED assembly
 SEAM_T2.0
 AUTO_RBE2_<source>
 BOLT_D12_CBEAM
@@ -186,15 +178,13 @@ AUTO_CONTACT_*
 
 ### 2.4 处理实体件和铸件
 
-实体件和铸件建议按下面顺序执行：
+实体件和铸件的前置组织由后续重构模块负责；当前工具箱从已有的统一组件命名开始执行：
 
-1. `Component Classification`：将 component 标记为 `SOLID` 或 `CASTING`。
-2. `Material Assignment`：追加材料 key。
-3. `Geometry Cleanup: Chamfer/Recess`：按需要清理小特征、倒角或沉台。
-4. `Casting TetraMesh`：对铸件执行 surface 清理、三角面网格质量迭代和 TetraMesh。
-5. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
-6. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
-7. `Contact Setup`：基于两次 Face 单元选择建立相向接触。
+1. `Geometry Cleanup: Chamfer/Recess`：按需要清理小特征、倒角或沉台。
+2. `Casting TetraMesh`：对铸件执行 surface 清理、三角面网格质量迭代和 TetraMesh。
+3. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
+4. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
+5. `Contact Setup`：基于两次 Face 单元选择建立相向接触。
 
 ### 2.5 中断、返回和刷新
 
@@ -212,7 +202,6 @@ AUTO_CONTACT_*
 |-- shortcut_bootstrap.tcl
 |-- config.yaml
 |-- config/
-|   |-- materials.txt
 |   |-- washer_rules.txt
 |   |-- seam_rules.txt
 |   |-- geometry_cleanup_rules.txt
@@ -221,7 +210,6 @@ AUTO_CONTACT_*
 `-- modules/
     |-- workflow_common.tcl
     |-- shortcut_manager.tcl
-    |-- component_workflow.tcl
     |-- midsurf.tcl
     |-- geometry_cleanup.tcl
     |-- seam_surface.tcl
@@ -268,7 +256,6 @@ workflow:
 
 | 文件 | 用途 |
 | --- | --- |
-| `materials.txt` | 材料标识库，供 Material Assignment 读取。 |
 | `washer_rules.txt` | 孔径与 washer 规则。 |
 | `seam_rules.txt` | Seam Surface Creation 默认参数。 |
 | `geometry_cleanup_rules.txt` | Geometry Cleanup 默认参数。 |
@@ -278,21 +265,21 @@ workflow:
 
 ## 5. 命名约定
 
-推荐组件名称保留类型、厚度和材料信息：
+组件名称统一使用版本/件号/厚度格式，材料字段可由后续网格模块追加：
 
 ```text
-SHELL_PARTNAME_T2.0_Q235
-SOLID_PARTNAME_Q235
-CASTING_PARTNAME_QT500
+V01_PARTNAME_T2.0_Q235
+V02_PARTNAME_T1.2_AL6061
+V03_PARTNAME_T1.5
 SEAM_T2.0
 ```
 
 命名规则：
 
-- 类型前缀来自 `SHELL`、`SOLID`、`CASTING`。
+- `Vxx` 为版本/车型前缀，`Name` 为件号或部件名称。
 - 钣金厚度使用 `_T<value>`，例如 `_T2.0`。
-- 材料后缀来自 `config/materials.txt` 中的 `key`。
-- Material Assignment 会识别材料库中已有 key，并替换组件名中已有的材料后缀。
+- 材料后缀不是抽中面的必需字段；批量 Property 模块会从后续组件名称和 HyperMesh 材料实体中识别材料。
+- HyperMesh 重复导入产生的 `.1`、`.2` 等后缀不会改变部件或材料归类。
 - Midsurface Extraction 优先读取源组件名中的 `_Tx`，无法读取时会尝试从中面拓扑或体积/面积测量厚度。
 - Midsurface Extraction 与 Mesh Seam Weld 共用厚度标记规则；中面输出中的 `_Tx` 可直接被网格焊缝读取并生成 `SEAM_Tx`。
 - Seam Surface Creation 输出 `SEAM_Tx`，其中 `x` 优先取相邻组件名中较薄的厚度。
@@ -304,62 +291,17 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 包含 SEAM 且其后存在 Txx      ->  SEAM_Txx（材料固定为 Steel）
 ```
 
-普通件只读取 `T` 后紧跟的数字作为厚度，并把最后一个下划线字段作为材料；例如 `V01_xxxx_T10aaa_355` 生成 `355_T10`。焊缝名称的其余后缀会被忽略，例如 `SEAM_T10_dff` 和 `SEAM_T10.surf` 都生成 `SEAM_T10`。
+普通件只读取 `T` 后紧跟的数字作为厚度；存在材料字段时把最后一个下划线字段作为材料，例如 `V01_xxxx_T10_355` 生成 `355_T10`。没有材料字段的中面组件会留待后续材料识别或人工补充。
 
 材料必须已由用户创建。模块会先调用 HyperMesh 原生的 `*EntityPreviewEmpty` 一次性识别空 component；这些 component 不再检查 Property、解析名称或进入人工复核。已经关联 Property 的 component，以及名称中包含 `BEAM`、`RBE`、`BUSH`、`SPRING`（不区分大小写）的 1D component 也会直接跳过。无法识别、找不到材料、Property 创建失败或赋予校验失败的非空 component 不会被移动；模块只会在 `PROPERTY_ASSIGNMENT_REVIEW` assembly 中创建名为 `PROPERTY_REVIEW__<原component名>` 的空 component collector，作为人工复核名称清单，不复制网格、节点或几何。
 
 ## 6. 模块功能和用法
 
-### 6.1 Component Classification
-
-入口：`::CompWorkflow::runCategory`
-
-功能：将组件分类为 `SHELL`、`SOLID` 或 `CASTING`，规范化组件名称，并组织到对应装配中。
-
-用法：
-
-1. 在主面板运行 `Component Classification`。
-2. 在 `类型 / Category` 中选择目标类型。
-3. 点击 `选择组件`，在 HyperMesh 中选择 component。
-4. 点击 `应用类型`。
-
-输出：
-
-- `NAME` 会变为 `CATEGORY_NAME`。
-- 如果已有类型前缀，会替换为当前选择的类型。
-- 组件会加入对应类型装配。
-
-### 6.2 Material Assignment
-
-入口：`::CompWorkflow::runMaterial`
-
-功能：从 `config/materials.txt` 选择材料 key，追加或替换组件名称中的材料后缀，并按材料装配归类。
-
-用法：
-
-1. 在主面板运行 `Material Assignment`。
-2. 在材料列表中选择材料 key。
-3. 点击 `选择组件`，选择已经带有类型前缀的 component。
-4. 点击 `应用材料标识`。
-5. 需要调整材料库时，点击模块中的 `编辑 TXT`，保存后点击 `重新加载`。
-
-输出：
-
-- `SHELL_PART_T2.0` 可变为 `SHELL_PART_T2.0_Q235`。
-- 组件会加入材料装配，例如 `SHELL_Q235`。
-
-材料文件格式：
-
-```text
-key|display|density|E|nu|yield|ultimate|note
-Q235|Q235|7.85e-9|210000|0.30|235|370|steel
-```
-
-### 6.3 Midsurface Extraction
+### 6.1 Midsurface Extraction
 
 入口：`::MidSurf::run`
 
-功能：批量抽取钣金几何中面，按 `CATEGORY_NAME_Tx_MATERIAL` 规则命名输出 component。
+功能：批量抽取钣金几何中面，按 `Vxx_Name_Tx[_MATERIAL]` 规则命名输出 component；材料不是抽中面的必需输入。
 
 用法：
 
@@ -371,11 +313,12 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 输出：
 
 - 生成新的 midsurface component。
-- 输出 component 统一放入 `midsurf` assembly。
+- 新 component 统一命名为 `Vxx_Name_T<厚度>`；如果源名称已有材料字段则原样保留，材料识别和赋予由后续网格模块处理。
+- 输出 component 统一放入 `MIDSURFED` assembly。
 - 源几何保留并隐藏。
 - 厚度优先读取源 component 名称中的 `_Tx`；名称中没有厚度时，尝试读取中面拓扑点厚度，仍不可用时按实体体积/中面面积自动测量。
 
-### 6.4 Geometry Cleanup: Chamfer/Recess
+### 6.2 Geometry Cleanup: Chamfer/Recess
 
 入口：`::GeomCleanup::run`
 
@@ -397,7 +340,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - 失败时撤销本次几何修改，不影响继续处理下一个区域。
 - 清理完成后刷新 Model Browser 和图形窗口。
 
-### 6.5 Seam Surface Creation
+### 6.3 Seam Surface Creation
 
 入口：`::SeamSurf::run`
 
@@ -422,7 +365,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - Line-Line 模式会按两侧特征点对应关系切分曲线段，并逐段创建 ruled 焊缝。
 - 单次失败时撤销本次几何修改并等待下一次选择。
 
-### 6.6 BatchMesher 自动网格划分
+### 6.4 BatchMesher 自动网格划分
 
 入口：`::BatchMesher::runAction`
 
@@ -442,9 +385,9 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - 每个不可拆分的 Surface 拓扑连通域对应一个任务；单一连通域自动整体执行。
 - 每个任务记录状态、耗时、Surface IDs、Component 名称、原始 Tcl 错误和独立日志；失败默认不阻止后续任务。
 - `*hm_batchmesh2` 后只要新增了 Elements，任务就视为有可用结果；质量或迭代问题作为警告保留，不会删除网格。成功任务保存原生 HM 作为恢复文件，并按结果 Component 使用 `*feoutputwithdata` 输出包含完整 Elements/依赖的 FE-only FEM。合并 worker 在空白模型中用默认 OptiStruct reader 和 `overwrite_flag=0` 逐个导入 FEM、验证 Element 增量，再保存 `merged_result.hm` 和导出 `batchmesh_result.fem`。主会话优先导入完整原生 FE，跨版本不兼容时回退到唯一的最终合并 FEM。网格状态与结果封装状态相互独立。
-- 报告位于共享任务存储的 `batch_mesher/<run-id>/`，包含汇总状态、`monitor_batchmesher.cmd`、`monitor_status.txt`、各 worker 的 stdout/stderr、`run.json`、`result.json` 和逐任务日志。关闭汇总监视窗口不会终止后台任务。
+- 报告位于共享任务存储的 `batch_mesher/<run-id>/`，包含汇总状态、`monitor_batchmesher.cmd`、`monitor_status.txt`、各 worker 的 `launch.log`、必要时生成的 `manager_failure.log`、stdout/stderr、`run.json`、`result.json` 和逐任务日志。即使 Altair launcher 没有输出，管理端日志也会记录实际命令、独立工作目录、PID 和启动握手超时诊断。关闭汇总监视窗口不会终止后台任务。
 
-### 6.7 Casting TetraMesh
+### 6.5 Casting TetraMesh
 
 入口：`::CastingTetMesh::run`
 
@@ -466,7 +409,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - 质量通过后执行 TetraMesh 体网格填充。
 - 可将失败壳单元组织到 `AUTO_CASTING_FAILED_2D`。
 
-### 6.8 Shell Washer-Hole RBE2
+### 6.6 Shell Washer-Hole RBE2
 
 入口：`::RB2W::run`
 
@@ -489,7 +432,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - RBE2 只移动到输出 component，不移动源节点。
 - 模块会检查已有 RBE2，避免重复创建。
 
-### 6.9 Solid Through-Hole RBE2
+### 6.7 Solid Through-Hole RBE2
 
 入口：`::AutoHoleRBE2::run`
 
@@ -510,7 +453,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - 输出到指定结果 component。
 - 运行结束后可自动删除临时自由面 component。
 
-### 6.10 RBE2 Bolt Connector
+### 6.8 RBE2 Bolt Connector
 
 入口：`::RB2Bolt::run`
 
@@ -536,7 +479,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - 输出属性按孔径和属性卡命名，例如 `BOLT_D12_PBEAM`，避免 CBEAM/CBAR 只有几何线而没有求解刚度。
 - 只组织新建的一维连接单元，不移动源节点。
 
-### 6.11 CBUSH Creator
+### 6.9 CBUSH Creator
 
 入口：`::CBushCreator::runAction`
 
@@ -556,7 +499,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - 如果没有可识别的源 component，或源节点同时归属多个 component，工具会停止并提示，不会猜测名称。
 - 如果 CBUSH 创建失败，工具会删除本次新建的临时节点。
 
-### 6.12 Adhesive Connector
+### 6.10 Adhesive Connector
 
 入口：`::AdhesiveConnector::runAction`
 
@@ -577,7 +520,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 模块会从当前 HyperMesh `feconfig.cfg` 动态解析 OptiStruct 的精确 `adhesives` 类型 ID，创建后回读 connector state；未生成连接或存在非 `REALIZED` 连接时会报错。首次投产前仍需在目标 HM2019 环境完成一次 smoke test。
 
-### 6.13 Contact Setup
+### 6.11 Contact Setup
 
 入口：`::ContactSetup::run`
 
@@ -605,7 +548,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 - contact surface 创建时直接写入计算所得 `reverse_normals`；节点和坐标通过 mark 批量读取，不扫描整个 component。
 - 修改模式只会从当前 contact surface 中移除所选单元，不删除源 component 原始网格。
 
-### 6.14 Solid Seam Connector
+### 6.12 Solid Seam Connector
 
 入口：`::SolidSeam::run`
 
@@ -623,7 +566,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 完整识别验证可运行 `examples/SolidSeam_Validation/generate_fem.py`，并导入生成的单一组合模型 `SolidSeam_Combined_Validation.fem`。对应 manifest 给出了每组应选组件、参数和预期结果。
 
-### 6.15 网格焊缝完整性检查
+### 6.13 网格焊缝完整性检查
 
 入口：`::WeldIntegrityCheck::runAction`
 
@@ -643,7 +586,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 
 当前限制：完整性检查本身只支持 Shell–Shell 和人工审查；距离搜索是自由边节点到目标网格节点的近似，不读取 CAD。审查页的“创建焊缝”会显式转入下述自动壳焊缝流程，仍需工程人员再次确认后才修改模型。
 
-### 6.16 自动壳焊缝与快速创建
+### 6.14 自动壳焊缝与快速创建
 
 `Mesh Seam Weld` 新增 `FAST_AUTO`，与原 `LEGACY_MANUAL` 手动路径并存。自动模式原生导出所选 Shell Component，由便携式 Python 识别并分类 `T_PATH/T_LIST/CONNECT/L_SURF/L_LIST/REVIEW`，用户明确接受后才生成创建计划。自动规划优先复用已有连续目标网格边，也可在显式开启后执行受控节点微调，或对单个 CTRIA3/CQUAD4 母单元执行保守局部切分；快速路径不调用 imprint、ruled surface、automesh 或 connector。
 
@@ -654,7 +597,7 @@ Q235|Q235|7.85e-9|210000|0.30|235|370|steel
 `modules/workflow_common.tcl` 提供跨模块共享能力：
 
 - 全局语言配置读取。
-- 材料库读取。
+- HyperMesh 材料实体名称匹配和重复后缀归一化。
 - component 命名、重命名和装配组织。
 - Model Browser 创建、同步和刷新。
 - 进度窗口、取消状态和日志。

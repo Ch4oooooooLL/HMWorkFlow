@@ -106,10 +106,30 @@ proc ::MeshSeamWeld::runAutoWorkflow {{preselectedComponents {}}} {
     set answer [tk_messageBox -type yesno -icon question -message [::HWFlow::txt "创建计划中有 $ready 项可直接创建。是否应用？" "$ready creation plans are ready. Apply them now?"]]
     if {$answer ne "yes"} { return }
     if {[catch {set execution [::MeshSeamWeld::executeAutoPlans $taskDir $plans]} err]} { tk_messageBox -icon error -message [::HWFlow::txt "自动壳焊缝失败并已回滚：$err\n任务目录：$taskDir" "Automatic shell seam failed and was rolled back: $err\nTask: $taskDir"]; return }
+    ::MeshSeamWeld::clearUndoRecord
     ::MeshSeamWeld::writeAutoExecutionReport $taskDir $execution
     set created [dict get $execution created]; set succeeded [dict get $execution succeeded]; set rolledBack [dict get $execution rolled_back]; set moved [dict get $execution moved_nodes]
+    set undoRegistered 0
+    if {$succeeded > 0 && [dict exists $execution snapshot]} {
+        if {![catch {
+            ::MeshSeamWeld::registerUndoSnapshot [dict get $execution snapshot] \
+                [::HWFlow::txt \
+                    "最近一次自动网格焊缝批次（成功候选 $succeeded）" \
+                    "the most recent automatic mesh-seam batch ($succeeded successful candidates)"]
+        } undoRegisterErr]} {
+            set undoRegistered 1
+        } else {
+            ::HybridCore::log ERROR "automatic mesh seam undo registration failed error=$undoRegisterErr"
+        }
+    }
     set icon [expr {$rolledBack ? "warning" : "info"}]
-    tk_messageBox -icon $icon -message [::HWFlow::txt "自动壳焊缝完成：成功 $succeeded 项，回滚 $rolledBack 项，移动 $moved 个节点，创建 $created 个壳单元。\n任务目录：$taskDir" "Automatic shell seam finished: $succeeded succeeded, $rolledBack rolled back, $moved nodes moved, $created shell elements created.\nTask: $taskDir"]
+    set completion [::HWFlow::txt "自动壳焊缝完成：成功 $succeeded 项，回滚 $rolledBack 项，移动 $moved 个节点，创建 $created 个壳单元。\n任务目录：$taskDir" "Automatic shell seam finished: $succeeded succeeded, $rolledBack rolled back, $moved nodes moved, $created shell elements created.\nTask: $taskDir"]
+    if {$undoRegistered} {
+        append completion [::HWFlow::txt \
+            "\n可撤回：可在工具箱的“网格焊缝”行点击“撤回”。" \
+            "\nUndo available: click “Undo” on the Mesh Seam Weld row in the toolkit."]
+    }
+    tk_messageBox -icon $icon -message $completion
 }
 
 proc ::MeshSeamWeld::openAutoCandidate {pairData} {

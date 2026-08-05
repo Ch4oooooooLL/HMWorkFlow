@@ -375,6 +375,9 @@ proc ::hmtoolkit::seam::executor::_connect_edges {data} {
     set first [::hmtoolkit::seam::validation::require_ids $data first_lines lines]
     set second [::hmtoolkit::seam::validation::require_ids $data second_lines lines]
     if {[llength [lsort -integer -unique [concat $first $second]]] != [expr {[llength $first]+[llength $second]}]} { error "Edge groups must not overlap" }
+    set organized [::hmtoolkit::seam::candidate::organize_ruled_surface_lines $first $second]
+    set first [dict get $organized first_lines]
+    set second [dict get $organized second_lines]
     set thickness [::hmtoolkit::seam::naming::thickness_from_data $data]
     set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
     set before [::hmtoolkit::seam::entity::component_surfaces [lindex $component 1]]

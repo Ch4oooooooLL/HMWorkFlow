@@ -4,6 +4,8 @@
 # Recognized key fields:
 #   Vxx_<part>_T<thickness><ignored text>_..._<material>
 #   <text containing SEAM>...T<thickness><ignored text> (material is Steel)
+# A trailing HyperMesh import suffix (.1/.2/...) on the version, part or
+# material field is ignored for recognition and Property reuse.
 # HyperMesh-native empty components, existing properties, and 1D-name
 # keywords BEAM/RBE/BUSH/SPRING are skipped.
 #
@@ -25,6 +27,24 @@ proc ::BatchPropertyAssignment::formatThicknessToken {value} {
     regsub {\.0+$} $text "" text
     regsub {(\.[0-9]*?)0+([eE].*)?$} $text {\1\2} text
     return $text
+}
+
+proc ::BatchPropertyAssignment::canonicalImportedNameField {value} {
+    if {[llength [info commands ::HWFlow::stripHyperMeshDuplicateSuffix]] > 0} {
+        return [::HWFlow::stripHyperMeshDuplicateSuffix $value]
+    }
+    set value [string trim $value]
+    while {[regexp {^(.+)[.]([1-9][0-9]*)$} $value -> base serial]} {
+        set value [string trim $base]
+    }
+    return $value
+}
+
+proc ::BatchPropertyAssignment::canonicalMaterialName {value} {
+    if {[llength [info commands ::HWFlow::canonicalMaterialToken]] > 0} {
+        return [::HWFlow::canonicalMaterialToken $value]
+    }
+    return [::BatchPropertyAssignment::canonicalImportedNameField $value]
 }
 
 proc ::BatchPropertyAssignment::parseComponentName {name} {
@@ -53,17 +73,24 @@ proc ::BatchPropertyAssignment::parseComponentName {name} {
             property_name "SEAM_T${token}"]
     }
 
+    if {[llength [info commands ::HWFlow::componentNameInfo]] > 0} {
+        set shared [::HWFlow::componentNameInfo $name]
+        if {[dict size $shared] > 0} {
+            return $shared
+        }
+    }
+
     # Only the key fields are structural: Vxx prefix, the first _T<number>
     # after a non-empty part number, and the final underscore token as the
     # material.  Text such as T10aaa or T2.5.surf is intentionally ignored
     # after the numeric thickness.
-    set expression [format {^(V[[:alnum:]]+)_(.+?)_T%s.*_([^_]+)$} $numberPattern]
+    set expression [format {^(V[[:alnum:].+-]+)_(.+?)_T%s.*_([^_]+)$} $numberPattern]
     if {![regexp -nocase -- $expression $name -> version partNumber thickness decimal exponent material]} {
         return {}
     }
-    set version [string trim $version]
-    set partNumber [string trim $partNumber]
-    set material [string trim $material]
+    set version [::BatchPropertyAssignment::canonicalImportedNameField [string trim $version]]
+    set partNumber [::BatchPropertyAssignment::canonicalImportedNameField [string trim $partNumber]]
+    set material [::BatchPropertyAssignment::canonicalMaterialName $material]
     set token [::BatchPropertyAssignment::formatThicknessToken $thickness]
     if {$version eq "" || $partNumber eq "" || $material eq "" || $token eq ""} {
         return {}
@@ -156,17 +183,57 @@ proc ::BatchPropertyAssignment::materialIdByName {materialName} {
     set id [::BatchPropertyAssignment::entityIdByName {mats materials} $materialName]
     if {$id ne ""} {return $id}
 
+    set target [::BatchPropertyAssignment::canonicalMaterialName $materialName]
+
     # HyperMesh name lookup can be case-sensitive.  Reuse Steel/steel rather
-    # than creating or requiring a second material with different casing.
+    # than creating or requiring a second material with different casing. A
+    # repeated import may also expose the material as Q235.1/Q235.2.
     foreach materialId [::BatchPropertyAssignment::allEntityIds {mats materials}] {
         foreach entityType {mats materials} {
             if {![catch {set existing [hm_getvalue $entityType id=$materialId dataname=name]}] &&
-                [string equal -nocase [string trim $existing] [string trim $materialName]]} {
+                [string equal -nocase [::BatchPropertyAssignment::canonicalMaterialName $existing] $target]} {
                 return $materialId
             }
         }
     }
     return ""
+}
+
+proc ::BatchPropertyAssignment::ensureSteelMaterial {} {
+    # Keep the fallback aligned with the project's mm-tonne-MPa material
+    # convention: E in MPa and density in tonne/mm^3.
+    set materialName Steel
+    set materialId [::BatchPropertyAssignment::materialIdByName $materialName]
+    if {$materialId ne "" && $materialId != 0} {
+        return $materialId
+    }
+
+    set firstError ""
+    set secondError ""
+    if {[catch {*createentity mats cardimage=MAT1 includeid=0 name=$materialName} firstError]} {
+        if {[catch {*createentity materials cardimage=MAT1 includeid=0 name=$materialName} secondError]} {
+            error "cannot create default Steel material: $firstError / $secondError"
+        }
+    }
+    set materialId [::BatchPropertyAssignment::materialIdByName $materialName]
+    if {$materialId eq "" || $materialId == 0} {
+        error "cannot read default Steel material id"
+    }
+
+    foreach selector [list "id=$materialId" "name=$materialName"] {
+        foreach entityType {mats materials} {
+            catch {*setvalue $entityType $selector cardimage=MAT1}
+        }
+        # Named and numeric field fallbacks cover the HM2019 templates used by
+        # the toolkit while keeping the same values for every representation.
+        ::BatchPropertyAssignment::trySetValue {mats materials} $selector E 210000.0
+        ::BatchPropertyAssignment::trySetValue {mats materials} $selector 1 210000.0
+        ::BatchPropertyAssignment::trySetValue {mats materials} $selector Nu 0.30
+        ::BatchPropertyAssignment::trySetValue {mats materials} $selector 3 0.30
+        ::BatchPropertyAssignment::trySetValue {mats materials} $selector Rho 7.85e-9
+        ::BatchPropertyAssignment::trySetValue {mats materials} $selector 4 7.85e-9
+    }
+    return $materialId
 }
 
 proc ::BatchPropertyAssignment::trySetValue {entityTypes selector field value} {
@@ -369,6 +436,12 @@ proc ::BatchPropertyAssignment::execute {} {
 
         set materialName [dict get $parsed material]
         set materialId [::BatchPropertyAssignment::materialIdByName $materialName]
+        if {$materialId eq "" && [string equal -nocase $materialName Steel]} {
+            if {[catch {set materialId [::BatchPropertyAssignment::ensureSteelMaterial]} materialError]} {
+                lappend failures [list $componentName $materialError]
+                continue
+            }
+        }
         if {$materialId eq ""} {
             lappend failures [list $componentName "未找到材料 $materialName"]
             continue

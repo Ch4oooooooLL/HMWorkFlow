@@ -118,6 +118,33 @@ class BatchMesherTests(unittest.TestCase):
         self.assertTrue(args[4].replace("\\", "/").endswith("/mesh/a.criteria"))
         self.assertTrue(args[5].replace("\\", "/").endswith("/mesh/a.param"))
 
+    def test_hmbatch_command_suppresses_command_and_profile_dialogs(self):
+        command = self.h.tcl.splitlist(
+            self.h.eval(
+                "::BatchMesher::buildHmbatchCommand "
+                "{C:/Program Files/Altair/hmbatch.exe} {C:/work/worker.tcl}"
+            )
+        )
+        self.assertEqual(command[0], "C:\\Program Files\\Altair\\hmbatch.exe")
+        self.assertEqual(
+            command[1:4],
+            ("-nocommand", "-nouserprofiledialog", "-tcl"),
+        )
+        self.assertEqual(command[4], "C:\\work\\worker.tcl")
+
+    def test_background_run_enforces_real_hmbatch_preflight(self):
+        manager_source = (MODULE / "background.tcl").read_text(encoding="utf-8")
+        start_source = manager_source[
+            manager_source.index("proc ::BatchMesher::startBackgroundRun") :
+            manager_source.index("proc ::BatchMesher::readBackgroundState")
+        ]
+        self.assertIn("::BatchMesher::probeHmbatchExecutable", start_source)
+        self.assertIn("failed the real Tcl startup gate", start_source)
+        self.assertLess(
+            start_source.index("::BatchMesher::probeHmbatchExecutable"),
+            start_source.index("::BatchMesher::launchAvailableWorkers"),
+        )
+
     def test_short_hm2019_versions_are_normalized(self):
         cases = {
             "19": "2019",
@@ -360,6 +387,87 @@ class BatchMesherTests(unittest.TestCase):
         finally:
             self.h.eval("rename exec {}; rename __native_exec exec")
 
+    def test_detached_hmbatch_launch_uses_isolated_working_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker_dir = Path(directory)
+            launch_log = worker_dir / "launch.log"
+            stdout = worker_dir / "stdout.log"
+            stderr = worker_dir / "stderr.log"
+            original_directory = Path(self.h.eval("pwd"))
+            self.h.tcl.setvar("detached_worker_dir", worker_dir.as_posix())
+            self.h.tcl.setvar("detached_launch_log", launch_log.as_posix())
+            self.h.tcl.setvar("detached_stdout", stdout.as_posix())
+            self.h.tcl.setvar("detached_stderr", stderr.as_posix())
+            self.h.eval(
+                "set ::env(HMWORKFLOW_BATCH_WORKER) interactive-session; "
+                "rename exec __native_exec; "
+                "proc exec {args} {"
+                "set ::detachedObservedDirectory [pwd]; "
+                "set ::detachedObservedMarker $::env(HMWORKFLOW_BATCH_WORKER); return 4321}"
+            )
+            try:
+                self.assertEqual(
+                    self.h.eval(
+                        "::BatchMesher::launchDetachedHmbatch "
+                        "[list C:/Altair/hmbatch.exe -tcl C:/work/background_launcher.tcl] "
+                        "$detached_worker_dir $detached_stdout $detached_stderr $detached_launch_log"
+                    ),
+                    "4321",
+                )
+            finally:
+                self.h.eval("rename exec {}; rename __native_exec exec")
+            self.assertEqual(Path(self.h.eval("set ::detachedObservedDirectory")), worker_dir)
+            self.assertEqual(self.h.eval("set ::detachedObservedMarker"), "1")
+            self.assertEqual(
+                self.h.eval("set ::env(HMWORKFLOW_BATCH_WORKER)"),
+                "interactive-session",
+            )
+            self.assertEqual(Path(self.h.eval("pwd")), original_directory)
+            report = launch_log.read_text(encoding="utf-8")
+            self.assertIn("status=LAUNCH_REQUESTED", report)
+            self.assertIn("launcher_pid=4321", report)
+            self.assertIn(
+                f"working_directory={worker_dir.as_posix()}",
+                report.replace("\\", "/"),
+            )
+
+    def test_manager_failure_report_exists_when_hmbatch_logs_are_empty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker_dir = Path(directory)
+            artifacts = {
+                "launch_log": worker_dir / "launch.log",
+                "state_path": worker_dir / "background.state",
+                "stdout": worker_dir / "hmbatch_stdout.log",
+                "stderr": worker_dir / "hmbatch_stderr.log",
+            }
+            for artifact in artifacts.values():
+                artifact.write_text("", encoding="utf-8")
+            self.h.tcl.setvar("failure_worker_dir", worker_dir.as_posix())
+            for key, artifact in artifacts.items():
+                self.h.tcl.setvar(f"failure_{key}", artifact.as_posix())
+            report_path = Path(
+                self.h.eval(
+                    "::BatchMesher::writeWorkerManagerFailure [dict create "
+                    "task_id T001 launcher_pid 123 actual_pid {} worker_dir $failure_worker_dir "
+                    "launch_log $failure_launch_log state_path $failure_state_path "
+                    "stdout $failure_stdout stderr $failure_stderr] {startup timeout}"
+                )
+            )
+            report = report_path.read_text(encoding="utf-8")
+            self.assertIn("message=startup timeout", report)
+            self.assertIn("task_id=T001", report)
+            self.assertIn("bytes=0", report)
+
+    def test_worker_startup_waits_for_state_handshake(self):
+        self.assertGreaterEqual(
+            int(self.h.eval("set ::BatchMesher::WORKER_STARTUP_TIMEOUT_MS")),
+            60000,
+        )
+        manager_source = (MODULE / "background.tcl").read_text(encoding="utf-8")
+        self.assertIn('if {$state eq "" && [dict get $job actual_pid] eq ""}', manager_source)
+        self.assertIn("$startupElapsed < $WORKER_STARTUP_TIMEOUT_MS", manager_source)
+        self.assertIn("worker initialized actual_pid=", manager_source)
+
     def test_background_launcher_reports_worker_source_failures(self):
         with tempfile.TemporaryDirectory() as directory:
             self.h.tcl.setvar("launcher_dir", Path(directory).as_posix())
@@ -457,33 +565,36 @@ class BatchMesherTests(unittest.TestCase):
             "2022",
         )
 
-    def test_hm2022_worker_profile_reads_namespace_configuration(self):
+    def test_hm2022_worker_initializes_profile_from_worker_config(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             template = root / "optistruct"
             criteria = root / "mesh.criteria"
             template.write_text("template", encoding="utf-8")
             criteria.write_text("criteria", encoding="utf-8")
-            self.h.tcl.setvar("worker_template", template.as_posix())
-            self.h.tcl.setvar("worker_criteria", criteria.as_posix())
+            self.h.tcl.setvar("hm2022_template", template.as_posix())
+            self.h.tcl.setvar("hm2022_criteria", criteria.as_posix())
             self.h.eval(
                 r"""
                 set ::BatchMesherWorker::config [dict create \
-                    export_template $worker_template criteria $worker_criteria]
-                set ::profileTemplate {}
-                set ::profileCriteria {}
-                proc *templatefileset {path} {set ::profileTemplate $path}
-                proc *readqualitycriteria {path} {set ::profileCriteria $path}
+                    export_template $hm2022_template criteria $hm2022_criteria]
+                set ::hm2022ProfileCalls {}
+                proc *templatefileset {path} {
+                    lappend ::hm2022ProfileCalls [list template $path]
+                }
+                proc *readqualitycriteria {path} {
+                    lappend ::hm2022ProfileCalls [list criteria $path]
+                }
                 """
             )
             self.h.eval("::BatchMesherWorker::initializeBatchMeshProfile 2022")
             self.assertEqual(
-                Path(self.h.eval("set ::profileTemplate")).as_posix(),
-                template.as_posix(),
+                Path(self.h.eval("lindex [lindex $::hm2022ProfileCalls 0] 1")),
+                template,
             )
             self.assertEqual(
-                Path(self.h.eval("set ::profileCriteria")).as_posix(),
-                criteria.as_posix(),
+                Path(self.h.eval("lindex [lindex $::hm2022ProfileCalls 1] 1")),
+                criteria,
             )
 
     def test_scale_preflight_rejects_element_size_larger_than_model_span(self):
@@ -595,6 +706,7 @@ class BatchMesherTests(unittest.TestCase):
             "set ::BatchMesher::runtime(background_active) [dict create]; "
             "set ::BatchMesher::runtime(background_merge_pid) {}; "
             "set ::BatchMesher::runtime(stop_after_current) 0; "
+            "set ::BatchMesher::runtime(background_startup_verified) 1; "
             "set ::BatchMesher::ui(PARALLEL_WORKERS) 2; "
             "rename ::BatchMesher::launchTaskWorker ::BatchMesher::__realLaunchTaskWorker; "
             "proc ::BatchMesher::launchTaskWorker {task} {"
@@ -628,6 +740,36 @@ class BatchMesherTests(unittest.TestCase):
             self.assertEqual(
                 self.h.eval("llength $::BatchMesher::runtime(background_pending)"),
                 "0",
+            )
+        finally:
+            self.h.eval(
+                "rename ::BatchMesher::launchTaskWorker {}; "
+                "rename ::BatchMesher::__realLaunchTaskWorker ::BatchMesher::launchTaskWorker"
+            )
+
+    def test_parallel_scheduler_starts_one_canary_before_filling_pool(self):
+        self.h.eval(
+            "set ::BatchMesher::runtime(background_pending) [list "
+            "[dict create task_id T001] [dict create task_id T002] [dict create task_id T003]]; "
+            "set ::BatchMesher::runtime(background_active) [dict create]; "
+            "set ::BatchMesher::runtime(background_merge_pid) {}; "
+            "set ::BatchMesher::runtime(stop_after_current) 0; "
+            "set ::BatchMesher::runtime(background_startup_verified) 0; "
+            "set ::BatchMesher::ui(PARALLEL_WORKERS) 8; "
+            "rename ::BatchMesher::launchTaskWorker ::BatchMesher::__realLaunchTaskWorker; "
+            "proc ::BatchMesher::launchTaskWorker {task} {"
+            "variable runtime; set taskId [dict get $task task_id]; "
+            "dict set runtime(background_active) $taskId [dict create launcher_pid 1 actual_pid {}]; return 1}"
+        )
+        try:
+            self.h.eval("::BatchMesher::launchAvailableWorkers")
+            self.assertEqual(
+                self.h.eval("dict size $::BatchMesher::runtime(background_active)"),
+                "1",
+            )
+            self.assertEqual(
+                self.h.eval("llength $::BatchMesher::runtime(background_pending)"),
+                "2",
             )
         finally:
             self.h.eval(

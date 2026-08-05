@@ -183,6 +183,92 @@ class GeometrySeamTclTests(unittest.TestCase):
             "{lines 1 {101 102}} {nodes 1 {}} {lines 2 {201 202}} {nodes 2 {}}",
         )
 
+    def test_connect_line_paths_are_sorted_by_endpoint_continuity(self):
+        self.tcl.eval(
+            """
+            proc test_connect_line_points {id} {
+                switch -- $id {
+                    10 {return {{0 0 0} {1 0 0}}}
+                    20 {return {{2 0 0} {1 0 0}}}
+                    30 {return {{3 0 0} {2 0 0}}}
+                }
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::ordered_line_path "
+            "{30 10 20} test_connect_line_points 0.01"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} lines"), "10 20 30")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} closed"), "0")
+
+    def test_connect_line_paths_reverse_second_side_to_prevent_twist(self):
+        self.tcl.eval(
+            """
+            proc test_connect_pair_points {id} {
+                switch -- $id {
+                    10 {return {{0 100 0} {10 0 0}}}
+                    20 {return {{5 0 1} {10 100 1}}}
+                    30 {return {{10 100 1} {20 110 1}}}
+                }
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::organize_ruled_surface_lines "
+            "{10} {30 20} test_connect_pair_points 0.01"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} first_lines"), "10")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} second_lines"), "30 20")
+
+    def test_connect_line_paths_reject_disconnected_or_branched_input(self):
+        self.tcl.eval(
+            """
+            proc test_invalid_connect_points {id} {
+                switch -- $id {
+                    10 {return {{0 0 0} {1 0 0}}}
+                    20 {return {{5 0 0} {6 0 0}}}
+                    30 {return {{1 0 0} {2 0 0}}}
+                    40 {return {{1 0 0} {1 1 0}}}
+                }
+            }
+            """
+        )
+        with self.assertRaisesRegex(tkinter.TclError, "disconnected"):
+            self.tcl.eval(
+                "::hmtoolkit::seam::candidate::ordered_line_path "
+                "{10 20} test_invalid_connect_points 0.01"
+            )
+        with self.assertRaisesRegex(tkinter.TclError, "branched"):
+            self.tcl.eval(
+                "::hmtoolkit::seam::candidate::ordered_line_path "
+                "{10 30 40} test_invalid_connect_points 0.01"
+            )
+
+    def test_connect_closed_paths_align_their_break_and_direction(self):
+        self.tcl.eval(
+            """
+            proc test_closed_connect_points {id} {
+                switch -- $id {
+                    10 {return {{0 0 0} {1 0 0}}}
+                    11 {return {{1 0 0} {1 1 0}}}
+                    12 {return {{1 1 0} {0 1 0}}}
+                    13 {return {{0 1 0} {0 0 0}}}
+                    20 {return {{0.1 0.1 1} {1 0 1}}}
+                    21 {return {{1 0 1} {1 1 1}}}
+                    22 {return {{1 1 1} {-0.2 1 1}}}
+                    23 {return {{-0.2 1 1} {0.1 0.1 1}}}
+                }
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::organize_ruled_surface_lines "
+            "{11 13 10 12} {22 20 23 21} test_closed_connect_points 0.01"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} first_lines"), "13 12 11 10")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} second_lines"), "23 22 21 20")
+
     def test_connect_captures_input_surface_owners_before_creating_the_seam(self):
         body = self.tcl.eval("info body ::hmtoolkit::seam::executor::_connect_edges")
         first_owner = body.index("set firstSurfs")

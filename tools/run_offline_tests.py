@@ -22,6 +22,7 @@ def commands() -> List[Sequence[str]]:
     ]
     pytest_suites = [
         "modules/batch_mesher/tests",
+        "modules/bom_material_assignment/tests",
         "modules/cbush_creator/tests",
         "modules/contact_setup/tests",
         "modules/local_mesh_optimizer/tests",

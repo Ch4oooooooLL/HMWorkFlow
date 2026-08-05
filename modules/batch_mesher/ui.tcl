@@ -167,8 +167,11 @@ proc ::BatchMesher::refreshUi {} {
 
 proc ::BatchMesher::validateConfigFromUi {} {
     if {[catch {set config [::BatchMesher::validateRunConfig]} err]} { ::BatchMesher::showError $err; return }
+    if {[catch {set probe [::BatchMesher::testHmbatchStartup]} err]} { ::BatchMesher::showError $err; return }
     set message [::BatchMesher::txt "Criteria 和 Param 有效。" "Criteria and param files are valid."]
-    append message [::BatchMesher::txt "\nhmbatch 路径有效。" "\nhmbatch path is valid."]
+    append message [::BatchMesher::txt \
+        "\nhmbatch 已真实启动并执行 Tcl；版本：[dict get $probe version]；实际程序：[dict get $probe executable]" \
+        "\nhmbatch executed the Tcl preflight successfully; version: [dict get $probe version]; executable: [dict get $probe executable]"]
     if {[llength [dict get $config warnings]] > 0} { append message "\n\n[::BatchMesher::txt "提示：文件自保存预设后被外部修改，将使用最新内容。" "Notice: files changed since the preset was saved; latest contents will be used."]\n[join [dict get $config warnings] \n]" }
     tk_messageBox -icon info -title [::BatchMesher::txt "配置验证" "Configuration Validation"] -message $message
 }
