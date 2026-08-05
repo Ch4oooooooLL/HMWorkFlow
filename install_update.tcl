@@ -287,7 +287,9 @@ proc ::HWInstaller::run {} {
     }
 
     ::HWShortcut::initialize
-    ::HWShortcut::installContextKeyHooks
+    if {[llength [info commands ::HWShortcut::installContextKeyHooks]] > 0} {
+        ::HWShortcut::installContextKeyHooks
+    }
     ::HWShortcut::installAutoLoader
 
     set verification [::HWInstaller::verifyLoadedSession]
