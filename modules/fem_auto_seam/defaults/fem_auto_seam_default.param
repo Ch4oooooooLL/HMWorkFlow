@@ -1,0 +1,13 @@
+# FEM Automatic Seam built-in HM2019 parameters
+geometry_cleanup_flag             0
+meshing_flag                      3
+element_size                      auto
+element_type                      2
+element_order                     1
+feature_angle                     30.0
+smooth_elems_target               0.2
+move_nodes_across_feature_edges   0
+featureedge_nodes_moveacross_max  0.1
+move_nodes_across_free_edges      0
+freeedge_nodes_moveacross_max     0.05
+divide_warped_quads               1

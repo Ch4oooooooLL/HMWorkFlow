@@ -44,6 +44,7 @@ namespace eval ::HWFlow {
     variable UI_BACKEND "tk"
     variable UI_WINDOWS
     catch {array set UI_WINDOWS {}}
+    variable PROJECT_TOPMOST -1
     variable NATIVE_PANEL_ACTIVE 0
     variable MODEL_IO_ACTIVE 0
 }
@@ -561,6 +562,7 @@ proc ::HWFlow::registerWindow {w {role module}} {
     variable UI_WINDOWS
     set UI_WINDOWS($w) $role
     bind $w <Destroy> +[list ::HWFlow::unregisterWindow %W $w]
+    ::HWFlow::applyProjectTopmost $w
 }
 
 proc ::HWFlow::unregisterWindow {eventWidget registeredWindow} {
@@ -583,6 +585,50 @@ proc ::HWFlow::managedWindows {} {
     return $result
 }
 
+# One project-wide switch controls every toolkit-owned Tk/hwtk top-level.
+# HyperMesh native panels are host windows and deliberately remain outside this
+# registry.  The lazy load keeps sourcing workflow_common.tcl side-effect free.
+proc ::HWFlow::projectTopmostEnabled {} {
+    variable PROJECT_TOPMOST
+    if {$PROJECT_TOPMOST < 0} {
+        set PROJECT_TOPMOST 0
+        if {[llength [info commands ::HWFlow::loadState]] > 0} {
+            set state [::HWFlow::loadState project_ui]
+            if {[dict exists $state topmost]} {
+                set value [string tolower [string trim [dict get $state topmost]]]
+                set PROJECT_TOPMOST [expr {$value in {1 true yes on}}]
+            }
+        }
+    }
+    return $PROJECT_TOPMOST
+}
+
+proc ::HWFlow::applyProjectTopmost {w} {
+    if {[llength [info commands winfo]] == 0 || ![winfo exists $w]} {
+        return 0
+    }
+    set enabled [::HWFlow::projectTopmostEnabled]
+    catch {wm attributes $w -topmost $enabled}
+    if {$enabled} { catch {raise $w} }
+    return $enabled
+}
+
+proc ::HWFlow::setProjectTopmost {enabled} {
+    variable PROJECT_TOPMOST
+    set PROJECT_TOPMOST [expr {$enabled ? 1 : 0}]
+    if {[llength [info commands ::HWFlow::saveState]] > 0} {
+        ::HWFlow::saveState project_ui [dict create topmost $PROJECT_TOPMOST]
+    }
+    foreach w [::HWFlow::managedWindows] {
+        ::HWFlow::applyProjectTopmost $w
+    }
+    return $PROJECT_TOPMOST
+}
+
+proc ::HWFlow::toggleProjectTopmost {} {
+    return [::HWFlow::setProjectTopmost [expr {![::HWFlow::projectTopmostEnabled]}]]
+}
+
 proc ::HWFlow::destroyManagedWindows {} {
     foreach w [::HWFlow::managedWindows] {
         catch {destroy $w}
@@ -595,13 +641,14 @@ proc ::HWFlow::progressIsActive {} {
     return $progressActive
 }
 
-# Compatibility entry point retained for modules that previously requested a
-# permanent topmost window.  hwtk windows are raised only when explicitly
-# requested; the topmost attribute is no longer installed or rebound.
+# Compatibility entry point retained for modules that request foreground
+# attention. Permanent topmost behavior is controlled only by the project-wide
+# switch, so one module cannot silently override the user's global preference.
 proc ::HWFlow::keepWindowTopmost {w} {
     if {[llength [info commands winfo]] == 0 || ![winfo exists $w]} {
         return
     }
+    ::HWFlow::applyProjectTopmost $w
     catch {raise $w}
 }
 
@@ -645,6 +692,8 @@ proc ::HWFlow::runHyperMeshIo {operation command {outputPath ""}} {
         error "Unsupported HyperMesh model I/O operation: $operation"
     }
     set MODEL_IO_ACTIVE 1
+    set importErrorsPrevious ""
+    set importErrorsChanged 0
     set setupCode [catch {
         if {$operation eq "export" && $outputPath ne "" && [file exists $outputPath]} {
             if {![file isfile $outputPath]} {
@@ -657,15 +706,29 @@ proc ::HWFlow::runHyperMeshIo {operation command {outputPath ""}} {
             if {$grabbed ne ""} { catch {grab release $grabbed} }
         }
         catch {update idletasks}
+        # FE readers can raise one Import Process Messages window per delta.
+        # Keep the messages in the translator .msg file, but suppress the Tcl
+        # popup for scripted imports and restore the user's setting afterward.
+        if {$operation eq "import" &&
+            [llength [info commands hm_info]] > 0 &&
+            [llength [info commands *displayimporterrors]] > 0} {
+            if {![catch {set importErrorsPrevious [hm_info displayimporterrors]}] &&
+                $importErrorsPrevious ne "" && $importErrorsPrevious != 0} {
+                *displayimporterrors 0
+                set importErrorsChanged 1
+            }
+        }
         if {[llength [info commands hm_answernext]] > 0} {
-            hm_answernext yes
+            hm_answernext [expr {$operation eq "import" ? "all" : "yes"}]
         }
     } setupError setupOptions]
     if {$setupCode} {
+        if {$importErrorsChanged} { catch {*displayimporterrors $importErrorsPrevious} }
         set MODEL_IO_ACTIVE 0
         return -options $setupOptions $setupError
     }
     set code [catch {uplevel #0 $command} result options]
+    if {$importErrorsChanged} { catch {*displayimporterrors $importErrorsPrevious} }
     set MODEL_IO_ACTIVE 0
     catch {update idletasks}
     if {$code} { return -options $options $result }

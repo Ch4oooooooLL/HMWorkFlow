@@ -58,3 +58,8 @@ LocalMeshOptimizer_Report_*/
 # Generated validation models and their manifests
 /examples/**/*.fem
 /examples/**/*_manifest.json
+
+# Versioned FEM Automatic Seam acceptance fixtures.
+!/examples/AutoShellSeamBackend/test_fem/
+!/examples/AutoShellSeamBackend/test_fem/**/*.fem
+!/examples/AutoShellSeamBackend/test_fem/**/*_manifest.json

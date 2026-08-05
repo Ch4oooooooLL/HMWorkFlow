@@ -80,6 +80,16 @@ namespace eval ::HWToolkit {
             settings_proc "::MeshSeamWeld::runSettings"
             undo_proc "::MeshSeamWeld::undoLast"
         }
+        fem_auto_seam {
+            group    "Mesh"
+            label_zh "FEM 自动焊缝"
+            label_en "FEM Automatic Seam"
+            desc_zh  "分析孤立划分后的壳网格，识别并复核 T 型、贴片型和邻近自由边，在 FEM 层面切分并创建焊缝。"
+            desc_en  "Analyze independently meshed shells, review T/patch/near-edge candidates, and create seams through FEM-level splitting."
+            proc     "::FemAutoSeam::runAction"
+            settings_proc "::FemAutoSeam::runSettings"
+            undo_proc "::FemAutoSeam::undoLast"
+        }
         batch_property_assignment {
             group    "Mesh"
             label_zh "批量赋予 Property 和材料"
@@ -367,6 +377,8 @@ proc ::HWToolkit::clearExistingWindows {} {
         .batch_mesher
         .casting_tetramesh
         .mesh_seam_weld
+        .fem_auto_seam
+        .fem_auto_seam_review
         .hwshortcut_manager
         .hwshortcut_capture
         .local_mesh_optimizer
@@ -384,6 +396,21 @@ proc ::HWToolkit::clearExistingWindows {} {
 proc ::HWToolkit::closePanel {} {
     if {[llength [info commands winfo]] > 0 && [winfo exists .hwtoolkit]} {
         catch {destroy .hwtoolkit}
+    }
+}
+
+proc ::HWToolkit::topmostButtonText {} {
+    if {[::HWFlow::projectTopmostEnabled]} {
+        return [::HWFlow::txt "窗口置顶：开" "Always on Top: On"]
+    }
+    return [::HWFlow::txt "窗口置顶：关" "Always on Top: Off"]
+}
+
+proc ::HWToolkit::toggleProjectTopmost {} {
+    ::HWFlow::toggleProjectTopmost
+    set button .hwtoolkit.foot.topmost
+    if {[llength [info commands winfo]] > 0 && [winfo exists $button]} {
+        $button configure -text [::HWToolkit::topmostButtonText]
     }
 }
 
@@ -467,8 +494,10 @@ proc ::HWToolkit::showPanel {} {
     ::HWFlow::uiWidget button $w.foot.help -text [::HWFlow::txt "查看帮助" "View Help"] -width 14 -command "::HWToolkit::openGuide"
     ::HWFlow::uiWidget button $w.foot.diagnostics -text [::HWFlow::txt "复制诊断" "Copy Diagnostics"] -width 14 -command "::HWToolkit::copyDiagnostics"
     ::HWFlow::uiWidget button $w.foot.shortcuts -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -width 14 -command "::HWShortcut::showManager"
+    ::HWFlow::uiWidget button $w.foot.topmost -text [::HWToolkit::topmostButtonText] -width 18 -command ::HWToolkit::toggleProjectTopmost
     ::HWFlow::uiWidget button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command ::HWToolkit::closePanel
     pack $w.foot.close -side right
+    pack $w.foot.topmost -side right -padx {0 8}
     pack $w.foot.shortcuts -side right -padx {0 8}
     pack $w.foot.diagnostics -side right -padx {0 8}
     pack $w.foot.help -side right -padx {0 8}

@@ -592,11 +592,24 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 应用前会写入任务安全快照，每个候选还会建立独立检查点；导入后复核新增 ID、connectivity 和相对原始基线新增的 HyperMesh 质量失败，单个候选失败只回滚该候选。结果位于 `runtime/tasks/mesh_seam_weld/<run_id>/output/`，包含 candidate、creation plan、候选独立增量 FEM、manifest、规划 JSON/HTML 报告及执行报告。焊缝 Property 无法可靠复用时会明确标记 `property_assignment_required`，可随后使用批量 Property 模块。受控节点微调和保守单母单元局部切分均已实现但默认关闭；模块状态为 `controlled`，仍需按 [协议与 HM2019 清单](doc/mesh_seam_auto_protocol.md) 完成真实 HyperMesh 验证。
 
+### 6.15 FEM 自动焊缝（独立模块）
+
+`FEM Automatic Seam` 与 `Mesh Seam Weld` 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型、贴片型和邻近自由边候选，并在 FEM 层面切分母单元、插入节点和创建焊缝壳；后者继续处理用户已经明确选择的网格焊缝路径。
+
+该模块使用独立配置与任务目录。检测前固定生成 `before.hm`，Python 在临时工作区生成拆分、连接和规范驱动的局部优化计划，HyperMesh 校验后逐候选导入并支持回滚；完成后导出 `result.fem`，随后删除全部过程文件，因此成功任务目录严格只保留这两个文件。可直接导入的十组验收模型位于 `examples/AutoShellSeamBackend/test_fem/`。
+
+`Criteria file` 和 `Param file` 均可留空。留空时模块使用 `modules/fem_auto_seam/defaults/` 中的内置 HM2019 质量标准与自适应单元尺寸参数；任一文件由用户指定时，只覆盖对应的内置默认文件。
+
+检测、后台规划、逐候选 FEM 导入、质量检查和完成态导出均显示进度。高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败、回滚项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 `Mesh Seam Weld` 继续手工创建。
+
+该模块使用独立配置 `fem_auto_seam` 和独立任务目录 `runtime/tasks/fem_auto_seam/`。设置页可单独配置搜索距离、置信度、小孔阈值、`.criteria/.param`、优化邻域层数和迭代次数。Python 局部优化是固定流程而非可选开关：它只接受不新增规范失败、不恶化最差罚值且改善局部目标的安全节点移动；HyperMesh 2019 随后执行原生质量检查，单个候选失败只回滚该候选。
+
 ## 7. 公共机制
 
 `modules/workflow_common.tcl` 提供跨模块共享能力：
 
 - 全局语言配置读取。
+- 项目级 Tk/hwtk 窗口置顶开关、状态持久化，以及对当前和后续项目窗口的统一应用。
 - HyperMesh 材料实体名称匹配和重复后缀归一化。
 - component 命名、重命名和装配组织。
 - Model Browser 创建、同步和刷新。

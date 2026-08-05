@@ -231,7 +231,13 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
         tcl.eval(
             r'''
             set ::answers {}
+            set ::import_error_modes {}
             proc hm_answernext {answer} { lappend ::answers $answer }
+            proc hm_info {key} {
+                if {$key eq "displayimporterrors"} { return 1 }
+                return ""
+            }
+            proc *displayimporterrors {mode} { lappend ::import_error_modes $mode }
             proc successful_io {} { return done }
             proc failing_io {} { error boom }
             '''
@@ -248,6 +254,8 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
         self.assertEqual(tcl.splitlist(tcl.eval("set ::answers")), ("yes",))
         with self.assertRaises(tkinter.TclError):
             tcl.eval("::HWFlow::runHyperMeshIo import failing_io")
+        self.assertEqual(tcl.splitlist(tcl.eval("set ::answers")), ("yes", "all"))
+        self.assertEqual(tcl.splitlist(tcl.eval("set ::import_error_modes")), ("0", "1"))
         self.assertEqual(tcl.eval("set ::HWFlow::MODEL_IO_ACTIVE"), "0")
 
     def test_all_native_fem_import_export_calls_use_the_guard(self) -> None:

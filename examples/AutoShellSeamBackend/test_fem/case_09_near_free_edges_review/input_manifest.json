@@ -1,0 +1,43 @@
+{
+  "components": [
+    {
+      "component_id": 1,
+      "component_name": "EDGE_PLATE_A_T1",
+      "element_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ]
+    },
+    {
+      "component_id": 2,
+      "component_name": "EDGE_PLATE_B_T1",
+      "element_ids": [
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ]
+    }
+  ],
+  "fem_path": "input.fem",
+  "format": "hm_auto_shell_seam_fem",
+  "schema_version": "1.0"
+}

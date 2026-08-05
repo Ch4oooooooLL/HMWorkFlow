@@ -17,6 +17,7 @@ def commands() -> List[Sequence[str]]:
         "modules/batch_property_assignment/tests/run_tests.py",
         "modules/hybrid_core/tests/run_tests.py",
         "modules/mesh_seam_weld/tests/run_tests.py",
+        "modules/fem_auto_seam/tests/run_tests.py",
         "modules/rbe2_bolt_connector/tests/run_tests.py",
         "modules/shell_washer_hole_rbe2/tests/run_tests.py",
     ]

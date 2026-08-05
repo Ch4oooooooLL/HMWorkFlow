@@ -106,13 +106,53 @@ set available_after_restore [::MeshSeamWeld::undoAvailable]
     def test_all_free_edge_seed_counts_use_tcl_without_python_fallback(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
-        self.assertIn("pickNodes",run_action)
+        collector=module.split("proc ::MeshSeamWeld::collectManualSelectionPairs",1)[1].split("proc ::MeshSeamWeld::nodeXYZ",1)[0]
+        self.assertIn("collectManualSelectionPairs",run_action)
+        self.assertIn("pickNodes",collector)
         self.assertIn("buildNativeFreeEdgeGraphs",run_action)
         self.assertIn("pathsFromNativeFreeEdgeGraphs",run_action)
         self.assertIn("planning_mode=hm_native_edges",run_action)
         self.assertNotIn("runPythonComponentPlan",run_action)
         self.assertNotIn("sourcePathsForSingleNode",run_action)
         self.assertIn("processWeldPathIsolated",run_action)
+        self.assertIn("dict set job target_components $targetComps",run_action)
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_manual_selection_collects_node_component_pairs_until_empty_nodes(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        for name in ("pickNodes","pickComponents","componentsHaveElements"):
+            interp.eval("rename ::MeshSeamWeld::{0} ::MeshSeamWeld::{0}_real".format(name))
+        result=interp.eval(r"""
+set ::nodeSelections {{1 2 3} {4 5} {}}
+set ::componentSelections {{10} {20 21}}
+set ::selectionCalls {}
+proc ::MeshSeamWeld::pickNodes {} {
+    lappend ::selectionCalls nodes
+    set value [lindex $::nodeSelections 0]
+    set ::nodeSelections [lrange $::nodeSelections 1 end]
+    return $value
+}
+proc ::MeshSeamWeld::pickComponents {} {
+    lappend ::selectionCalls comps
+    set value [lindex $::componentSelections 0]
+    set ::componentSelections [lrange $::componentSelections 1 end]
+    return $value
+}
+proc ::MeshSeamWeld::componentsHaveElements {ids} {return 1}
+set pairs [::MeshSeamWeld::collectManualSelectionPairs]
+list $::selectionCalls [llength $pairs] \
+    [dict get [lindex $pairs 0] source_nodes] \
+    [dict get [lindex $pairs 0] target_components] \
+    [dict get [lindex $pairs 1] source_nodes] \
+    [dict get [lindex $pairs 1] target_components]
+""")
+        values=interp.splitlist(result)
+        self.assertEqual(interp.splitlist(values[0]),("nodes","comps","nodes","comps","nodes"))
+        self.assertEqual(values[1],"2")
+        self.assertEqual(interp.splitlist(values[2]),("1","2","3"))
+        self.assertEqual(interp.splitlist(values[3]),("10",))
+        self.assertEqual(interp.splitlist(values[4]),("4","5"))
+        self.assertEqual(interp.splitlist(values[5]),("20","21"))
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_local_boundary_trace_accepts_one_seed_and_deduplicates_same_loop(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
@@ -398,7 +438,7 @@ list [llength $loops] [llength [lindex $loops 0]]
         self.assertNotIn("buildTargetElementIndex",execution)
         self.assertNotIn("retryTargetElems",execution)
         self.assertNotIn("component-scope retry",execution)
-        self.assertIn("createFailureMarkerNodes [list $failure]",execution)
+        self.assertIn("createFailureMarkerNodes $failureRecords",execution)
         self.assertIn("retry_count 0",execution)
     def test_tcl_boundary_jobs_project_nodes_without_full_component_index(self):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
@@ -537,7 +577,8 @@ set failure [dict create path_index 2 source_nodes {11 12 13 14} center {1.0 2.0
         self.assertNotIn("retryTargetElems",run_action)
         self.assertNotIn("component_fallback",run_action)
         self.assertNotIn("component-scope retry",run_action)
-        self.assertIn("createFailureMarkerNodes [list $failure]",run_action)
+        self.assertIn("createFailureMarkerNodes $failureRecords",run_action)
+        self.assertEqual(run_action.count("createFailureMarkerNodes"),1)
     def test_component_exporter_writes_combined_binary_mesh(self):
         exporter=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"exporter.tcl").read_text(encoding="utf-8")
         self.assertIn("writeComponentPlanMesh",exporter)

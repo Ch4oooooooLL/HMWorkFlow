@@ -1,0 +1,235 @@
+{
+  "case_count": 10,
+  "case_spacing": 500.0,
+  "cases": [
+    {
+      "case_index": 1,
+      "case_name": "case_01_straight_t",
+      "component_ids": [
+        1,
+        2
+      ],
+      "element_id_max": 44,
+      "element_id_min": 1,
+      "expected": {
+        "minimum_created": 1,
+        "minimum_t": 1
+      },
+      "node_id_max": 66,
+      "node_id_min": 1,
+      "translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 2,
+      "case_name": "case_02_angled_t",
+      "component_ids": [
+        3,
+        4
+      ],
+      "element_id_max": 104,
+      "element_id_min": 45,
+      "expected": {
+        "minimum_created": 1,
+        "minimum_t": 1
+      },
+      "node_id_max": 150,
+      "node_id_min": 67,
+      "translation": [
+        500.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 3,
+      "case_name": "case_03_curved_t",
+      "component_ids": [
+        5,
+        6
+      ],
+      "element_id_max": 190,
+      "element_id_min": 105,
+      "expected": {
+        "minimum_created": 1,
+        "minimum_t": 1
+      },
+      "node_id_max": 265,
+      "node_id_min": 151,
+      "translation": [
+        1000.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 4,
+      "case_name": "case_04_partial_overlap_t",
+      "component_ids": [
+        7,
+        8
+      ],
+      "element_id_max": 222,
+      "element_id_min": 191,
+      "expected": {
+        "maximum_created_t_length": 34.001,
+        "minimum_created": 1,
+        "minimum_created_t_length": 33.999,
+        "minimum_source_inserted_nodes": 2,
+        "minimum_t": 1
+      },
+      "node_id_max": 317,
+      "node_id_min": 266,
+      "translation": [
+        1500.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 5,
+      "case_name": "case_05_multi_target_same_edge",
+      "component_ids": [
+        9,
+        10,
+        11
+      ],
+      "element_id_max": 298,
+      "element_id_min": 223,
+      "expected": {
+        "minimum_created": 2,
+        "minimum_distinct_targets": 2,
+        "minimum_same_source_target_count": 2,
+        "minimum_t": 2
+      },
+      "node_id_max": 428,
+      "node_id_min": 318,
+      "translation": [
+        2000.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 6,
+      "case_name": "case_06_four_target_t",
+      "component_ids": [
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "element_id_max": 346,
+      "element_id_min": 299,
+      "expected": {
+        "minimum_created": 4,
+        "minimum_distinct_targets": 4,
+        "minimum_t": 4
+      },
+      "node_id_max": 515,
+      "node_id_min": 429,
+      "translation": [
+        2500.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 7,
+      "case_name": "case_07_patch",
+      "component_ids": [
+        17,
+        18
+      ],
+      "element_id_max": 402,
+      "element_id_min": 347,
+      "expected": {
+        "minimum_created": 1,
+        "minimum_created_nodes": 1,
+        "minimum_deleted_mother_elements": 1,
+        "minimum_patch": 1
+      },
+      "node_id_max": 593,
+      "node_id_min": 516,
+      "translation": [
+        3000.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 8,
+      "case_name": "case_08_patch_small_hole_review",
+      "component_ids": [
+        19,
+        20
+      ],
+      "element_id_max": 470,
+      "element_id_min": 403,
+      "expected": {
+        "maximum_created": 0,
+        "minimum_created": 0,
+        "minimum_patch_review": 1
+      },
+      "node_id_max": 691,
+      "node_id_min": 594,
+      "translation": [
+        3500.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 9,
+      "case_name": "case_09_near_free_edges_review",
+      "component_ids": [
+        21,
+        22
+      ],
+      "element_id_max": 494,
+      "element_id_min": 471,
+      "expected": {
+        "maximum_created": 0,
+        "minimum_created": 0,
+        "minimum_near_edge": 1
+      },
+      "node_id_max": 731,
+      "node_id_min": 692,
+      "translation": [
+        4000.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case_index": 10,
+      "case_name": "case_10_negative_far_apart",
+      "component_ids": [
+        23,
+        24
+      ],
+      "element_id_max": 512,
+      "element_id_min": 495,
+      "expected": {
+        "maximum_candidates": 0,
+        "maximum_created": 0,
+        "minimum_created": 0
+      },
+      "node_id_max": 763,
+      "node_id_min": 732,
+      "translation": [
+        4500.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "fem_path": "combined_all_cases.fem",
+  "format": "fem_auto_seam_combined_acceptance_model",
+  "manifest_path": "combined_all_cases_manifest.json",
+  "schema_version": "1.0"
+}

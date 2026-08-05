@@ -18,6 +18,7 @@ BASE_CASES = (
     "modules/hybrid_core/tests/hm_hybrid_export_smoke.tcl",
     "modules/batch_mesher/tests/hm2019_api_smoke.tcl",
     "modules/mesh_seam_weld/tests/hm2019_shared_node_imprint_smoke.tcl",
+    "modules/fem_auto_seam/tests/hm2019_module_smoke.tcl",
     "modules/contact_setup/tests/hm2019_contact_surface_smoke.tcl",
 )
 PERFORMANCE_CASE = "modules/contact_setup/tests/hm2019_contact_performance_smoke.tcl"

@@ -1,0 +1,6 @@
+{
+  "minimum_created": 2,
+  "minimum_distinct_targets": 2,
+  "minimum_same_source_target_count": 2,
+  "minimum_t": 2
+}

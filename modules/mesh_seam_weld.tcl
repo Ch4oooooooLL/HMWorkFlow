@@ -21,7 +21,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.50"
+    variable VERSION "0.51"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -581,6 +581,33 @@ proc ::MeshSeamWeld::pickComponents {} {
     catch {set comps [hm_getmark comps 1]}
     ::MeshSeamWeld::clearComponentSelection
     return [::MeshSeamWeld::uniq $comps]
+}
+
+proc ::MeshSeamWeld::collectManualSelectionPairs {} {
+    set selectionPairs {}
+    while {1} {
+        set selectedNodes [::MeshSeamWeld::pickNodes]
+        if {[llength $selectedNodes] == 0} {
+            break
+        }
+
+        set targetComps [::MeshSeamWeld::pickComponents]
+        if {[llength $targetComps] == 0} {
+            # Cancel only the unfinished pair, then return to node input.  An
+            # empty node selection remains the single gesture that submits all
+            # completed pairs.
+            continue
+        }
+        if {![::MeshSeamWeld::componentsHaveElements $targetComps]} {
+            tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] \
+                -message [::HWFlow::txt "目标组件中没有可用网格单元。" \
+                    "Target components contain no usable mesh elements."]
+            continue
+        }
+        lappend selectionPairs [dict create \
+            source_nodes $selectedNodes target_components $targetComps]
+    }
+    return $selectionPairs
 }
 
 proc ::MeshSeamWeld::nodeXYZ {nodeId} {
@@ -5188,27 +5215,25 @@ proc ::MeshSeamWeld::runAction {} {
     ::MeshSeamWeld::resetRunCaches
     ::MeshSeamWeld::clearTransientSelections
 
-    set selectedNodes [::MeshSeamWeld::pickNodes]
-    if {[llength $selectedNodes] == 0} {
+    set selectionPairs [::MeshSeamWeld::collectManualSelectionPairs]
+    if {[llength $selectionPairs] == 0} {
         return
     }
 
-    set closedSeedMode [expr {[llength $selectedNodes] == 1 ||
-        ![::MeshSeamWeld::selectedNodesFormContinuousPath $selectedNodes]}]
-    set internalSingleNode 0
-    set pairBoundaryMode 0
-    set pathClosedLoop [expr {$closedSeedMode ? 1 : 0}]
-    set sourceSelectionMode [expr {$closedSeedMode ?
-        "closed free-edge seed nodes" : "open node path"}]
+    set selectedNodes {}
+    set targetComps {}
+    foreach selectionPair $selectionPairs {
+        set selectedNodes [concat $selectedNodes \
+            [dict get $selectionPair source_nodes]]
+        set targetComps [concat $targetComps \
+            [dict get $selectionPair target_components]]
+    }
+    set selectedNodes [::MeshSeamWeld::uniq $selectedNodes]
+    set targetComps [::MeshSeamWeld::uniq $targetComps]
+    set batchSelectedNodes $selectedNodes
+    set batchTargetComps $targetComps
 
-    set targetComps [::MeshSeamWeld::pickComponents]
-    if {[llength $targetComps] == 0} {
-        return
-    }
-    if {![::MeshSeamWeld::componentsHaveElements $targetComps]} {
-        tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "目标组件中没有可用网格单元。" "Target components contain no usable mesh elements."]
-        return
-    }
+    set sourceSelectionMode "batched node/component pairs"
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
@@ -5231,6 +5256,22 @@ proc ::MeshSeamWeld::runAction {} {
         ::MeshSeamWeld::clearUndoRecord
         ::MeshSeamWeld::clearFailureMarkerComponent
         set prepareStarted [clock milliseconds]
+        set batchedSourcePaths {}
+        set batchedWeldJobs {}
+        set batchedSourceComponentIds {}
+        set batchedSourceModes {}
+        set selectionPairIndex 0
+        foreach selectionPair $selectionPairs {
+            incr selectionPairIndex
+            set selectedNodes [dict get $selectionPair source_nodes]
+            set targetComps [dict get $selectionPair target_components]
+            set closedSeedMode [expr {[llength $selectedNodes] == 1 ||
+                ![::MeshSeamWeld::selectedNodesFormContinuousPath $selectedNodes]}]
+            set internalSingleNode 0
+            set pairBoundaryMode 0
+            set pathClosedLoop [expr {$closedSeedMode ? 1 : 0}]
+            set sourceSelectionMode [expr {$closedSeedMode ?
+                "closed free-edge seed nodes" : "open node path"}]
         # Resolve every component touched by the input node list up front.
         # A path may cross component ownership boundaries, and an internal
         # seed may be shared by several components; both cases are valid
@@ -5303,6 +5344,32 @@ proc ::MeshSeamWeld::runAction {} {
         } else {
             set sourcePaths [list $selectedNodes]
             set weldJobs [::MeshSeamWeld::prepareWeldJobs $sourcePaths $targetComps $progressOpened]
+        }
+            set batchedSourcePaths [concat $batchedSourcePaths $sourcePaths]
+            set batchedSourceComponentIds [concat \
+                $batchedSourceComponentIds $sourceComponentIds]
+            lappend batchedSourceModes $sourceSelectionMode
+            foreach job $weldJobs {
+                dict set job target_components $targetComps
+                dict set job selection_pair_index $selectionPairIndex
+                if {![dict exists $job closed_loop]} {
+                    dict set job closed_loop $pathClosedLoop
+                }
+                if {![dict exists $job imprint_closed_loop]} {
+                    dict set job imprint_closed_loop $pathClosedLoop
+                }
+                lappend batchedWeldJobs $job
+            }
+        }
+        set selectedNodes $batchSelectedNodes
+        set targetComps $batchTargetComps
+        set sourcePaths $batchedSourcePaths
+        set weldJobs $batchedWeldJobs
+        set sourceComponentIds [::MeshSeamWeld::uniq $batchedSourceComponentIds]
+        if {[llength $selectionPairs] == 1} {
+            set sourceSelectionMode [lindex $batchedSourceModes 0]
+        } else {
+            set sourceSelectionMode "batched node/component pairs ([llength $selectionPairs] pairs)"
         }
         set prepareMs [expr {[clock milliseconds] - $prepareStarted}]
         ::HybridCore::log INFO "PERF mesh_seam_weld prepare paths=[llength $sourcePaths] source_nodes=[llength [::MeshSeamWeld::uniq [concat {*}$sourcePaths]]] prepare_ms=$prepareMs"
@@ -5377,8 +5444,6 @@ proc ::MeshSeamWeld::runAction {} {
                     first_error [dict get $isolated error] \
                     final_error [dict get $isolated error] error [dict get $isolated error]]
                 lappend failureRecords $failure
-                set failureMarkerNodes [concat $failureMarkerNodes \
-                    [::MeshSeamWeld::createFailureMarkerNodes [list $failure]]]
                 ::HybridCore::log ERROR "weld path skipped path=$pathIndex/$pathTotal source_seed=[lindex $sourceNodes 0] error=[dict get $isolated error]"
                 continue
             }
@@ -5393,6 +5458,12 @@ proc ::MeshSeamWeld::runAction {} {
                     weldElems { set allWeldElems [concat $allWeldElems $value] }
                 }
             }
+        }
+        # Successful weld paths do not need diagnostic nodes.  Create all
+        # marker nodes once, and only at the centers of paths that failed.
+        if {[llength $failureRecords] > 0} {
+            set failureMarkerNodes \
+                [::MeshSeamWeld::createFailureMarkerNodes $failureRecords]
         }
         set executionMs [expr {[clock milliseconds] - $executionStarted}]
         set failureMarkerNodes [::MeshSeamWeld::uniq $failureMarkerNodes]

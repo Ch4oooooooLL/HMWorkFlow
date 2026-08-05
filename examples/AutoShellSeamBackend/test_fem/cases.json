@@ -1,0 +1,52 @@
+[
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_01_straight_t\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_01_straight_t\\input_manifest.json",
+    "name": "case_01_straight_t"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_02_angled_t\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_02_angled_t\\input_manifest.json",
+    "name": "case_02_angled_t"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_03_curved_t\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_03_curved_t\\input_manifest.json",
+    "name": "case_03_curved_t"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_04_partial_overlap_t\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_04_partial_overlap_t\\input_manifest.json",
+    "name": "case_04_partial_overlap_t"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_05_multi_target_same_edge\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_05_multi_target_same_edge\\input_manifest.json",
+    "name": "case_05_multi_target_same_edge"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_06_four_target_t\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_06_four_target_t\\input_manifest.json",
+    "name": "case_06_four_target_t"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_07_patch\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_07_patch\\input_manifest.json",
+    "name": "case_07_patch"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_08_patch_small_hole_review\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_08_patch_small_hole_review\\input_manifest.json",
+    "name": "case_08_patch_small_hole_review"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_09_near_free_edges_review\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_09_near_free_edges_review\\input_manifest.json",
+    "name": "case_09_near_free_edges_review"
+  },
+  {
+    "expected": "examples\\AutoShellSeamBackend\\test_fem\\case_10_negative_far_apart\\expected.json",
+    "manifest": "examples\\AutoShellSeamBackend\\test_fem\\case_10_negative_far_apart\\input_manifest.json",
+    "name": "case_10_negative_far_apart"
+  }
+]
