@@ -29,6 +29,10 @@ namespace eval ::HWShortcut {
     variable MARK_START "# >>> HMWorkFlow shortcut loader >>>"
     variable MARK_END "# <<< HMWorkFlow shortcut loader <<<"
     variable LAST_REGISTRATION_RESULT [dict create registered 0 errors {}]
+    variable STARTUP_AFTER_ID ""
+    variable STARTUP_ATTEMPTS 0
+    variable STARTUP_MAX_ATTEMPTS 240
+    variable STARTUP_RETRY_MS 250
 }
 
 proc ::HWShortcut::projectRoot {} {
@@ -166,6 +170,74 @@ proc ::HWShortcut::nativeLibraryStatus {} {
         return [::HWFlow::txt "当前会话回退模式" "Session fallback mode"]
     }
     return [::HWFlow::txt "不可用" "Unavailable"]
+}
+
+# HyperWorks 2022 reads hmcustom.tcl before its modeling context has finished
+# creating hm_registerkeyproc.  A one-shot registration from hmcustom.tcl
+# therefore fails even though the same installer works when sourced manually
+# after startup.  Keep the 2019 fast path, but let the startup loader wait for
+# the native API instead of requiring the user to source install_update.tcl
+# once per HyperWorks process.
+proc ::HWShortcut::startupRegistrationReady {} {
+    return [expr {[::HWShortcut::nativeKeyApi] ne ""}]
+}
+
+proc ::HWShortcut::isContextManagedGeneration {} {
+    if {[llength [info commands ::HWFlow::hyperWorksYear]] == 0} { return 0 }
+    if {[catch {set year [::HWFlow::hyperWorksYear]}]} { return 0 }
+    return [expr {$year ne "" && $year >= 2022}]
+}
+
+proc ::HWShortcut::contextKeysChanged {args} {
+    variable LAST_REGISTRATION_RESULT
+    if {![::HWShortcut::startupRegistrationReady]} { return }
+    # HyperWorks 2022 documents hm_registerkeyproc as context-bound.  Register
+    # directly from the execution-trace callback, matching Altair's own 2022
+    # Weld Certification integration, rather than postponing it past setkeys.
+    ::HWShortcut::loadConfig
+    set LAST_REGISTRATION_RESULT [::HWShortcut::registerAll]
+}
+
+proc ::HWShortcut::installContextKeyHooks {} {
+    if {![::HWShortcut::isContextManagedGeneration]} { return }
+    foreach command {::HM_Framework::p_RegisterKeys ::hm::context::ContextBase::setkeys} {
+        if {[llength [info commands $command]] == 0} { continue }
+        catch {trace remove execution $command leave ::HWShortcut::contextKeysChanged}
+        catch {trace add execution $command leave ::HWShortcut::contextKeysChanged}
+    }
+}
+
+proc ::HWShortcut::attemptStartupInitialization {} {
+    variable STARTUP_AFTER_ID
+    variable STARTUP_ATTEMPTS
+    variable STARTUP_MAX_ATTEMPTS
+    variable STARTUP_RETRY_MS
+    set STARTUP_AFTER_ID ""
+
+    if {[::HWShortcut::startupRegistrationReady]} {
+        ::HWShortcut::initialize startup
+        ::HWShortcut::installContextKeyHooks
+        return 1
+    }
+
+    incr STARTUP_ATTEMPTS
+    if {$STARTUP_ATTEMPTS >= $STARTUP_MAX_ATTEMPTS} {
+        # Preserve the existing diagnostic heartbeat if the host never exposes
+        # a keyboard API (for example, a non-interactive HyperMesh process).
+        ::HWShortcut::initialize startup
+        ::HWShortcut::log "startup shortcut API was not ready after [expr {$STARTUP_ATTEMPTS * $STARTUP_RETRY_MS}] ms"
+        return 0
+    }
+    set STARTUP_AFTER_ID [after $STARTUP_RETRY_MS ::HWShortcut::attemptStartupInitialization]
+    return 0
+}
+
+proc ::HWShortcut::startStartupInitialization {} {
+    variable STARTUP_AFTER_ID
+    variable STARTUP_ATTEMPTS
+    if {$STARTUP_AFTER_ID ne ""} { return 0 }
+    set STARTUP_ATTEMPTS 0
+    return [::HWShortcut::attemptStartupInitialization]
 }
 
 proc ::HWShortcut::moduleExistsVisible {moduleKey} {

@@ -457,6 +457,119 @@ class BatchMesherTests(unittest.TestCase):
             "2022",
         )
 
+    def test_hm2022_worker_profile_reads_namespace_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            template = root / "optistruct"
+            criteria = root / "mesh.criteria"
+            template.write_text("template", encoding="utf-8")
+            criteria.write_text("criteria", encoding="utf-8")
+            self.h.tcl.setvar("worker_template", template.as_posix())
+            self.h.tcl.setvar("worker_criteria", criteria.as_posix())
+            self.h.eval(
+                r"""
+                set ::BatchMesherWorker::config [dict create \
+                    export_template $worker_template criteria $worker_criteria]
+                set ::profileTemplate {}
+                set ::profileCriteria {}
+                proc *templatefileset {path} {set ::profileTemplate $path}
+                proc *readqualitycriteria {path} {set ::profileCriteria $path}
+                """
+            )
+            self.h.eval("::BatchMesherWorker::initializeBatchMeshProfile 2022")
+            self.assertEqual(
+                Path(self.h.eval("set ::profileTemplate")).as_posix(),
+                template.as_posix(),
+            )
+            self.assertEqual(
+                Path(self.h.eval("set ::profileCriteria")).as_posix(),
+                criteria.as_posix(),
+            )
+
+    def test_scale_preflight_rejects_element_size_larger_than_model_span(self):
+        with tempfile.TemporaryDirectory() as directory:
+            param = Path(directory) / "mesh.param"
+            param.write_text("element_size 8.0\n", encoding="utf-8")
+            self.h.tcl.setvar("scale_param", param.as_posix())
+            self.h.eval(
+                r"""
+                proc hm_getsurfaceedges {surfaceId} {return {{10 11}}}
+                proc hm_getverticesfromedge {edgeId} {
+                    if {$edgeId == 10} {return {1 2}}
+                    return {3 4}
+                }
+                proc hm_getvalue {entityType args} {
+                    set pointId [lindex [split [lindex $args 0] =] 1]
+                    return [dict get {1 {0 0 0} 2 {5 0 0} 3 {0 1 0} 4 {5 1 0}} $pointId]
+                }
+                """
+            )
+            with self.assertRaisesRegex(tkinter.TclError, "different length units"):
+                self.h.eval("::BatchMesher::validateBatchMeshScale {100} $scale_param")
+
+            param.write_text("element_size 0.008\n", encoding="utf-8")
+            result = self.h.eval(
+                "::BatchMesher::validateBatchMeshScale {100} $scale_param"
+            )
+            self.assertEqual(self.h.eval(f"dict get {{{result}}} element_size"), "0.008")
+
+    def test_existing_worker_error_is_not_overwritten_by_packaging_summary(self):
+        self.h.eval(
+            "set ::BatchMesher::runtime(tasks) [list [dict create task_id T001 "
+            "status failed ended_at {} error_message {*hm_batchmesh2 returned 0}]]"
+        )
+        self.h.eval("::BatchMesher::setTaskFailed T001 {no successful output package}")
+        self.assertEqual(
+            self.h.eval("dict get [lindex $::BatchMesher::runtime(tasks) 0] error_message"),
+            "*hm_batchmesh2 returned 0",
+        )
+
+    def test_worker_skips_packaging_when_every_mesh_task_failed(self):
+        worker_source = (MODULE / "background_worker.tcl").read_text(encoding="utf-8")
+        self.assertIn('packaging_skipped reason=no_successful_mesh_elements', worker_source)
+        self.assertIn('set overall [expr {$failures > 0 ? "failed" : "completed"}]', worker_source)
+
+    def test_worker_auto_switches_stale_live_session_to_meter_companion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            criteria = root / "mesh.criteria"
+            param = root / "mesh.param"
+            meter_criteria = root / "mesh_meter.criteria"
+            meter_param = root / "mesh_meter.param"
+            criteria.write_text("criteria\n", encoding="utf-8")
+            param.write_text("element_size 8.0\n", encoding="utf-8")
+            meter_criteria.write_text("criteria\n", encoding="utf-8")
+            meter_param.write_text("element_size 0.008\n", encoding="utf-8")
+            self.h.tcl.setvar("unit_root", root.as_posix())
+            self.h.eval(
+                r"""
+                set ::BatchMesherWorker::config [dict create \
+                    criteria [file join $unit_root mesh.criteria] \
+                    param [file join $unit_root mesh.param] \
+                    run_log [file join $unit_root worker.log]]
+                set ::BatchMesherWorker::records [list [dict create surface_ids {100}]]
+                proc hm_getsurfaceedges {surfaceId} {return {{10}}}
+                proc hm_getverticesfromedge {edgeId} {return {1 2}}
+                proc hm_getvalue {entityType args} {
+                    set pointId [lindex [split [lindex $args 0] =] 1]
+                    if {$pointId == 1} {return {0 0 0}}
+                    return {5 0 0}
+                }
+                """
+            )
+            self.assertEqual(
+                self.h.eval("::BatchMesherWorker::resolveUnitCompatibleConfiguration"),
+                "1",
+            )
+            self.assertEqual(
+                Path(self.h.eval("dict get $::BatchMesherWorker::config param")).as_posix(),
+                meter_param.as_posix(),
+            )
+            self.assertIn(
+                "configuration_auto_switched",
+                (root / "worker.log").read_text(encoding="utf-8"),
+            )
+
     def test_hmbatch_release_is_not_bound_to_interactive_release(self):
         executor_source = (MODULE / "executor.tcl").read_text(encoding="utf-8")
         manager_source = (MODULE / "background.tcl").read_text(encoding="utf-8")

@@ -75,6 +75,7 @@ proc ::BatchMesherWorker::optistructTemplate {} {
 }
 
 proc ::BatchMesherWorker::initializeBatchMeshProfile {release} {
+    variable config
     if {$release ne "2022"} { return }
     set template [::BatchMesherWorker::optistructTemplate]
     *templatefileset [file nativename $template]
@@ -94,6 +95,93 @@ proc ::BatchMesherWorker::verifyConfigurationFiles {} {
             error "CONFIG_CHANGED_DURING_RUN file=$path expected_mtime=[dict get $config $mtimeKey] actual_mtime=[file mtime $path] expected_size=[dict get $config $sizeKey] actual_size=[file size $path]"
         }
     }
+}
+
+proc ::BatchMesherWorker::batchMeshElementSize {paramPath} {
+    if {[catch {set channel [open $paramPath r]}]} { return "" }
+    set text [read $channel]
+    close $channel
+    if {[regexp -line {^[ \t]*element_size[ \t]+([0-9]+(?:[.][0-9]*)?(?:[eE][+-]?[0-9]+)?)} $text -> value] &&
+        [string is double -strict $value] && $value > 0} {
+        return [expr {double($value)}]
+    }
+    return ""
+}
+
+proc ::BatchMesherWorker::taskSurfaceIds {} {
+    variable records
+    set ids {}
+    foreach record $records {
+        if {[dict exists $record surface_ids]} { set ids [concat $ids [dict get $record surface_ids]] }
+    }
+    return [::BatchMesherWorker::uniqueIds $ids]
+}
+
+proc ::BatchMesherWorker::selectedSurfaceGeometrySpan {surfaceIds} {
+    set count [llength $surfaceIds]
+    if {$count == 0} { return "" }
+    set stride [expr {max(1, int(ceil(double($count) / 64.0)))}]
+    array set seenPoint {}
+    set coords {}
+    for {set index 0} {$index < $count} {incr index $stride} {
+        if {[catch {set loops [hm_getsurfaceedges [lindex $surfaceIds $index]]}]} { continue }
+        foreach loop $loops {
+            foreach edgeId $loop {
+                if {[catch {set pointIds [hm_getverticesfromedge $edgeId]}]} { continue }
+                foreach pointId $pointIds {
+                    if {[info exists seenPoint($pointId)]} { continue }
+                    set seenPoint($pointId) 1
+                    if {[catch {set xyz [hm_getvalue points id=$pointId dataname=coordinates]}] || [llength $xyz] < 3} { continue }
+                    lappend coords [lrange $xyz 0 2]
+                }
+            }
+        }
+    }
+    if {[llength $coords] < 2} { return "" }
+    lassign [lindex $coords 0] xmin ymin zmin
+    set xmax $xmin; set ymax $ymin; set zmax $zmin
+    foreach xyz [lrange $coords 1 end] {
+        lassign $xyz x y z
+        if {$x < $xmin} { set xmin $x }; if {$x > $xmax} { set xmax $x }
+        if {$y < $ymin} { set ymin $y }; if {$y > $ymax} { set ymax $y }
+        if {$z < $zmin} { set zmin $z }; if {$z > $zmax} { set zmax $z }
+    }
+    return [expr {max($xmax-$xmin, $ymax-$ymin, $zmax-$zmin)}]
+}
+
+proc ::BatchMesherWorker::unitCompatibleCompanion {path} {
+    set candidate "[file rootname $path]_meter[file extension $path]"
+    if {[file isfile $candidate]} { return [file normalize $candidate] }
+    return ""
+}
+
+proc ::BatchMesherWorker::resolveUnitCompatibleConfiguration {} {
+    variable config
+    set originalParam [dict get $config param]
+    set originalCriteria [dict get $config criteria]
+    set elementSize [::BatchMesherWorker::batchMeshElementSize $originalParam]
+    set compatibleParam [::BatchMesherWorker::unitCompatibleCompanion $originalParam]
+    set compatibleCriteria [::BatchMesherWorker::unitCompatibleCompanion $originalCriteria]
+    set marker "[file rootname $originalParam].use_meter"
+    set markerEnabled [file isfile $marker]
+    set geometrySpan [::BatchMesherWorker::selectedSurfaceGeometrySpan [::BatchMesherWorker::taskSurfaceIds]]
+    set detectedMismatch [expr {$elementSize ne "" && $geometrySpan ne "" && $geometrySpan > 0 && $elementSize >= $geometrySpan}]
+    if {!$markerEnabled && !$detectedMismatch} {
+        return 0
+    }
+    if {$compatibleParam eq "" || $compatibleCriteria eq ""} {
+        error "BATCHMESH_UNIT_MISMATCH element_size=$elementSize geometry_span=$geometrySpan; compatible _meter.criteria/_meter.param files were not found"
+    }
+    set compatibleSize [::BatchMesherWorker::batchMeshElementSize $compatibleParam]
+    if {$compatibleSize eq "" || $compatibleSize >= $elementSize} {
+        error "BATCHMESH_UNIT_MISMATCH invalid compatible parameter file: $compatibleParam"
+    }
+    dict set config criteria $compatibleCriteria
+    dict set config param $compatibleParam
+    set reason [expr {$markerEnabled ? "explicit_meter_marker" : "unit_mismatch"}]
+    ::BatchMesherWorker::appendLog [dict get $config run_log] WARN \
+        "configuration_auto_switched reason=$reason marker=$marker element_size=$elementSize geometry_span=$geometrySpan compatible_element_size=$compatibleSize original_criteria=$originalCriteria original_param=$originalParam criteria=$compatibleCriteria param=$compatibleParam"
+    return 1
 }
 
 proc ::BatchMesherWorker::allIds {entityType markId} {
@@ -326,6 +414,7 @@ proc ::BatchMesherWorker::writeIsolatedOutputModel {} {
 proc ::BatchMesherWorker::main {} {
     variable config
     variable records
+    variable successfulElements
     variable workerRelease
     set records [dict get $config tasks]
     set runLog [dict get $config run_log]
@@ -341,6 +430,7 @@ proc ::BatchMesherWorker::main {} {
         ::BatchMesherWorker::verifyConfigurationFiles
         catch {hm_answernext yes}
         *readfile [file nativename [dict get $config model]] 0
+        ::BatchMesherWorker::resolveUnitCompatibleConfiguration
         ::BatchMesherWorker::initializeBatchMeshProfile $release
         for {set index 0} {$index < [llength $records]} {incr index} {
             set failed [::BatchMesherWorker::runTask $index]
@@ -354,10 +444,15 @@ proc ::BatchMesherWorker::main {} {
                 break
             }
         }
-        ::BatchMesherWorker::writeState exporting [llength $records] "Saving native worker mesh result"
-        ::BatchMesherWorker::writeIsolatedOutputModel
         set femPackagingError ""
-        if {[catch {::BatchMesherWorker::exportResult} femError femOptions]} {
+        if {[llength [::BatchMesherWorker::uniqueIds $successfulElements]] > 0} {
+            ::BatchMesherWorker::writeState exporting [llength $records] "Saving native worker mesh result"
+            ::BatchMesherWorker::writeIsolatedOutputModel
+        } else {
+            ::BatchMesherWorker::appendLog $runLog WARN "packaging_skipped reason=no_successful_mesh_elements"
+        }
+        if {[llength [::BatchMesherWorker::uniqueIds $successfulElements]] > 0 &&
+            [catch {::BatchMesherWorker::exportResult} femError femOptions]} {
             set femPackagingError $femError
             # Meshing remains successful, but this worker cannot participate in
             # final aggregation without its FE-only payload.
@@ -398,9 +493,10 @@ proc ::BatchMesherWorker::main {} {
     }
     set failures 0
     foreach record $records { if {[dict get $record status] eq "failed"} { incr failures } }
-    ::BatchMesherWorker::appendLog $runLog INFO "worker_complete failures=$failures result=[dict get $config result_fem]"
-    ::BatchMesherWorker::writeState completed [llength $records] "Background meshing completed; failed_tasks=$failures"
-    return 0
+    set overall [expr {$failures > 0 ? "failed" : "completed"}]
+    ::BatchMesherWorker::appendLog $runLog INFO "worker_complete status=$overall failures=$failures result=[dict get $config result_fem]"
+    ::BatchMesherWorker::writeState $overall [llength $records] "Background meshing completed; failed_tasks=$failures"
+    return [expr {$failures > 0 ? 1 : 0}]
 }
 
 if {![info exists ::BatchMesherWorkerNoAutoRun] || !$::BatchMesherWorkerNoAutoRun} {

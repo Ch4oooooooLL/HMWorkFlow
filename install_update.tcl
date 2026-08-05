@@ -59,6 +59,7 @@ proc ::HWInstaller::run {} {
     }
 
     ::HWShortcut::initialize
+    ::HWShortcut::installContextKeyHooks
     ::HWShortcut::installAutoLoader
 
     ::HWInstaller::reloadHybridCore

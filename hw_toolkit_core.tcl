@@ -394,11 +394,22 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {update idletasks}
 }
 
+proc ::HWToolkit::closePanel {} {
+    if {[llength [info commands winfo]] > 0 && [winfo exists .hwtoolkit]} {
+        catch {destroy .hwtoolkit}
+    }
+}
+
 proc ::HWToolkit::showPanel {} {
     variable MODULES
 
-    catch {destroy .hwtoolkit}
     set w .hwtoolkit
+    if {[winfo exists $w]} {
+        catch {wm deiconify $w}
+        catch {raise $w}
+        catch {focus -force $w}
+        return $w
+    }
     ::HWFlow::createTopLevel $w main
     wm title $w "HyperMesh Toolkit"
     wm minsize $w 720 620
@@ -463,12 +474,13 @@ proc ::HWToolkit::showPanel {} {
     ::HWFlow::uiWidget button $w.foot.help -text [::HWFlow::txt "查看帮助" "View Help"] -width 14 -command "::HWToolkit::openGuide"
     ::HWFlow::uiWidget button $w.foot.diagnostics -text [::HWFlow::txt "复制诊断" "Copy Diagnostics"] -width 14 -command "::HWToolkit::copyDiagnostics"
     ::HWFlow::uiWidget button $w.foot.shortcuts -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -width 14 -command "::HWShortcut::showManager"
-    ::HWFlow::uiWidget button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command "destroy .hwtoolkit"
+    ::HWFlow::uiWidget button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command ::HWToolkit::closePanel
     pack $w.foot.close -side right
     pack $w.foot.shortcuts -side right -padx {0 8}
     pack $w.foot.diagnostics -side right -padx {0 8}
     pack $w.foot.help -side right -padx {0 8}
-    bind $w <Escape> "destroy .hwtoolkit"
+    bind $w <Escape> ::HWToolkit::closePanel
+    wm protocol $w WM_DELETE_WINDOW ::HWToolkit::closePanel
 
     update idletasks
     set sw [winfo screenwidth $w]
@@ -479,7 +491,11 @@ proc ::HWToolkit::showPanel {} {
     catch {wm deiconify $w}
     catch {raise $w}
     catch {focus -force $w}
-    tkwait window $w
+    # Keep the main panel non-modal.  HyperWorks 2022 does not reliably re-arm
+    # a native key callback when its deferred handler enters a nested
+    # `tkwait window`; returning to the host event loop keeps the shortcut
+    # repeatable after the panel is closed.  Module dialogs may remain modal.
+    return $w
 }
 
 proc ::HWToolkit::shortcutText {key} {
@@ -573,7 +589,10 @@ proc ::HWToolkit::drainShortcutLaunch {} {
     set target $PENDING_SHORTCUT_TARGET
     set PENDING_SHORTCUT_TARGET ""
     if {$target eq "__toolkit_home__"} {
-        ::HWToolkit::run
+        # The shortcut library is already initialized before a native key can
+        # dispatch here.  Re-registering the active key while handling it can
+        # invalidate that binding in HyperWorks 2022 after the panel closes.
+        ::HWToolkit::run 0
     } else {
         ::HWToolkit::invokeModule $target shortcut
     }
@@ -735,11 +754,11 @@ proc ::HWToolkit::settingsModule {key} {
     }
 }
 
-proc ::HWToolkit::run {} {
+proc ::HWToolkit::run {{refreshShortcuts 1}} {
     if {![::HWToolkit::sourceModules]} {
         return
     }
-    if {[llength [info commands ::HWShortcut::initialize]] > 0} {
+    if {$refreshShortcuts && [llength [info commands ::HWShortcut::initialize]] > 0} {
         catch {::HWShortcut::initialize}
     }
     ::HWToolkit::clearExistingWindows

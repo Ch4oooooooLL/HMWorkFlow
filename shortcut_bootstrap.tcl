@@ -24,7 +24,10 @@ if {[catch {
         }
         source -encoding utf-8 $shortcutFile
     }
-    ::HWShortcut::initialize startup
+    # HyperWorks 2019 normally has its key API ready here.  HyperWorks 2022
+    # sources hmcustom.tcl earlier, so this call retries asynchronously until
+    # the modeling context can accept shortcut registrations.
+    ::HWShortcut::startStartupInitialization
 
     set hybridCoreInit [file join $hmworkflowRoot "modules" "hybrid_core" "tcl" "init.tcl"]
     if {![file exists $hybridCoreInit]} {

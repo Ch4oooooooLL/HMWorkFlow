@@ -245,3 +245,58 @@ proc ::BatchMesher::validateRunConfig {} {
     }
     return [dict create criteria $criteria param $param hmbatch [::BatchMesher::validateHmbatch 1] warnings $warnings]
 }
+
+proc ::BatchMesher::batchMeshElementSize {paramPath} {
+    if {[catch {set text [::HWFlow::readTextFile $paramPath]}]} { return "" }
+    if {[regexp -line {^[ \t]*element_size[ \t]+([0-9]+(?:[.][0-9]*)?(?:[eE][+-]?[0-9]+)?)} $text -> value] &&
+        [string is double -strict $value] && $value > 0} {
+        return [expr {double($value)}]
+    }
+    return ""
+}
+
+proc ::BatchMesher::selectedSurfaceGeometrySpan {surfaceIds} {
+    if {[llength $surfaceIds] == 0} { return "" }
+    set count [llength $surfaceIds]
+    set stride [expr {max(1, int(ceil(double($count) / 64.0)))}]
+    array set seenPoint {}
+    set coords {}
+    for {set index 0} {$index < $count} {incr index $stride} {
+        set surfaceId [lindex $surfaceIds $index]
+        if {[catch {set loops [hm_getsurfaceedges $surfaceId]}]} { continue }
+        foreach loop $loops {
+            foreach edgeId $loop {
+                if {[catch {set pointIds [hm_getverticesfromedge $edgeId]}]} { continue }
+                foreach pointId $pointIds {
+                    if {[info exists seenPoint($pointId)]} { continue }
+                    set seenPoint($pointId) 1
+                    if {[catch {set xyz [hm_getvalue points id=$pointId dataname=coordinates]}] || [llength $xyz] < 3} { continue }
+                    lappend coords [lrange $xyz 0 2]
+                }
+            }
+        }
+    }
+    if {[llength $coords] < 2} { return "" }
+    lassign [lindex $coords 0] xmin ymin zmin
+    set xmax $xmin; set ymax $ymin; set zmax $zmin
+    foreach xyz [lrange $coords 1 end] {
+        lassign $xyz x y z
+        if {$x < $xmin} { set xmin $x }; if {$x > $xmax} { set xmax $x }
+        if {$y < $ymin} { set ymin $y }; if {$y > $ymax} { set ymax $y }
+        if {$z < $zmin} { set zmin $z }; if {$z > $zmax} { set zmax $z }
+    }
+    return [expr {max($xmax-$xmin, $ymax-$ymin, $zmax-$zmin)}]
+}
+
+proc ::BatchMesher::validateBatchMeshScale {surfaceIds paramPath} {
+    set elementSize [::BatchMesher::batchMeshElementSize $paramPath]
+    if {$elementSize eq ""} { return "" }
+    set geometrySpan [::BatchMesher::selectedSurfaceGeometrySpan $surfaceIds]
+    if {$geometrySpan eq "" || $geometrySpan <= 0} { return "" }
+    if {$elementSize >= $geometrySpan} {
+        error [::BatchMesher::txt \
+            "BatchMesh 单元尺寸 $elementSize 大于或等于所选几何整体跨度 [format %.6g $geometrySpan]。模型与 criteria/param 很可能使用了不同长度单位（例如米制模型应将 8 mm 写为 0.008）；已在启动 worker 前停止。" \
+            "BatchMesh element size $elementSize is greater than or equal to the selected geometry span [format %.6g $geometrySpan]. The model and criteria/param likely use different length units (for example, use 0.008 for 8 mm in a metre-based model); stopped before launching workers."]
+    }
+    return [dict create element_size $elementSize geometry_span $geometrySpan]
+}

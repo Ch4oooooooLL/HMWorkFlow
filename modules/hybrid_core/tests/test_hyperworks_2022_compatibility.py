@@ -68,6 +68,94 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
         self.assertNotIn("hyperWorksCompatibility", preflight)
         self.assertIn("informational only", preflight)
 
+    def test_main_panel_shortcut_uses_a_reentrant_2022_window_lifecycle(self) -> None:
+        core = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
+        panel = core[
+            core.index("proc ::HWToolkit::showPanel") :
+            core.index("proc ::HWToolkit::shortcutText")
+        ]
+        drain = core[
+            core.index("proc ::HWToolkit::drainShortcutLaunch") :
+            core.index("proc ::HWToolkit::openGuide")
+        ]
+
+        self.assertNotRegex(panel, r"(?m)^\s*tkwait\s+window\b")
+        self.assertIn(
+            "wm protocol $w WM_DELETE_WINDOW ::HWToolkit::closePanel", panel
+        )
+        self.assertIn("::HWToolkit::run 0", drain)
+
+        tcl = tkinter.Tcl()
+        tcl.eval(f"source -encoding utf-8 {{{(ROOT / 'hw_toolkit_core.tcl').as_posix()}}}")
+        tcl.eval(
+            r'''
+            namespace eval ::HWShortcut {}
+            set ::shortcut_refreshes 0
+            set ::panel_opens 0
+            proc ::HWShortcut::initialize {} { incr ::shortcut_refreshes }
+            proc ::HWToolkit::sourceModules {} { return 1 }
+            proc ::HWToolkit::clearExistingWindows {} { return }
+            proc ::HWToolkit::showPanel {} { incr ::panel_opens }
+            '''
+        )
+
+        tcl.eval("::HWToolkit::run 0")
+        self.assertEqual(tcl.eval("set ::shortcut_refreshes"), "0")
+        self.assertEqual(tcl.eval("set ::panel_opens"), "1")
+        tcl.eval("::HWToolkit::run")
+        self.assertEqual(tcl.eval("set ::shortcut_refreshes"), "1")
+        self.assertEqual(tcl.eval("set ::panel_opens"), "2")
+
+    def test_2022_startup_waits_for_native_shortcut_api_and_tracks_context(self) -> None:
+        manager_path = ROOT / "modules" / "shortcut_manager.tcl"
+        source = manager_path.read_text(encoding="utf-8")
+        bootstrap = (ROOT / "shortcut_bootstrap.tcl").read_text(encoding="utf-8")
+
+        self.assertIn("::HWShortcut::startStartupInitialization", bootstrap)
+        self.assertIn("after $STARTUP_RETRY_MS", source)
+        self.assertIn("::HM_Framework::p_RegisterKeys", source)
+        self.assertIn("::hm::context::ContextBase::setkeys", source)
+
+        tcl = tkinter.Tcl()
+        tcl.eval(f"source -encoding utf-8 {{{manager_path.as_posix()}}}")
+        tcl.eval(
+            r'''
+            rename ::HWShortcut::initialize ::HWShortcut::initialize_real
+            set ::startup_modes {}
+            proc ::HWShortcut::initialize {{mode manual}} {
+                lappend ::startup_modes $mode
+                return 1
+            }
+            set ::HWShortcut::STARTUP_RETRY_MS 100000
+            set ::HWShortcut::STARTUP_MAX_ATTEMPTS 2
+            '''
+        )
+
+        self.assertEqual(tcl.eval("::HWShortcut::startStartupInitialization"), "0")
+        self.assertEqual(tcl.eval("llength $::startup_modes"), "0")
+        tcl.eval("proc hm_registerkeyproc {key file command} { return }")
+        self.assertEqual(tcl.eval("::HWShortcut::attemptStartupInitialization"), "1")
+        self.assertEqual(tcl.splitlist(tcl.eval("set ::startup_modes")), ("startup",))
+        tcl.eval(
+            r'''
+            namespace eval ::HM_Framework {}
+            proc ::HM_Framework::p_RegisterKeys {} { return }
+            rename ::HWFlow::hyperWorksYear ::HWFlow::hyperWorksYear_real
+            proc ::HWFlow::hyperWorksYear {{version ""}} { return 2022 }
+            rename ::HWShortcut::loadConfig ::HWShortcut::loadConfig_real
+            proc ::HWShortcut::loadConfig {} { return }
+            rename ::HWShortcut::registerAll ::HWShortcut::registerAll_real
+            set ::context_refreshes 0
+            proc ::HWShortcut::registerAll {} {
+                incr ::context_refreshes
+                return [dict create registered 1 errors {}]
+            }
+            ::HWShortcut::installContextKeyHooks
+            ::HM_Framework::p_RegisterKeys
+            '''
+        )
+        self.assertEqual(tcl.eval("set ::context_refreshes"), "1")
+
     def test_short_hmbatch_release_values_are_normalized_to_years(self) -> None:
         tcl = tkinter.Tcl()
         tcl.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")

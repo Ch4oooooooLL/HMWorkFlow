@@ -162,6 +162,7 @@ proc ::BatchMesher::startBackgroundRun {{taskIds {}}} {
     ::BatchMesher::requireSupportedHyperMesh
     set runConfig [::BatchMesher::validateRunConfig]
     ::BatchMesher::verifyAnalysisFresh
+    ::BatchMesher::validateBatchMeshScale $runtime(selected_surfaces) [dict get $runConfig param]
     if {[llength $runtime(tasks)] == 0} { error [::BatchMesher::txt "没有可运行任务。" "There are no runnable tasks."] }
     if {[llength [::BatchMesher::modelPath]] == 0} { error [::BatchMesher::txt "当前模型尚未保存，请先保存模型。" "The current model is unsaved; save it first."] }
     ::BatchMesher::saveCurrentPreset
@@ -257,7 +258,9 @@ proc ::BatchMesher::setTaskFailed {taskId message} {
         if {[dict get $task task_id] ne $taskId} { continue }
         dict set task status failed
         dict set task ended_at [clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S}]
-        dict set task error_message $message
+        if {![dict exists $task error_message] || [string trim [dict get $task error_message]] eq ""} {
+            dict set task error_message $message
+        }
         ::BatchMesher::replaceTask $index $task
         return
     }
