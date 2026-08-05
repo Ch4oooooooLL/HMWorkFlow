@@ -4,7 +4,7 @@ workflow:
   # 界面语言 / UI language: zh_CN or en_US
   language: zh_CN
 project:
-  # Engineering values in config/materials.txt use this consistent system.
+  # Engineering values use this consistent system.
   # Change these values and reconfirm before using another project system.
   unit_system: mm_N_s_tonne
   solver_profile: OptiStruct

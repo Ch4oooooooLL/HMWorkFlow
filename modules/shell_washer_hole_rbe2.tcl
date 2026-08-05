@@ -1370,6 +1370,9 @@ proc ::RB2W::listSubtract {all remove} {
 }
 
 proc ::RB2W::componentExistsByName {compName} {
+    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
+        return [expr {[::HWFlow::componentIdByName $compName] ne ""}]
+    }
     if {![catch {set exists [hm_entityinfo exist components $compName -byname]}]} { return $exists }
     if {![catch {set cid [hm_entityinfo id components $compName -byname]}] && $cid ne "" && $cid != 0} { return 1 }
     return 0
@@ -1393,6 +1396,9 @@ proc ::RB2W::deleteComponentByName {compName} {
 }
 
 proc ::RB2W::componentIdByName {compName} {
+    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
+        return [::HWFlow::componentIdByName $compName]
+    }
     foreach etype {components comps component} {
         if {![catch {set cid [hm_entityinfo id $etype $compName -byname]}] && $cid ne "" && $cid != 0} { return $cid }
     }
@@ -1409,6 +1415,9 @@ proc ::RB2W::componentIdByName {compName} {
 }
 
 proc ::RB2W::getComponentName {compId} {
+    if {[llength [info commands ::HWFlow::componentName]] > 0} {
+        return [::HWFlow::componentName $compId]
+    }
     foreach etype {comps components component} {
         if {![catch {set n [hm_getcollectorname $etype $compId]}] && $n ne ""} { return $n }
     }

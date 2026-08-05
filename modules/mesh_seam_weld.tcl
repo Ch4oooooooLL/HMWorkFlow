@@ -68,6 +68,9 @@ namespace eval ::MeshSeamWeld {
         mesh_cross_size        0
         create_geometry_surf   0
     }
+    # Legacy state keys are retained for old config files.  Ruled transverse
+    # layers are now derived from each source/target gap and weld size;
+    # mesh_cross_param is intentionally not used as a fixed override.
 
     variable ui
     array set ui {}
@@ -88,6 +91,10 @@ namespace eval ::MeshSeamWeld {
     variable nodeFreeEdgeNeighborsCache
     variable nodeXYZCache
     variable freeEdgePrimedComponents
+    # Component names created during the current run.  This is intentionally
+    # separate from the output-component lookup: an existing SEAM_T* collector
+    # must not be reassigned a property merely because this run reused it.
+    variable createdOutputComponents [dict create]
     variable targetElemGrid
     variable targetElemCentroid
     variable targetNodeToElems
@@ -388,8 +395,8 @@ proc ::MeshSeamWeld::showPanel {} {
     grid $w.main.param.local_split -row $row -column 0 -columnspan 2 -sticky w
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "连续节点直接作为开放路径执行。单点及不连续边界种子由 HyperMesh 原生 *findedges 为每个源组件建立临时自由边组件：自由边点只处理所在闭环，内部点处理该组件全部闭合自由边。每条路径在执行前即时准备目标组件上投影最近的几层单元，并以原始节点列表和该 Elements patch 调用 Mesh Edit imprint；随后重新获取已被 imprint 调整位置的目标节点。Ruled 的第一侧始终使用原始节点列表，第二侧使用 imprint 后目标节点，两侧数量不要求一一对应；闭环会显式补首尾封口。运行流程不导出 FEM，也不调用 Python。" \
-        "Continuous nodes execute directly as an open path. For single points and disconnected boundary seeds, native HyperMesh *findedges creates a temporary free-edge component per source component. Each path prepares only the nearest projected element layers on the selected target components, then calls Mesh Edit imprint with the original node list and that Elements patch. The post-imprint target nodes are then reacquired. Ruled side 1 is always the original node list and side 2 is the post-imprint target list; equal node counts are not required. Closed loops receive an explicit end-to-start closure. No FEM export or Python runtime planning is used."]
+        "连续节点直接作为开放路径执行。单点仍按原有规则处理所在闭环；不连续且均位于自由边界上的节点按端点对分流：每条自由边界只能选两个点，批量选择的端点总数必须为偶数，程序自动补齐两点之间的较短边界路径并按开放路径创建焊缝。其它不连续输入仍按闭合自由边界规则校验。每条路径在执行前即时准备目标组件上投影最近的几层单元，并以原始节点列表和该 Elements patch 调用 Mesh Edit imprint；随后重新获取已被 imprint 调整位置的目标节点。Ruled 的第一侧始终使用原始节点列表，第二侧使用 imprint 后目标节点；对应关系按实际弧长和拓扑连续性校验，不再按节点序号盲目连接。横向层数按每个对应点之间的间距除以焊缝网格尺寸自动计算，间距变化时局部调整；闭环会显式补首尾封口。新建 SEAM_* component 后会自动尝试赋予对应 SEAM_Tx Property。运行流程不导出 FEM，也不调用 Python。" \
+        "Continuous nodes execute directly as an open path. Single points retain the existing matching closed-loop behavior. Disconnected nodes that all lie on free boundaries use endpoint-pair mode: select exactly two points per free boundary, keep the total endpoint count even, and the tool fills the shorter boundary path between each pair before creating an open weld span. Other disconnected inputs continue through closed-free-boundary validation. Each path prepares only the nearest projected element layers on the selected target components, then calls Mesh Edit imprint with the original node list and that Elements patch. The post-imprint target nodes are then reacquired. Ruled side 1 is always the original node list and side 2 is the post-imprint target list; correspondence is checked by physical arc length and target topology instead of blindly pairing node indices. Transverse layers are calculated per corresponding gap from gap distance divided by weld mesh size, so local spacing changes are handled locally. Closed loops receive an explicit end-to-start closure. A newly created SEAM_* component also receives the matching SEAM_Tx Property when available. No FEM export or Python runtime planning is used."]
     grid $w.main.note -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -492,6 +499,7 @@ proc ::MeshSeamWeld::runSettings {} {
 }
 
 proc ::MeshSeamWeld::resetRunCaches {} {
+    variable createdOutputComponents
     foreach arrayName {
         elemNodesCache nodeElemsCache elemComponentCache
         nodeFreeEdgeNeighborsCache nodeXYZCache freeEdgePrimedComponents
@@ -514,6 +522,7 @@ proc ::MeshSeamWeld::resetRunCaches {} {
     set ::MeshSeamWeld::lastImprintAffectedElemIds {}
     set ::MeshSeamWeld::lastLocalTargetNodeIds {}
     set ::MeshSeamWeld::lastLocalTargetEdges [dict create]
+    set createdOutputComponents [dict create]
 }
 
 proc ::MeshSeamWeld::clearNodeSelection {} {
@@ -1317,7 +1326,38 @@ proc ::MeshSeamWeld::buildNativeFreeEdgeGraphs {sourceComponentIds} {
     return $graphs
 }
 
-proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByComponent} {
+proc ::MeshSeamWeld::pathBetweenClosedFreeEdgeNodes {loop startNode endNode} {
+    set count [llength $loop]
+    set startIndex [lsearch -exact $loop $startNode]
+    set endIndex [lsearch -exact $loop $endNode]
+    if {$startIndex < 0 || $endIndex < 0 || $startNode == $endNode} {
+        error "The selected endpoint pair is not two distinct nodes on the same free boundary."
+    }
+
+    # A closed boundary has two possible paths between the endpoints.  Select
+    # the shorter node path so a pair of picks describes one open seam span,
+    # rather than silently expanding back to the whole loop.  Preserve the
+    # first selected node as the path start; this keeps source/target
+    # correspondence deterministic for equal-length alternatives.
+    set forward [list $startNode]
+    set index $startIndex
+    while {$index != $endIndex} {
+        set index [expr {($index + 1) % $count}]
+        lappend forward [lindex $loop $index]
+    }
+    set reverse [list $startNode]
+    set index $startIndex
+    while {$index != $endIndex} {
+        set index [expr {($index - 1 + $count) % $count}]
+        lappend reverse [lindex $loop $index]
+    }
+    if {[llength $reverse] < [llength $forward]} {
+        return $reverse
+    }
+    return $forward
+}
+
+proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByComponent {pairBoundaryMode 0}} {
     set selectedNodes [::MeshSeamWeld::uniq $selectedNodes]
     set allLoops {}
     foreach componentId [lsort -integer [dict keys $graphsByComponent]] {
@@ -1328,6 +1368,67 @@ proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByCompon
     }
     if {[llength $allLoops] == 0} {
         error "HyperMesh native edge components contain no valid closed free-edge loops."
+    }
+
+    if {$pairBoundaryMode} {
+        if {[llength $selectedNodes] < 2 || [llength $selectedNodes] % 2 != 0} {
+            error [::HWFlow::txt \
+                "边界端点数量必须为大于等于 2 的偶数；每条自由边界必须选择两个点。" \
+                "Boundary endpoint count must be an even number of at least 2; select exactly two points on each free boundary."]
+        }
+
+        array set loopForNode {}
+        array set loopByKey {}
+        array set nodesForLoop {}
+        set loopKeys {}
+        foreach row $allLoops {
+            lassign $row componentId loop
+            set loopKey "${componentId}:[join [lsort -integer $loop] ,]"
+            set loopByKey($loopKey) $loop
+            foreach nodeId $loop {
+                if {[info exists loopForNode($nodeId)] &&
+                    $loopForNode($nodeId) ne $loopKey} {
+                    error [::HWFlow::txt \
+                        "节点 $nodeId 同时属于多个自由边界，无法确定端点配对。" \
+                        "Node $nodeId belongs to more than one free boundary, so its endpoint pair is ambiguous."]
+                }
+                set loopForNode($nodeId) $loopKey
+            }
+        }
+
+        foreach nodeId $selectedNodes {
+            if {![info exists loopForNode($nodeId)]} {
+                error [::HWFlow::txt \
+                    "节点 $nodeId 不在有效的闭合自由边界上；批量边界模式要求所有节点都为边界端点。" \
+                    "Node $nodeId is not on a valid closed free boundary; boundary-pair mode requires every node to be a boundary endpoint."]
+            }
+            set loopKey $loopForNode($nodeId)
+            if {![info exists nodesForLoop($loopKey)]} {
+                set nodesForLoop($loopKey) {}
+                lappend loopKeys $loopKey
+            }
+            lappend nodesForLoop($loopKey) $nodeId
+        }
+
+        set matchedPaths {}
+        foreach loopKey $loopKeys {
+            set endpoints [::MeshSeamWeld::uniq $nodesForLoop($loopKey)]
+            if {[llength $endpoints] != 2} {
+                error [::HWFlow::txt \
+                    "同一自由边界上只能选择两个点；当前边界选择了 [llength $endpoints] 个点。" \
+                    "Only two points may be selected on one free boundary; this boundary has [llength $endpoints] selected points."]
+            }
+            set loop $loopByKey($loopKey)
+            lappend matchedPaths [::MeshSeamWeld::pathBetweenClosedFreeEdgeNodes \
+                $loop [lindex $endpoints 0] [lindex $endpoints 1]]
+        }
+        if {[llength $matchedPaths] == 0} {
+            error [::HWFlow::txt \
+                "没有生成有效的边界端点路径。" \
+                "No valid boundary endpoint paths were generated."]
+        }
+        return [dict create paths $matchedPaths internal_single_node 0 \
+            pair_boundary_mode 1 closed_loop 0]
     }
 
     set matchedPaths {}
@@ -1364,9 +1465,11 @@ proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByCompon
                 error "Selected node $selectedNode is on an open, branched, or non-manifold native free edge."
             }
         }
-        if {[dict size $graphsByComponent] != 1} {
-            error "An internal seed node must belong to exactly one source component."
-        }
+        # The seed may be shared by multiple source components.  The native
+        # graphs were already built only for components returned by
+        # componentIdsFromNodes, so accepting all of them here does not widen
+        # the model search scope; it simply lets one internal seed select the
+        # free-edge loops of every participating source component.
         foreach row $allLoops {
             set loop [lindex $row 1]
             set signature [join [lsort -integer $loop] ,]
@@ -1379,7 +1482,8 @@ proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByCompon
     if {[llength $matchedPaths] == 0} {
         error "No native free-edge loop matches the selected nodes."
     }
-    return [dict create paths $matchedPaths internal_single_node $internalSingleNode]
+    return [dict create paths $matchedPaths internal_single_node $internalSingleNode \
+        pair_boundary_mode 0 closed_loop 1]
 }
 
 proc ::MeshSeamWeld::closedFreeEdgeLoopsFromSeedsBulk {seedNodes} {
@@ -1453,6 +1557,23 @@ proc ::MeshSeamWeld::thicknessFromComponentName {name} {
     return ""
 }
 
+proc ::MeshSeamWeld::isWeldComponentName {name} {
+    set normalized [string toupper [string trim $name]]
+    if {$normalized eq ""} {
+        return 0
+    }
+    # SEAM_Tx is the normal output naming convention.  The other prefixes
+    # cover the configured fallback collector and the temporary native-edge
+    # collectors used while discovering free boundaries.  Do not classify a
+    # normal component such as PANEL_SEAMLESS as a weld component merely
+    # because its name contains the word SEAM.
+    return [expr {
+        [regexp {^SEAM(?:_|$)} $normalized] ||
+        [regexp {^MESH_SEAM_WELD(?:_|$)} $normalized] ||
+        [regexp {^\^?MSWE(?:_|$)} $normalized]
+    }]
+}
+
 proc ::MeshSeamWeld::formatThickness {thickness} {
     if {[llength [info commands ::HWFlow::formatThicknessToken]] > 0} {
         return [::HWFlow::formatThicknessToken $thickness]
@@ -1465,6 +1586,9 @@ proc ::MeshSeamWeld::seamComponentForRelatedComps {relatedCompIds} {
 
     set minThickness ""
     foreach name [::MeshSeamWeld::componentNames $relatedCompIds] {
+        if {[::MeshSeamWeld::isWeldComponentName $name]} {
+            continue
+        }
         set thickness [::MeshSeamWeld::thicknessFromComponentName $name]
         if {$thickness eq ""} {
             continue
@@ -1496,12 +1620,14 @@ proc ::MeshSeamWeld::moveElemsToComponent {elemIds compName} {
 }
 
 proc ::MeshSeamWeld::ensureOutputComponent {compName {color 11}} {
+    variable createdOutputComponents
     set compName [string trim $compName]
     if {$compName eq ""} {
         error [::HWFlow::txt "焊缝输出组件名称不能为空。" "The weld output component name cannot be empty."]
     }
 
     set compId [::HWFlow::componentIdByName $compName]
+    set created 0
     if {$compId eq ""} {
         # Do not call ::HWFlow::createComponent here.  Its Browser creation
         # route is useful for interactive tools, but opens the unwanted
@@ -1522,6 +1648,9 @@ proc ::MeshSeamWeld::ensureOutputComponent {compName {color 11}} {
                 "Cannot create weld output component $compName without UI: $err1 / $err2"]
         }
         set compId [::HWFlow::componentIdByName $compName]
+        if {$compId ne ""} {
+            set created 1
+        }
     }
 
     if {$compId ne "" && $color ne ""} {
@@ -1531,7 +1660,76 @@ proc ::MeshSeamWeld::ensureOutputComponent {compName {color 11}} {
     }
     catch {*currentcollector component $compName}
     catch {*currentcollector components $compName}
+    if {$created && [regexp -nocase {^SEAM(?:_|$)} $compName]} {
+        dict set createdOutputComponents $compName $compId
+    }
     return $compId
+}
+
+proc ::MeshSeamWeld::assignCreatedSeamComponentProperties {componentNames} {
+    variable MODULE_DIR
+    variable createdOutputComponents
+
+    set assigned {}
+    set failures {}
+    if {[dict size $createdOutputComponents] == 0} {
+        return [dict create assigned $assigned failures $failures]
+    }
+
+    # The toolkit normally sources modules in order and therefore already has
+    # BatchPropertyAssignment loaded. Keep a lazy-load fallback for callers
+    # that source MeshSeamWeld directly (including HM command-file smoke tests).
+    if {[llength [info commands ::BatchPropertyAssignment::parseComponentName]] == 0} {
+        set propertyModule [file join [file dirname $MODULE_DIR] batch_property_assignment.tcl]
+        if {[file isfile $propertyModule]} {
+            catch {
+                if {[llength [info commands ::HWFlow::sourceUtf8]] > 0} {
+                    ::HWFlow::sourceUtf8 $propertyModule
+                } else {
+                    source -encoding utf-8 $propertyModule
+                }
+            }
+        }
+    }
+
+    foreach componentName [::MeshSeamWeld::uniq $componentNames] {
+        if {![regexp -nocase {^SEAM(?:_|$)} $componentName] ||
+            ![dict exists $createdOutputComponents $componentName]} {
+            continue
+        }
+        set componentId [dict get $createdOutputComponents $componentName]
+        set assignmentCode [catch {
+            if {[llength [info commands ::BatchPropertyAssignment::parseComponentName]] == 0} {
+                error "Batch Property Assignment module is unavailable."
+            }
+            set parsed [::BatchPropertyAssignment::parseComponentName $componentName]
+            if {[dict size $parsed] == 0 || ![dict exists $parsed property_name]} {
+                error "Could not derive a SEAM property from component name $componentName."
+            }
+            set materialName [dict get $parsed material]
+            set materialId [::BatchPropertyAssignment::materialIdByName $materialName]
+            if {$materialId eq "" && [string equal -nocase $materialName Steel]} {
+                set materialId [::BatchPropertyAssignment::ensureSteelMaterial]
+            }
+            if {$materialId eq ""} {
+                error "Material $materialName was not found."
+            }
+            set propertyName [dict get $parsed property_name]
+            set propertyId [::BatchPropertyAssignment::ensureProperty \
+                $propertyName [dict get $parsed thickness] $materialId]
+            if {![::BatchPropertyAssignment::assignProperty \
+                $componentId $propertyId $propertyName]} {
+                error "Property $propertyName assignment or verification failed."
+            }
+            lappend assigned [list $componentName $propertyName]
+        } assignmentError]
+        if {$assignmentCode} {
+            lappend failures [list $componentName $assignmentError]
+            catch {::HybridCore::log WARN \
+                "mesh seam weld SEAM property assignment failed component=$componentName error=$assignmentError"}
+        }
+    }
+    return [dict create assigned $assigned failures $failures]
 }
 
 proc ::MeshSeamWeld::vsub {a b} {
@@ -1605,6 +1803,9 @@ proc ::MeshSeamWeld::nodePathLength {nodeIds {closedLoop 0}} {
 }
 
 proc ::MeshSeamWeld::meshDensityForLength {length meshSize {minimum 1}} {
+    if {![string is double -strict $meshSize] || $meshSize <= 0} {
+        error "Mesh size must be a positive number."
+    }
     if {$minimum < 1} {
         set minimum 1
     }
@@ -1613,6 +1814,80 @@ proc ::MeshSeamWeld::meshDensityForLength {length meshSize {minimum 1}} {
         set density $minimum
     }
     return $density
+}
+
+proc ::MeshSeamWeld::normalizedPathParameters {nodeIds {closedLoop 0}} {
+    set count [llength $nodeIds]
+    if {$count == 0} {
+        return {}
+    }
+    if {$count == 1} {
+        return {0.0}
+    }
+
+    set cumulative {0.0}
+    set total 0.0
+    for {set index 1} {$index < $count} {incr index} {
+        set total [expr {$total + [::MeshSeamWeld::distanceBetweenNodes \
+            [lindex $nodeIds [expr {$index - 1}]] [lindex $nodeIds $index]]}]
+        lappend cumulative $total
+    }
+    if {$closedLoop} {
+        set total [expr {$total + [::MeshSeamWeld::distanceBetweenNodes \
+            [lindex $nodeIds end] [lindex $nodeIds 0]]}]
+    }
+
+    # Coincident or effectively zero-length paths have no usable geometric
+    # parameter.  Fall back to the stable node order in that degenerate case.
+    if {$total <= 1.0e-12} {
+        set parameters {}
+        set denominator [expr {$closedLoop ? $count : $count - 1}]
+        for {set index 0} {$index < $count} {incr index} {
+            lappend parameters [expr {double($index) / max(1, $denominator)}]
+        }
+        return $parameters
+    }
+
+    set parameters {}
+    foreach value $cumulative {
+        lappend parameters [expr {double($value) / $total}]
+    }
+    return $parameters
+}
+
+proc ::MeshSeamWeld::nearestPathIndexForParameter {parameters parameter} {
+    set count [llength $parameters]
+    if {$count == 0} {
+        return -1
+    }
+    set bestIndex 0
+    set bestDistance [expr {abs(double([lindex $parameters 0]) - double($parameter))}]
+    for {set index 1} {$index < $count} {incr index} {
+        set distance [expr {abs(double([lindex $parameters $index]) - double($parameter))}]
+        if {$distance < $bestDistance} {
+            set bestIndex $index
+            set bestDistance $distance
+        }
+    }
+    return $bestIndex
+}
+
+proc ::MeshSeamWeld::nearestPathIndicesForParameters {sourceParameters targetParameters} {
+    set targetCount [llength $targetParameters]
+    if {$targetCount == 0} {
+        return {}
+    }
+    set targetIndex 0
+    set indices {}
+    foreach parameter $sourceParameters {
+        while {$targetIndex + 1 < $targetCount &&
+            abs(double([lindex $targetParameters [expr {$targetIndex + 1}]]) - double($parameter)) <
+            abs(double([lindex $targetParameters $targetIndex]) - double($parameter))} {
+            incr targetIndex
+        }
+        lappend indices $targetIndex
+    }
+    return $indices
 }
 
 proc ::MeshSeamWeld::shortestMeshBoundaryPath {elemIds startNode endNode} {
@@ -2998,17 +3273,15 @@ proc ::MeshSeamWeld::pathPairingCost {sourceNodes targetNodes {closedLoop 0}} {
     set sourceCount [llength $sourceNodes]
     set targetCount [llength $targetNodes]
     if {$sourceCount == 0 || $targetCount == 0} { return Inf }
+    set sourceParameters [::MeshSeamWeld::normalizedPathParameters \
+        $sourceNodes $closedLoop]
+    set targetParameters [::MeshSeamWeld::normalizedPathParameters \
+        $targetNodes $closedLoop]
+    set targetIndices [::MeshSeamWeld::nearestPathIndicesForParameters \
+        $sourceParameters $targetParameters]
     set cost 0.0
     for {set sourceIndex 0} {$sourceIndex < $sourceCount} {incr sourceIndex} {
-        if {$closedLoop} {
-            set targetIndex [expr {int(floor(
-                double($sourceIndex)*$targetCount/$sourceCount + 0.5)) % $targetCount}]
-        } elseif {$sourceCount == 1 || $targetCount == 1} {
-            set targetIndex 0
-        } else {
-            set targetIndex [expr {int(floor(
-                double($sourceIndex)*($targetCount - 1)/($sourceCount - 1) + 0.5))}]
-        }
+        set targetIndex [lindex $targetIndices $sourceIndex]
         set sourceNode [lindex $sourceNodes $sourceIndex]
         set targetNode [lindex $targetNodes $targetIndex]
         set cost [expr {$cost + [::MeshSeamWeld::dist2 \
@@ -3066,18 +3339,32 @@ proc ::MeshSeamWeld::alignTargetPathNodes {sourceNodes targetNodes {closedLoop 0
 
 proc ::MeshSeamWeld::nearestAlignedTargetAnchors {sourceNodes targetNodes {closedLoop 0} {radius 8}} {
     set count [llength $sourceNodes]
+    set targetCount [llength $targetNodes]
+    set sourceParameters [::MeshSeamWeld::normalizedPathParameters \
+        $sourceNodes $closedLoop]
+    set targetParameters [::MeshSeamWeld::normalizedPathParameters \
+        $targetNodes $closedLoop]
+    set baseIndices [::MeshSeamWeld::nearestPathIndicesForParameters \
+        $sourceParameters $targetParameters]
+    # A target path may be more finely discretized than the source path.  A
+    # fixed eight-node window then misses the actual geometric mate.  Scale
+    # the local search window by the two path resolutions while retaining the
+    # small bounded window used for local list slips.
+    set radius [expr {max($radius, int(ceil(2.0 * $targetCount / \
+        max(1, $count))) + 2)}]
     set anchors {}
     for {set sourceIndex 0} {$sourceIndex < $count} {incr sourceIndex} {
         set sourcePoint [::MeshSeamWeld::nodeXYZ [lindex $sourceNodes $sourceIndex]]
+        set baseIndex [lindex $baseIndices $sourceIndex]
         set bestNode ""
         set bestDistance ""
         catch {unset checked}
         array set checked {}
         for {set delta [expr {-$radius}]} {$delta <= $radius} {incr delta} {
-            set targetIndex [expr {$sourceIndex + $delta}]
+            set targetIndex [expr {$baseIndex + $delta}]
             if {$closedLoop} {
-                set targetIndex [expr {(($targetIndex % $count) + $count) % $count}]
-            } elseif {$targetIndex < 0 || $targetIndex >= $count} {
+                set targetIndex [expr {(($targetIndex % $targetCount) + $targetCount) % $targetCount}]
+            } elseif {$targetIndex < 0 || $targetIndex >= $targetCount} {
                 continue
             }
             if {[info exists checked($targetIndex)]} { continue }
@@ -3441,13 +3728,34 @@ proc ::MeshSeamWeld::idsAddedToCollection {beforeIds afterIds} {
     return [::MeshSeamWeld::uniq $added]
 }
 
+proc ::MeshSeamWeld::sourceComponentIdsForPaths {sourcePaths {knownSourceCompIds {}}} {
+    if {[llength $knownSourceCompIds] > 0} {
+        return [lsort -integer -unique $knownSourceCompIds]
+    }
+    set componentIds {}
+    foreach sourceNodes $sourcePaths {
+        set componentIds [concat $componentIds \
+            [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]]
+    }
+    return [lsort -integer -unique $componentIds]
+}
+
 proc ::MeshSeamWeld::legacyIndexedPrepareWeldJobs {sourcePaths targetComps {progressOpened 0} {knownSourceCompIds {}}} {
     set jobs {}
-    array set seamByRelated {}
     ::MeshSeamWeld::buildTargetElementIndex $targetComps
     if {$progressOpened} {
         ::HybridCore::progressUpdate 3.0 "Mesh Seam Weld" "Target element index ready; preparing local patches..." 1
     }
+    # A batch can contain paths from different source components and can
+    # imprint against several target components.  The resulting weld
+    # component is named from the complete participating set, not from the
+    # component of the current path only.
+    set processSourceCompIds [::MeshSeamWeld::sourceComponentIdsForPaths \
+        $sourcePaths $knownSourceCompIds]
+    set processRelated [lsort -integer -unique [concat \
+        $processSourceCompIds $targetComps]]
+    set processSeamComponent [::MeshSeamWeld::seamComponentForRelatedComps \
+        $processRelated]
     set pathTotal [llength $sourcePaths]
     set pathIndex 0
     foreach sourceNodes $sourcePaths {
@@ -3457,15 +3765,10 @@ proc ::MeshSeamWeld::legacyIndexedPrepareWeldJobs {sourcePaths targetComps {prog
         } else {
             set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
         }
-        set related [lsort -integer -unique [concat $sourceCompIds $targetComps]]
-        set relatedKey [join $related ,]
-        if {![info exists seamByRelated($relatedKey)]} {
-            set seamByRelated($relatedKey) [::MeshSeamWeld::seamComponentForRelatedComps $related]
-        }
         lappend jobs [dict create \
             source_nodes $sourceNodes \
             source_component_ids $sourceCompIds \
-            seam_component $seamByRelated($relatedKey) \
+            seam_component $processSeamComponent \
             target_elements [::MeshSeamWeld::localTargetPatchForPath $sourceNodes] \
             center [::MeshSeamWeld::pathCenter $sourceNodes] \
             retry_patch_extra_layers 3]
@@ -3695,7 +3998,6 @@ proc ::MeshSeamWeld::localTargetPatchFromProjectedNodes {projectedNodes targetCo
 proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0} {knownSourceCompIds {}}} {
     variable nodeXYZCache
     set jobs {}
-    array set seamByRelated {}
     set allSourceNodes {}
     foreach sourceNodes $sourcePaths {
         set allSourceNodes [concat $allSourceNodes $sourceNodes]
@@ -3709,6 +4011,17 @@ proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}
         set nodeXYZCache($nodeId) [dict get $sourceCoordinates $nodeId]
     }
 
+    # Use every source path and every selected target component when deriving
+    # the batch seam thickness.  This is intentionally computed once so a
+    # multi-component batch cannot produce different SEAM_Tx names merely
+    # because its paths were prepared in a different order.
+    set processSourceCompIds [::MeshSeamWeld::sourceComponentIdsForPaths \
+        $sourcePaths $knownSourceCompIds]
+    set processRelated [lsort -integer -unique [concat \
+        $processSourceCompIds $targetComps]]
+    set processSeamComponent [::MeshSeamWeld::seamComponentForRelatedComps \
+        $processRelated]
+
     set pathTotal [llength $sourcePaths]
     set pathIndex 0
     foreach sourceNodes $sourcePaths {
@@ -3718,16 +4031,10 @@ proc ::MeshSeamWeld::prepareWeldJobs {sourcePaths targetComps {progressOpened 0}
         } else {
             set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
         }
-        set related [lsort -integer -unique [concat $sourceCompIds $targetComps]]
-        set relatedKey [join $related ,]
-        if {![info exists seamByRelated($relatedKey)]} {
-            set seamByRelated($relatedKey) \
-                [::MeshSeamWeld::seamComponentForRelatedComps $related]
-        }
         lappend jobs [dict create \
             source_nodes $sourceNodes \
             source_component_ids $sourceCompIds \
-            seam_component $seamByRelated($relatedKey) \
+            seam_component $processSeamComponent \
             target_components $targetComps \
             target_elements {} \
             center [::MeshSeamWeld::pathCenter $sourceNodes] \
@@ -3868,6 +4175,50 @@ proc ::MeshSeamWeld::unequalStripElementNodeLists {sourceNodes targetNodes {clos
     return $elements
 }
 
+proc ::MeshSeamWeld::adaptiveStructuredStripElementNodeLists {crossChains {closedLoop 0}} {
+    set nodeCount [llength $crossChains]
+    if {$nodeCount < 2 || ($closedLoop && $nodeCount < 3)} {
+        error "Too few cross chains for adaptive structured strip creation."
+    }
+
+    set firstCount [llength [lindex $crossChains 0]]
+    if {$firstCount < 2} {
+        error "Each adaptive structured strip cross chain must contain at least two nodes."
+    }
+    set uniform 1
+    foreach chain $crossChains {
+        if {[llength $chain] < 2} {
+            error "Each adaptive structured strip cross chain must contain at least two nodes."
+        }
+        if {[llength $chain] != $firstCount} {
+            set uniform 0
+        }
+    }
+    if {$uniform} {
+        return [::MeshSeamWeld::directStructuredStripQuadNodeLists \
+            $crossChains $closedLoop]
+    }
+
+    # A single maximum width forced every longitudinal section to use the
+    # same number of transverse layers.  Mesh each neighboring pair with its
+    # actual chain lengths instead.  The zipper emits quads where counts
+    # agree and only the necessary transition triangles where they do not,
+    # so a narrow start does not inherit the wide end's refinement.
+    set segmentCount [expr {$closedLoop ? $nodeCount : $nodeCount - 1}]
+    set elements {}
+    for {set index 0} {$index < $segmentCount} {incr index} {
+        set nextIndex [expr {($index + 1) % $nodeCount}]
+        set segment [::MeshSeamWeld::unequalStripElementNodeLists \
+            [lindex $crossChains $index] [lindex $crossChains $nextIndex] 0]
+        if {[llength $segment] == 0} {
+            error "Adaptive structured strip segment [expr {$index + 1}] is empty."
+        }
+        set elements [concat $elements $segment]
+        ::MeshSeamWeld::responsiveCheckpoint [expr {$index + 1}] 256
+    }
+    return $elements
+}
+
 proc ::MeshSeamWeld::createTrackedNodeAtXYZ {xyz} {
     foreach {x y z} $xyz break
     if {[catch {*createnode $x $y $z 0 0 0} createErr]} {
@@ -3886,13 +4237,36 @@ proc ::MeshSeamWeld::createTrackedNodeAtXYZ {xyz} {
     return [lindex $createdNodes 0]
 }
 
+proc ::MeshSeamWeld::normalizedCrossLayerCounts {crossDensity nodeCount} {
+    if {[string is integer -strict $crossDensity]} {
+        if {$crossDensity < 1} {
+            error "Direct structured strip cross density must be a positive integer."
+        }
+        set counts {}
+        for {set index 0} {$index < $nodeCount} {incr index} {
+            lappend counts $crossDensity
+        }
+        return $counts
+    }
+    if {[llength $crossDensity] != $nodeCount} {
+        error "Adaptive cross-layer counts do not match the node path count."
+    }
+    set counts {}
+    foreach density $crossDensity {
+        if {![string is integer -strict $density] || $density < 1} {
+            error "Adaptive cross-layer counts must be positive integers."
+        }
+        lappend counts $density
+    }
+    return $counts
+}
+
 proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossDensity outputCompName outputCompId beforeOutputElems {closedLoop 0}} {
     if {[llength $sourceNodes] != [llength $targetNodes]} {
         error "Source and target node counts do not match for direct structured strip creation."
     }
-    if {![string is integer -strict $crossDensity] || $crossDensity < 1} {
-        error "Direct structured strip cross density must be a positive integer."
-    }
+    set crossLayerCounts [::MeshSeamWeld::normalizedCrossLayerCounts \
+        $crossDensity [llength $sourceNodes]]
     catch {*currentcollector component $outputCompName}
     catch {*currentcollector components $outputCompName}
 
@@ -3902,11 +4276,12 @@ proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossD
     for {set index 0} {$index < [llength $sourceNodes]} {incr index} {
         set sourceNode [lindex $sourceNodes $index]
         set targetNode [lindex $targetNodes $index]
+        set localCrossDensity [lindex $crossLayerCounts $index]
         set sourceXYZ [::MeshSeamWeld::nodeXYZ $sourceNode]
         set targetXYZ [::MeshSeamWeld::nodeXYZ $targetNode]
         set chain [list $sourceNode]
-        for {set layer 1} {$layer < $crossDensity} {incr layer} {
-            set ratio [expr {double($layer) / double($crossDensity)}]
+        for {set layer 1} {$layer < $localCrossDensity} {incr layer} {
+            set ratio [expr {double($layer) / double($localCrossDensity)}]
             set xyz {}
             for {set axis 0} {$axis < 3} {incr axis} {
                 set sourceValue [lindex $sourceXYZ $axis]
@@ -3923,13 +4298,15 @@ proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossD
         ::MeshSeamWeld::responsiveCheckpoint $sourcePairCount 128
     }
 
+    set elementPlans [::MeshSeamWeld::adaptiveStructuredStripElementNodeLists \
+        $crossChains $closedLoop]
     set segmentIndex 0
-    foreach quadNodes [::MeshSeamWeld::directStructuredStripQuadNodeLists \
-        $crossChains $closedLoop] {
+    foreach elementNodes $elementPlans {
         incr segmentIndex
+        set config [expr {[llength $elementNodes] == 3 ? 103 : 104}]
         if {[catch {
-            eval *createlist nodes 1 $quadNodes
-            *createelement 104 1 1 1
+            eval *createlist nodes 1 $elementNodes
+            *createelement $config 1 1 1
         } createErr]} {
             error "Failed to create direct weld strip element $segmentIndex: $createErr"
         }
@@ -3940,14 +4317,14 @@ proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossD
     if {[llength $elemIds] == 0} {
         error "Direct structured weld strip creation did not add any elements."
     }
-    set pathSegments [expr {$closedLoop ? [llength $sourceNodes] : [llength $sourceNodes] - 1}]
-    set expectedElemCount [expr {$pathSegments * $crossDensity}]
+    set expectedElemCount [llength $elementPlans]
     if {[llength $elemIds] != $expectedElemCount} {
         error "Direct structured weld strip created [llength $elemIds]/$expectedElemCount expected elements."
     }
     ::MeshSeamWeld::moveElemsToComponent $elemIds $outputCompName
+    set layerSummary [join $crossLayerCounts ,]
     ::HybridCore::log INFO \
-        "weld_mesh creation_mode=direct_structured cross_layers=$crossDensity intermediate_nodes=$intermediateNodeCount elements=[llength $elemIds] closed_loop=$closedLoop"
+        "weld_mesh creation_mode=direct_structured cross_layers=$layerSummary intermediate_nodes=$intermediateNodeCount elements=[llength $elemIds] closed_loop=$closedLoop"
     return $elemIds
 }
 
@@ -3987,9 +4364,11 @@ proc ::MeshSeamWeld::createDirectUnequalStrip {sourceNodes targetNodes outputCom
 
 proc ::MeshSeamWeld::createAnchoredStructuredStrip {sourceNodes targetNodes anchorIndices crossDensity outputCompName outputCompId beforeOutputElems {closedLoop 0}} {
     variable cfg
-    if {$crossDensity < 1 || [llength $anchorIndices] != [llength $sourceNodes]} {
+    if {[llength $anchorIndices] != [llength $sourceNodes]} {
         error "Invalid anchored structured strip correspondence or cross density."
     }
+    set crossLayerCounts [::MeshSeamWeld::normalizedCrossLayerCounts \
+        $crossDensity [llength $sourceNodes]]
     catch {*currentcollector component $outputCompName}
     catch {*currentcollector components $outputCompName}
 
@@ -3998,11 +4377,12 @@ proc ::MeshSeamWeld::createAnchoredStructuredStrip {sourceNodes targetNodes anch
     for {set index 0} {$index < [llength $sourceNodes]} {incr index} {
         set sourceNode [lindex $sourceNodes $index]
         set targetNode [lindex $targetNodes [lindex $anchorIndices $index]]
+        set localCrossDensity [lindex $crossLayerCounts $index]
         set sourceXYZ [::MeshSeamWeld::nodeXYZ $sourceNode]
         set targetXYZ [::MeshSeamWeld::nodeXYZ $targetNode]
         set chain [list $sourceNode]
-        for {set layer 1} {$layer < $crossDensity} {incr layer} {
-            set ratio [expr {double($layer) / double($crossDensity)}]
+        for {set layer 1} {$layer < $localCrossDensity} {incr layer} {
+            set ratio [expr {double($layer) / double($localCrossDensity)}]
             set xyz {}
             for {set axis 0} {$axis < 3} {incr axis} {
                 lappend xyz [expr {[lindex $sourceXYZ $axis] + $ratio *
@@ -4016,19 +4396,65 @@ proc ::MeshSeamWeld::createAnchoredStructuredStrip {sourceNodes targetNodes anch
     }
 
     set elementPlans {}
-    if {$crossDensity > 1} {
+    set uniform 1
+    set firstDensity [lindex $crossLayerCounts 0]
+    foreach density $crossLayerCounts {
+        if {$density != $firstDensity} {
+            set uniform 0
+            break
+        }
+    }
+    if {$uniform && $firstDensity > 1} {
         set innerChains {}
         foreach chain $crossChains { lappend innerChains [lrange $chain 0 end-1] }
         set elementPlans [::MeshSeamWeld::directStructuredStripQuadNodeLists \
             $innerChains $closedLoop]
+        set finalSourceNodes {}
+        foreach chain $crossChains {
+            lappend finalSourceNodes [lindex $chain [expr {$firstDensity - 1}]]
+        }
+        set elementPlans [concat $elementPlans \
+            [::MeshSeamWeld::anchoredUnequalStripElementNodeLists \
+                $finalSourceNodes $targetNodes $anchorIndices $closedLoop]]
+    } else {
+        # Mesh each longitudinal segment independently when its two
+        # transverse chains have different layer counts.  The inner part is
+        # zipped only when both sides have an inner chain; the final part is
+        # always zipped to the real target path segment.  This preserves all
+        # available adaptive layers without forcing a narrow start to use the
+        # widest cross-section's density.
+        set sourceCount [llength $sourceNodes]
+        set segmentCount [expr {$closedLoop ? $sourceCount : $sourceCount - 1}]
+        for {set index 0} {$index < $segmentCount} {incr index} {
+            set nextIndex [expr {($index + 1) % $sourceCount}]
+            set currentInner [lrange [lindex $crossChains $index] 0 end-1]
+            set nextInner [lrange [lindex $crossChains $nextIndex] 0 end-1]
+            if {[llength $currentInner] >= 2 && [llength $nextInner] >= 2} {
+                set elementPlans [concat $elementPlans \
+                    [::MeshSeamWeld::unequalStripElementNodeLists \
+                        $currentInner $nextInner 0]]
+            }
+
+            set startTarget [lindex $anchorIndices $index]
+            if {$closedLoop && $index == $segmentCount - 1} {
+                set targetSegment [concat [lrange $targetNodes $startTarget end] \
+                    [list [lindex $targetNodes 0]]]
+            } else {
+                set endTarget [lindex $anchorIndices $nextIndex]
+                set targetSegment [lrange $targetNodes $startTarget $endTarget]
+            }
+            if {[llength $targetSegment] < 2} {
+                error "Adaptive anchored target segment [expr {$index + 1}] contains fewer than two nodes."
+            }
+            set finalSourceSegment [list \
+                [lindex [lindex $crossChains $index] end-1] \
+                [lindex [lindex $crossChains $nextIndex] end-1]]
+            set elementPlans [concat $elementPlans \
+                [::MeshSeamWeld::unequalStripElementNodeLists \
+                    $finalSourceSegment $targetSegment 0]]
+            ::MeshSeamWeld::responsiveCheckpoint [expr {$index + 1}] 128
+        }
     }
-    set finalSourceNodes {}
-    foreach chain $crossChains {
-        lappend finalSourceNodes [lindex $chain [expr {$crossDensity - 1}]]
-    }
-    set elementPlans [concat $elementPlans \
-        [::MeshSeamWeld::anchoredUnequalStripElementNodeLists \
-            $finalSourceNodes $targetNodes $anchorIndices $closedLoop]]
 
     set createdPlanCount 0
     foreach elementNodes $elementPlans {
@@ -4057,8 +4483,9 @@ proc ::MeshSeamWeld::createAnchoredStructuredStrip {sourceNodes targetNodes anch
         error "Anchored weld strip created [llength $elemIds]/$createdPlanCount expected elements."
     }
     ::MeshSeamWeld::moveElemsToComponent $elemIds $outputCompName
+    set layerSummary [join $crossLayerCounts ,]
     ::HybridCore::log INFO \
-        "weld_mesh creation_mode=anchored_structured source_nodes=[llength $sourceNodes] target_nodes=[llength $targetNodes] cross_layers=$crossDensity intermediate_nodes=$intermediateNodeCount elements=[llength $elemIds] closed_loop=$closedLoop"
+        "weld_mesh creation_mode=anchored_structured source_nodes=[llength $sourceNodes] target_nodes=[llength $targetNodes] cross_layers=$layerSummary intermediate_nodes=$intermediateNodeCount elements=[llength $elemIds] closed_loop=$closedLoop"
     return $elemIds
 }
 
@@ -4237,24 +4664,59 @@ proc ::MeshSeamWeld::maximumPathCrossDistance {sourceNodes targetNodes {closedLo
     set sourceCount [llength $sourceNodes]
     set targetCount [llength $targetNodes]
     if {$sourceCount == 0 || $targetCount == 0} { return 0.0 }
+    set sourceParameters [::MeshSeamWeld::normalizedPathParameters \
+        $sourceNodes $closedLoop]
+    set targetParameters [::MeshSeamWeld::normalizedPathParameters \
+        $targetNodes $closedLoop]
+    set targetIndices [::MeshSeamWeld::nearestPathIndicesForParameters \
+        $sourceParameters $targetParameters]
     set maximum 0.0
     for {set sourceIndex 0} {$sourceIndex < $sourceCount} {incr sourceIndex} {
         if {$sourceCount == $targetCount} {
             set targetIndex $sourceIndex
-        } elseif {$closedLoop} {
-            set targetIndex [expr {int(floor(
-                double($sourceIndex)*$targetCount/$sourceCount + 0.5)) % $targetCount}]
-        } elseif {$sourceCount == 1 || $targetCount == 1} {
-            set targetIndex 0
         } else {
-            set targetIndex [expr {int(floor(
-                double($sourceIndex)*($targetCount - 1)/($sourceCount - 1) + 0.5))}]
+            set targetIndex [lindex $targetIndices $sourceIndex]
         }
         set distance [::MeshSeamWeld::distanceBetweenNodes \
             [lindex $sourceNodes $sourceIndex] [lindex $targetNodes $targetIndex]]
         if {$distance > $maximum} { set maximum $distance }
     }
     return $maximum
+}
+
+proc ::MeshSeamWeld::adaptiveCrossLayerCounts {sourceNodes targetNodes meshSize {closedLoop 0}} {
+    set sourceCount [llength $sourceNodes]
+    set targetCount [llength $targetNodes]
+    if {$sourceCount == 0 || $targetCount == 0} {
+        return {}
+    }
+    if {$sourceCount != $targetCount && $sourceCount < 2} {
+        return [list [::MeshSeamWeld::meshDensityForLength 0.0 $meshSize 1]]
+    }
+
+    set sourceParameters [::MeshSeamWeld::normalizedPathParameters \
+        $sourceNodes $closedLoop]
+    set targetParameters [::MeshSeamWeld::normalizedPathParameters \
+        $targetNodes $closedLoop]
+    set targetIndices [::MeshSeamWeld::nearestPathIndicesForParameters \
+        $sourceParameters $targetParameters]
+    set counts {}
+    for {set sourceIndex 0} {$sourceIndex < $sourceCount} {incr sourceIndex} {
+        # Equal-count paths are already an explicit imprint correspondence:
+        # source[i] must connect to target[i], even when the two paths have
+        # different local edge lengths.  Only unequal paths use normalized
+        # arc-length matching here.
+        if {$sourceCount == $targetCount} {
+            set targetIndex $sourceIndex
+        } else {
+            set targetIndex [lindex $targetIndices $sourceIndex]
+        }
+        set distance [::MeshSeamWeld::distanceBetweenNodes \
+            [lindex $sourceNodes $sourceIndex] [lindex $targetNodes $targetIndex]]
+        lappend counts [::MeshSeamWeld::meshDensityForLength \
+            $distance $meshSize 1]
+    }
+    return $counts
 }
 
 proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes outputCompName {closedLoop 0} {targetComps {}}} {
@@ -4267,6 +4729,16 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
     # paths start in the same geometric neighborhood.
     set targetNodes [::MeshSeamWeld::alignTargetPathNodes \
         $sourceNodes $targetNodes $closedLoop]
+    # The executor performs this repair after imprint as well.  Repeat it at
+    # the mesh boundary so direct callers cannot bypass the geometric/topology
+    # validation and accidentally feed a locally slipped target list to ruled.
+    if {[llength $targetComps] > 0} {
+        catch {
+            set refinedTargetNodes [::MeshSeamWeld::refineEqualTargetPathCorrespondence \
+                $sourceNodes $targetNodes $targetComps $closedLoop]
+            set targetNodes $refinedTargetNodes
+        }
+    }
 
     # When imprint returned one target node for every source node, preserve
     # that correspondence explicitly.  A single native ruled surface
@@ -4291,20 +4763,20 @@ proc ::MeshSeamWeld::createRuledMeshBetweenNodePaths {sourceNodes targetNodes ou
         foreach anchorIndex $anchorIndices {
             lappend anchorTargetNodes [lindex $targetNodes $anchorIndex]
         }
-        set maximumCrossLength [::MeshSeamWeld::maximumPathCrossDistance \
-            $sourceNodes $anchorTargetNodes $closedLoop]
-        set crossDensity [::MeshSeamWeld::meshDensityForLength \
-            $maximumCrossLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
+        set crossLayerCounts [::MeshSeamWeld::adaptiveCrossLayerCounts \
+            $sourceNodes $anchorTargetNodes $cfg(weld_mesh_size) $closedLoop]
         if {[llength $sourceNodes] == [llength $targetNodes] &&
             $cfg(mesh_elem_type) != 1} {
             return [::MeshSeamWeld::createDirectStructuredStrip \
-                $sourceNodes $targetNodes $crossDensity $outputCompName \
+                $sourceNodes $targetNodes $crossLayerCounts $outputCompName \
                 $outputCompId $beforeOutputElems $closedLoop]
         }
         return [::MeshSeamWeld::createAnchoredStructuredStrip \
-            $sourceNodes $targetNodes $anchorIndices $crossDensity \
+            $sourceNodes $targetNodes $anchorIndices $crossLayerCounts \
             $outputCompName $outputCompId $beforeOutputElems $closedLoop]
     }
+    # If no safe anchor mapping exists, the native fallback uses
+    # maximumPathCrossDistance as its conservative width estimator.
     return [::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths \
         $sourceNodes $targetNodes $outputCompName $closedLoop]
 }
@@ -4341,7 +4813,7 @@ proc ::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths {sourceNodes targetNo
     set maximumCrossLength [::MeshSeamWeld::maximumPathCrossDistance \
         $sourceNodes $targetNodes $closedLoop]
     set crossDensity [::MeshSeamWeld::meshDensityForLength \
-        $maximumCrossLength $cfg(weld_mesh_size) $cfg(mesh_cross_param)]
+        $maximumCrossLength $cfg(weld_mesh_size) 1]
 
     # HyperMesh 2019 records show that ruled node-list creation followed by
     # *automesh can terminate the session in mode 3 (Mesh without surface).
@@ -4724,6 +5196,8 @@ proc ::MeshSeamWeld::runAction {} {
     set closedSeedMode [expr {[llength $selectedNodes] == 1 ||
         ![::MeshSeamWeld::selectedNodesFormContinuousPath $selectedNodes]}]
     set internalSingleNode 0
+    set pairBoundaryMode 0
+    set pathClosedLoop [expr {$closedSeedMode ? 1 : 0}]
     set sourceSelectionMode [expr {$closedSeedMode ?
         "closed free-edge seed nodes" : "open node path"}]
 
@@ -4757,13 +5231,17 @@ proc ::MeshSeamWeld::runAction {} {
         ::MeshSeamWeld::clearUndoRecord
         ::MeshSeamWeld::clearFailureMarkerComponent
         set prepareStarted [clock milliseconds]
+        # Resolve every component touched by the input node list up front.
+        # A path may cross component ownership boundaries, and an internal
+        # seed may be shared by several components; both cases are valid
+        # source selections for the compatibility workflow.
+        set sourceComponentIds [::MeshSeamWeld::componentIdsFromNodes $selectedNodes]
+        if {[llength $sourceComponentIds] == 0} {
+            error [::HWFlow::txt \
+                "所选节点不属于包含壳网格的源 component。" \
+                "Selected nodes do not belong to a source component containing shell mesh."]
+        }
         if {$closedSeedMode} {
-            set sourceComponentIds [::MeshSeamWeld::componentIdsFromNodes $selectedNodes]
-            if {[llength $sourceComponentIds] == 0} {
-                error [::HWFlow::txt \
-                    "所选节点不属于包含壳网格的源 component。" \
-                    "Selected nodes do not belong to a source component containing shell mesh."]
-            }
             if {[llength [::MeshSeamWeld::uniq [concat $sourceComponentIds $targetComps]]] <
                 [expr {[llength [::MeshSeamWeld::uniq $sourceComponentIds]] + [llength [::MeshSeamWeld::uniq $targetComps]]}]} {
                 error [::HWFlow::txt \
@@ -4774,26 +5252,42 @@ proc ::MeshSeamWeld::runAction {} {
             if {[catch {
                 set nativeGraphs [::MeshSeamWeld::buildNativeFreeEdgeGraphs \
                     $sourceComponentIds]
+                # Disconnected boundary picks are endpoint pairs, not a
+                # request to weld the entire closed loop.  The pair branch
+                # also validates the batch rule: exactly two endpoints per
+                # free boundary and an even total endpoint count.  Single
+                # seeds retain the established full-loop behavior.
+                set pairBoundaryMode [expr {[llength $selectedNodes] >= 2}]
                 set nativeSelection [::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs \
-                    $selectedNodes $nativeGraphs]
+                    $selectedNodes $nativeGraphs $pairBoundaryMode]
             } nativeEdgeErr]} {
                 ::MeshSeamWeld::stageError SOURCE_PLAN $nativeEdgeErr
             }
             set sourcePaths [dict get $nativeSelection paths]
             set internalSingleNode [dict get $nativeSelection internal_single_node]
+            set pairBoundaryMode [dict get $nativeSelection pair_boundary_mode]
+            set pathClosedLoop [dict get $nativeSelection closed_loop]
             set boundaryTraceMs [expr {[clock milliseconds] - $boundaryTraceStarted}]
             set weldJobs [::MeshSeamWeld::prepareWeldJobs \
                 $sourcePaths $targetComps $progressOpened]
             set normalizedJobs {}
             foreach job $weldJobs {
-                dict set job closed_loop 1
-                dict set job imprint_closed_loop 1
+                if {$pathClosedLoop} {
+                    dict set job closed_loop 1
+                    dict set job imprint_closed_loop 1
+                } else {
+                    dict set job closed_loop 0
+                    dict set job imprint_closed_loop 0
+                }
                 lappend normalizedJobs $job
             }
             set weldJobs $normalizedJobs
             if {$internalSingleNode} {
                 set sourceSelectionMode \
                     "single internal node -> all native component free-edge loops"
+            } elseif {$pairBoundaryMode} {
+                set sourceSelectionMode \
+                    "disconnected free-boundary endpoint pairs -> open boundary spans"
             } elseif {[llength $selectedNodes] == 1} {
                 set sourceSelectionMode \
                     "single free-edge seed -> matching native free-edge loop"
@@ -4828,7 +5322,7 @@ proc ::MeshSeamWeld::runAction {} {
             incr pathIndex
             set sourceNodes [dict get $job source_nodes]
             set jobTargetComps $targetComps
-            set jobClosedLoop $closedSeedMode
+            set jobClosedLoop $pathClosedLoop
             set jobImprintClosedLoop $jobClosedLoop
             if {[dict exists $job target_components]} {
                 set jobTargetComps [dict get $job target_components]
@@ -4968,6 +5462,18 @@ proc ::MeshSeamWeld::runAction {} {
         return
     }
 
+    set seamPropertyAssigned {}
+    set seamPropertyFailures {}
+    if {[catch {
+        set seamPropertyResult [::MeshSeamWeld::assignCreatedSeamComponentProperties \
+            $allSeamCompNames]
+        set seamPropertyAssigned [dict get $seamPropertyResult assigned]
+        set seamPropertyFailures [dict get $seamPropertyResult failures]
+    } seamPropertyErr]} {
+        lappend seamPropertyFailures [list "SEAM_*" $seamPropertyErr]
+        catch {::HybridCore::log WARN \
+            "mesh seam weld SEAM property assignment stage failed error=$seamPropertyErr"}
+    }
     catch {::HWFlow::refreshBrowser}
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
         catch {::HWFlow::progressClose [::HWFlow::txt "网格焊缝命令流已完成。" "Mesh seam weld command stream finished."] 100.0}
@@ -4996,6 +5502,24 @@ proc ::MeshSeamWeld::runAction {} {
     append msg [::HWFlow::txt \
         "\n成功路径：$successCount\n跳过路径：$failedCount\n失败标记节点：[llength $failureMarkerNodes]\n边界/路径规划及局部目标准备耗时：[format %.3f [expr {$prepareMs/1000.0}]] 秒\nTcl/HyperMesh 执行耗时：[format %.3f [expr {$executionMs/1000.0}]] 秒\n总耗时：[format %.3f [expr {$batchElapsedMs/1000.0}]] 秒" \
         "\nSuccessful paths: $successCount\nSkipped paths: $failedCount\nFailure marker nodes: [llength $failureMarkerNodes]\nBoundary/path planning and local-target preparation: [format %.3f [expr {$prepareMs/1000.0}]] s\nTcl/HyperMesh execution: [format %.3f [expr {$executionMs/1000.0}]] s\nElapsed: [format %.3f [expr {$batchElapsedMs/1000.0}]] s"]
+    if {[llength $seamPropertyAssigned] > 0} {
+        set assignedText {}
+        foreach row $seamPropertyAssigned {
+            lappend assignedText "[lindex $row 0] -> [lindex $row 1]"
+        }
+        append msg [::HWFlow::txt \
+            "\n自动赋予焊缝 Property：[join $assignedText {, }]" \
+            "\nAutomatically assigned weld properties: [join $assignedText {, }]"]
+    }
+    if {[llength $seamPropertyFailures] > 0} {
+        set propertyFailureText {}
+        foreach row $seamPropertyFailures {
+            lappend propertyFailureText "[lindex $row 0]: [lindex $row 1]"
+        }
+        append msg [::HWFlow::txt \
+            "\n焊缝 Property 自动赋予失败（默认 Steel 材料创建或 Property 赋予失败，可手动执行批量 Property）：[join $propertyFailureText {； }]" \
+            "\nAutomatic weld-property assignment failed (default Steel creation or Property assignment failed; Batch Property Assignment can be run manually): [join $propertyFailureText {; }]"]
+    }
     if {$failedCount > 0} {
         set firstFailure [lindex $failureRecords 0]
         set firstDiagnosis [::MeshSeamWeld::diagnoseFailure [dict get $firstFailure final_error]]

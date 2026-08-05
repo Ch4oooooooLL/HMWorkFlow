@@ -99,13 +99,9 @@ class EngineeringContextContractTests(unittest.TestCase):
             "PASS",
         )
 
-    def test_toolkit_and_material_mutations_use_preflight(self) -> None:
+    def test_toolkit_mutations_use_preflight(self) -> None:
         toolkit = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
-        material = (ROOT / "modules" / "component_workflow.tcl").read_text(
-            encoding="utf-8"
-        )
         self.assertIn("::HWFlow::requireEngineeringContext", toolkit)
-        self.assertIn("::HWFlow::requireEngineeringContext", material)
 
 
 if __name__ == "__main__":

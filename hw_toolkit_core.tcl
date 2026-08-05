@@ -17,33 +17,21 @@ namespace eval ::HWToolkit {
     variable PENDING_SHORTCUT_AFTER ""
 
     set MODULES {
-        component_category {
-            group    "Geometry"
-            hidden   1
-            file     "component_workflow"
-            label_zh "Component Classification"
-            label_en "Component Classification"
-            desc_zh  "按 SHELL、SOLID、CASTING 分类组件，并规范化组件名称。"
-            desc_en  "Classify components as SHELL, SOLID, or CASTING and normalize component names."
-            proc     "::CompWorkflow::runCategory"
-        }
-        material_assignment {
-            group    "Geometry"
-            hidden   1
-            file     "component_workflow"
-            label_zh "Material Assignment"
-            label_en "Material Assignment"
-            desc_zh  "从材料库分配材料标识，并按材料装配归类。"
-            desc_en  "Assign material keys from the material library and organize material assemblies."
-            proc     "::CompWorkflow::runMaterial"
-        }
         midsurf {
             group    "Geometry"
             label_zh "抽中面"
             label_en "Midsurface Extraction"
-            desc_zh  "抽取钣金中面，并按与网格焊缝一致的 T<厚度> 规则命名输出组件。"
-            desc_en  "Extract sheet-metal midsurfaces and name outputs as CATEGORY_NAME_Tx_MATERIAL."
+            desc_zh  "抽取钣金中面，并按 Vxx_件号_T厚度[_材料] 规则命名；材料由后续网格模块处理。"
+            desc_en  "Extract sheet-metal midsurfaces as Vxx_part_Tx[_material]; material assignment is handled later by mesh modules."
             proc     "::MidSurf::run"
+        }
+        bom_material_assignment {
+            group    "Geometry"
+            label_zh "读取 BOM 表"
+            label_en "BOM Material Assignment"
+            desc_zh  "扫描 MIDSURFED Assembly 中的全部 component；当前统一创建/复用 Q355、赋予材料并追加组件名后缀，BOM 读取接口预留。"
+            desc_en  "Scan all components in MIDSURFED; currently create/reuse Q355, assign it, and append the component-name suffix while reserving the BOM reader interface."
+            proc     "::BomMaterialAssignment::runAction"
         }
         geometry_cleanup {
             group    "Geometry"
@@ -68,8 +56,8 @@ namespace eval ::HWToolkit {
             group    "Mesh"
             label_zh "BatchMesher 自动网格划分"
             label_en "BatchMesher Automatic Meshing"
-            desc_zh  "按 Surface 最终拓扑连通域顺序执行 HyperMesh 2019 BatchMesher，完整使用用户 criteria/param。"
-            desc_en  "Run HyperMesh 2019 BatchMesher sequentially by final surface-topology connectivity using user criteria/param files."
+            desc_zh  "在隔离的 HyperMesh 2019/2022 hmbatch 进程中按 Surface 拓扑连通域并行划分，完整使用用户 criteria/param。"
+            desc_en  "Mesh surface-topology groups in isolated parallel HyperMesh 2019/2022 hmbatch workers using the selected criteria/param files."
             proc     "::BatchMesher::runAction"
             settings_proc "::BatchMesher::runSettings"
         }
@@ -330,8 +318,8 @@ proc ::HWToolkit::groupText {group} {
 }
 
 proc ::HWToolkit::clearExistingWindows {} {
-    catch {::CompWorkflow::saveState}
     catch {::MidSurf::savePanelState}
+    catch {set ::BomMaterialAssignment::ui(ok) 0}
     catch {::AutoHoleRBE2::savePanelState}
     catch {::RB2W::savePanelState}
     catch {::BatchMesher::savePanelState}
@@ -364,10 +352,8 @@ proc ::HWToolkit::clearExistingWindows {} {
     foreach w {
         .hwtoolkit
         .hwflow_progress
-        .comp_category
-        .material_assign
-        .material_editor
         .midsurf_dlg
+        .bom_material_assignment
         .autoHoleRBE2
         .rb2w_panel
         .rb2bolt_dlg

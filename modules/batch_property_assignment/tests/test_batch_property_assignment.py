@@ -39,12 +39,59 @@ class BatchPropertyAssignmentNamingTests(unittest.TestCase):
         self.assertEqual(self.field(name, "thickness_token"), "1.5")
         self.assertEqual(self.field(name, "property_name"), "Al6061_T1.5")
 
+    def test_ignores_hypermesh_duplicate_suffix_on_material(self):
+        name = "V2_BRACKET_T1.500_Al6061.2"
+        self.assertEqual(self.field(name, "material"), "Al6061")
+        self.assertEqual(self.field(name, "property_name"), "Al6061_T1.5")
+
+    def test_ignores_hypermesh_duplicate_suffix_on_part_name(self):
+        name = "V2_BRACKET.1_T1.500_Al6061"
+        self.assertEqual(self.field(name, "part_number"), "BRACKET")
+        self.assertEqual(self.field(name, "property_name"), "Al6061_T1.5")
+
     def test_part_ignores_characters_after_thickness_and_uses_last_material_token(self):
         name = "V01_xxxx_T10aaa_355"
         self.assertEqual(self.field(name, "kind"), "PART")
         self.assertEqual(self.field(name, "thickness_token"), "10")
         self.assertEqual(self.field(name, "material"), "355")
         self.assertEqual(self.field(name, "property_name"), "355_T10")
+
+    def test_material_lookup_matches_reimported_material_name(self):
+        self.tcl.eval(
+            r"""
+            proc *clearmark {entityType markId} {}
+            proc *createmark {entityType markId selector} {}
+            proc hm_getmark {entityType markId} {return {7}}
+            proc hm_getvalue {entityType selector args} {
+                if {$selector eq "id=7"} {return Q235.1}
+                error "name lookup is intentionally unavailable"
+            }
+            """
+        )
+        self.assertEqual(
+            int(self.tcl.call("::BatchPropertyAssignment::materialIdByName", "Q235")),
+            7,
+        )
+
+    def test_missing_steel_material_is_created_with_default_mat1_values(self):
+        self.tcl.eval(
+            r"""
+            rename ::BatchPropertyAssignment::materialIdByName ::BatchPropertyAssignment::materialIdByName_real
+            set ::steelId ""
+            proc ::BatchPropertyAssignment::materialIdByName {name} {return $::steelId}
+            proc *createentity {args} {set ::steelId 17}
+            set ::materialValues {}
+            proc *setvalue {args} {lappend ::materialValues $args}
+            """
+        )
+        self.assertEqual(
+            int(self.tcl.call("::BatchPropertyAssignment::ensureSteelMaterial")),
+            17,
+        )
+        values = self.tcl.eval("set ::materialValues")
+        self.assertIn("E=210000.0", values)
+        self.assertIn("Nu=0.30", values)
+        self.assertIn("Rho=7.85e-9", values)
 
     def test_part_allows_extra_tokens_between_thickness_and_material(self):
         name = "V01_floor_T2.5.surf_revision_Q355"

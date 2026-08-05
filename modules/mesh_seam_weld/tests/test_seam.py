@@ -298,6 +298,65 @@ list [llength $loops] [llength [lindex $loops 0]]
         )
 
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_disconnected_free_boundary_pairs_expand_to_open_batch_paths(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        graphs="{7 {1 {2 4} 2 {1 3} 3 {2 4} 4 {1 3} 11 {12 14} 12 {11 13} 13 {12 14} 14 {11 13}}}"
+        result=interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {1 3 11 13} %s 1" % graphs)
+        self.assertEqual(interp.eval("dict get {{{}}} pair_boundary_mode".format(result)),"1")
+        self.assertEqual(interp.eval("dict get {{{}}} closed_loop".format(result)),"0")
+        self.assertEqual(interp.eval("lindex [dict get {{{}}} paths] 0".format(result)),"1 2 3")
+        self.assertEqual(interp.eval("lindex [dict get {{{}}} paths] 1".format(result)),"11 12 13")
+        with self.assertRaises(tkinter.TclError):
+            interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {1 2 3} %s 1" % graphs)
+        with self.assertRaises(tkinter.TclError):
+            interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {1 2 3 11} %s 1" % graphs)
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_internal_seed_accepts_multiple_source_components(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        graphs="{7 {1 {2 4} 2 {1 3} 3 {2 4} 4 {1 3}} 8 {11 {12 14} 12 {11 13} 13 {12 14} 14 {11 13}}}"
+        result=interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {99} %s" % graphs)
+        self.assertEqual(interp.eval("dict get {{{}}} internal_single_node".format(result)),"1")
+        self.assertEqual(interp.eval("llength [dict get {{{}}} paths]".format(result)),"2")
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_batch_seam_thickness_uses_all_non_weld_components_and_targets(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::HWFlow::componentName ::HWFlow::componentName_real")
+        interp.eval("proc ::HWFlow::componentName {id} {return [dict get {10 PANEL_T12 20 PANEL_T5 30 SEAM_T1 40 PANEL_T8} $id]}")
+        interp.eval("rename ::MeshSeamWeld::componentIdsFromNodes ::MeshSeamWeld::componentIdsFromNodes_real")
+        interp.eval("proc ::MeshSeamWeld::componentIdsFromNodes {nodes} {return [expr {[lindex $nodes 0] <= 2 ? {10} : {20}}]}")
+        interp.eval("rename ::HybridCore::readNodeCoordinatesBulk ::HybridCore::readNodeCoordinatesBulk_real")
+        interp.eval("proc ::HybridCore::readNodeCoordinatesBulk {nodes readers} {return {1 {0 0 0} 2 {1 0 0} 3 {0 1 0} 4 {1 1 0}}}")
+        interp.eval("rename ::MeshSeamWeld::pathCenter ::MeshSeamWeld::pathCenter_real")
+        interp.eval("proc ::MeshSeamWeld::pathCenter {nodes} {return {0 0 0}}")
+        jobs=interp.eval("::MeshSeamWeld::prepareWeldJobs {{1 2} {3 4}} {30 40}")
+        self.assertEqual(interp.eval("dict get [lindex {{{}}} 0] seam_component".format(jobs)),"SEAM_T5")
+        self.assertEqual(interp.eval("dict get [lindex {{{}}} 1] seam_component".format(jobs)),"SEAM_T5")
+        self.assertEqual(interp.eval("dict get [lindex {{{}}} 0] target_components".format(jobs)),"30 40")
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_new_seam_component_gets_property_only_when_created_in_run(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("namespace eval ::BatchPropertyAssignment {}")
+        interp.eval("proc ::BatchPropertyAssignment::parseComponentName {name} {return [dict create property_name SEAM_T8 material Steel thickness 8.0]}")
+        interp.eval("set ::steelMaterialCreated 0")
+        interp.eval("proc ::BatchPropertyAssignment::materialIdByName {name} {return {}}")
+        interp.eval("proc ::BatchPropertyAssignment::ensureSteelMaterial {} {incr ::steelMaterialCreated; return 5}")
+        interp.eval("proc ::BatchPropertyAssignment::ensureProperty {name thickness material} {return 9}")
+        interp.eval("proc ::BatchPropertyAssignment::assignProperty {component property name} {set ::propertyAssignment [list $component $property $name]; return 1}")
+        interp.eval("set ::MeshSeamWeld::createdOutputComponents [dict create SEAM_T8 42]")
+        result=interp.eval("::MeshSeamWeld::assignCreatedSeamComponentProperties {SEAM_T8 MESH_SEAM_WELD}")
+        self.assertEqual(interp.eval("set ::steelMaterialCreated"),"1")
+        self.assertEqual(interp.eval("lindex [dict get {{{}}} assigned] 0".format(result)),"SEAM_T8 SEAM_T8")
+        self.assertEqual(interp.eval("set ::propertyAssignment"),"42 9 SEAM_T8")
+        self.assertEqual(interp.eval("llength [dict get {{{}}} failures]".format(result)),"0")
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_single_point_on_open_native_edge_is_not_misclassified_as_internal(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
@@ -1065,6 +1124,38 @@ list $path [llength [lsort -integer -unique $path]]
             float(interp.eval("::MeshSeamWeld::maximumPathCrossDistance {1 2 3} {11 12 13} 0")),
             5.0,
         )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_path_pairing_cost_uses_physical_arclength_not_node_index(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 0} 2 {9 0 0} 3 {10 0 0} 11 {0 0 0} 12 {1 0 0} 13 {10 0 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        # Source node 2 is at 90% of the path and must pair with target 13,
+        # not target 12 merely because both lists use index 1.
+        self.assertAlmostEqual(
+            float(interp.eval("::MeshSeamWeld::pathPairingCost {1 2 3} {11 12 13} 0")),
+            1.0,
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_adaptive_cross_layers_follow_each_local_gap(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 0} 2 {1 0 0} 3 {2 0 0} 11 {0 1 0} 12 {1 4 0} 13 {2 10 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::adaptiveCrossLayerCounts {1 2 3} {11 12 13} 3 0"),
+            "1 2 4",
+        )
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_adaptive_structured_strip_accepts_variable_cross_layers(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        elems=interp.splitlist(interp.eval(
+            "::MeshSeamWeld::adaptiveStructuredStripElementNodeLists {{1 11} {2 102 12} {3 13}} 0"
+        ))
+        self.assertEqual(len(elems),4)
+        self.assertTrue(all(len(interp.splitlist(elem)) in (3,4) for elem in elems))
+        self.assertTrue(all(len(set(interp.splitlist(elem))) == len(interp.splitlist(elem)) for elem in elems))
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_equal_target_path_repairs_local_native_list_slip_by_geometric_correspondence(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"

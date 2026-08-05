@@ -12,14 +12,10 @@ namespace eval ::HWFlow {
     variable ROOT_DIR [file dirname [file dirname [file normalize [info script]]]]
     variable GLOBAL_CONFIG_FILE [file join $ROOT_DIR "config.yaml"]
     variable CONFIG_DIR [file join $ROOT_DIR "config"]
-    variable MATERIAL_FILE [file join $CONFIG_DIR "materials.txt"]
-    variable CATEGORIES {SHELL SOLID CASTING SOURCE_GEOM SEAM CONNECTOR}
     variable LANGUAGE "zh_CN"
     variable LANGUAGE_LOADED 0
     variable ENGINEERING_CONTEXT {}
     variable ENGINEERING_CONTEXT_LOADED 0
-    variable materialRows {}
-    variable materialKeys {}
     variable progressWin ".hwflow_progress"
     variable progressMessage ""
     variable progressDetail ""
@@ -801,32 +797,6 @@ proc ::HWFlow::configDir {} {
     return $userConfig
 }
 
-proc ::HWFlow::materialFile {} {
-    variable MATERIAL_FILE
-    ::HWFlow::configDir
-    return $MATERIAL_FILE
-}
-
-proc ::HWFlow::defaultMaterialText {} {
-    return [join {
-        {key|display|density|E|nu|yield|ultimate|note}
-        {Q235|Q235|7.85e-9|210000|0.30|235|370|steel}
-        {Q345|Q345|7.85e-9|206000|0.30|345|470|steel}
-        {AL6061|AL6061|2.70e-9|69000|0.33|275|310|aluminum}
-        {QT500|QT500|7.20e-9|169000|0.28|320|500|casting}
-    } "\n"]
-}
-
-proc ::HWFlow::ensureDefaultConfigs {} {
-    set f [::HWFlow::materialFile]
-    if {![file exists $f]} {
-        set ch [open $f w]
-        fconfigure $ch -encoding utf-8 -translation lf
-        puts $ch [::HWFlow::defaultMaterialText]
-        close $ch
-    }
-}
-
 proc ::HWFlow::readTextFile {path} {
     if {![file exists $path]} {
         return ""
@@ -915,77 +885,6 @@ proc ::HWFlow::saveArrayState {moduleKey arrayName {skipKeys ""}} {
     return 1
 }
 
-proc ::HWFlow::loadMaterials {} {
-    variable materialRows
-    variable materialKeys
-
-    ::HWFlow::ensureDefaultConfigs
-    set data [::HWFlow::readTextFile [::HWFlow::materialFile]]
-    set materialRows {}
-    set materialKeys {}
-    set header {}
-
-    foreach rawLine [split $data "\n"] {
-        set line [string trim $rawLine]
-        if {$line eq "" || [string index $line 0] eq "#"} {
-            continue
-        }
-        set cols [split $line "|"]
-        if {[llength $header] == 0} {
-            set header $cols
-            continue
-        }
-
-        set row [dict create]
-        for {set i 0} {$i < [llength $header]} {incr i} {
-            set key [string trim [lindex $header $i]]
-            set val [string trim [lindex $cols $i]]
-            dict set row $key $val
-        }
-        set matKey [string trim [dict get $row key]]
-        if {$matKey eq ""} {
-            continue
-        }
-        lappend materialRows $row
-        lappend materialKeys $matKey
-    }
-    return $materialRows
-}
-
-proc ::HWFlow::materialKeys {} {
-    variable materialKeys
-    if {[llength $materialKeys] == 0} {
-        ::HWFlow::loadMaterials
-    }
-    return $materialKeys
-}
-
-proc ::HWFlow::materialRowByKey {matKey} {
-    variable materialRows
-    if {[llength $materialRows] == 0} {
-        ::HWFlow::loadMaterials
-    }
-    foreach row $materialRows {
-        if {[dict get $row key] eq $matKey} {
-            return $row
-        }
-    }
-    return ""
-}
-
-proc ::HWFlow::isMaterialKey {token} {
-    return [expr {[lsearch -exact [::HWFlow::materialKeys] $token] >= 0}]
-}
-
-proc ::HWFlow::categoryList {} {
-    variable CATEGORIES
-    return $CATEGORIES
-}
-
-proc ::HWFlow::isCategory {token} {
-    return [expr {[lsearch -exact [::HWFlow::categoryList] $token] >= 0}]
-}
-
 proc ::HWFlow::sanitizeToken {raw {fallback X}} {
     set s [string trim $raw]
     if {$s eq ""} {
@@ -998,6 +897,22 @@ proc ::HWFlow::sanitizeToken {raw {fallback X}} {
         set s $fallback
     }
     return $s
+}
+
+# HyperMesh appends .1, .2, ... when an imported entity collides with an
+# existing name. The suffix is a database detail, not part of the engineering
+# name. Do not apply this helper to thickness tokens directly: T2.1 is a
+# valid thickness, while Q235.1 is normally a duplicated material name.
+proc ::HWFlow::stripHyperMeshDuplicateSuffix {value} {
+    set value [string trim $value]
+    while {[regexp {^(.+)[.]([1-9][0-9]*)$} $value -> base serial]} {
+        set value [string trim $base]
+    }
+    return $value
+}
+
+proc ::HWFlow::canonicalMaterialToken {token} {
+    return [::HWFlow::stripHyperMeshDuplicateSuffix [string trim $token]]
 }
 
 proc ::HWFlow::stableHash {text} {
@@ -1078,54 +993,54 @@ proc ::HWFlow::nameTokens {name} {
     return $out
 }
 
-proc ::HWFlow::stripKnownCategory {tokens} {
-    if {[llength $tokens] > 0 && [::HWFlow::isCategory [lindex $tokens 0]]} {
-        return [lrange $tokens 1 end]
-    }
-    return $tokens
-}
-
-proc ::HWFlow::componentCategoryFromName {name} {
-    set tokens [::HWFlow::nameTokens $name]
-    if {[llength $tokens] > 0 && [::HWFlow::isCategory [lindex $tokens 0]]} {
-        return [lindex $tokens 0]
-    }
-    return ""
-}
-
-proc ::HWFlow::replaceCategoryInName {name category} {
-    set category [::HWFlow::sanitizeToken [string toupper $category] "SHELL"]
-    set tokens [::HWFlow::stripKnownCategory [::HWFlow::nameTokens $name]]
-    if {[llength $tokens] == 0} {
-        set tokens [list COMPONENT]
-    }
-    return [join [linsert $tokens 0 $category] "_"]
-}
-
-proc ::HWFlow::replaceMaterialInName {name matKey} {
-    set matKey [::HWFlow::sanitizeToken $matKey MAT]
-    set tokens [::HWFlow::nameTokens $name]
-    if {[llength $tokens] == 0} {
-        set tokens [list COMPONENT]
-    }
-    set last [lindex $tokens end]
-    if {[::HWFlow::isMaterialKey $last]} {
-        set tokens [lreplace $tokens end end $matKey]
-    } else {
-        lappend tokens $matKey
-    }
-    return [join $tokens "_"]
-}
-
 # Canonical thickness naming shared by midsurface and mesh-weld outputs.
 # Keeping both the reader and formatter here prevents one module from creating
 # a T token that the next module cannot recognize.
 proc ::HWFlow::thicknessFromComponentName {name} {
-    if {[regexp -nocase {(^|_)T([0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?)(_|$)} $name -> prefix value decimal exponent suffix] &&
+    if {[regexp -nocase {(^|_)T([0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?)} $name -> prefix value decimal exponent] &&
         [string is double -strict $value] && $value > 0.0} {
         return [expr {double($value)}]
     }
     return ""
+}
+
+proc ::HWFlow::componentNameInfo {name {requireMaterial 1}} {
+    set name [string trim $name]
+    if {$name eq ""} {
+        return {}
+    }
+
+    # The final material field is optional for geometry/midsurface naming and
+    # mandatory for downstream Property assignment.
+    set numberPattern {([0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?)}
+    set expression [format {^(V[[:alnum:].+-]+)_(.+?)_T%s.*_([^_]+)$} $numberPattern]
+    if {[regexp -nocase -- $expression $name -> version partNumber thickness decimal exponent material]} {
+        set material [::HWFlow::canonicalMaterialToken $material]
+    } elseif {!$requireMaterial} {
+        set optionalExpression [format {^(V[[:alnum:].+-]+)_(.+?)_T%s$} $numberPattern]
+        if {![regexp -nocase -- $optionalExpression $name -> version partNumber thickness decimal exponent]} {
+            return {}
+        }
+        set material ""
+    } else {
+        return {}
+    }
+
+    set version [::HWFlow::stripHyperMeshDuplicateSuffix [string trim $version]]
+    set partNumber [::HWFlow::stripHyperMeshDuplicateSuffix [string trim $partNumber]]
+    set token [::HWFlow::formatThicknessToken $thickness]
+    if {$version eq "" || $partNumber eq "" || ($requireMaterial && $material eq "") || $token eq "" || $token eq "UNKNOWN"} {
+        return {}
+    }
+
+    return [dict create \
+        kind PART \
+        version $version \
+        part_number $partNumber \
+        material $material \
+        thickness [expr {double($thickness)}] \
+        thickness_token $token \
+        property_name [expr {$material eq "" ? "" : "${material}_T${token}"}]]
 }
 
 proc ::HWFlow::formatThicknessToken {value} {
@@ -1139,30 +1054,65 @@ proc ::HWFlow::formatThicknessToken {value} {
 }
 
 proc ::HWFlow::formatMidsurfName {sourceName thicknessText} {
-    set tText [::HWFlow::sanitizeToken $thicknessText UNKNOWN]
-    set tokens [::HWFlow::nameTokens $sourceName]
-    if {[llength $tokens] == 0} {
-        set tokens [list SHELL COMPONENT]
+    set tText [::HWFlow::formatThicknessToken $thicknessText]
+    if {$tText eq "UNKNOWN"} {
+        set tText [::HWFlow::sanitizeToken $thicknessText UNKNOWN]
     }
 
-    set mat ""
-    if {[llength $tokens] > 0 && [::HWFlow::isMaterialKey [lindex $tokens end]]} {
-        set mat [lindex $tokens end]
-        set tokens [lrange $tokens 0 end-1]
+    # Always emit the canonical geometry name. Material is carried forward
+    # only when it is already present; midsurface extraction itself does not
+    # assign or infer material.
+    set info [::HWFlow::componentNameInfo $sourceName 0]
+    if {[dict size $info] > 0} {
+        set version [::HWFlow::sanitizeToken [dict get $info version] Vxx]
+        set part [::HWFlow::sanitizeToken [dict get $info part_number] COMPONENT]
+        set material [string trim [dict get $info material]]
+        if {$material ne ""} {
+            set material "_[::HWFlow::sanitizeToken $material MATERIAL]"
+        }
+        return "${version}_${part}_T${tText}${material}"
+    }
+
+    set tokens [::HWFlow::nameTokens $sourceName]
+    if {[llength $tokens] == 0} {
+        set tokens [list Vxx COMPONENT]
+    }
+
+    if {[llength $tokens] > 0 && [regexp -nocase {^V} [lindex $tokens 0]]} {
+        set version [::HWFlow::sanitizeToken [::HWFlow::stripHyperMeshDuplicateSuffix [lindex $tokens 0]] Vxx]
+        set tokens [lrange $tokens 1 end]
+    } else {
+        set version Vxx
     }
 
     set clean {}
     foreach token $tokens {
         if {[::HWFlow::thicknessFromComponentName $token] eq ""} {
-            lappend clean $token
+            lappend clean [::HWFlow::stripHyperMeshDuplicateSuffix $token]
         }
     }
     set tokens $clean
-    lappend tokens "T$tText"
-    if {$mat ne ""} {
-        lappend tokens $mat
+    if {[llength $tokens] == 0} {
+        set tokens [list COMPONENT]
     }
-    return [join $tokens "_"]
+    return "${version}_[join $tokens _]_T${tText}"
+}
+
+proc ::HWFlow::componentNameMatchKey {name} {
+    set info [::HWFlow::componentNameInfo $name 0]
+    if {[dict size $info] > 0} {
+        set material [string toupper [::HWFlow::canonicalMaterialToken [dict get $info material]]]
+        return [join [list \
+            [string toupper [::HWFlow::stripHyperMeshDuplicateSuffix [dict get $info version]]] \
+            [string toupper [::HWFlow::stripHyperMeshDuplicateSuffix [dict get $info part_number]]] \
+            [::HWFlow::formatThicknessToken [dict get $info thickness]] \
+            $material] "|"]
+    }
+    return [string toupper [::HWFlow::stripHyperMeshDuplicateSuffix [string trim $name]]]
+}
+
+proc ::HWFlow::componentNamesEquivalent {left right} {
+    return [expr {[::HWFlow::componentNameMatchKey $left] eq [::HWFlow::componentNameMatchKey $right]}]
 }
 
 proc ::HWFlow::componentName {compId} {
@@ -1187,6 +1137,16 @@ proc ::HWFlow::componentIdByName {name} {
         }
         if {![catch {set id [hm_getvalue $etype name=$name dataname=id]}] && $id ne "" && $id != 0} {
             return $id
+        }
+    }
+
+    # HyperMesh may have renamed an imported duplicate to <name>.1/.2. Use
+    # the canonical engineering-name key as a compatibility fallback after
+    # the exact lookup has failed.
+    set targetKey [::HWFlow::componentNameMatchKey $name]
+    foreach compId [::HWFlow::componentIds 2] {
+        if {[::HWFlow::componentNameMatchKey [::HWFlow::componentName $compId]] eq $targetKey} {
+            return $compId
         }
     }
     return ""
@@ -2122,5 +2082,3 @@ proc ::HWFlow::padString {str width} {
     if {$pad < 0} { set pad 0 }
     return "$str[string repeat " " $pad]"
 }
-
-::HWFlow::ensureDefaultConfigs

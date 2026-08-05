@@ -76,6 +76,7 @@ proc ::BatchMesherWorker::optistructTemplate {} {
 
 proc ::BatchMesherWorker::initializeBatchMeshProfile {release} {
     if {$release ne "2022"} { return }
+    variable config
     set template [::BatchMesherWorker::optistructTemplate]
     *templatefileset [file nativename $template]
     *readqualitycriteria [file nativename [dict get $config criteria]]

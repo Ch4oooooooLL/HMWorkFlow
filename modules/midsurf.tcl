@@ -4,7 +4,7 @@
 #
 # Batch midsurface extraction for sheet-metal geometry components.
 # Output component names are generated as:
-#   <source component name>_T<thickness>
+#   Vxx_<part name>_T<thickness>[_<material>]
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -13,7 +13,7 @@ if {![namespace exists ::HWFlow]} {
 
 namespace eval ::MidSurf {
     variable VERSION "0.1"
-    variable outputAssemblyName "midsurf"
+    variable outputAssemblyName "MIDSURFED"
 
     variable cfg
     array set cfg {
@@ -318,6 +318,9 @@ proc ::MidSurf::formatThickness {value} {
 }
 
 proc ::MidSurf::getComponentName {compId} {
+    if {[llength [info commands ::HWFlow::componentName]] > 0} {
+        return [::HWFlow::componentName $compId]
+    }
     foreach etype {comps components component} {
         if {![catch {set n [hm_getcollectorname $etype $compId]}] && $n ne ""} {
             return $n
@@ -335,6 +338,9 @@ proc ::MidSurf::getComponentName {compId} {
 }
 
 proc ::MidSurf::componentExistsByName {compName} {
+    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
+        return [expr {[::HWFlow::componentIdByName $compName] ne ""}]
+    }
     if {![catch {set exists [hm_entityinfo exist components $compName -byname]}]} {
         return $exists
     }
@@ -345,6 +351,9 @@ proc ::MidSurf::componentExistsByName {compName} {
 }
 
 proc ::MidSurf::componentIdByName {compName} {
+    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
+        return [::HWFlow::componentIdByName $compName]
+    }
     foreach etype {components comps component} {
         if {![catch {set cid [hm_entityinfo id $etype $compName -byname]}] && $cid ne "" && $cid != 0} {
             return $cid

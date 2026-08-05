@@ -1,6 +1,11 @@
 namespace eval ::BatchMesher {
-    variable VERSION "2.4"
+    variable VERSION "2.6"
     variable CONFIG_KEY "batch_mesher"
+    # hmbatch.exe can return before the real hmopengl process has finished
+    # loading HyperMesh and sourcing the worker Tcl, especially when several
+    # HM2022 instances start together.  Do not treat that launcher exit as a
+    # task failure until the worker has had time to create its state handshake.
+    variable WORKER_STARTUP_TIMEOUT_MS 120000
     variable TASK_STATUSES {pending running completed failed cancelled skipped}
     variable ui
     variable runtime
@@ -26,6 +31,7 @@ namespace eval ::BatchMesher {
         background_task_ids {}
         background_pending {}
         background_active {}
+        background_startup_verified 0
         background_outputs {}
         background_phase ""
         background_merge_pid ""
@@ -33,6 +39,7 @@ namespace eval ::BatchMesher {
         background_merge_dir ""
         background_merge_stdout ""
         background_merge_stderr ""
+        background_merge_launch_log ""
         background_merge_state_path ""
         background_snapshot ""
         background_executable ""
@@ -44,6 +51,10 @@ namespace eval ::BatchMesher {
         background_param_size 0
         background_export_template ""
         background_release ""
+        validated_hmbatch_path ""
+        validated_hmbatch_mtime 0
+        validated_hmbatch_version ""
+        validated_hmbatch_executable ""
         background_monitor_status_path ""
         background_monitor_done_path ""
         result_fem_path ""
@@ -233,6 +244,11 @@ proc ::BatchMesher::validateRunConfig {} {
         error [::BatchMesher::txt "并行 hmbatch 数量必须是 1 到 16 的整数。" "Parallel hmbatch count must be an integer from 1 to 16."]
     }
     set warnings {}
+    if {$ui(PARALLEL_WORKERS) > 2} {
+        lappend warnings [::BatchMesher::txt \
+            "当前并行数为 $ui(PARALLEL_WORKERS)；本项目对 HyperMesh 2022 的实机验证上限为 2，更多实例可能受许可证或启动资源限制。首次验证请使用 1。" \
+            "Parallel workers is $ui(PARALLEL_WORKERS); live HyperMesh 2022 validation covered up to 2, and additional instances may hit license or startup-resource limits. Use 1 for the first validation."]
+    }
     set index [::BatchMesher::findPresetIndex $ui(ACTIVE_PRESET)]
     if {$index >= 0} {
         set preset [lindex $ui(PRESETS) $index]

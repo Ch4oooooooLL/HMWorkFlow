@@ -30,9 +30,35 @@ proc ::BatchMesher::requireSupportedHyperMesh {} {
 # Compatibility alias retained for callers from the original HM2019-only module.
 proc ::BatchMesher::requireHm2019 {} { return [::BatchMesher::requireSupportedHyperMesh] }
 
-proc ::BatchMesher::runProbeProcess {arguments stdoutPath stderrPath timeoutMs} {
+proc ::BatchMesher::buildHmbatchCommand {executable scriptPath} {
+    # Altair's documented batch examples suppress command-file generation and
+    # the user-profile dialog.  The worker loads its OptiStruct profile itself,
+    # so allowing that dialog can block HM2022 before the Tcl script starts.
+    return [list [file nativename $executable] \
+        -nocommand -nouserprofiledialog -tcl [file nativename $scriptPath]]
+}
+
+proc ::BatchMesher::runProbeProcess {arguments stdoutPath stderrPath timeoutMs {workingDirectory ""}} {
     set pipeline [concat [list |] $arguments [list 2> $stderrPath]]
-    if {[catch {set channel [open $pipeline r]} err opts]} { return -options $opts $err }
+    set previousDirectory [pwd]
+    set markerExisted [info exists ::env(HMWORKFLOW_BATCH_WORKER)]
+    if {$markerExisted} { set previousMarker $::env(HMWORKFLOW_BATCH_WORKER) }
+    set ::env(HMWORKFLOW_BATCH_WORKER) 1
+    set openCode [catch {
+        if {$workingDirectory ne ""} { cd $workingDirectory }
+        set channel [open $pipeline r]
+    } err opts]
+    if {$markerExisted} {
+        set ::env(HMWORKFLOW_BATCH_WORKER) $previousMarker
+    } else {
+        unset ::env(HMWORKFLOW_BATCH_WORKER)
+    }
+    set restoreCode [catch {cd $previousDirectory} restoreError restoreOptions]
+    if {$openCode} { return -options $opts $err }
+    if {$restoreCode} {
+        catch {close $channel}
+        return -options $restoreOptions $restoreError
+    }
     fconfigure $channel -blocking 0 -encoding utf-8
     set output ""
     set started [clock milliseconds]
@@ -59,45 +85,78 @@ proc ::BatchMesher::runProbeProcess {arguments stdoutPath stderrPath timeoutMs} 
     return $output
 }
 
+proc ::BatchMesher::probeHmbatchExecutable {executable probeDir} {
+    variable runtime
+    file mkdir $probeDir
+    set script [file join $probeDir hmbatch_preflight.tcl]
+    set result [file join $probeDir hmbatch_preflight_result.tcl]
+    set stdout [file join $probeDir hmbatch_preflight_stdout.log]
+    set stderr [file join $probeDir hmbatch_preflight_stderr.log]
+    set scriptText [join [list \
+        "set ch \[open [list [file nativename $result]] w\]" \
+        {set version ""} \
+        {catch {set version [string trim [hm_info -appinfo VERSION]]}} \
+        {set executable [info nameofexecutable]} \
+        {set payload [dict create version $version executable $executable working_directory [pwd] batchmesh2 [expr {[llength [info commands *hm_batchmesh2]] > 0}]]} \
+        {puts -nonewline $ch $payload} \
+        {close $ch}] "\n"]
+    ::HWFlow::writeTextFile $script $scriptText
+    set command [::BatchMesher::buildHmbatchCommand $executable $script]
+    ::BatchMesher::log INFO "hmbatch preflight command=$command working_directory=$probeDir"
+    if {[catch {
+        ::BatchMesher::runProbeProcess $command $stdout $stderr 90000 $probeDir
+    } probeError probeOptions]} {
+        error "HMBATCH_PREFLIGHT_FAILED: $probeError; command=$command; stdout=$stdout; stderr=$stderr"
+    }
+    if {![file isfile $result] || [file size $result] == 0} {
+        error "HMBATCH_PREFLIGHT_NO_RESULT: hmbatch exited without sourcing Tcl; command=$command; stdout=$stdout; stderr=$stderr"
+    }
+    set payload [string trim [::HWFlow::readTextFile $result]]
+    if {$payload eq "" || [catch {dict size $payload}]} {
+        error "HMBATCH_PREFLIGHT_INVALID_RESULT: $result"
+    }
+    set version [dict get $payload version]
+    set year [::BatchMesher::supportedHyperMeshYear $version]
+    if {$year ni {2019 2022}} {
+        error "HMBATCH_PREFLIGHT_UNSUPPORTED_VERSION: $version; result=$result"
+    }
+    if {![dict get $payload batchmesh2]} {
+        error "HMBATCH_PREFLIGHT_API_MISSING: *hm_batchmesh2; version=$version; result=$result"
+    }
+    set runtime(validated_hmbatch_path) [file normalize $executable]
+    set runtime(validated_hmbatch_mtime) [file mtime $executable]
+    set runtime(validated_hmbatch_version) $version
+    set runtime(validated_hmbatch_executable) [dict get $payload executable]
+    ::BatchMesher::log INFO "hmbatch preflight passed version=$version executable=[dict get $payload executable] working_directory=[dict get $payload working_directory]"
+    return $payload
+}
+
+proc ::BatchMesher::hmbatchPreflightCurrent {executable} {
+    variable runtime
+    set normalized [file normalize $executable]
+    return [expr {
+        $runtime(validated_hmbatch_path) ne "" &&
+        [string equal -nocase $runtime(validated_hmbatch_path) $normalized] &&
+        $runtime(validated_hmbatch_mtime) == [file mtime $normalized] &&
+        $runtime(validated_hmbatch_version) ne ""
+    }]
+}
+
 proc ::BatchMesher::testHmbatchStartup {} {
     variable runtime
     set executable [::BatchMesher::validateHmbatch 1]
     if {$runtime(running)} { error [::BatchMesher::txt "任务正在运行，不能启动探针。" "Tasks are running; the probe cannot start."] }
     ::BatchMesher::createRunWorkspace
     set probeDir $runtime(run_dir)
-    set script [file join $runtime(run_dir) hmbatch_probe.tcl]
-    set result [file join $runtime(run_dir) hmbatch_probe_result.txt]
-    set stdout [file join $runtime(run_dir) hmbatch_probe_stdout.log]
-    set stderr [file join $runtime(run_dir) hmbatch_probe_stderr.log]
-    set scriptText [join [list \
-        "set ch \[open [list [file nativename $result]] w\]" \
-        {set version ""} \
-        {catch {set version [hm_info -appinfo VERSION]}} \
-        {puts $ch $version} \
-        {close $ch} \
-        {exit}] "\n"]
-    ::HWFlow::writeTextFile $script $scriptText
     ::BatchMesher::log INFO "hmbatch startup probe executable=$executable"
-    if {[catch {::BatchMesher::runProbeProcess [list [file nativename $executable] -tcl [file nativename $script]] $stdout $stderr 60000} err opts]} {
+    if {[catch {set payload [::BatchMesher::probeHmbatchExecutable $executable $runtime(run_dir)]} err opts]} {
         catch {::HybridCore::finalizeTaskWorkspace $probeDir FAILED}
         set runtime(run_dir) ""
-        error [::BatchMesher::txt "hmbatch 测试启动失败：$err；日志：$stderr" "hmbatch startup probe failed: $err; log: $stderr"]
-    }
-    if {![file isfile $result]} {
-        catch {::HybridCore::finalizeTaskWorkspace $probeDir FAILED}
-        set runtime(run_dir) ""
-        error [::BatchMesher::txt "hmbatch 已退出但未生成探针结果；请查看日志：$stderr" "hmbatch exited without a probe result; see: $stderr"]
-    }
-    set version [string trim [::HWFlow::readTextFile $result]]
-    set year [::BatchMesher::supportedHyperMeshYear $version]
-    if {$year ni {2019 2022}} {
-        catch {::HybridCore::finalizeTaskWorkspace $probeDir FAILED}
-        set runtime(run_dir) ""
-        error [::BatchMesher::txt "所选 hmbatch 不是受支持的 HyperMesh 2019/2022：$version" "The selected hmbatch is not a supported HyperMesh 2019/2022 executable: $version"]
+        error [::BatchMesher::txt "hmbatch 真实启动测试失败：$err" "Real hmbatch startup test failed: $err"]
     }
     catch {::HybridCore::finalizeTaskWorkspace $probeDir SUCCESS}
     set runtime(run_dir) ""
-    return $version
+    return $payload
 }
 
 proc ::BatchMesher::saveBackup {} {

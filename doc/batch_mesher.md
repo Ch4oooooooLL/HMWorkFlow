@@ -60,7 +60,7 @@ SHOW_CMD_WINDOW 1
 
 `number_of_strings=0`，不创建自动参数字符串，不传入 `elem_size`、`params_generate_mode`、`no_washer` 或任何 washer 覆盖项。criteria/param 原文件不被复制或修改。
 
-“启动后台划分”首先保存一个只读输入快照，再为不同连通域直接启动相互隔离的 `hmbatch.exe -tcl background_launcher.tcl`，最多同时运行 `PARALLEL_WORKERS` 个。2022 worker 在读入模型后显式执行 `*templatefileset` 和 `*readqualitycriteria`，再调用实机验证过的 `*hm_batchmesh2`。主 HyperMesh 每 500ms 汇总各 worker 的原子状态文件，不会被原生命令阻塞。
+“启动后台划分”先使用与正式 worker 完全相同的 `hmbatch.exe -nocommand -nouserprofiledialog -tcl hmbatch_preflight.tcl` 命令执行真实门禁，确认 Tcl 被执行、版本属于 2019/2022 且 `*hm_batchmesh2` 存在；门禁失败时不会启动任何连通域任务。通过后保存只读输入快照，再为不同连通域启动相互隔离的 hmbatch，最多同时运行 `PARALLEL_WORKERS` 个。2022 worker 在读入模型后显式执行 `*templatefileset` 和 `*readqualitycriteria`，再调用实机验证过的 `*hm_batchmesh2`。主 HyperMesh 每 500ms 汇总各 worker 的原子状态文件，不会被原生命令阻塞。
 
 Windows 默认勾选“显示 hmbatch 命令窗口”。整次运行只打开一个汇总 CMD：每两秒刷新当前阶段、所有活动 `hmopengl.exe` PID 和任务统计，网格与合并结束后三秒自动关闭，不再为每个 worker/merge 进程创建窗口。关闭该窗口不影响后台任务；取消任务仍会同时终止 launcher 与实际进程树。
 
@@ -92,6 +92,8 @@ runtime/tasks/batch_mesher/<run-id>/
   monitor.done                 # 完成信号，触发窗口自动关闭
   workers/T001/
     background_launcher.tcl
+    launch.log                 # 管理器在调用 hmbatch 前即写入，含命令、工作目录和 launcher PID
+    manager_failure.log        # worker 未进入 Tcl 时仍会生成的管理端失败诊断
     background.state
     hmbatch_worker.log
     launcher_error.log
@@ -101,6 +103,8 @@ runtime/tasks/batch_mesher/<run-id>/
     task_result.hm             # 保留源几何元数据、仅含该任务新增 Elements
   merge/                       # 至少一个可聚合 FEM 时生成
     background_launcher.tcl
+    launch.log
+    manager_failure.log        # 仅管理器判定启动/进程异常时生成
     merge.state
     hmbatch_merge.log
     hmbatch_stdout.log
@@ -109,7 +113,7 @@ runtime/tasks/batch_mesher/<run-id>/
   batchmesh_result.fem        # 仅包含成功任务产生的网格
 ```
 
-失败日志包含 task/group、Surface 数量、criteria/param 路径、原始 Tcl errorInfo 和检查建议。
+失败日志包含 task/group、Surface 数量、criteria/param 路径、原始 Tcl errorInfo 和检查建议。即使 Altair launcher 没有产生 stdout/stderr，`launch.log` 也会保留实际命令、独立工作目录和 launcher PID；120 秒内未收到真实 worker 状态握手时，`manager_failure.log` 会记录状态文件及各日志是否存在和字节数。
 
 ## 测试
 

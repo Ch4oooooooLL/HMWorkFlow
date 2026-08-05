@@ -29,6 +29,77 @@ proc ::BatchMesher::backgroundProcessAlive {{requestedPid ""}} {
     return [expr {![catch {exec kill -0 $processId}]}]
 }
 
+proc ::BatchMesher::launchDetachedHmbatch {command workingDirectory stdoutPath stderrPath launchLogPath} {
+    file mkdir $workingDirectory
+    set requested [clock milliseconds]
+    set report [list \
+        "status=REQUESTED" \
+        "requested_ms=$requested" \
+        "working_directory=[file nativename $workingDirectory]" \
+        "command_tcl_list=$command" \
+        "stdout=[file nativename $stdoutPath]" \
+        "stderr=[file nativename $stderrPath]"]
+    # This manager-side report exists before hmbatch is invoked, so there is
+    # always a diagnostic even when the Altair launcher produces no output.
+    ::HWFlow::writeTextFile $launchLogPath [join $report "\n"]
+
+    set previousDirectory [pwd]
+    set markerExisted [info exists ::env(HMWORKFLOW_BATCH_WORKER)]
+    if {$markerExisted} { set previousMarker $::env(HMWORKFLOW_BATCH_WORKER) }
+    set ::env(HMWORKFLOW_BATCH_WORKER) 1
+    set launchCode [catch {
+        # HyperMesh writes startup artifacts such as command1.tcl in its
+        # working directory.  Every parallel worker must inherit its own
+        # directory or the launchers can overwrite one another's files.
+        cd $workingDirectory
+        set pids [exec {*}$command >$stdoutPath 2>$stderrPath &]
+    } launchError launchOptions]
+    if {$markerExisted} {
+        set ::env(HMWORKFLOW_BATCH_WORKER) $previousMarker
+    } else {
+        unset ::env(HMWORKFLOW_BATCH_WORKER)
+    }
+    set restoreCode [catch {cd $previousDirectory} restoreError restoreOptions]
+    if {$launchCode} {
+        lappend report "status=FAILED" "error=$launchError"
+        ::HWFlow::writeTextFile $launchLogPath [join $report "\n"]
+        return -options $launchOptions $launchError
+    }
+    if {$restoreCode} {
+        lappend report "status=FAILED" "error=Could not restore working directory: $restoreError"
+        ::HWFlow::writeTextFile $launchLogPath [join $report "\n"]
+        return -options $restoreOptions $restoreError
+    }
+    if {[llength $pids] == 0 || ![string is integer -strict [lindex $pids 0]] || [lindex $pids 0] <= 0} {
+        set launchError "hmbatch launch returned no valid PID: $pids"
+        lappend report "status=FAILED" "error=$launchError"
+        ::HWFlow::writeTextFile $launchLogPath [join $report "\n"]
+        error $launchError
+    }
+    set processId [lindex $pids 0]
+    lappend report "status=LAUNCH_REQUESTED" "launcher_pid=$processId" "returned_ms=[clock milliseconds]"
+    ::HWFlow::writeTextFile $launchLogPath [join $report "\n"]
+    return $processId
+}
+
+proc ::BatchMesher::writeWorkerManagerFailure {job message} {
+    set path [file join [dict get $job worker_dir] manager_failure.log]
+    set lines [list \
+        "failed_ms=[clock milliseconds]" \
+        "task_id=[dict get $job task_id]" \
+        "message=$message" \
+        "launcher_pid=[dict get $job launcher_pid]" \
+        "actual_pid=[dict get $job actual_pid]"]
+    foreach key {launch_log state_path stdout stderr} {
+        set artifact [dict get $job $key]
+        set exists [file exists $artifact]
+        set bytes [expr {$exists && [file isfile $artifact] ? [file size $artifact] : 0}]
+        lappend lines "$key=[file nativename $artifact] exists=$exists bytes=$bytes"
+    }
+    ::HWFlow::writeTextFile $path [join $lines "\n"]
+    return $path
+}
+
 proc ::BatchMesher::writeBackgroundLauncher {workerConfig {launcherDir ""} {workerPath ""}} {
     variable runtime
     variable MODULE_DIR
@@ -161,11 +232,27 @@ proc ::BatchMesher::startBackgroundRun {{taskIds {}}} {
     if {$runtime(running)} { error [::BatchMesher::txt "已有 BatchMesher 后台任务正在运行。" "A BatchMesher background run is already active."] }
     ::BatchMesher::requireSupportedHyperMesh
     set runConfig [::BatchMesher::validateRunConfig]
+    foreach configWarning [dict get $runConfig warnings] { ::BatchMesher::log WARN $configWarning }
     ::BatchMesher::verifyAnalysisFresh
     if {[llength $runtime(tasks)] == 0} { error [::BatchMesher::txt "没有可运行任务。" "There are no runnable tasks."] }
     if {[llength [::BatchMesher::modelPath]] == 0} { error [::BatchMesher::txt "当前模型尚未保存，请先保存模型。" "The current model is unsaved; save it first."] }
     ::BatchMesher::saveCurrentPreset
     ::BatchMesher::createRunWorkspace
+    set selectedHmbatch [dict get $runConfig hmbatch]
+    if {![::BatchMesher::hmbatchPreflightCurrent $selectedHmbatch]} {
+        set preflightDir [file join $runtime(run_dir) hmbatch_preflight]
+        if {[catch {
+            ::BatchMesher::probeHmbatchExecutable $selectedHmbatch $preflightDir
+        } preflightError preflightOptions]} {
+            set runtime(run_error) $preflightError
+            set runtime(run_finished_ms) [clock milliseconds]
+            catch {::BatchMesher::writeRunReport 1}
+            catch {::HybridCore::finalizeTaskWorkspace $runtime(run_dir) FAILED}
+            error [::BatchMesher::txt \
+                "所选 hmbatch 未通过真实 Tcl 启动门禁，未启动任何子任务：$preflightError" \
+                "The selected hmbatch failed the real Tcl startup gate; no task worker was launched: $preflightError"]
+        }
+    }
     set backgroundTasks [::BatchMesher::tasksForBackground $taskIds]
     if {[llength $backgroundTasks] == 0} { error [::BatchMesher::txt "没有匹配的后台任务。" "No matching background tasks were found."] }
     set runtime(background_task_ids) {}
@@ -192,6 +279,7 @@ proc ::BatchMesher::startBackgroundRun {{taskIds {}}} {
     set runtime(imported_result_paths) {}
     set runtime(background_pending) $backgroundTasks
     set runtime(background_active) [dict create]
+    set runtime(background_startup_verified) 0
     set runtime(background_outputs) {}
     set runtime(background_phase) meshing
     set runtime(background_merge_pid) ""
@@ -199,6 +287,7 @@ proc ::BatchMesher::startBackgroundRun {{taskIds {}}} {
     set runtime(background_merge_dir) ""
     set runtime(background_merge_stdout) ""
     set runtime(background_merge_stderr) ""
+    set runtime(background_merge_launch_log) ""
     set runtime(background_merge_state_path) ""
     set runtime(background_snapshot) $snapshot
     set runtime(background_executable) [dict get $runConfig hmbatch]
@@ -286,6 +375,7 @@ proc ::BatchMesher::launchTaskWorker {task} {
     set modelPath [file join $workerDir task_result.hm]
     set stdoutPath [file join $workerDir hmbatch_stdout.log]
     set stderrPath [file join $workerDir hmbatch_stderr.log]
+    set launchLogPath [file join $workerDir launch.log]
     set workerConfig [dict create run_dir $workerDir model $runtime(background_snapshot) \
         criteria $runtime(background_criteria) param $runtime(background_param) tasks [list $task] \
         continue_after_failure 1 state_path $statePath result_fem $resultPath \
@@ -294,28 +384,33 @@ proc ::BatchMesher::launchTaskWorker {task} {
         param_mtime $runtime(background_param_mtime) param_size $runtime(background_param_size) \
         export_template $runtime(background_export_template) run_log [file join $workerDir hmbatch_worker.log]]
     set launcher [::BatchMesher::writeBackgroundLauncher $workerConfig $workerDir]
-    set command [list [file nativename $runtime(background_executable)] -tcl [file nativename $launcher]]
-    set launchCode [catch {set pids [exec {*}$command >$stdoutPath 2>$stderrPath &]} launchError]
-    set processId [expr {$launchCode || [llength $pids] == 0 ? "" : [lindex $pids 0]}]
-    if {$launchCode || ![string is integer -strict $processId] || $processId <= 0} {
-        if {!$launchCode} { set launchError "direct hmbatch launch returned no valid PID: $pids" }
+    set command [::BatchMesher::buildHmbatchCommand $runtime(background_executable) $launcher]
+    set launchCode [catch {
+        set processId [::BatchMesher::launchDetachedHmbatch \
+            $command $workerDir $stdoutPath $stderrPath $launchLogPath]
+    } launchError]
+    if {$launchCode} {
         ::BatchMesher::setTaskFailed $taskId "Could not start hmbatch worker: $launchError"
-        ::BatchMesher::log ERROR "$taskId worker launch failed: $launchError"
+        ::BatchMesher::log ERROR "$taskId worker launch failed: $launchError; launch_log=$launchLogPath"
         return 0
     }
     set job [dict create task_id $taskId pid $processId launcher_pid $processId actual_pid "" \
         worker_release "" \
         state_path $statePath result_fem $resultPath result_model $modelPath \
-        stdout $stdoutPath stderr $stderrPath worker_dir $workerDir started_ms [clock milliseconds]]
+        stdout $stdoutPath stderr $stderrPath launch_log $launchLogPath \
+        worker_dir $workerDir started_ms [clock milliseconds]]
     dict set runtime(background_active) $taskId $job
-    ::BatchMesher::log INFO "$taskId independent worker started pid=$processId launcher=$launcher"
+    ::BatchMesher::log INFO "$taskId worker launch requested launcher_pid=$processId launcher=$launcher launch_log=$launchLogPath"
     return 1
 }
 
 proc ::BatchMesher::launchAvailableWorkers {} {
     variable runtime
     variable ui
-    set maximum $ui(PARALLEL_WORKERS)
+    # Start one canary process first.  Once its state file proves that the real
+    # hmopengl interpreter entered worker Tcl, open the configured parallel
+    # pool.  This prevents a bad common startup path from spawning every task.
+    set maximum [expr {$runtime(background_startup_verified) ? $ui(PARALLEL_WORKERS) : 1}]
     while {!$runtime(stop_after_current) && [llength $runtime(background_pending)] > 0 && [dict size $runtime(background_active)] < $maximum} {
         set task [lindex $runtime(background_pending) 0]
         set runtime(background_pending) [lrange $runtime(background_pending) 1 end]
@@ -414,6 +509,7 @@ proc ::BatchMesher::startMergeWorker {} {
     set runtime(background_merge_state_path) [file join $mergeDir merge.state]
     set stdoutPath [file join $mergeDir hmbatch_stdout.log]
     set stderrPath [file join $mergeDir hmbatch_stderr.log]
+    set launchLogPath [file join $mergeDir launch.log]
     set inputs {}
     # A worker HM is a full model snapshot with only the pre-existing elements
     # removed.  Merging a second such snapshot can terminate HM2019 before Tcl
@@ -429,11 +525,12 @@ proc ::BatchMesher::startMergeWorker {} {
         export_template $runtime(background_export_template) run_log [file join $mergeDir hmbatch_merge.log]]
     set mergeWorker [file join $::BatchMesher::MODULE_DIR background_merge_worker.tcl]
     set launcher [::BatchMesher::writeBackgroundLauncher $mergeConfig $mergeDir $mergeWorker]
-    set command [list [file nativename $runtime(background_executable)] -tcl [file nativename $launcher]]
-    set code [catch {set pids [exec {*}$command >$stdoutPath 2>$stderrPath &]} launchError]
-    set processId [expr {$code || [llength $pids] == 0 ? "" : [lindex $pids 0]}]
-    if {$code || ![string is integer -strict $processId] || $processId <= 0} {
-        if {!$code} { set launchError "merge hmbatch returned no valid PID: $pids" }
+    set command [::BatchMesher::buildHmbatchCommand $runtime(background_executable) $launcher]
+    set code [catch {
+        set processId [::BatchMesher::launchDetachedHmbatch \
+            $command $mergeDir $stdoutPath $stderrPath $launchLogPath]
+    } launchError]
+    if {$code} {
         set state [::BatchMesher::writeAggregateState failed "Could not start FEM merge worker: $launchError"]
         ::BatchMesher::finishBackgroundRun $state "Could not start FEM merge worker: $launchError"
         return
@@ -444,9 +541,10 @@ proc ::BatchMesher::startMergeWorker {} {
     set runtime(background_merge_dir) $mergeDir
     set runtime(background_merge_stdout) $stdoutPath
     set runtime(background_merge_stderr) $stderrPath
+    set runtime(background_merge_launch_log) $launchLogPath
     set runtime(background_started_ms) [clock milliseconds]
     ::BatchMesher::updateBackgroundPids
-    ::BatchMesher::log INFO "result merge worker started launcher_pid=$processId mode=$mergeMode inputs=[llength $inputs]"
+    ::BatchMesher::log INFO "result merge worker launch requested launcher_pid=$processId mode=$mergeMode inputs=[llength $inputs] launch_log=$launchLogPath"
 }
 
 proc ::BatchMesher::finishBackgroundRun {state {forcedError ""}} {
@@ -521,6 +619,7 @@ proc ::BatchMesher::finishBackgroundRun {state {forcedError ""}} {
 proc ::BatchMesher::pollBackgroundRun {} {
     variable runtime
     variable ui
+    variable WORKER_STARTUP_TIMEOUT_MS
     if {!$runtime(running)} { return }
     if {[::HWFlow::progressCancelled]} {
         ::BatchMesher::terminateBackgroundRun
@@ -536,10 +635,30 @@ proc ::BatchMesher::pollBackgroundRun {} {
             ::BatchMesher::finishBackgroundRun $state
             return
         }
+        set mergeElapsed [expr {[clock milliseconds] - $runtime(background_started_ms)}]
+        if {$state eq "" && $mergeElapsed >= $WORKER_STARTUP_TIMEOUT_MS} {
+            set message "FEM merge hmbatch did not initialize worker Tcl within [expr {$WORKER_STARTUP_TIMEOUT_MS / 1000}] seconds"
+            set mergeJob [dict create task_id MERGE \
+                launcher_pid $runtime(background_merge_launcher_pid) actual_pid "" \
+                state_path $runtime(background_merge_state_path) \
+                stdout $runtime(background_merge_stdout) stderr $runtime(background_merge_stderr) \
+                launch_log $runtime(background_merge_launch_log) worker_dir $runtime(background_merge_dir)]
+            set diagnostic [::BatchMesher::writeWorkerManagerFailure $mergeJob $message]
+            set aggregate [::BatchMesher::writeAggregateState failed "$message; manager diagnostic: $diagnostic"]
+            ::BatchMesher::finishBackgroundRun $aggregate "$message; manager diagnostic: $diagnostic"
+            return
+        }
         if {![::BatchMesher::backgroundProcessAlive $runtime(background_merge_pid)] && \
-            [clock milliseconds] - $runtime(background_started_ms) >= 10000} {
-            set aggregate [::BatchMesher::writeAggregateState failed "FEM merge hmbatch exited before producing a final state"]
-            ::BatchMesher::finishBackgroundRun $aggregate "FEM merge hmbatch exited before producing a final state"
+            $state ne "" && $mergeElapsed >= 10000} {
+            set message "FEM merge hmbatch exited before producing a final state"
+            set mergeJob [dict create task_id MERGE \
+                launcher_pid $runtime(background_merge_launcher_pid) actual_pid $runtime(background_merge_pid) \
+                state_path $runtime(background_merge_state_path) \
+                stdout $runtime(background_merge_stdout) stderr $runtime(background_merge_stderr) \
+                launch_log $runtime(background_merge_launch_log) worker_dir $runtime(background_merge_dir)]
+            set diagnostic [::BatchMesher::writeWorkerManagerFailure $mergeJob $message]
+            set aggregate [::BatchMesher::writeAggregateState failed "$message; manager diagnostic: $diagnostic"]
+            ::BatchMesher::finishBackgroundRun $aggregate "$message; manager diagnostic: $diagnostic"
             return
         }
         set detail [::BatchMesher::backgroundStatusDetail [dict create tasks $runtime(tasks)]]
@@ -562,8 +681,13 @@ proc ::BatchMesher::pollBackgroundRun {} {
         set finished 0
         if {$state ne ""} {
             if {[dict exists $state worker_pid]} {
+                set previousActualPid [dict get $job actual_pid]
                 dict set job actual_pid [dict get $state worker_pid]
                 dict set job pid [dict get $state worker_pid]
+                if {$previousActualPid eq "" && [dict get $state worker_pid] ne ""} {
+                    set runtime(background_startup_verified) 1
+                    ::BatchMesher::log INFO "$taskId worker initialized actual_pid=[dict get $state worker_pid]"
+                }
             }
             if {[dict exists $state hypermesh_release] && [dict get $state hypermesh_release] ne ""} {
                 dict set job worker_release [dict get $state hypermesh_release]
@@ -606,11 +730,33 @@ proc ::BatchMesher::pollBackgroundRun {} {
             ::BatchMesher::releaseWorkerAndRefill $taskId
             continue
         }
+        set startupElapsed [expr {$now - [dict get $job started_ms]}]
+        if {$state eq "" && [dict get $job actual_pid] eq ""} {
+            if {$startupElapsed < $WORKER_STARTUP_TIMEOUT_MS} {
+                # hmbatch.exe is only an Altair launcher on some installations;
+                # it may disappear while hmopengl is still loading.  The state
+                # file written by the real worker is the startup handshake.
+                dict set runtime(background_active) $taskId $job
+                continue
+            }
+            set launcherAlive [::BatchMesher::backgroundProcessAlive [dict get $job launcher_pid]]
+            set message "hmbatch did not initialize worker Tcl within [expr {$WORKER_STARTUP_TIMEOUT_MS / 1000}] seconds; launcher_alive=$launcherAlive"
+            set diagnostic [::BatchMesher::writeWorkerManagerFailure $job $message]
+            set message "$message; manager diagnostic: $diagnostic"
+            set sawFailure 1
+            ::BatchMesher::setTaskFailed $taskId $message
+            ::BatchMesher::log ERROR "$taskId $message"
+            if {!$ui(CONTINUE_AFTER_FAILURE)} { set runtime(stop_after_current) 1 }
+            ::BatchMesher::releaseWorkerAndRefill $taskId
+            continue
+        }
         set alive [::BatchMesher::backgroundProcessAlive [dict get $job launcher_pid]]
         if {[dict get $job actual_pid] ne ""} { set alive [::BatchMesher::backgroundProcessAlive [dict get $job actual_pid]] }
         if {!$alive && $now - [dict get $job started_ms] >= 10000} {
             set sawFailure 1
-            ::BatchMesher::setTaskFailed $taskId "hmbatch exited before producing a terminal state; inspect [dict get $job stderr] and [dict get $job stdout]"
+            set message "hmbatch exited before producing a terminal state"
+            set diagnostic [::BatchMesher::writeWorkerManagerFailure $job $message]
+            ::BatchMesher::setTaskFailed $taskId "$message; manager diagnostic: $diagnostic"
             if {!$ui(CONTINUE_AFTER_FAILURE)} { set runtime(stop_after_current) 1 }
             ::BatchMesher::releaseWorkerAndRefill $taskId
             continue

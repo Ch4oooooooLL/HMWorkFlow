@@ -959,6 +959,12 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#mod-bom-material-assignment" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M4,3H20A2,2 0,0 1,22,5V19A2,2 0,0 1,20,21H4A2,2 0,0 1,2,19V5A2,2 0,0 1,4,3M4,7V11H10V7H4M12,7V11H20V7H12M4,13V17H10V13H4M12,13V17H20V13H12Z"/></svg>
+                        读取 BOM 表
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#mod-geometry-cleanup" class="nav-link" onclick="activateLink(this)">
                         <svg viewBox="0 0 24 24"><path d="M19.14,12.94C19.14,12.77 19.17,12.6 19.17,12.43C19.17,12.26 19.14,12.09 19.14,11.92L21.19,10.3C21.38,10.15 21.43,9.88 21.31,9.67L19.38,6.32C19.26,6.1 18.98,6.03 18.77,6.11L16.36,7.09C15.86,6.7 15.31,6.39 14.71,6.14L14.35,3.56C14.31,3.33 14.12,3.16 13.88,3.16H10.04C9.8,3.16 9.61,3.33 9.57,3.56L9.21,6.14C8.61,6.39 8.06,6.7 7.56,7.09L5.15,6.11C4.94,6.03 4.66,6.1 4.54,6.32L2.61,9.67C2.49,9.88 2.54,10.15 2.73,10.3L4.78,11.92C4.78,12.09 4.75,12.26 4.75,12.43C4.75,12.6 4.78,12.77 4.78,12.94L2.73,14.56C2.54,14.71 2.49,14.98 2.61,15.19L4.54,18.54C4.66,18.76 4.94,18.83 5.15,18.75L7.56,17.77C8.06,18.16 8.61,18.47 9.21,18.72L9.57,21.3C9.61,21.53 9.8,21.7 10.04,21.7H13.88C14.12,21.7 14.31,21.53 14.35,21.3L14.71,18.72C15.31,18.47 15.86,18.16 16.36,17.77L18.77,18.75C18.98,18.83 19.26,18.76 19.38,18.54L21.31,15.19C21.43,14.98 21.38,14.71 21.19,14.56L19.14,12.94M12,15.6C10.25,15.6 8.83,14.18 8.83,12.43C8.83,10.68 10.25,9.26 12,9.26C13.75,9.26 15.17,10.68 15.17,12.43C15.17,14.18 13.75,15.6 12,15.6Z"/></svg>
                         几何清理
@@ -1064,7 +1070,7 @@
                     <svg viewBox="0 0 24 24"><path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"/></svg>
                     <div class="alert-content">
                         <h4>主面板与隐藏模块</h4>
-                        <p>当前主面板显示 14 个可直接运行的模块，本指南均提供入口说明。Component 分类、材料分配、自动 Washer 划分和铸件网格仍作为隐藏的准备工作流保留，不计入这 14 个模块。</p>
+                        <p>当前主面板显示可直接运行的模块，本指南均提供入口说明。BOM 模块当前使用 Q355 默认材料，真实 BOM 文件解析接口预留到后续版本。</p>
                     </div>
                 </div>
 
@@ -1072,8 +1078,14 @@
                     <div class="dashboard-card" id="card-midsurf">
                         <div class="card-header"><span class="card-title">中面抽取</span><span class="card-badge geometry">几何</span></div>
                         <div class="card-path">midsurf.tcl</div>
-                        <div class="card-desc">批量抽取钣金中面，自动解析或测量厚度，规范命名并归入 midsurf assembly。</div>
+                        <div class="card-desc">批量抽取钣金中面，自动解析或测量厚度，规范命名并归入 MIDSURFED assembly。</div>
                         <a href="#mod-midsurf" class="card-btn">查看使用说明</a>
+                    </div>
+                    <div class="dashboard-card" id="card-bom-material-assignment">
+                        <div class="card-header"><span class="card-title">读取 BOM 表</span><span class="card-badge geometry">几何</span></div>
+                        <div class="card-path">bom_material_assignment.tcl</div>
+                        <div class="card-desc">扫描 MIDSURFED Assembly 内的 component，当前统一创建/复用 Q355、赋予材料并追加组件名后缀。</div>
+                        <a href="#mod-bom-material-assignment" class="card-btn">查看使用说明</a>
                     </div>
                     <!-- Geometry Card -->
                     <div class="dashboard-card" id="card-geom">
@@ -1281,13 +1293,27 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 <h1 class="section-title">中面抽取 (Midsurface Extraction)</h1>
                 <div class="module-detail">
                     <div class="detail-header"><div class="detail-title"><span class="card-badge geometry">几何</span><span>钣金中面批量抽取</span></div><div class="detail-path-badge">modules/midsurf.tcl</div></div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">对选中的钣金几何 component 批量抽取中面，按 <code>CATEGORY_NAME_Tx_MATERIAL</code> 规则命名，并统一放入 <code>midsurf</code> assembly。源几何保留并隐藏。</p>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">对选中的钣金几何 component 批量抽取中面，按 <code>Vxx_Name_Tx[_材料]</code> 规则命名，并统一放入 <code>MIDSURFED</code> assembly。抽中面时材料可为空，源几何保留并隐藏。</p>
                     <div class="step-list">
                         <div class="step-item"><span class="step-num">1</span><div class="step-title">选择组件</div><div class="step-detail">在主面板进入“抽中面”，选择需要处理的钣金几何组件。</div></div>
                         <div class="step-item"><span class="step-num">2</span><div class="step-title">确认抽取参数</div><div class="step-detail">检查抽取方法、阶梯对齐步数、中面位置和 R/T 比。</div></div>
                         <div class="step-item"><span class="step-num">3</span><div class="step-title">执行并复核厚度</div><div class="step-detail">厚度优先读取组件名中的 <code>_Tx</code>，其次读取中面拓扑点厚度，最后按实体体积/中面面积测量。</div></div>
                     </div>
                     <div class="alert-box warning"><div class="alert-content"><h4>抽取结果需要几何复核</h4><p>自动厚度测量和复杂折弯区域的中面位置可能受源几何质量影响；请检查输出厚度、自由边、重叠面及组件命名。</p></div></div>
+                </div>
+            </section>
+
+            <section id="mod-bom-material-assignment" class="module-section" data-module="bom_material_assignment">
+                <h1 class="section-title">读取 BOM 表 / 材料赋予</h1>
+                <div class="module-detail">
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge geometry">几何</span><span>MIDSURFED 默认材料赋予</span></div><div class="detail-path-badge">modules/bom_material_assignment.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">当前版本暂不解析 BOM 文件。执行模块后扫描 <code>MIDSURFED</code> Assembly 中的全部 component，自动创建或复用 <code>Q355</code> 材料，给组件赋予该材料，并将组件名称规范为 <code>_Q355</code> 后缀。</p>
+                    <div class="step-list">
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">完成中面抽取</div><div class="step-detail">先使用中面模块生成并确认 <code>MIDSURFED</code> Assembly。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">运行读取 BOM 表</div><div class="step-detail">在主面板运行该模块，模块会处理 Assembly 中的全部 component。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">复核材料</div><div class="step-detail">检查组件名、组件材料指针和模型中的 <code>Q355</code> MAT1；后续版本将在此流程中读取 BOM 映射。</div></div>
+                    </div>
+                    <div class="alert-box info"><div class="alert-content"><h4>BOM 读取接口已预留</h4><p>真实 BOM 文件格式和部件匹配规则确定后，只需替换模块中的 <code>readBom</code> / 默认映射接口。</p></div></div>
                 </div>
             </section>
 
@@ -1601,7 +1627,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                     <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">扫描目标 component 名称，从 <code>Vxx_件号_Txx_材料</code> 或 <code>SEAM_Txx</code> 中解析厚度和材料，批量创建或复用 PSHELL Property，并把无法解析的名称集中列出供人工复核。</p>
                     <div class="step-list">
                         <div class="step-item"><span class="step-num">1</span><div class="step-title">规范组件名称</div><div class="step-detail">确认名称包含可解析的厚度与材料标识；焊缝组件可使用 <code>SEAM_Txx</code>。</div></div>
-                        <div class="step-item"><span class="step-num">2</span><div class="step-title">执行批量赋予</div><div class="step-detail">工具按名称匹配材料库，复用等价属性或创建新的 PSHELL，再赋给对应组件。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">执行批量赋予</div><div class="step-detail">工具按名称匹配 HyperMesh 中已创建的材料实体，复用等价属性或创建新的 PSHELL，再赋给对应组件。</div></div>
                         <div class="step-item"><span class="step-num">3</span><div class="step-title">处理异常清单</div><div class="step-detail">修正未识别厚度、材料或命名格式的组件后重新运行；已正确匹配的结果无需逐项重建。</div></div>
                     </div>
                     <div class="alert-box warning"><div class="alert-content"><h4>命名不是最终工程校核</h4><p>批量规则减少重复操作，但材料牌号、厚度、卡片类型和单位制仍须与当前 OptiStruct 项目规范一致。</p></div></div>
@@ -1978,28 +2004,6 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 <h1 class="section-title">配置文件与参数规则</h1>
                 <p class="section-desc">本工具箱所有的默认参数和判定规范均通过明文文本文件的形式进行维护。您可以通过编辑对应的文件来直接变更工具的规则走向。</p>
 
-                <!-- Materials Config -->
-                <div class="module-detail" style="margin-bottom: 24px;">
-                    <div class="detail-header">
-                        <div class="detail-title">材料库定义规则 (materials.txt)</div>
-                        <div class="detail-path-badge">config/materials.txt</div>
-                    </div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">使用 <code>|</code> 符号作为列的间隔符。每一行定义一个合格的求解器金属材料参数：</p>
-                    <div class="code-container">
-                        <div class="code-header">
-                            <span>config/materials.txt</span>
-                            <button class="copy-btn" onclick="copyCode(this)">
-                                <svg viewBox="0 0 24 24"><path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/></svg>
-                                复制模板
-                            </button>
-                        </div>
-                        <pre class="code-block" id="tpl-materials">key|display|density|E|nu|yield|ultimate|note
-Q235|Q235|7.85e-9|210000|0.30|235|370|steel
-Q345|Q345|7.85e-9|206000|0.30|345|470|steel
-AL6061|AL6061|2.70e-9|69000|0.33|275|310|aluminum
-QT500|QT500|7.20e-9|169000|0.28|320|500|casting</pre>
-                    </div>
-                </div>
 
                 <!-- Washer Config -->
                 <div class="module-detail" style="margin-bottom: 24px;">
