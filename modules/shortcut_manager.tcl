@@ -859,7 +859,7 @@ proc ::HWShortcut::captureShortcut {} {
     catch {destroy .hwshortcut_capture}
     set w .hwshortcut_capture
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "录入快捷键" "Capture Shortcut"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "录入快捷键" "Capture Shortcut"] "Capture Shortcut"]
     label $w.msg -text [::HWFlow::txt "请按下需要绑定的快捷键" "Press the shortcut to bind"] -font [::HWFlow::uiFont heading] -padx 18 -pady 18
     pack $w.msg -fill both -expand 1
     bind $w <KeyPress> {
@@ -911,7 +911,7 @@ proc ::HWShortcut::showInitialSetup {} {
     set SETUP_RESULT cancelled
     set w .hwshortcut_setup
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "HMWorkFlow 初始安装" "HMWorkFlow Initial Setup"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "HMWorkFlow 初始安装" "HMWorkFlow Initial Setup"] "HMWorkFlow Initial Setup"]
     wm resizable $w 0 0
 
     frame $w.main -padx 16 -pady 14
@@ -1080,7 +1080,7 @@ proc ::HWShortcut::showManager {} {
     catch {destroy .hwshortcut_manager}
     set w .hwshortcut_manager
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "快捷键管理" "Shortcuts"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "快捷键管理" "Shortcuts"] "Shortcuts"]
     wm minsize $w 680 420
     wm resizable $w 1 1
 

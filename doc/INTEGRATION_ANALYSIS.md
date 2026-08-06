@@ -35,12 +35,13 @@ hw_toolkit.tcl
 
 ### 2.2 主界面入口
 
-主界面定义在 `hw_toolkit_core.tcl` 的 `::HWToolkit::showPanel`。模块按 `Geometry`、`Mesh`、`Connector` 分组显示，每一行统一包含：
+主界面定义在 `hw_toolkit_core.tcl` 的 `::HWToolkit::showPanel`。2019 与 2022 使用相同的双栏布局：左侧是 `Geometry`、`Mesh`、`Connector` 分类按钮和工具列表，右侧是选中工具的详情卡片，包含：
 
-- 固定宽度的运行按钮；
+- 工具名称与所属分类（含当前快捷键）；
 - 描述文字；
-- 设置按钮；
-- 快捷键按钮。
+- `运行` / `设置` / `快捷键` / `撤回` 操作按钮。
+
+`::HWToolkit::showPanel2022` 是统一的布局实现，`::HWToolkit::showPanelLegacy` 在 2019 上委托给同一实现；两代的差异仅由 `::HWFlow::uiFont` 与 `::HWFlow::uiWidget` 按宿主版本处理。
 
 Local Mesh Optimizer 应加入 `::HWToolkit::MODULES` 字典的 `Mesh` 组，使用现有 `label_zh/label_en`、`desc_zh/desc_en`、`proc`、`settings_proc` 字段。模块入口建议为：
 

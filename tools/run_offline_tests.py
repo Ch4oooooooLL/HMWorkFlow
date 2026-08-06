@@ -25,6 +25,7 @@ def commands() -> List[Sequence[str]]:
         "modules/batch_mesher/tests",
         "modules/bom_material_assignment/tests",
         "modules/cbush_creator/tests",
+        "modules/batch_temp_nodes/tests",
         "modules/contact_setup/tests",
         "modules/local_mesh_optimizer/tests",
         "modules/solid_seam/tests",

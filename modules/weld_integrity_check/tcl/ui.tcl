@@ -57,7 +57,7 @@ proc ::WeldIntegrityCheck::showConfig {{settingsOnly 0}} {
     set ui(excludedText) [::WeldIntegrityCheck::txt "未排除组件" "No excluded components"]
     set w .weld_integrity_config
     ::HWFlow::createTopLevel $w
-    wm title $w [::WeldIntegrityCheck::txt "网格焊缝完整性检查" "Mesh Weld Integrity Check"]
+    wm title $w [::HWFlow::windowTitle [::WeldIntegrityCheck::txt "网格焊缝完整性检查" "Mesh Weld Integrity Check"] "Mesh Weld Integrity Check"]
     wm resizable $w 0 0
     frame $w.main -padx 12 -pady 10; pack $w.main -fill both -expand 1
     label $w.main.title -text [::WeldIntegrityCheck::txt "网格焊缝完整性检查" "Mesh Weld Integrity Check"] -font [::HWFlow::uiFont heading] -anchor w

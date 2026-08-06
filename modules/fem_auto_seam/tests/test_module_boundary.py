@@ -23,6 +23,7 @@ class FemAutoSeamModuleBoundaryTests(unittest.TestCase):
         self.assertIn('"module": "fem_auto_seam"', workflow.replace('\\"', '"'))
         self.assertIn("createOriginalModelBackup", workflow)
         self.assertIn("validateBackendTransfer", workflow)
+        self.assertIn("Full diagnostic task retained", workflow)
         self.assertIn("before.hm", workflow)
         self.assertIn("result.fem", workflow)
         self.assertIn("cleanupTaskWorkspace", workflow)
@@ -30,7 +31,6 @@ class FemAutoSeamModuleBoundaryTests(unittest.TestCase):
         self.assertIn("Cleanup cannot invalidate", workflow)
         self.assertIn("effectiveSpecificationPath", module)
         self.assertTrue((ROOT / "modules" / "fem_auto_seam" / "defaults" / "fem_auto_seam_default.criteria").is_file())
-        self.assertTrue((ROOT / "modules" / "fem_auto_seam" / "defaults" / "fem_auto_seam_default.param").is_file())
 
     def test_mesh_seam_weld_has_no_fem_auto_seam_configuration(self):
         original = (ROOT / "modules" / "mesh_seam_weld.tcl").read_text(encoding="utf-8")
@@ -48,22 +48,54 @@ class FemAutoSeamModuleBoundaryTests(unittest.TestCase):
         self.assertIn("after idle", ui)
         self.assertIn("*viewfit", ui)
 
-    def test_workflow_reports_background_and_per_candidate_progress(self):
+    def test_workflow_reports_background_and_batch_remesh_progress(self):
         workflow = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "workflow.tcl").read_text(encoding="utf-8")
         executor = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "fast_executor.tcl").read_text(encoding="utf-8")
         for token in ("progressOpen", "progressUpdate", "progressClose", "Python 正在后台检测焊缝"):
             self.assertIn(token, workflow)
-        self.assertIn("Applying candidate $index/$readyTotal", executor)
-        self.assertIn("ROLLED_BACK", executor)
+        self.assertIn("Importing all weld topology changes", executor)
+        self.assertIn("bounded chunks", executor)
+        self.assertIn("autoRemeshChunks", executor)
+        self.assertIn("progressPumpEvents", executor)
+        self.assertIn("*interactiveremeshelems", executor)
+        self.assertIn("*elementsaddnodesfixed", executor)
+        self.assertIn("*storemeshtodatabase 1", executor)
+        self.assertNotIn("checkpoints", executor)
+        self.assertEqual(1, executor.count("*interactiveremeshelems"))
 
-    def test_optimization_is_mandatory_and_python_owned(self):
+    def test_long_python_and_native_stages_remain_cancelable_without_double_restore(self):
+        workflow = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "workflow.tcl").read_text(encoding="utf-8")
+        runner = (ROOT / "modules" / "hybrid_core" / "tcl" / "process_runner.tcl").read_text(encoding="utf-8")
+        backend = (ROOT / "modules" / "fem_auto_seam" / "python" / "backend.py").read_text(encoding="utf-8")
+        self.assertIn('"FEM Automatic Seam"] $message 1', workflow)
+        self.assertIn("executeAutoPlans owns the task transaction", workflow)
+        self.assertIn("progressCancelled", runner)
+        self.assertIn("stopPersistentWorker 1", runner)
+        self.assertIn("python_stage.json", runner)
+        self.assertIn("Python background detection processes", runner)
+        self.assertIn('with_name("pythonw.exe")', backend)
+        self.assertIn("multiprocessing.set_executable", backend)
+
+    def test_partial_candidate_import_gets_a_focused_retry_and_diagnostics(self):
+        importer = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "delta_import.tcl").read_text(encoding="utf-8")
+        backend = (ROOT / "modules" / "fem_auto_seam" / "python" / "backend.py").read_text(encoding="utf-8")
+        self.assertIn("writeAutoPlanRepairDelta", importer)
+        self.assertIn("HMWF_AUTO_SHELL_SEAM_REPAIR_V1", importer)
+        self.assertIn("candidate delta import remained incomplete after focused retry", importer)
+        self.assertIn("candidate delta references GRID IDs that are absent before import", importer)
+        self.assertIn("invalid_replacements", backend)
+        self.assertIn("duplicates another planned shell", backend)
+        self.assertIn("duplicates an existing shell", backend)
+        self.assertIn("weld cell duplicates a retained shell", backend)
+
+    def test_python_only_plans_topology_and_hypermesh_owns_remesh(self):
         module = (ROOT / "modules" / "fem_auto_seam.tcl").read_text(encoding="utf-8")
         workflow = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "workflow.tcl").read_text(encoding="utf-8")
-        schema = (ROOT / "modules" / "fem_auto_seam" / "python" / "schema.py").read_text(encoding="utf-8")
-        self.assertIn("optimize_neighborhood 1", module)
-        self.assertIn('"optimize_neighborhood": true', workflow.replace('\\"', '"'))
-        self.assertIn('settings["optimize_neighborhood"] = True', schema)
-        self.assertNotIn("$w.main.optimize", module)
+        backend = (ROOT / "modules" / "fem_auto_seam" / "python" / "backend.py").read_text(encoding="utf-8")
+        self.assertIn("remesh_element_size 8.0", module)
+        self.assertIn("remesh_element_size remesh_expand_layers remesh_feature_angle", workflow)
+        self.assertNotIn("optimize_seam_neighborhood", backend)
+        self.assertIn('"execution_mode": "HYPERMESH_BATCH_AUTOMESH"', backend)
 
 
 if __name__ == "__main__":

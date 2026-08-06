@@ -763,7 +763,7 @@ proc ::AdhesiveConnector::showPanel {{settingsOnly 0}} {
     catch {destroy .adhesive_connector}
     set w .adhesive_connector
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "打胶连接" "Adhesive Connector"] v$VERSION"
+    wm title $w [::HWFlow::windowTitle "[::HWFlow::txt "打胶连接" "Adhesive Connector"] v$VERSION" "Adhesive Connector v$VERSION"]
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10

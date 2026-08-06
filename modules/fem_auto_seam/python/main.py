@@ -19,14 +19,14 @@ for directory in reversed((REPO_PYTHON_DIR, MODULE_DIR, COMMON_DIR, MESH_SEAM_SH
     sys.path.insert(0, text)
 
 try:
-    from .backend import detect_candidates, plan_candidate_deltas, write_fem_bundle
+    from .backend import detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
     from .delta_writer import write_manifest, write_plan_delta_files, write_shell_weld_delta
     from .schema import validate_request
 except ImportError:
     # persistent_worker loads this entry under a private module name.  Import
     # through the public package namespace so module-local schema.py files from
     # previously executed tools cannot shadow hybrid_core dependencies.
-    from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, write_fem_bundle
+    from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
     from hmworkflow.fem_auto_seam.delta_writer import write_manifest, write_plan_delta_files, write_shell_weld_delta
     from hmworkflow.fem_auto_seam.schema import validate_request
 
@@ -81,18 +81,23 @@ def _mark_duplicates(candidates, model, existing, maximum):
     return candidates
 
 
-def calculate(request, model, existing):
+def calculate(request, model, existing, performance=None):
+    performance = performance if performance is not None else {}
     settings = request["settings"]
+    stage_started = time.perf_counter()
     candidates = detect_candidates(model, _backend_settings(settings, request))
+    performance["detection_seconds"] = round(time.perf_counter() - stage_started, 6)
+    stage_started = time.perf_counter()
     candidates = _mark_duplicates(candidates, model, existing.get("seams", []), settings["existing_weld_search_distance"])
+    performance["duplicate_check_seconds"] = round(time.perf_counter() - stage_started, 6)
     if settings["mode"] == "detect":
+        performance["planning_seconds"] = 0.0
         return {"candidates": candidates}
     accepted = set(str(value) for value in request.get("accepted_candidate_ids", []))
     selected = [row for row in candidates if row["candidate_id"] in accepted]
-    planned = plan_candidate_deltas(
-        model, selected, _backend_settings(settings, request),
-        settings.get("criteria_path") or None, settings.get("param_path") or None,
-    )
+    stage_started = time.perf_counter()
+    planned = plan_candidate_deltas(model, selected, _backend_settings(settings, request))
+    performance["planning_seconds"] = round(time.perf_counter() - stage_started, 6)
     planned["detected_candidates"] = candidates
     return planned
 
@@ -142,11 +147,25 @@ def main(argv=None):
     logger = create_logger("fem_auto_seam", args.log)
     try:
         started = time.perf_counter()
+        performance = {}
+        stage_started = time.perf_counter()
         request = validate_request(load_json(args.request))
+        performance["request_read_seconds"] = round(time.perf_counter() - stage_started, 6)
+        stage_started = time.perf_counter()
         model = read_shell_fem_bundle(args.mesh)
+        performance["mesh_read_seconds"] = round(time.perf_counter() - stage_started, 6)
+        worker_count = resolved_worker_count_for_model(model, request["settings"]) if request["settings"]["mode"] == "detect" else 1
+        performance["python_worker_count"] = worker_count
+        (args.output.parent / "python_stage.json").write_text(json.dumps({
+            "stage": request["settings"]["mode"],
+            "worker_count": worker_count,
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+        stage_started = time.perf_counter()
         existing = load_json(args.existing)
-        calculated = calculate(request, model, existing)
+        performance["existing_read_seconds"] = round(time.perf_counter() - stage_started, 6)
+        calculated = calculate(request, model, existing, performance)
         result = new_result("fem_auto_seam", request["run_id"])
+        artifact_started = time.perf_counter()
         if request["settings"]["mode"] == "detect":
             result["candidates"] = calculated["candidates"]
             result["summary"] = {"mode": "detect", "candidate_count": len(result["candidates"])}
@@ -161,7 +180,7 @@ def main(argv=None):
                 "ready_count": len(ready),
                 "created_weld_element_count": sum(len(row["weld_elements"]) for row in ready),
                 "replaced_mother_element_count": sum(len(row["replacement_elements"]) for row in ready),
-                "moved_node_count": sum(len(row["move_nodes"]) for row in ready),
+                "remesh_seed_element_count": len(calculated["remesh"]["seed_element_ids"]),
             }
             manifest = write_shell_weld_delta(args.output.parent / "delta.fem", plans, request)
             delta_files = write_plan_delta_files(args.output.parent / "deltas", plans)
@@ -169,7 +188,7 @@ def main(argv=None):
                 row["delta_fem"] = delta_files[row["candidate_id"]]
             write_manifest(args.output.parent / "delta_manifest.json", manifest)
             (args.output.parent / "creation_plan.json").write_text(json.dumps({key: value for key, value in calculated.items() if key != "result_model"}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            (args.output.parent / "optimization_report.json").write_text(json.dumps(calculated["optimization"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            (args.output.parent / "remesh_plan.json").write_text(json.dumps(calculated["remesh"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             backend_manifest = write_fem_bundle(
                 calculated["result_model"],
                 args.output.parent / "backend_result.fem",
@@ -181,7 +200,7 @@ def main(argv=None):
                 "combined_delta_fem": args.output.parent / "delta.fem",
                 "delta_manifest": args.output.parent / "delta_manifest.json",
                 "creation_plan": args.output.parent / "creation_plan.json",
-                "optimization_report": args.output.parent / "optimization_report.json",
+                "remesh_plan": args.output.parent / "remesh_plan.json",
             }
             artifacts = {name: _artifact(path, args.output.parent) for name, path in artifact_paths.items()}
             transfer_path = args.output.parent / "transfer_manifest.json"
@@ -194,6 +213,8 @@ def main(argv=None):
                 "candidate_count": len(plans),
                 "ready_count": len(ready),
             }
+        performance["artifact_write_seconds"] = round(time.perf_counter() - artifact_started, 6)
+        result["performance"].update(performance)
         result["performance"]["total_seconds"] = round(time.perf_counter() - started, 6)
         write_result(args.output, args.tcl_output, "::FemAutoSeam::pythonResult", result)
         return 0

@@ -31,11 +31,23 @@ proc ::HybridCore::workerShutdownJson {} {
     return {{"command":"shutdown"}}
 }
 
-proc ::HybridCore::stopPersistentWorker {} {
+proc ::HybridCore::stopPersistentWorker {{force 0}} {
     variable workerChannel; variable workerPid; variable workerPython
     if {$workerChannel ne ""} {
-        catch {fconfigure $workerChannel -blocking 1}
-        catch {puts $workerChannel [::HybridCore::workerShutdownJson]; flush $workerChannel}
+        if {$force} {
+            # Closing a Tcl pipeline waits for its child. A busy Python worker
+            # (and its multiprocessing children) therefore froze HyperMesh at
+            # the 30-minute timeout. Kill the tree before closing the channel.
+            foreach processId $workerPid {
+                if {[llength [info commands ::HybridCore::terminateProcessTree]]} {
+                    catch {::HybridCore::terminateProcessTree $processId}
+                }
+            }
+            catch {fconfigure $workerChannel -blocking 0}
+        } else {
+            catch {fconfigure $workerChannel -blocking 1}
+            catch {puts $workerChannel [::HybridCore::workerShutdownJson]; flush $workerChannel}
+        }
         catch {close $workerChannel}
     }
     set workerChannel ""; set workerPid ""; set workerPython ""
@@ -127,11 +139,35 @@ proc ::HybridCore::workerReadable {channel requestId} {
     }
 }
 
-proc ::HybridCore::workerProgressTick {started} {
-    variable workerWaitDone; variable workerProgressAfter
+proc ::HybridCore::workerStageDetail {taskDir} {
+    set path [file join $taskDir output python_stage.json]
+    if {![file isfile $path]} { return "" }
+    set text ""; catch {set text [::HybridCore::readTextFile $path]}
+    set workerCount ""; set stage ""
+    regexp {"worker_count"\s*:\s*([0-9]+)} $text -> workerCount
+    regexp {"stage"\s*:\s*"([^"]+)"} $text -> stage
+    if {$workerCount eq ""} { return "" }
+    if {$stage eq "plan"} {
+        if {[llength [info commands ::HWFlow::txt]]} { return [::HWFlow::txt "Python 规划进程：$workerCount" "Python planning processes: $workerCount"] }
+        return "Python planning processes: $workerCount"
+    }
+    if {[llength [info commands ::HWFlow::txt]]} { return [::HWFlow::txt "Python 后台检测进程：$workerCount" "Python background detection processes: $workerCount"] }
+    return "Python background detection processes: $workerCount"
+}
+
+proc ::HybridCore::workerProgressTick {started taskDir} {
+    variable workerWaitDone; variable workerWaitError; variable workerProgressAfter
     if {$workerWaitDone} { return }
-    ::HybridCore::pulseProgress [expr {([clock milliseconds]-$started)/1000.0}]
-    set workerProgressAfter [after 150 [list ::HybridCore::workerProgressTick $started]]
+    ::HybridCore::pulseProgress [expr {([clock milliseconds]-$started)/1000.0}] [::HybridCore::workerStageDetail $taskDir]
+    if {[llength [info commands ::HWFlow::progressPumpEvents]]} {
+        catch {::HWFlow::progressPumpEvents 1}
+    }
+    if {[llength [info commands ::HWFlow::progressCancelled]] && [::HWFlow::progressCancelled]} {
+        set workerWaitError "Persistent Python worker was cancelled"
+        set workerWaitDone 1
+        return
+    }
+    set workerProgressAfter [after 150 [list ::HybridCore::workerProgressTick $started $taskDir]]
 }
 
 proc ::HybridCore::workerTimeout {} {
@@ -153,13 +189,13 @@ proc ::HybridCore::runPersistentProcess {entry arguments taskDir} {
     ::HybridCore::log INFO "process start mode=persistent request_id=$requestId worker_pid=[pid $channel] entry=$entry"
     set started [clock milliseconds]
     if {[catch {puts $channel $request; flush $channel} sendErr]} {
-        ::HybridCore::stopPersistentWorker
+        ::HybridCore::stopPersistentWorker 1
         error "Persistent Python worker send failed: $sendErr"
     }
     set workerWaitDone 0; set workerWaitResponse ""; set workerWaitError ""
     fileevent $channel readable [list ::HybridCore::workerReadable $channel $requestId]
     set timeoutAfter [after $workerRequestTimeoutMs ::HybridCore::workerTimeout]
-    set workerProgressAfter [after 150 [list ::HybridCore::workerProgressTick $started]]
+    set workerProgressAfter [after 150 [list ::HybridCore::workerProgressTick $started $taskDir]]
     vwait ::HybridCore::workerWaitDone
     fileevent $channel readable {}
     after cancel $timeoutAfter
@@ -167,7 +203,7 @@ proc ::HybridCore::runPersistentProcess {entry arguments taskDir} {
     if {$workerWaitError ne ""} {
         set waitError $workerWaitError
         set diagnostic [::HybridCore::workerDiagnostic]
-        ::HybridCore::stopPersistentWorker
+        ::HybridCore::stopPersistentWorker 1
         error "$waitError. $diagnostic task_log=$stderrPath"
     }
     set response $workerWaitResponse

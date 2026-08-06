@@ -343,7 +343,7 @@ proc ::MeshSeamWeld::showPanel {} {
     catch {destroy .mesh_seam_weld}
     set w .mesh_seam_weld
     ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] v$VERSION"
+    wm title $w [::HWFlow::windowTitle "[::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] v$VERSION" "Mesh Seam Weld v$VERSION"]
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10
@@ -422,7 +422,7 @@ proc ::MeshSeamWeld::showMorePanel {} {
     set w .mesh_seam_weld_more
     catch {destroy $w}
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "网格焊缝 - 更多" "Mesh Seam Weld - More"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "网格焊缝 - 更多" "Mesh Seam Weld - More"] "Mesh Seam Weld - More"]
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10

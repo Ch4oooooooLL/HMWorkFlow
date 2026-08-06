@@ -20,10 +20,10 @@ DEFAULTS = {
     "auto_accept_confidence": 0.88,
     "review_confidence": 0.60,
     "criteria_path": "",
-    "param_path": "",
-    "optimize_neighborhood": True,
-    "optimization_layers": 2,
-    "optimization_iterations": 4,
+    "remesh_element_size": 8.0,
+    "remesh_expand_layers": 2,
+    "remesh_feature_angle": 30.0,
+    "python_workers": 0,
 }
 
 
@@ -43,14 +43,14 @@ def validate_request(data):
         settings[key] = float(settings[key])
         if settings[key] < 0.0:
             raise SchemaError("{} must not be negative".format(key))
-    for key in ("max_new_failed_elements", "optimization_layers", "optimization_iterations"):
+    for key in ("max_new_failed_elements", "remesh_expand_layers", "python_workers"):
         settings[key] = int(settings[key])
         if settings[key] < 0:
             raise SchemaError("{} must not be negative".format(key))
     settings["criteria_path"] = str(settings.get("criteria_path", "")).strip()
-    settings["param_path"] = str(settings.get("param_path", "")).strip()
-    # Optimization is a required realization stage.  Accept the legacy key in
-    # requests, but never allow stale saved settings to bypass it.
-    settings["optimize_neighborhood"] = True
+    for key in ("remesh_element_size", "remesh_feature_angle"):
+        settings[key] = float(settings[key])
+        if settings[key] <= 0.0:
+            raise SchemaError("{} must be positive".format(key))
     data["settings"] = settings
     return data

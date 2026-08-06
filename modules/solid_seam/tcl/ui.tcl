@@ -19,7 +19,7 @@ proc ::SolidSeam::showPanel {} {
     set w .solid_seam
     if {[winfo exists $w]} { raise $w; return }
     ::HWFlow::createTopLevel $w
-    wm title $w [::SolidSeam::txt "实体焊缝自动识别与创建" "Solid Seam Recognition and Creation"]
+    wm title $w [::HWFlow::windowTitle [::SolidSeam::txt "实体焊缝自动识别与创建" "Solid Seam Recognition and Creation"] "Solid Seam Recognition and Creation"]
     wm minsize $w 720 430
     frame $w.main -padx 12 -pady 10; pack $w.main -fill both -expand 1
     label $w.main.title -text [::SolidSeam::txt "实体焊缝 / Solid Seam" "Solid Seam"] -font [::HWFlow::uiFont heading] -anchor w

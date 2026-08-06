@@ -20,7 +20,6 @@ from hmworkflow.fem_auto_seam.backend import (
     write_fem_bundle,
     write_json,
 )
-from hmworkflow.fem_auto_seam.seam_neighborhood_optimizer import optimize_seam_neighborhood
 
 
 def _validate_case(name, original, result, candidates, realization, expected):
@@ -108,10 +107,8 @@ def _validate_case(name, original, result, candidates, realization, expected):
     return counts, errors
 
 
-def run(output_dir, criteria_path=None, param_path=None, optimize=True):
+def run(output_dir):
     output_dir = Path(output_dir)
-    criteria_path = Path(criteria_path or Path(__file__).with_name("reference.criteria"))
-    param_path = Path(param_path or Path(__file__).with_name("reference.param"))
     generated = generate(output_dir)
     settings = dict(DEFAULT_SETTINGS)
     summary = []
@@ -129,12 +126,6 @@ def run(output_dir, criteria_path=None, param_path=None, optimize=True):
         result, realization = realize_candidates(original, candidates, settings)
         realization_seconds = time.perf_counter() - started
         write_json(case_dir / "realization.json", {"schema_version": "1.0", "results": realization})
-        optimization = {"status": "DISABLED", "moves": []}
-        if optimize:
-            optimization = optimize_seam_neighborhood(
-                result, realization, criteria_path, param_path, layers=2, iterations=4
-            )
-        write_json(case_dir / "optimization.json", optimization)
         result_manifest = write_fem_bundle(result, case_dir / "result.fem", case_dir / "result_manifest.json")
         round_trip = read_shell_fem_bundle(result_manifest)
         counts, errors = _validate_case(name, original, round_trip, candidates, realization, expected)
@@ -148,7 +139,6 @@ def run(output_dir, criteria_path=None, param_path=None, optimize=True):
                 "input": str(case_dir / "input.fem"),
                 "candidates": str(case_dir / "candidates.json"),
                 "realization": str(case_dir / "realization.json"),
-                "optimization": str(case_dir / "optimization.json"),
                 "result": str(case_dir / "result.fem"),
             },
         }
@@ -156,7 +146,7 @@ def run(output_dir, criteria_path=None, param_path=None, optimize=True):
         summary.append(case_report)
     report = {
         "schema_version": "1.0",
-        "backend": "offline_auto_shell_seam_with_local_optimization" if optimize else "offline_auto_shell_seam",
+        "backend": "offline_auto_shell_seam_topology_only",
         "status": "PASS" if all(row["status"] == "PASS" for row in summary) else "FAIL",
         "case_count": len(summary),
         "passed_count": sum(row["status"] == "PASS" for row in summary),
@@ -170,11 +160,8 @@ def run(output_dir, criteria_path=None, param_path=None, optimize=True):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=ROOT / "runtime" / "tasks" / "fem_auto_seam" / "offline_backend")
-    parser.add_argument("--criteria", type=Path, default=Path(__file__).with_name("reference.criteria"))
-    parser.add_argument("--param", type=Path, default=Path(__file__).with_name("reference.param"))
-    parser.add_argument("--no-optimize", action="store_true")
     args = parser.parse_args()
-    report = run(args.output, args.criteria, args.param, not args.no_optimize)
+    report = run(args.output)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
     return 0 if report["status"] == "PASS" else 2
 

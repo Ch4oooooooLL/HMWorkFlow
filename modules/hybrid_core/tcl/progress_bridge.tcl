@@ -14,12 +14,16 @@ proc ::HybridCore::progressUpdate {percent message detail {force 0}} {
     if {$force} { catch {update idletasks} }
 }
 
-proc ::HybridCore::pulseProgress {elapsedSeconds} {
+proc ::HybridCore::pulseProgress {elapsedSeconds {runtimeDetail ""}} {
     variable progressRangeStart; variable progressRangeEnd; variable progressMessage; variable progressDetail
     set fraction [expr {min(0.90, 1.0-exp(-double($elapsedSeconds)/3.0))}]
     set percent [expr {$progressRangeStart+($progressRangeEnd-$progressRangeStart)*$fraction}]
-    set detail $progressDetail
-    if {$detail eq ""} { set detail [format "Python analysis running (%.1f s)" $elapsedSeconds] }
+    set detail [expr {$runtimeDetail ne "" ? $runtimeDetail : $progressDetail}]
+    if {$detail eq ""} {
+        set detail [format "Python analysis running (%.1f s)" $elapsedSeconds]
+    } else {
+        append detail [format " | elapsed %.1f s" $elapsedSeconds]
+    }
     ::HybridCore::progressUpdate $percent $progressMessage $detail 0
 }
 

@@ -48,21 +48,13 @@ set code [catch {
     set expectedCreated 0
     foreach plan $plans {
         if {[dict get $plan status] ne "READY"} { continue }
-        foreach element [concat [dict get $plan replacement_elements] [dict get $plan weld_elements]] {
+        incr expectedCreated [llength [concat [dict get $plan replacement_elements] [dict get $plan weld_elements]]]
+        # Mother shells are intentionally replaced again by native automesh;
+        # only the weld IDs/connectivity remain stable after the batch.
+        foreach element [dict get $plan weld_elements] {
             set elementId [dict get $element element_id]
             if {[llength [::HybridCore::existingEntityIds {elems elements} [list $elementId]]] != 1} {
                 error "created element is missing: $elementId"
-            }
-            incr expectedCreated
-        }
-        foreach elementId [dict get $plan delete_element_ids] {
-            if {[llength [::HybridCore::existingEntityIds {elems elements} [list $elementId]]]} {
-                error "deleted mother element remains: $elementId"
-            }
-        }
-        foreach move [dict get $plan move_nodes] {
-            if {![::HybridCore::coordinatesMatch [::HybridCore::nodeCoordinates [dict get $move node_id]] [dict get $move to] 1.0e-7]} {
-                error "optimized node did not reach its planned location"
             }
         }
     }
@@ -79,7 +71,7 @@ set code [catch {
     lappend lines "status=PASS"
     lappend lines "succeeded=[dict get $execution succeeded]"
     lappend lines "created=[dict get $execution created]"
-    lappend lines "moved_nodes=[dict get $execution moved_nodes]"
+    lappend lines "remeshed_elements=[dict get $execution remeshed_elements]"
     lappend lines "rolled_back=[dict get $execution rolled_back]"
     lappend lines "backup_hm=$backup"
     lappend lines "result_fem=$resultFem"

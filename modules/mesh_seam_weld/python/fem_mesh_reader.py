@@ -100,6 +100,8 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
     pending_elements = []
     properties = {}
     materials = {}
+    skipped_element_cards = {}
+    skipped_degenerate_elements = []
     unsupported_cards = {"CTRIA6", "CQUAD8", "CTETRA", "CPENTA", "CHEXA", "CPYRAM", "CWELD", "CSEAM", "CROD", "CONROD", "CBAR", "CBEAM", "RBE2", "RBE3", "CELAS1", "CELAS2", "CBUSH", "PLOTEL"}
     for line_number, fields in _raw_cards(Path(path)):
         card = fields[0].upper().rstrip("*")
@@ -120,7 +122,11 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
                 _compact_number(fields[5], "GRID Z", line_number),
             )
         elif card in unsupported_cards:
-            raise FemMeshError("unsupported element card {} at line {}".format(card, line_number))
+            # FEM Automatic Seam only consumes first-order shell topology.
+            # Other element families can legitimately coexist in a full
+            # vehicle export and must not abort the complete detection run.
+            skipped_element_cards[card] = skipped_element_cards.get(card, 0) + 1
+            continue
         elif card in ("CTRIA3", "CQUAD4"):
             expected = 3 if card == "CTRIA3" else 4
             if len(fields) < 3 + expected:
@@ -132,7 +138,8 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
                 for value in fields[3 : 3 + expected]
             )
             if len(set(node_ids)) != len(node_ids):
-                raise FemMeshError("{} {} contains repeated nodes".format(card, element_id))
+                skipped_degenerate_elements.append(element_id)
+                continue
             pending_elements.append((line_number, element_id, property_id, card, node_ids))
         elif card == "PSHELL":
             if len(fields) >= 4:
@@ -159,16 +166,17 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
         area = _triangle_area(points[0], points[1], points[2])
         if card == "CQUAD4": area += _triangle_area(points[0], points[2], points[3])
         if area <= 1.0e-12:
-            raise FemMeshError("{} {} is degenerate".format(card, element_id))
+            skipped_degenerate_elements.append(element_id)
+            continue
         elements[element_id] = Element(element_id, component_id, card, node_ids)
         element_properties[element_id] = property_id
-    if not elements:
-        raise FemMeshError("FEM selection contains no CTRIA3/CQUAD4 cards: {}".format(path))
     component = Component(component_id, str(component_name), "SHELL")
     model = MeshModel({component_id: component}, nodes, elements)
     model.element_properties = element_properties
     model.pshell = properties
     model.materials = materials
+    model.skipped_element_cards = skipped_element_cards
+    model.skipped_degenerate_elements = sorted(skipped_degenerate_elements)
     return model
 
 
@@ -220,5 +228,7 @@ def read_shell_fem_bundle(manifest_path):
     model.element_properties = dict(getattr(raw_model, "element_properties", {}))
     model.pshell = dict(getattr(raw_model, "pshell", {}))
     model.materials = dict(getattr(raw_model, "materials", {}))
+    model.skipped_element_cards = dict(getattr(raw_model, "skipped_element_cards", {}))
+    model.skipped_degenerate_elements = list(getattr(raw_model, "skipped_degenerate_elements", []))
     model.component_metadata = {int(entry["component_id"]): dict(entry) for entry in entries}
     return model

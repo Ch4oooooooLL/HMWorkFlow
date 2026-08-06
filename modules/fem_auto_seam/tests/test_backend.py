@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import os
@@ -14,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "python"))
 
 from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, realize_candidates
-from hmworkflow.fem_auto_seam.seam_neighborhood_optimizer import parse_criteria_metadata, parse_param_metadata
 from hmworkflow.fem_auto_seam.delta_writer import write_shell_weld_delta
 from hmworkflow.fem_auto_seam.main import _mark_duplicates
+from hmworkflow.mesh_seam_weld.fem_mesh_reader import read_shell_fem
 from hmworkflow.mesh_seam_weld.weld_strip_planner import plan_zipper
 
 
@@ -36,14 +37,84 @@ PIPELINE = _load("auto_seam_stage2_pipeline", EXAMPLE_DIR / "prepare_stage2_pipe
 
 
 class OfflineBackendTests(unittest.TestCase):
-    def test_blank_specifications_use_built_in_optimizer_defaults(self):
-        criteria = parse_criteria_metadata(None)
-        param = parse_param_metadata("")
-        self.assertIn("built-in defaults", criteria["authority"])
-        self.assertIn("minimum_jacobian", criteria["quality_limits"])
-        self.assertIn("built-in defaults", param["authority"])
-        self.assertEqual("auto", param["values"]["element_size"])
+    def test_failed_local_plan_rolls_back_without_poisoning_next_candidate(self):
+        model, _ = FIXTURES.partial_overlap_t()
+        candidate = next(row for row in detect_candidates(model) if row.get("auto_eligible"))
+        failed = copy.deepcopy(candidate)
+        failed["candidate_id"] = "FAILED_FIRST"
+        failed["target_projection_points"] = [
+            [point[0], point[1], point[2] + 1000.0]
+            for point in failed["target_projection_points"]
+        ]
+        settings = {"id_state": {"max_node_id": 5000, "max_element_id": 8000, "max_component_id": 100}}
+        recovered, reports = realize_candidates(model, [failed, candidate], settings)
+        expected, expected_reports = realize_candidates(model, [candidate], settings)
+        self.assertEqual("FAILED", reports[0]["status"])
+        self.assertEqual("CREATED", reports[1]["status"])
+        self.assertEqual("CREATED", expected_reports[0]["status"])
+        self.assertEqual(expected.nodes, recovered.nodes)
+        self.assertEqual(expected.elements, recovered.elements)
 
+    def test_parallel_detection_matches_serial_candidate_order(self):
+        fixture = EXAMPLE_DIR / "test_fem" / "combined_all_cases_manifest.json"
+        model = __import__(
+            "hmworkflow.mesh_seam_weld.fem_mesh_reader", fromlist=["read_shell_fem_bundle"]
+        ).read_shell_fem_bundle(fixture)
+        serial = detect_candidates(model, {"python_workers": 1})
+        parallel = detect_candidates(model, {"python_workers": 2, "parallel_min_elements": 0})
+        self.assertEqual(serial, parallel)
+
+    def test_fem_reader_skips_unsupported_elements_without_aborting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fem = Path(directory) / "mixed.fem"
+            fem.write_text(
+                "GRID,1,0,0.0,0.0,0.0\n"
+                "GRID,2,0,1.0,0.0,0.0\n"
+                "GRID,3,0,0.0,1.0,0.0\n"
+                "GRID,4,0,0.0,0.0,1.0\n"
+                "CTETRA,100,20,1,2,3,4\n"
+                "RBE2,101,1,123456,2,3,4\n"
+                "CTRIA3,102,10,1,2,3\n",
+                encoding="utf-8",
+            )
+            model = read_shell_fem(fem, 1)
+            self.assertEqual([102], sorted(model.elements))
+            self.assertEqual({"CTETRA": 1, "RBE2": 1}, model.skipped_element_cards)
+
+    def test_fem_reader_allows_an_export_with_only_unsupported_elements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fem = Path(directory) / "solid_only.fem"
+            fem.write_text(
+                "GRID,1,0,0.0,0.0,0.0\n"
+                "GRID,2,0,1.0,0.0,0.0\n"
+                "GRID,3,0,0.0,1.0,0.0\n"
+                "GRID,4,0,0.0,0.0,1.0\n"
+                "CTETRA,100,20,1,2,3,4\n",
+                encoding="utf-8",
+            )
+            model = read_shell_fem(fem, 1)
+            self.assertEqual({}, model.elements)
+            self.assertEqual({"CTETRA": 1}, model.skipped_element_cards)
+            self.assertEqual([], detect_candidates(model))
+
+    def test_fem_reader_skips_degenerate_shells_without_aborting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fem = Path(directory) / "degenerate_shells.fem"
+            fem.write_text(
+                "GRID,1,0,0.0,0.0,0.0\n"
+                "GRID,2,0,1.0,0.0,0.0\n"
+                "GRID,3,0,2.0,0.0,0.0\n"
+                "GRID,4,0,0.0,1.0,0.0\n"
+                "CTRIA3,100,10,1,2,3\n"
+                "CTRIA3,101,10,1,1,4\n"
+                "CTRIA3,102,10,1,2,4\n",
+                encoding="utf-8",
+            )
+            model = read_shell_fem(fem, 1)
+            self.assertEqual([102], sorted(model.elements))
+            self.assertEqual([100, 101], model.skipped_degenerate_elements)
+
+    def test_backend_plans_native_batch_remesh_without_node_moves(self):
         model, _ = FIXTURES.angled_t()
         candidates = [row for row in detect_candidates(model) if row["auto_eligible"]]
         planned = plan_candidate_deltas(
@@ -51,21 +122,21 @@ class OfflineBackendTests(unittest.TestCase):
             candidates,
             {
                 "id_state": {"max_node_id": 5000, "max_element_id": 8000, "max_component_id": 100},
-                "optimize_neighborhood": True,
-                "optimization_layers": 2,
-                "optimization_iterations": 4,
+                "remesh_element_size": 8.0,
+                "remesh_expand_layers": 2,
+                "remesh_feature_angle": 30.0,
             },
-            None,
-            None,
         )
-        self.assertIn(planned["optimization"]["status"], ("OPTIMIZED", "NO_SAFE_MOVE"))
-        self.assertIn("built-in defaults", planned["optimization"]["criteria"]["authority"])
-        self.assertIn("built-in defaults", planned["optimization"]["param"]["authority"])
+        self.assertEqual("HYPERMESH_BATCH_AUTOMESH", planned["remesh"]["execution_mode"])
+        self.assertEqual(8.0, planned["remesh"]["element_size"])
+        self.assertTrue(planned["remesh"]["seed_element_ids"])
+        self.assertTrue(planned["remesh"]["protected_node_ids"])
+        self.assertTrue(all(not row["move_nodes"] for row in planned["plans"] if row["status"] == "READY"))
 
     def test_persistent_worker_loads_standalone_entry_without_schema_collision(self):
         with tempfile.TemporaryDirectory() as directory:
             task_dir = Path(directory)
-            mesh_manifest = EXAMPLE_DIR / "test_fem" / "case_01_straight_t" / "input_manifest.json"
+            mesh_manifest = EXAMPLE_DIR / "test_fem" / "combined_all_cases_manifest.json"
             request_path = task_dir / "request.json"
             existing_path = task_dir / "existing.json"
             output_path = task_dir / "result.hmwfr"
@@ -77,9 +148,9 @@ class OfflineBackendTests(unittest.TestCase):
                 "selected_component_ids": [1, 2],
                 "settings": {
                     "mode": "detect",
-                    "optimize_neighborhood": False,
                     "criteria_path": "",
-                    "param_path": "",
+                    "python_workers": 2,
+                    "parallel_min_elements": 0,
                 },
                 "options": {"debug": False, "keep_runtime_files": True},
             }), encoding="utf-8")
@@ -171,7 +242,7 @@ class OfflineBackendTests(unittest.TestCase):
     def test_production_pipeline_writes_importable_result_and_transfer_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = PIPELINE.prepare(Path(directory))
-            for key in ("backend_result_fem", "backend_result_manifest", "transfer_manifest", "delta_manifest"):
+            for key in ("backend_result_fem", "backend_result_manifest", "transfer_manifest", "delta_manifest", "remesh_plan"):
                 artifact = Path(manifest[key])
                 self.assertTrue(artifact.is_file(), key)
                 self.assertGreater(artifact.stat().st_size, 0, key)
@@ -248,10 +319,7 @@ class OfflineBackendTests(unittest.TestCase):
         self.assertTrue(elements)
         self.assertTrue(any(row["element_type"] == "CTRIA3" for row in elements))
 
-    def test_hm2019_param_and_criteria_drive_safe_neighborhood_moves(self):
-        metadata = parse_param_metadata(EXAMPLE_DIR / "reference.param")
-        self.assertEqual(10, metadata["values"]["element_size"])
-        self.assertEqual(30, metadata["values"]["feature_angle"])
+    def test_hm2019_batch_remesh_settings_and_preallocated_ids(self):
         model, _ = FIXTURES.angled_t()
         candidates = [row for row in detect_candidates(model) if row["auto_eligible"]]
         planned = plan_candidate_deltas(
@@ -259,21 +327,23 @@ class OfflineBackendTests(unittest.TestCase):
             candidates,
             {
                 "id_state": {"max_node_id": 5000, "max_element_id": 8000, "max_component_id": 100},
-                "optimize_neighborhood": True,
-                "optimization_layers": 2,
-                "optimization_iterations": 4,
+                "remesh_element_size": 10.0,
+                "remesh_expand_layers": 2,
+                "remesh_feature_angle": 30.0,
             },
-            EXAMPLE_DIR / "reference.criteria",
-            EXAMPLE_DIR / "reference.param",
         )
         self.assertEqual("READY", planned["plans"][0]["status"])
         self.assertTrue(planned["plans"][0]["ids_preallocated"])
         self.assertTrue(all(row["node_id"] > 5000 for row in planned["plans"][0]["new_nodes"]))
         self.assertTrue(all(row["element_id"] > 8000 for row in planned["plans"][0]["replacement_elements"] + planned["plans"][0]["weld_elements"]))
-        optimization = planned["optimization"]
-        self.assertLessEqual(optimization["quality_after"]["failed_element_count"], optimization["quality_before"]["failed_element_count"])
-        self.assertLess(optimization["quality_after"]["objective"], optimization["quality_before"]["objective"])
-        self.assertTrue(optimization["moves"])
+        remesh = planned["remesh"]
+        self.assertEqual(10.0, remesh["element_size"])
+        self.assertEqual(2, remesh["expand_layers"])
+        self.assertEqual(30.0, remesh["feature_angle"])
+        self.assertEqual(
+            sorted(element["element_id"] for plan in planned["plans"] for element in plan.get("replacement_elements", [])),
+            remesh["seed_element_ids"],
+        )
 
     def test_preallocated_multi_component_delta_is_written(self):
         model, _ = FIXTURES.partial_overlap_t()

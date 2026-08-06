@@ -185,7 +185,7 @@ proc ::BatchMesher::showPanel {} {
     catch {destroy .batch_mesher}
     set w .batch_mesher
     ::HWFlow::createTopLevel $w
-    wm title $w "[::BatchMesher::txt "BatchMesher 自动网格划分" "BatchMesher Automatic Meshing"] v$VERSION"
+    wm title $w [::HWFlow::windowTitle "[::BatchMesher::txt "BatchMesher 自动网格划分" "BatchMesher Automatic Meshing"] v$VERSION" "BatchMesher Automatic Meshing v$VERSION"]
     wm minsize $w 980 720
     wm resizable $w 1 1
     frame $w.main -padx 10 -pady 8

@@ -245,7 +245,7 @@ proc ::WeldIntegrityCheck::showReview {} {
     if {[winfo exists $w]} { raise $w; ::WeldIntegrityCheck::refreshReview; return }
     set ui(filterText) ""; set ui(statusFilter) pending
     ::HWFlow::createTopLevel $w
-    wm title $w [::WeldIntegrityCheck::txt "网格焊缝完整性检查" "Mesh Weld Integrity Check"]
+    wm title $w [::HWFlow::windowTitle [::WeldIntegrityCheck::txt "网格焊缝完整性检查" "Mesh Weld Integrity Check"] "Mesh Weld Integrity Check"]
     wm minsize $w 920 560; wm protocol $w WM_DELETE_WINDOW ::WeldIntegrityCheck::closeReview
     bind $w <Escape> ::WeldIntegrityCheck::closeReview
     bind $w <Destroy> [list ::WeldIntegrityCheck::onReviewDestroy $w %W]

@@ -6,7 +6,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::FemAutoSeam {
-    variable VERSION "0.14"
+    variable VERSION "0.17"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] fem_auto_seam]
     variable cfg
     array set cfg {
@@ -23,10 +23,11 @@ namespace eval ::FemAutoSeam {
         auto_accept_confidence 0.88
         review_confidence 0.60
         criteria_path ""
-        param_path ""
-        optimize_neighborhood 1
-        optimization_layers 2
-        optimization_iterations 4
+        remesh_element_size 8.0
+        remesh_expand_layers 2
+        remesh_feature_angle 30.0
+        remesh_chunk_elements 1000
+        python_workers 0
         max_new_failed_elements 0
     }
     variable ui
@@ -40,8 +41,8 @@ proc ::FemAutoSeam::stateKeys {} {
         search_distance min_seam_length parallel_angle_max perpendicular_angle_min
         max_distance_variation_ratio near_edge_distance small_hole_diameter
         max_weld_tria_ratio existing_weld_search_distance exclude_existing_welds
-        auto_accept_confidence review_confidence criteria_path param_path
-        optimization_layers optimization_iterations max_new_failed_elements
+        auto_accept_confidence review_confidence criteria_path
+        remesh_element_size remesh_expand_layers remesh_feature_angle remesh_chunk_elements python_workers max_new_failed_elements
     }
 }
 
@@ -49,9 +50,6 @@ proc ::FemAutoSeam::loadState {} {
     if {[llength [info commands ::HWFlow::applyStateToArray]]} {
         ::HWFlow::applyStateToArray fem_auto_seam ::FemAutoSeam::cfg [::FemAutoSeam::stateKeys]
     }
-    # Seam-neighborhood optimization is part of realization, not an optional
-    # UI preference. Older saved state must not disable the Python stage.
-    set ::FemAutoSeam::cfg(optimize_neighborhood) 1
 }
 
 proc ::FemAutoSeam::saveState {} {
@@ -82,10 +80,16 @@ proc ::FemAutoSeam::validateUi {} {
     foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_distance_variation_ratio near_edge_distance small_hole_diameter max_weld_tria_ratio existing_weld_search_distance auto_accept_confidence review_confidence} {
         if {![string is double -strict $ui($key)] || $ui($key) < 0} { error "$key must be non-negative" }
     }
-    foreach key {optimization_layers optimization_iterations max_new_failed_elements} {
+    foreach key {remesh_expand_layers max_new_failed_elements python_workers} {
         if {![string is integer -strict $ui($key)] || $ui($key) < 0} { error "$key must be a non-negative integer" }
     }
-    foreach item [list [list criteria_path .criteria] [list param_path .param]] {
+    if {![string is integer -strict $ui(remesh_chunk_elements)] || $ui(remesh_chunk_elements) <= 0} {
+        error "remesh_chunk_elements must be a positive integer"
+    }
+    foreach key {remesh_element_size remesh_feature_angle} {
+        if {![string is double -strict $ui($key)] || $ui($key) <= 0} { error "$key must be positive" }
+    }
+    foreach item [list [list criteria_path .criteria]] {
         set key [lindex $item 0]; set extension [lindex $item 1]
         if {[string trim $ui($key)] eq ""} { continue }
         if {![file isfile $ui($key)] || [string tolower [file extension $ui($key)]] ne $extension} {
@@ -100,7 +104,6 @@ proc ::FemAutoSeam::effectiveSpecificationPath {key} {
     if {[string trim $cfg($key)] ne ""} { return [file normalize $cfg($key)] }
     switch -- $key {
         criteria_path { set name fem_auto_seam_default.criteria }
-        param_path { set name fem_auto_seam_default.param }
         default { error "unsupported FEM automatic seam specification: $key" }
     }
     set path [file join $MODULE_DIR defaults $name]
@@ -126,7 +129,7 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     foreach key [::FemAutoSeam::stateKeys] { set ui($key) $cfg($key) }
     set ui(ok) 0
     set w .fem_auto_seam; catch {destroy $w}; ::HWFlow::createTopLevel $w
-    wm title $w "[::HWFlow::txt "FEM 自动焊缝" "FEM Automatic Seam"] v$VERSION"
+    wm title $w [::HWFlow::windowTitle "[::HWFlow::txt "FEM 自动焊缝" "FEM Automatic Seam"] v$VERSION" "FEM Automatic Seam v$VERSION"]
     wm resizable $w 0 0
     frame $w.main -padx 12 -pady 10; pack $w.main -fill both -expand 1
     label $w.main.title -text [::HWFlow::txt "FEM 自动焊缝" "FEM Automatic Seam"] -font [::HWFlow::uiFont heading]
@@ -145,20 +148,22 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
         {auto_accept_confidence "自动创建置信度" "Auto-create confidence"}
         {review_confidence "复核置信度" "Review confidence"}
         {criteria_path "Criteria 文件" "Criteria file"}
-        {param_path "Param 文件" "Param file"}
-        {optimization_layers "优化邻域层数" "Optimization layers"}
-        {optimization_iterations "优化迭代次数" "Optimization iterations"}
+        {python_workers "Python 并行进程数（0=自动）" "Python workers (0=auto)"}
+        {remesh_element_size "重绘单元尺寸" "Remesh element size"}
+        {remesh_expand_layers "重绘扩展层数" "Remesh expansion layers"}
+        {remesh_feature_angle "重绘特征角" "Remesh feature angle"}
+        {remesh_chunk_elements "单批重绘单元上限" "Elements per remesh chunk"}
         {max_new_failed_elements "允许新增失败单元" "Allowed new failed elements"}
     }
     set row 2
     foreach item $fields {
         set key [lindex $item 0]
         label $w.main.l_$key -text [::HWFlow::txt [lindex $item 1] [lindex $item 2]] -anchor w
-        entry $w.main.e_$key -textvariable ::FemAutoSeam::ui($key) -width [expr {$key in {criteria_path param_path} ? 48 : 18}]
+        entry $w.main.e_$key -textvariable ::FemAutoSeam::ui($key) -width [expr {$key eq "criteria_path" ? 48 : 18}]
         grid $w.main.l_$key -row $row -column 0 -sticky w -padx {0 8} -pady 2
         grid $w.main.e_$key -row $row -column 1 -sticky w -pady 2
-        if {$key eq "criteria_path" || $key eq "param_path"} {
-            set extension [expr {$key eq "criteria_path" ? ".criteria" : ".param"}]
+        if {$key eq "criteria_path"} {
+            set extension ".criteria"
             button $w.main.b_$key -text [::HWFlow::txt "浏览" "Browse"] -command [list ::FemAutoSeam::browseFile $key $extension "选择 $extension 文件" "Select $extension file"]
             grid $w.main.b_$key -row $row -column 2 -padx {6 0}
         }
@@ -166,7 +171,7 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     }
     checkbutton $w.main.exclude -text [::HWFlow::txt "排除附近已有 SEAM 焊缝" "Exclude nearby existing SEAM welds"] -variable ::FemAutoSeam::ui(exclude_existing_welds)
     grid $w.main.exclude -row $row -column 0 -columnspan 3 -sticky w; incr row
-    label $w.main.required -text [::HWFlow::txt "固定流程：Python 按规范优化；任务目录仅保留 before.hm 与 result.fem。" "Fixed workflow: Python specification-driven optimization; only before.hm and result.fem are retained."] -anchor w
+    label $w.main.required -text [::HWFlow::txt "固定流程：Python 仅规划切分与连接；HyperMesh 按连通区域分批重绘受影响网格。" "Fixed workflow: Python plans topology only; HyperMesh remeshes affected regions in bounded chunks."] -anchor w
     grid $w.main.required -row $row -column 0 -columnspan 3 -sticky w
     frame $w.buttons -padx 12 -pady 10; pack $w.buttons -fill x
     button $w.buttons.cancel -text [::HWFlow::txt "取消" "Cancel"] -command [list destroy $w]

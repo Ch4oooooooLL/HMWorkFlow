@@ -68,6 +68,95 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
         self.assertNotIn("hyperWorksCompatibility", preflight)
         self.assertIn("informational only", preflight)
 
+    def test_ui_profile_keeps_2019_legacy_and_specializes_2022(self) -> None:
+        tcl = tkinter.Tcl()
+        tcl.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        self.assertEqual(tcl.eval("::HWFlow::uiProfile {HyperMesh 2019.0}"), "legacy")
+        self.assertEqual(tcl.eval("::HWFlow::uiProfile {HyperWorks 2022.3}"), "hw2022")
+
+    def test_2022_ui_skips_hwtk_while_2019_keeps_the_existing_backend(self) -> None:
+        modern = tkinter.Tcl()
+        modern.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        modern.eval(
+            r'''
+            proc hm_info {args} { return "HyperWorks 2022.3" }
+            namespace eval ::hwtk {}
+            proc ::hwtk::toplevel {w} { return $w }
+            package provide hwtk 9.9
+            '''
+        )
+        self.assertEqual(modern.eval("::HWFlow::uiBackend"), "tk2022")
+
+        legacy = tkinter.Tcl()
+        legacy.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        legacy.eval(
+            r'''
+            proc hm_info {args} { return "HyperMesh 2019.0" }
+            namespace eval ::hwtk {}
+            proc ::hwtk::toplevel {w} { return $w }
+            package provide hwtk 9.9
+            '''
+        )
+        self.assertEqual(legacy.eval("::HWFlow::uiBackend"), "hwtk")
+
+    def test_2022_basic_widgets_use_the_single_pass_tk_path(self) -> None:
+        tcl = tkinter.Tcl()
+        tcl.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        tcl.eval(
+            r'''
+            proc hm_info {args} { return "HyperWorks 2022.3" }
+            set ::widget_calls {}
+            proc frame {w args} { lappend ::widget_calls tk; return $w }
+            namespace eval ::ttk {}
+            proc ::ttk::frame {w args} { lappend ::widget_calls ttk; return $w }
+            '''
+        )
+        self.assertEqual(tcl.eval("::HWFlow::uiWidget frame .probe"), ".probe")
+        self.assertEqual(tcl.splitlist(tcl.eval("set ::widget_calls")), ("tk",))
+
+    def test_2022_home_panel_is_a_separate_lightweight_layout(self) -> None:
+        core = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
+        dispatcher = core[
+            core.index("proc ::HWToolkit::showPanel") :
+            core.index("proc ::HWToolkit::showPanel2022")
+        ]
+        optimized = core[
+            core.index("proc ::HWToolkit::showPanel2022") :
+            core.index("proc ::HWToolkit::showPanelLegacy")
+        ]
+        self.assertIn('uiProfile] eq "hw2022"', dispatcher)
+        self.assertIn("::HWToolkit::showPanelLegacy", dispatcher)
+        self.assertIn("wm withdraw $w", optimized)
+        self.assertIn("select2022Group", optimized)
+        self.assertNotIn("row_$key", optimized)
+
+    def test_2022_window_titles_use_ascii_without_changing_2019_titles(self) -> None:
+        modern = tkinter.Tcl()
+        modern.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        modern.eval('proc hm_info {args} { return "HyperWorks 2022.3" }')
+        self.assertEqual(
+            modern.eval("::HWFlow::windowTitle {中文标题} {ASCII Title}"),
+            "ASCII Title",
+        )
+
+        legacy = tkinter.Tcl()
+        legacy.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        legacy.eval('proc hm_info {args} { return "HyperMesh 2019.0" }')
+        self.assertEqual(
+            legacy.eval("::HWFlow::windowTitle {中文标题} {ASCII Title}"),
+            "中文标题",
+        )
+
+        for path in ROOT.rglob("*.tcl"):
+            for line_number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if re.search(r"\bwm\s+title\b", line) and re.search(
+                    r"[\u3400-\u9fff]", line
+                ):
+                    with self.subTest(path=path, line=line_number):
+                        self.assertIn("::HWFlow::windowTitle", line)
+
     def test_main_panel_shortcut_uses_a_reentrant_2022_window_lifecycle(self) -> None:
         core = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
         panel = core[

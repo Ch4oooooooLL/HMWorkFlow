@@ -1,8 +1,9 @@
 # Offline Auto Shell Seam Backend
 
 This directory validates the FEM-level automatic shell-seam backend and its
-criteria/param-driven finite-neighborhood optimizer.  The same backend is now
-available as the independent **FEM Automatic Seam** tool in HyperMesh 2019.
+topology-only split and connection planner. The same backend is available as
+the independent **FEM Automatic Seam** tool in HyperMesh 2019, where the live
+model performs one native batch element automesh after all topology imports.
 
 Run the complete fixture matrix from the repository root:
 
@@ -28,8 +29,6 @@ The default output is written below
 - `input.fem` and `input_manifest.json`;
 - `candidates.json` with confidence, type and automatic eligibility;
 - `realization.json` with deleted/replacement/weld entity IDs;
-- `optimization.json` with parsed criteria/param metadata, protected nodes,
-  accepted moves, and before/after quality summaries;
 - `result.fem` and `result_manifest.json`;
 - `validation.json` with round-trip and connectivity checks.
 
@@ -52,17 +51,11 @@ deleted and replaced with first-order triangles that share the inserted target
 constraint path.  A quad-dominant zipper then connects the source free edge to
 that path.  Result FEMs are read back through the production shell FEM reader.
 
-The local optimizer protects seam-interface nodes, free boundaries, feature
-edges, and nodes shared with elements outside the selected neighborhood.  A
-move is accepted only when it adds no Python-side criteria failure, does not
-worsen the worst penalty, and improves the local objective.  The live workflow
-loads the selected criteria in HyperMesh and applies the native quality guard
-before accepting the imported delta.
-
-The criteria and param fields are optional. Blank fields resolve to the
-versioned defaults under `modules/fem_auto_seam/defaults/`; the default element
-size is `auto`, derived from the finite seam neighborhood. A user-supplied file
-overrides only its corresponding default.
+Python does not move mesh nodes. The live workflow expands all replacement
+mother-shell seeds, fixes seam/interface and patch-boundary nodes, and sends the
+combined element selection through HyperMesh's native interactive remesh and
+automesh sequence. The criteria file remains the native final quality authority;
+element size, expansion layers, and feature angle are explicit module settings.
 
 The current geometric boundary remains planar first-order target patches.  A
 curved source free-edge path is supported, but non-planar target remeshing is a
@@ -74,9 +67,10 @@ Prepare the production `main.py` result used by the live HM2019 apply test:
 python examples\AutoShellSeamBackend\prepare_stage2_pipeline.py
 ```
 
-During execution the production plan uses candidate-scoped FEM deltas and
-transaction checkpoints.  They are transient.  A completed task directory is
-reduced to exactly two deliverables:
+During execution the production plan uses candidate-scoped FEM deltas for
+auditable topology import, followed by one task-scoped batch remesh. There are
+no candidate checkpoints; `before.hm` is the single transaction recovery point.
+A completed task directory is reduced to exactly two deliverables:
 
 - `before.hm`: the pre-task HyperMesh model used for rollback/undo;
 - `result.fem`: the selected scope plus successfully imported SEAM components.

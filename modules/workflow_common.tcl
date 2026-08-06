@@ -42,8 +42,13 @@ namespace eval ::HWFlow {
     catch {array set WRAP_TIMERS {}}
     variable UI_INITIALIZED 0
     variable UI_BACKEND "tk"
+    variable UI_PROFILE ""
+    variable UI_NAMED_FONTS
+    catch {array set UI_NAMED_FONTS {}}
     variable UI_WINDOWS
     catch {array set UI_WINDOWS {}}
+    variable UI_COLORS
+    catch {array set UI_COLORS {}}
     variable PROJECT_TOPMOST -1
     variable NATIVE_PANEL_ACTIVE 0
     variable MODEL_IO_ACTIVE 0
@@ -374,6 +379,49 @@ proc ::HWFlow::firstAvailableFont {candidates fallback} {
     return $fallback
 }
 
+# Keep the established HyperMesh 2019 presentation untouched.  HyperWorks
+# 2022 uses a lighter Tk profile because its hwtk bridge is noticeably more
+# expensive when many small widgets are created and has inconsistent CJK font
+# fallback on some Windows installations.
+proc ::HWFlow::uiProfile {{version ""}} {
+    variable UI_PROFILE
+    if {$version ne ""} {
+        if {[::HWFlow::hyperWorksYear $version] eq "2022"} {
+            return hw2022
+        }
+        return legacy
+    }
+    if {$UI_PROFILE eq ""} {
+        set UI_PROFILE legacy
+        if {[::HWFlow::hyperWorksYear] eq "2022"} {
+            set UI_PROFILE hw2022
+        }
+    }
+    return $UI_PROFILE
+}
+
+# HyperWorks 2022 can decode a Unicode Tcl string incorrectly while passing it
+# to the native Windows title bar.  Keep localized text inside the Tk window,
+# but use an ASCII title in that host generation.  The legacy title is returned
+# unchanged so HyperMesh 2019 retains its existing presentation.
+proc ::HWFlow::windowTitle {legacyTitle asciiTitle} {
+    if {[::HWFlow::uiProfile] eq "hw2022"} {
+        return $asciiTitle
+    }
+    return $legacyTitle
+}
+
+proc ::HWFlow::configure2022NamedFont {role family size weight} {
+    variable UI_NAMED_FONTS
+    set name "HWFlow2022[string totitle $role]Font"
+    if {[lsearch -exact [font names] $name] < 0} {
+        font create $name
+    }
+    font configure $name -family $family -size $size -weight $weight
+    set UI_NAMED_FONTS($role) $name
+    return $name
+}
+
 proc ::HWFlow::initFonts {} {
     variable FONT_INITIALIZED
     variable UI_FONT_FAMILY
@@ -388,6 +436,28 @@ proc ::HWFlow::initFonts {} {
     if {[llength [info commands font]] > 0} {
         set UI_FONT_FAMILY [::HWFlow::firstAvailableFont [list "Microsoft YaHei UI" "Microsoft YaHei" "SimHei" "SimSun" "NSimSun" "Arial Unicode MS" "Arial"] "Arial"]
         set UI_FIXED_FONT_FAMILY [::HWFlow::firstAvailableFont [list "NSimSun" "SimSun" "Microsoft YaHei UI" "Microsoft YaHei" "Consolas" "Courier New"] $UI_FONT_FAMILY]
+
+        if {[::HWFlow::uiProfile] eq "hw2022"} {
+            # Named fonts let Tk cache glyph metrics and ensure every classic
+            # widget uses a Windows font with Simplified Chinese coverage.
+            ::HWFlow::configure2022NamedFont default $UI_FONT_FAMILY 10 normal
+            ::HWFlow::configure2022NamedFont header $UI_FONT_FAMILY 16 bold
+            ::HWFlow::configure2022NamedFont title $UI_FONT_FAMILY 12 bold
+            ::HWFlow::configure2022NamedFont heading $UI_FONT_FAMILY 11 bold
+            ::HWFlow::configure2022NamedFont module $UI_FONT_FAMILY 10 bold
+            ::HWFlow::configure2022NamedFont small $UI_FONT_FAMILY 9 normal
+            ::HWFlow::configure2022NamedFont fixed $UI_FIXED_FONT_FAMILY 10 normal
+            ::HWFlow::configure2022NamedFont fixedSmall $UI_FIXED_FONT_FAMILY 9 normal
+            catch {font configure TkDefaultFont -family $UI_FONT_FAMILY -size 10 -weight normal}
+            catch {font configure TkTextFont -family $UI_FONT_FAMILY -size 10 -weight normal}
+            catch {font configure TkMenuFont -family $UI_FONT_FAMILY -size 10 -weight normal}
+            catch {font configure TkCaptionFont -family $UI_FONT_FAMILY -size 10 -weight bold}
+            catch {font configure TkHeadingFont -family $UI_FONT_FAMILY -size 10 -weight bold}
+            catch {font configure TkFixedFont -family $UI_FIXED_FONT_FAMILY -size 10 -weight normal}
+            catch {option add *Font HWFlow2022DefaultFont widgetDefault}
+            set FONT_INITIALIZED 1
+            return
+        }
 
         catch {font configure TkDefaultFont -family $UI_FONT_FAMILY -size 9 -weight normal}
         catch {font configure TkTextFont -family $UI_FONT_FAMILY -size 9 -weight normal}
@@ -452,8 +522,12 @@ proc ::HWFlow::updateLabelWrap {labelWidget padding} {
 proc ::HWFlow::uiFont {{role default}} {
     variable UI_FONT_FAMILY
     variable UI_FIXED_FONT_FAMILY
+    variable UI_NAMED_FONTS
 
     ::HWFlow::initFonts
+    if {[::HWFlow::uiProfile] eq "hw2022" && [info exists UI_NAMED_FONTS($role)]} {
+        return $UI_NAMED_FONTS($role)
+    }
     switch -- $role {
         header {
             return [list $UI_FONT_FAMILY 14 bold]
@@ -482,6 +556,37 @@ proc ::HWFlow::uiFont {{role default}} {
     }
 }
 
+# Shared light palette for the unified home panel and progress windows.  Plain
+# Tk color names keep the same look across classic Tk, ttk and hwtk widgets.
+proc ::HWFlow::uiColors {{key ""}} {
+    variable UI_COLORS
+    if {[array size UI_COLORS] == 0} {
+        array set UI_COLORS {
+            headerBg       #f3f6fa
+            headerAccent   #2563eb
+            bodyBg         #eef1f6
+            cardBg         #ffffff
+            border         #d5dbe4
+            accent         #2563eb
+            accentDark     #1d4ed8
+            accentSoft     #dbeafe
+            accentSoftText #1e40af
+            textPrimary    #1f2937
+            textSecondary  #4b5563
+            listBg         #ffffff
+            listSelBg      #2563eb
+            listSelFg      #ffffff
+        }
+    }
+    if {$key eq ""} {
+        return [array get UI_COLORS]
+    }
+    if {[info exists UI_COLORS($key)]} {
+        return $UI_COLORS($key)
+    }
+    return ""
+}
+
 proc ::HWFlow::initUI {} {
     variable UI_INITIALIZED
     variable UI_BACKEND
@@ -491,7 +596,13 @@ proc ::HWFlow::initUI {} {
     }
 
     set UI_BACKEND "tk"
-    if {![catch {package require hwtk} hwtkVersion] &&
+    if {[::HWFlow::uiProfile] eq "hw2022"} {
+        # Loading hwtk is intentionally skipped on 2022.  Apart from startup
+        # cost, failed hwtk/ttk option probes used to recreate every widget up
+        # to three times before falling back to classic Tk.
+        set UI_BACKEND "tk2022"
+        catch {puts "HWToolkit: HyperWorks 2022 UI backend=tk"}
+    } elseif {![catch {package require hwtk} hwtkVersion] &&
         [llength [info commands ::hwtk::toplevel]] > 0} {
         set UI_BACKEND "hwtk"
         catch {puts "HWToolkit: using hwtk $hwtkVersion UI backend"}
@@ -520,10 +631,13 @@ proc ::HWFlow::uiWidget {kind w args} {
         lappend candidates ::hwtk::$kind
     }
     if {$kind in {frame label button labelframe scrollbar checkbutton radiobutton entry}} {
+        if {[::HWFlow::uiProfile] eq "hw2022" && [llength [info commands ::$kind]] > 0} {
+            lappend candidates ::$kind
+        }
         if {[llength [info commands ::ttk::$kind]] > 0} {
             lappend candidates ::ttk::$kind
         }
-        if {[llength [info commands ::$kind]] > 0} {
+        if {[::HWFlow::uiProfile] ne "hw2022" && [llength [info commands ::$kind]] > 0} {
             lappend candidates ::$kind
         }
     } elseif {$kind eq "separator"} {
@@ -1795,15 +1909,19 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
     catch {destroy $w}
     if {[catch {
         ::HWFlow::createTopLevel $w progress
-        wm title $w $title
+        wm title $w [::HWFlow::windowTitle $title "HMWorkFlow Progress"]
         wm resizable $w 0 0
 
-        ::HWFlow::uiWidget frame $w.main
+        set cardBg [::HWFlow::uiColors cardBg]
+        set textPrimary [::HWFlow::uiColors textPrimary]
+        set textSecondary [::HWFlow::uiColors textSecondary]
+
+        ::HWFlow::uiWidget frame $w.main -background $cardBg
         pack $w.main -fill both -expand 1 -padx 14 -pady 12
 
-        ::HWFlow::uiWidget label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
-        ::HWFlow::uiWidget label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
-        ::HWFlow::uiWidget label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget label $w.main.title -text $title -font [::HWFlow::uiFont heading] -foreground $textPrimary -background $cardBg -anchor w
+        ::HWFlow::uiWidget label $w.main.msg -textvariable ::HWFlow::progressMessage -foreground $textPrimary -background $cardBg -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget label $w.main.detail -textvariable ::HWFlow::progressDetail -foreground $textSecondary -background $cardBg -anchor w -width 66 -wraplength 520 -justify left
         ::HWFlow::uiWidget progressbar $w.main.bar -mode determinate -value 0
         ::HWFlow::uiWidget label $w.main.percent -textvariable ::HWFlow::progressPercentText -width 7 -anchor e
         ::HWFlow::uiWidget labelframe $w.main.stream -text [::HWFlow::txt "命令流" "Command Stream"]
@@ -1925,13 +2043,17 @@ proc ::HWFlow::progressOpenMinimal {title {message ""}} {
     catch {destroy $w}
     if {[catch {
         ::HWFlow::createTopLevel $w progress
-        wm title $w $title
+        wm title $w [::HWFlow::windowTitle $title "HMWorkFlow Progress"]
         wm resizable $w 0 0
-        ::HWFlow::uiWidget frame $w.main
+        set cardBg [::HWFlow::uiColors cardBg]
+        set textPrimary [::HWFlow::uiColors textPrimary]
+        set textSecondary [::HWFlow::uiColors textSecondary]
+
+        ::HWFlow::uiWidget frame $w.main -background $cardBg
         pack $w.main -fill both -expand 1 -padx 14 -pady 12
-        ::HWFlow::uiWidget label $w.main.title -text $title -font [::HWFlow::uiFont heading] -anchor w
-        ::HWFlow::uiWidget label $w.main.msg -textvariable ::HWFlow::progressMessage -anchor w -width 66 -wraplength 520 -justify left
-        ::HWFlow::uiWidget label $w.main.detail -textvariable ::HWFlow::progressDetail -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget label $w.main.title -text $title -font [::HWFlow::uiFont heading] -foreground $textPrimary -background $cardBg -anchor w
+        ::HWFlow::uiWidget label $w.main.msg -textvariable ::HWFlow::progressMessage -foreground $textPrimary -background $cardBg -anchor w -width 66 -wraplength 520 -justify left
+        ::HWFlow::uiWidget label $w.main.detail -textvariable ::HWFlow::progressDetail -foreground $textSecondary -background $cardBg -anchor w -width 66 -wraplength 520 -justify left
         ::HWFlow::uiWidget progressbar $w.main.bar -mode determinate -value 0
         ::HWFlow::uiWidget label $w.main.percent -textvariable ::HWFlow::progressPercentText -width 7 -anchor e
         grid $w.main.title -row 0 -column 0 -sticky ew -pady {0 6}

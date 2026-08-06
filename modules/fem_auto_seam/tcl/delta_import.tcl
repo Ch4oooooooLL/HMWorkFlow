@@ -94,6 +94,71 @@ proc ::FemAutoSeam::applyAutoPlanMoves {plan} {
     return [llength [dict get $plan move_nodes]]
 }
 
+proc ::FemAutoSeam::autoMissingEntityIds {entityTypes ids} {
+    set missing {}
+    foreach id [lsort -integer -unique $ids] {
+        if {[llength [::HybridCore::existingEntityIds $entityTypes [list $id]]] == 0} {
+            lappend missing $id
+        }
+    }
+    return $missing
+}
+
+proc ::FemAutoSeam::writeAutoPlanRepairDelta {plan path missingNodes missingElements} {
+    set missingNodeSet [dict create]
+    foreach id $missingNodes { dict set missingNodeSet $id 1 }
+    set missingElementSet [dict create]
+    foreach id $missingElements { dict set missingElementSet $id 1 }
+    set lines [list "\$ HMWF_AUTO_SHELL_SEAM_REPAIR_V1" "BEGIN BULK"]
+    foreach node [dict get $plan new_nodes] {
+        set nodeId [dict get $node node_id]
+        if {![dict exists $missingNodeSet $nodeId]} { continue }
+        set xyz [dict get $node coordinates]
+        lappend lines [format "GRID,%s,,%.12g,%.12g,%.12g" $nodeId [lindex $xyz 0] [lindex $xyz 1] [lindex $xyz 2]]
+    }
+    set byComponent [dict create]
+    foreach element [concat [dict get $plan replacement_elements] [dict get $plan weld_elements]] {
+        set elementId [dict get $element element_id]
+        if {![dict exists $missingElementSet $elementId]} { continue }
+        dict lappend byComponent [dict get $element component_id] $element
+    }
+    dict for {componentId elements} $byComponent {
+        if {$componentId == [dict get $plan output_component_id]} {
+            set safeName [string map [list {"} {}] [dict get $plan output_component_name]]
+            lappend lines "\$HMNAME COMP $componentId \"$safeName\""
+        }
+        lappend lines "\$HMCOMP ID $componentId"
+        foreach element $elements {
+            set propertyId [dict get $element property_id]
+            set propertyField [expr {$propertyId > 0 ? $propertyId : ""}]
+            lappend lines "[dict get $element element_type],[dict get $element element_id],$propertyField,[join [dict get $element node_ids] ,]"
+        }
+    }
+    lappend lines "ENDDATA" ""
+    ::HybridCore::writeTextFile $path [join $lines \n]
+    return $path
+}
+
+proc ::FemAutoSeam::autoPlanImportFailureDetail {plan missingNodes missingElements delta repairDelta} {
+    set missingNodeSet [dict create]
+    foreach id $missingNodes { dict set missingNodeSet $id 1 }
+    set missingElementSet [dict create]
+    foreach id $missingElements { dict set missingElementSet $id 1 }
+    set rows {}
+    foreach role {replacement_elements weld_elements} {
+        foreach element [dict get $plan $role] {
+            set elementId [dict get $element element_id]
+            if {![dict exists $missingElementSet $elementId]} { continue }
+            set absentRefs {}
+            foreach nodeId [dict get $element node_ids] {
+                if {[llength [::HybridCore::existingEntityIds {nodes} [list $nodeId]]] == 0} { lappend absentRefs $nodeId }
+            }
+            lappend rows "id=$elementId role=$role card=[dict get $element element_type] component=[dict get $element component_id] nodes={[dict get $element node_ids]} missing_nodes={$absentRefs}"
+        }
+    }
+    return "candidate=[dict get $plan candidate_id] fem={$delta} repair_fem={$repairDelta} missing_grids={$missingNodes} missing_elements={$missingElements} details={[join $rows {; }]}"
+}
+
 proc ::FemAutoSeam::applyAutoPlanDelta {plan} {
     if {![dict exists $plan delta_fem]} { error "candidate delta path is absent from creation plan" }
     set delta [dict get $plan delta_fem]
@@ -102,15 +167,41 @@ proc ::FemAutoSeam::applyAutoPlanDelta {plan} {
     foreach node [dict get $plan new_nodes] { lappend expectedNodes [dict get $node node_id] }
     set expected {}
     foreach element [concat [dict get $plan replacement_elements] [dict get $plan weld_elements]] { lappend expected [dict get $element element_id] }
+    set externalNodes {}
+    set newNodeSet [dict create]
+    foreach nodeId $expectedNodes { dict set newNodeSet $nodeId 1 }
+    foreach element [concat [dict get $plan replacement_elements] [dict get $plan weld_elements]] {
+        foreach nodeId [dict get $element node_ids] {
+            if {![dict exists $newNodeSet $nodeId]} { lappend externalNodes $nodeId }
+        }
+    }
+    set missingExternal [::FemAutoSeam::autoMissingEntityIds {nodes} $externalNodes]
+    if {[llength $missingExternal]} {
+        error "candidate delta references GRID IDs that are absent before import: candidate=[dict get $plan candidate_id] grids={$missingExternal} fem={$delta}"
+    }
     set occupiedNodes [::HybridCore::existingEntityIds {nodes} $expectedNodes]
     if {[llength $occupiedNodes]} { error "candidate GRID IDs are already occupied: $occupiedNodes" }
     set occupied [::HybridCore::existingEntityIds {elems elements} $expected]
     if {[llength $occupied]} { error "candidate element IDs are already occupied: $occupied" }
     *createstringarray 2 "ASSIGNPROP_BYHMCOMMENTS " "ASSIGNPROP_ONELEMS "
     ::HWFlow::runHyperMeshIo import [list *feinputwithdata2 "#optistruct/optistruct" [file nativename $delta] 0 0 0 0 0 1 2 1 0]
-    set missing {}
-    foreach elementId $expected { if {[llength [::HybridCore::existingEntityIds {elems elements} [list $elementId]]] == 0} { lappend missing $elementId } }
-    if {[llength $missing]} { error "candidate delta import is incomplete: $missing" }
+    set missingNodes [::FemAutoSeam::autoMissingEntityIds {nodes} $expectedNodes]
+    set missing [::FemAutoSeam::autoMissingEntityIds {elems elements} $expected]
+    set repairDelta ""
+    if {[llength $missingNodes] || [llength $missing]} {
+        # HM2019 can occasionally finish a large incremental read without
+        # materializing every valid card. Retry only the absent cards so an
+        # isolated reader hiccup does not roll back an otherwise valid batch.
+        set repairDelta "[file rootname $delta].repair.fem"
+        ::FemAutoSeam::writeAutoPlanRepairDelta $plan $repairDelta $missingNodes $missing
+        *createstringarray 2 "ASSIGNPROP_BYHMCOMMENTS " "ASSIGNPROP_ONELEMS "
+        ::HWFlow::runHyperMeshIo import [list *feinputwithdata2 "#optistruct/optistruct" [file nativename $repairDelta] 0 0 0 0 0 1 2 1 0]
+        set missingNodes [::FemAutoSeam::autoMissingEntityIds {nodes} $expectedNodes]
+        set missing [::FemAutoSeam::autoMissingEntityIds {elems elements} $expected]
+    }
+    if {[llength $missingNodes] || [llength $missing]} {
+        error "candidate delta import remained incomplete after focused retry: [::FemAutoSeam::autoPlanImportFailureDetail $plan $missingNodes $missing $delta $repairDelta]"
+    }
     # HM2019's OptiStruct incremental reader does not consistently preserve
     # $HMCOMP boundaries when one delta contains replacement shells for more
     # than one existing component plus a new SEAM component.  Re-organize the

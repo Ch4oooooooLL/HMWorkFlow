@@ -98,7 +98,7 @@ proc ::MeshSeamWeld::showAutoReview {candidates} {
     set autoCandidates $candidates; array unset autoDecision; array unset autoForcedType; array unset autoSwap
     foreach candidate $autoCandidates { set id [dict get $candidate candidate_id]; set autoDecision($id) PENDING; set autoForcedType($id) ""; set autoSwap($id) 0 }
     set autoReviewConfirmed 0; set autoReviewFallback ""; set autoOriginalVisible [::MeshSeamWeld::autoVisibleComponents]; set w .mesh_seam_auto_review; catch {destroy $w}
-    ::HWFlow::createTopLevel $w; wm title $w [::HWFlow::txt "自动壳焊缝候选复核" "Automatic Shell Seam Review"]; wm minsize $w 760 440
+    ::HWFlow::createTopLevel $w; wm title $w [::HWFlow::windowTitle [::HWFlow::txt "自动壳焊缝候选复核" "Automatic Shell Seam Review"] "Automatic Shell Seam Review"]; wm minsize $w 760 440
     frame $w.body -padx 12 -pady 12; pack $w.body -fill both -expand 1
     label $w.body.note -text [::HWFlow::txt "自动创建前必须明确接受候选；REVIEW 和重复项不能批量接受。" "Candidates must be explicitly accepted before creation; REVIEW and duplicates are excluded from bulk acceptance."] -anchor w
     listbox $w.body.list -width 100 -height 18 -exportselection 0 -font [::HWFlow::uiFont fixedSmall]

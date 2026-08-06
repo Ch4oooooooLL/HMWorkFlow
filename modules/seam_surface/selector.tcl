@@ -73,7 +73,7 @@ proc ::hmtoolkit::seam::selector::prompt_thickness {} {
     set runtime(prompt_ok) 0
     set w .geometry_seam_thickness
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "输入焊缝板厚" "Input Seam Thickness"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "输入焊缝板厚" "Input Seam Thickness"] "Input Seam Thickness"]
     wm resizable $w 0 0
     frame $w.body -padx 12 -pady 10
     pack $w.body -fill both -expand 1

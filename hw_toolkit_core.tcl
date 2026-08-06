@@ -15,6 +15,8 @@ namespace eval ::HWToolkit {
     variable QUIET_ERRORS 0
     variable PENDING_SHORTCUT_TARGET ""
     variable PENDING_SHORTCUT_AFTER ""
+    variable UI2022_GROUP ""
+    variable UI2022_KEYS {}
 
     set MODULES {
         midsurf {
@@ -150,6 +152,15 @@ namespace eval ::HWToolkit {
             desc_zh  "选择一个或多个源节点，分别在全局 Z+5 处创建临时节点，并生成 CBUSH 连接。"
             desc_en  "Select source nodes, create temporary nodes at global Z+5, and connect them with CBUSH."
             proc     "::CBushCreator::runAction"
+        }
+        batch_temp_nodes {
+            group    "Connector"
+            label_zh "批量添加临时节点"
+            label_en "Batch Temporary Nodes"
+            desc_zh  "按每行 X,Y,Z 坐标批量创建临时节点，支持整批校验和撤销上一批。"
+            desc_en  "Create temporary nodes from X,Y,Z rows with batch validation and undo."
+            proc     "::BatchTempNodes::runAction"
+            undo_proc "::BatchTempNodes::undoLast"
         }
         contact_setup {
             group    "Connector"
@@ -415,109 +426,244 @@ proc ::HWToolkit::toggleProjectTopmost {} {
 }
 
 proc ::HWToolkit::showPanel {} {
-    variable MODULES
+    if {[::HWFlow::uiProfile] eq "hw2022"} {
+        return [::HWToolkit::showPanel2022]
+    }
+    return [::HWToolkit::showPanelLegacy]
+}
 
+# Unified home panel used by HyperWorks 2022 and, through
+# ::HWToolkit::showPanelLegacy, by HyperMesh 2019.  It renders one category at
+# a time instead of constructing every module row and every action button up
+# front, which keeps the widget count low on both host generations.  The
+# two-pane layout and header/footer structure are shared; only fonts and the
+# widget backend differ per profile (::HWFlow::uiFont / ::HWFlow::uiWidget).
+proc ::HWToolkit::showPanel2022 {} {
     set w .hwtoolkit
     if {[winfo exists $w]} {
         catch {wm deiconify $w}
         catch {raise $w}
-        catch {focus -force $w}
+        catch {focus $w}
         return $w
     }
+
     ::HWFlow::createTopLevel $w main
+    wm withdraw $w
     wm title $w "HyperMesh Toolkit"
-    wm minsize $w 720 620
+    wm minsize $w 760 520
     wm resizable $w 1 1
 
-    ::HWFlow::uiWidget frame $w.header
-    pack $w.header -fill x -padx 12 -pady 10
-    ::HWFlow::uiWidget label $w.header.title -text "HyperMesh Toolkit" -font [::HWFlow::uiFont header]
-    ::HWFlow::uiWidget label $w.header.subtitle -text [::HWFlow::txt "全部工具按类别平铺展示；主入口和模块快捷键均由 HyperMesh 原生快捷键库维护。" "All tools are shown by category; main and module shortcuts are maintained in the HyperMesh native key library."] -font [::HWFlow::uiFont default] -justify left -anchor w
-    pack $w.header.title -anchor w
-    pack $w.header.subtitle -anchor w
-    ::HWFlow::bindAutoWrap $w.header.subtitle 40
+    set headerBg       [::HWFlow::uiColors headerBg]
+    set bodyBg         [::HWFlow::uiColors bodyBg]
+    set cardBg         [::HWFlow::uiColors cardBg]
+    set border         [::HWFlow::uiColors border]
+    set accent         [::HWFlow::uiColors accent]
+    set accentDark     [::HWFlow::uiColors accentDark]
+    set accentSoftText [::HWFlow::uiColors accentSoftText]
+    set textPrimary    [::HWFlow::uiColors textPrimary]
+    set textSecondary  [::HWFlow::uiColors textSecondary]
+    set listSelBg      [::HWFlow::uiColors listSelBg]
+    set listSelFg      [::HWFlow::uiColors listSelFg]
 
-    ::HWFlow::uiWidget frame $w.body
-    pack $w.body -fill both -expand 1 -padx 12 -pady 4
+    ::HWFlow::uiWidget frame $w.header -background $headerBg
+    pack $w.header -fill x
+    ::HWFlow::uiWidget label $w.header.title -text "HyperMesh Toolkit" \
+        -font [::HWFlow::uiFont header] -foreground $textPrimary -background $headerBg -anchor w
+    pack $w.header.title -fill x -padx 18 -pady {14 2}
+    set version [::HWFlow::hyperWorksVersion]
+    if {$version eq ""} { set version "HyperWorks" }
+    ::HWFlow::uiWidget label $w.header.subtitle \
+        -text [::HWFlow::txt "请选择分类和工具" "Choose a category and tool"] \
+        -font [::HWFlow::uiFont default] -foreground $textSecondary -background $headerBg -anchor w
+    ::HWFlow::uiWidget label $w.header.version -text $version \
+        -font [::HWFlow::uiFont small] -foreground $textSecondary -background $headerBg -anchor e
+    pack $w.header.version -side right -padx 18 -pady {0 12}
+    pack $w.header.subtitle -side left -fill x -expand 1 -padx 18 -pady {0 12}
+    ::HWFlow::uiWidget frame $w.header.rule -height 3 -background $accent
+    pack $w.header.rule -fill x
 
-    ::HWFlow::uiWidget frame $w.body.modules
-    pack $w.body.modules -fill both -expand 1
-    grid columnconfigure $w.body.modules 0 -weight 1
+    ::HWFlow::uiWidget frame $w.body -background $bodyBg
+    pack $w.body -fill both -expand 1 -padx 16 -pady 14
+    ::HWFlow::uiWidget frame $w.body.navigation -background $bodyBg
+    ::HWFlow::uiWidget frame $w.body.detail -relief solid -borderwidth 1 -background $cardBg
+    grid $w.body.navigation -row 0 -column 0 -sticky ns -padx {0 16}
+    grid $w.body.detail -row 0 -column 1 -sticky nsew
+    grid rowconfigure $w.body 0 -weight 1
+    grid columnconfigure $w.body 1 -weight 1
 
-    set bodyRow 0
+    ::HWFlow::uiWidget label $w.body.navigation.heading \
+        -text [::HWFlow::txt "工具分类" "Categories"] -font [::HWFlow::uiFont heading] \
+        -foreground $textPrimary -background $bodyBg -anchor w
+    pack $w.body.navigation.heading -fill x -pady {0 8}
     set groupIndex 0
     foreach group [::HWToolkit::moduleGroups] {
-        if {$groupIndex > 0} {
-            ::HWFlow::uiWidget separator $w.body.modules.separator_$groupIndex -orient horizontal
-            grid $w.body.modules.separator_$groupIndex -row $bodyRow -column 0 -sticky ew -pady {8 6}
-            incr bodyRow
-        }
-        ::HWFlow::uiWidget label $w.body.modules.group_$groupIndex -text [::HWToolkit::groupText $group] -font [::HWFlow::uiFont heading] -anchor w
-        grid $w.body.modules.group_$groupIndex -row $bodyRow -column 0 -sticky ew -pady {2 3}
-        incr bodyRow
-
-        foreach {key info} $MODULES {
-            if {![::HWToolkit::moduleVisible $info]} {
-                continue
-            }
-            if {[dict get $info group] ne $group} {
-                continue
-            }
-            set labelText [::HWToolkit::moduleText $info label]
-            set row $w.body.modules.row_$key
-            ::HWFlow::uiWidget frame $row
-            ::HWFlow::uiWidget button $row.run -text $labelText -font [::HWFlow::uiFont module] -width 28 -anchor w -command [list ::HWToolkit::runModule $key]
-            ::HWFlow::uiWidget label $row.desc -text [::HWToolkit::moduleText $info desc] -font [::HWFlow::uiFont small] -justify left -anchor w
-            ::HWFlow::bindAutoWrap $row.desc 340
-            ::HWFlow::uiWidget button $row.settings -text [::HWFlow::txt "设置" "Settings"] -width 10 -command [list ::HWToolkit::settingsModule $key]
-            set shortcutText [::HWToolkit::shortcutText $key]
-            ::HWFlow::uiWidget button $row.shortcut -text $shortcutText -width 16 -command [list ::HWShortcut::showForModule $key]
-            set actionColumn 3
-            if {[dict exists $info undo_proc]} {
-                ::HWFlow::uiWidget button $row.undo -text [::HWFlow::txt "撤回" "Undo"] -width 10 -command [dict get $info undo_proc]
-                set actionColumn 4
-                grid $row.undo -row 0 -column 3 -sticky n -padx {0 6}
-            }
-            grid $row.run -row 0 -column 0 -sticky nw -padx {0 8}
-            grid $row.desc -row 0 -column 1 -sticky new -padx {0 8}
-            grid $row.settings -row 0 -column 2 -sticky n -padx {0 6}
-            grid $row.shortcut -row 0 -column $actionColumn -sticky n
-            grid columnconfigure $row 1 -weight 1
-            grid $row -row $bodyRow -column 0 -sticky ew -pady 4
-            incr bodyRow
-        }
+        set button $w.body.navigation.group_$groupIndex
+        ::HWFlow::uiWidget button $button -text [::HWToolkit::groupText $group] \
+            -font [::HWFlow::uiFont module] -width 18 -anchor w -relief flat -borderwidth 1 \
+            -highlightthickness 0 -cursor hand2 \
+            -command [list ::HWToolkit::select2022Group $group]
+        ::HWToolkit::styleGroupButton $button normal
+        pack $button -fill x -pady 2
         incr groupIndex
     }
+    ::HWFlow::uiWidget label $w.body.navigation.tools \
+        -text [::HWFlow::txt "工具" "Tools"] -font [::HWFlow::uiFont heading] \
+        -foreground $textPrimary -background $bodyBg -anchor w
+    pack $w.body.navigation.tools -fill x -pady {16 6}
+    listbox $w.body.navigation.list -width 29 -height 12 -font [::HWFlow::uiFont default] \
+        -exportselection 0 -selectmode browse -activestyle none \
+        -background $cardBg -foreground $textPrimary \
+        -selectbackground $listSelBg -selectforeground $listSelFg \
+        -selectborderwidth 0 -relief solid -borderwidth 1 \
+        -highlightthickness 1 -highlightbackground $border -highlightcolor $accent
+    pack $w.body.navigation.list -fill both -expand 1
+    bind $w.body.navigation.list <<ListboxSelect>> ::HWToolkit::update2022Selection
 
-    ::HWFlow::uiWidget frame $w.foot
-    pack $w.foot -fill x -padx 12 -pady 10
-    ::HWFlow::uiWidget button $w.foot.help -text [::HWFlow::txt "查看帮助" "View Help"] -width 14 -command "::HWToolkit::openGuide"
-    ::HWFlow::uiWidget button $w.foot.diagnostics -text [::HWFlow::txt "复制诊断" "Copy Diagnostics"] -width 14 -command "::HWToolkit::copyDiagnostics"
-    ::HWFlow::uiWidget button $w.foot.shortcuts -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -width 14 -command "::HWShortcut::showManager"
-    ::HWFlow::uiWidget button $w.foot.topmost -text [::HWToolkit::topmostButtonText] -width 18 -command ::HWToolkit::toggleProjectTopmost
-    ::HWFlow::uiWidget button $w.foot.close -text [::HWFlow::txt "退出" "Exit"] -width 10 -command ::HWToolkit::closePanel
+    ::HWFlow::uiWidget label $w.body.detail.title -text "" -font [::HWFlow::uiFont title] \
+        -foreground $textPrimary -background $cardBg -anchor w
+    ::HWFlow::uiWidget label $w.body.detail.group -text "" -font [::HWFlow::uiFont small] \
+        -foreground $accentSoftText -background $cardBg -anchor w
+    ::HWFlow::uiWidget label $w.body.detail.desc -text "" -font [::HWFlow::uiFont default] \
+        -foreground $textPrimary -background $cardBg -justify left -anchor nw -wraplength 430
+    pack $w.body.detail.title -fill x -padx 20 -pady {22 3}
+    pack $w.body.detail.group -fill x -padx 20
+    pack $w.body.detail.desc -fill both -expand 1 -padx 20 -pady {16 12}
+    ::HWFlow::bindAutoWrap $w.body.detail.desc 350
+
+    ::HWFlow::uiWidget frame $w.body.detail.actions -background $cardBg
+    pack $w.body.detail.actions -fill x -padx 18 -pady {8 18}
+    foreach {name text width primary} [list \
+        run [::HWFlow::txt "运行" "Run"] 12 1 \
+        settings [::HWFlow::txt "设置" "Settings"] 10 0 \
+        shortcut [::HWFlow::txt "快捷键" "Shortcut"] 12 0 \
+        undo [::HWFlow::txt "撤回" "Undo"] 10 0] {
+        ::HWFlow::uiWidget button $w.body.detail.actions.$name -text $text \
+            -font [::HWFlow::uiFont default] -width $width -cursor hand2
+        if {$primary} {
+            catch {$w.body.detail.actions.$name configure \
+                -background $accent -foreground #ffffff \
+                -activebackground $accentDark -activeforeground #ffffff}
+        }
+        pack $w.body.detail.actions.$name -side left -padx 3
+    }
+
+    ::HWFlow::uiWidget frame $w.foot -background $bodyBg
+    pack $w.foot -fill x -padx 16 -pady {0 14}
+    ::HWFlow::uiWidget frame $w.foot.rule -height 1 -background $border
+    pack $w.foot.rule -fill x -pady {0 10}
+    foreach {name text width command} [list \
+        help [::HWFlow::txt "查看帮助" "View Help"] 12 ::HWToolkit::openGuide \
+        diagnostics [::HWFlow::txt "复制诊断" "Copy Diagnostics"] 12 ::HWToolkit::copyDiagnostics \
+        shortcuts [::HWFlow::txt "快捷键管理" "Shortcuts"] 13 ::HWShortcut::showManager] {
+        ::HWFlow::uiWidget button $w.foot.$name -text $text -width $width -command $command -cursor hand2
+        pack $w.foot.$name -side left -padx {0 6}
+    }
+    ::HWFlow::uiWidget button $w.foot.topmost -text [::HWToolkit::topmostButtonText] \
+        -width 16 -command ::HWToolkit::toggleProjectTopmost -cursor hand2
+    pack $w.foot.topmost -side right -padx {0 6}
+    ::HWFlow::uiWidget button $w.foot.close -text [::HWFlow::txt "关闭" "Close"] -width 10 \
+        -command ::HWToolkit::closePanel -cursor hand2
     pack $w.foot.close -side right
-    pack $w.foot.topmost -side right -padx {0 8}
-    pack $w.foot.shortcuts -side right -padx {0 8}
-    pack $w.foot.diagnostics -side right -padx {0 8}
-    pack $w.foot.help -side right -padx {0 8}
+
     bind $w <Escape> ::HWToolkit::closePanel
     wm protocol $w WM_DELETE_WINDOW ::HWToolkit::closePanel
+    set groups [::HWToolkit::moduleGroups]
+    if {[llength $groups] > 0} { ::HWToolkit::select2022Group [lindex $groups 0] }
 
-    update idletasks
-    set sw [winfo screenwidth $w]
-    set sh [winfo screenheight $w]
-    set ww [winfo reqwidth $w]
-    set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
-    catch {wm deiconify $w}
+    set width 820
+    set height 560
+    set x [expr {([winfo screenwidth $w] - $width) / 2}]
+    set y [expr {([winfo screenheight $w] - $height) / 2}]
+    wm geometry $w ${width}x${height}+$x+$y
+    wm deiconify $w
     catch {raise $w}
-    catch {focus -force $w}
-    # Keep the main panel non-modal.  HyperWorks 2022 does not reliably re-arm
-    # a native key callback when its deferred handler enters a nested
-    # `tkwait window`; returning to the host event loop keeps the shortcut
-    # repeatable after the panel is closed.  Module dialogs may remain modal.
+    catch {focus $w}
     return $w
+}
+
+# Flat navigation-button look for the unified home panel.  The active category
+# gets the accent tint while inactive buttons match the body background.
+# Classic Tk options are used so hwtk and ttk backends fall back cleanly.
+proc ::HWToolkit::styleGroupButton {button state} {
+    set bodyBg [::HWFlow::uiColors bodyBg]
+    set accentSoft [::HWFlow::uiColors accentSoft]
+    set accentSoftText [::HWFlow::uiColors accentSoftText]
+    set textSecondary [::HWFlow::uiColors textSecondary]
+    if {$state eq "active"} {
+        catch {$button configure -relief flat -borderwidth 1 \
+            -background $accentSoft -foreground $accentSoftText \
+            -activebackground $accentSoft -activeforeground $accentSoftText}
+    } else {
+        catch {$button configure -relief flat -borderwidth 1 \
+            -background $bodyBg -foreground $textSecondary \
+            -activebackground $accentSoft -activeforeground $accentSoftText}
+    }
+}
+
+proc ::HWToolkit::select2022Group {group} {
+    variable MODULES
+    variable UI2022_GROUP
+    variable UI2022_KEYS
+    set UI2022_GROUP $group
+    set UI2022_KEYS {}
+    set list .hwtoolkit.body.navigation.list
+    if {![winfo exists $list]} { return }
+    $list delete 0 end
+    foreach {key info} $MODULES {
+        if {![::HWToolkit::moduleVisible $info] || [dict get $info group] ne $group} { continue }
+        lappend UI2022_KEYS $key
+        $list insert end [::HWToolkit::moduleText $info label]
+    }
+    set index 0
+    foreach candidate [::HWToolkit::moduleGroups] {
+        set button .hwtoolkit.body.navigation.group_$index
+        if {[winfo exists $button]} {
+            ::HWToolkit::styleGroupButton $button [expr {$candidate eq $group ? "active" : "normal"}]
+        }
+        incr index
+    }
+    if {[llength $UI2022_KEYS] > 0} {
+        $list selection set 0
+        $list activate 0
+        ::HWToolkit::update2022Selection
+    }
+}
+
+proc ::HWToolkit::update2022Selection {} {
+    variable MODULES
+    variable UI2022_GROUP
+    variable UI2022_KEYS
+    set list .hwtoolkit.body.navigation.list
+    if {![winfo exists $list]} { return }
+    set selection [$list curselection]
+    if {[llength $selection] == 0} { return }
+    set key [lindex $UI2022_KEYS [lindex $selection 0]]
+    if {![dict exists $MODULES $key]} { return }
+    set info [dict get $MODULES $key]
+    set detail .hwtoolkit.body.detail
+    $detail.title configure -text [::HWToolkit::moduleText $info label]
+    $detail.group configure -text "[::HWToolkit::groupText $UI2022_GROUP]  ·  [::HWToolkit::shortcutText $key]"
+    $detail.desc configure -text [::HWToolkit::moduleText $info desc]
+    $detail.actions.run configure -state normal -command [list ::HWToolkit::runModule $key]
+    if {[dict exists $info settings_proc]} {
+        $detail.actions.settings configure -state normal -command [list ::HWToolkit::settingsModule $key]
+    } else {
+        $detail.actions.settings configure -state disabled -command {}
+    }
+    $detail.actions.shortcut configure -state normal -command [list ::HWShortcut::showForModule $key]
+    if {[dict exists $info undo_proc]} {
+        $detail.actions.undo configure -state normal -command [dict get $info undo_proc]
+    } else {
+        $detail.actions.undo configure -state disabled -command {}
+    }
+}
+
+# HyperMesh 2019 entry point.  The 2019 profile renders the same two-pane
+# layout as HyperWorks 2022; ::HWFlow::uiWidget picks the host-appropriate
+# widget backend and ::HWFlow::uiFont keeps per-generation font sizes, so the
+# shared builder needs no version-specific copy.
+proc ::HWToolkit::showPanelLegacy {} {
+    return [::HWToolkit::showPanel2022]
 }
 
 proc ::HWToolkit::shortcutText {key} {
@@ -535,11 +681,11 @@ proc ::HWToolkit::refreshShortcutDisplays {} {
     if {![winfo exists .hwtoolkit]} {
         return
     }
-    foreach {key info} $MODULES {
-        set row ".hwtoolkit.body.modules.row_$key"
-        if {[winfo exists $row.shortcut]} {
-            catch {$row.shortcut configure -text [::HWToolkit::shortcutText $key]}
-        }
+    # The unified two-pane panel shows the shortcut of the currently selected
+    # module in the detail area; re-render that selection after bindings
+    # change.  No module rows exist anymore on either host generation.
+    if {[winfo exists .hwtoolkit.body.navigation.list]} {
+        catch {::HWToolkit::update2022Selection}
     }
 }
 
@@ -679,6 +825,9 @@ proc ::HWToolkit::copyDiagnostics {} {
         lappend rows "shortcut_startup=[::HWShortcut::getStartupHeartbeatStatus]"
         lappend rows "shortcut_config=[::HWShortcut::getConfigFile]"
     }
+    lappend rows "hyperworks_version=[::HWFlow::hyperWorksVersion]"
+    lappend rows "ui_profile=[::HWFlow::uiProfile]"
+    lappend rows "ui_backend=[::HWFlow::uiBackend]"
     set text [join $rows "\n"]
     if {[llength [info commands clipboard]] > 0} {
         clipboard clear

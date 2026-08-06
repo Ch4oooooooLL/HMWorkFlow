@@ -14,7 +14,12 @@ from __future__ import annotations
 
 import json
 import math
+import multiprocessing
+import os
 import re
+import sys
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 try:
@@ -27,7 +32,6 @@ try:
     from hmworkflow.mesh_seam_weld.local_split_planner import _plane, _project, _triangulate
     from .multi_element_split_planner import plan_multi_element_split
     from hmworkflow.mesh_seam_weld.quality_guard import element_metrics, validate_strip_connectivity, validate_weld_elements
-    from .seam_neighborhood_optimizer import optimize_seam_neighborhood
     from hmworkflow.mesh_seam_weld.shell_topology import build as build_topology
     from hmworkflow.mesh_seam_weld.weld_strip_planner import plan_zipper
 except ImportError:
@@ -35,14 +39,13 @@ except ImportError:
     from local_split_planner import _plane, _project, _triangulate
     from multi_element_split_planner import plan_multi_element_split
     from quality_guard import element_metrics, validate_strip_connectivity, validate_weld_elements
-    from seam_neighborhood_optimizer import optimize_seam_neighborhood
     from shell_topology import build as build_topology
     from weld_strip_planner import plan_zipper
 
 try:
-    from shell_weld_detection import connected_edge_paths
+    from shell_weld_detection import build_component_topology, connected_edge_paths, find_candidate_component_pairs
 except ImportError:
-    from hmworkflow.hybrid_core.shell_weld_detection import connected_edge_paths
+    from hmworkflow.hybrid_core.shell_weld_detection import build_component_topology, connected_edge_paths, find_candidate_component_pairs
 
 
 DEFAULT_SETTINGS = {
@@ -59,7 +62,119 @@ DEFAULT_SETTINGS = {
     "maximum_split_aspect_ratio": 100.0,
     "maximum_weld_aspect_ratio": 100.0,
     "maximum_weld_triangle_ratio": 0.75,
+    "python_workers": 0,
 }
+
+
+_DETECTION_CONTEXT = {}
+
+
+class _AabbGrid:
+    """Conservative uniform-grid broad phase for shell elements and edges."""
+
+    def __init__(self, rows, cell_size, maximum_cells_per_row=256):
+        self.cell_size = max(float(cell_size), 1.0e-9)
+        self.rows = {int(row_id): value for row_id, _, value in rows}
+        self.cells = defaultdict(list)
+        self.overflow = []
+        for row_id, bounds, _ in rows:
+            lower = self._key((bounds[0], bounds[2], bounds[4]))
+            upper = self._key((bounds[1], bounds[3], bounds[5]))
+            cell_count = (upper[0] - lower[0] + 1) * (upper[1] - lower[1] + 1) * (upper[2] - lower[2] + 1)
+            if cell_count > int(maximum_cells_per_row):
+                # A malformed or vehicle-spanning shell must not allocate
+                # millions of Python lists. Keep it in a conservative overflow
+                # bucket that participates in every exact query instead.
+                self.overflow.append(int(row_id))
+                continue
+            for ix in range(lower[0], upper[0] + 1):
+                for iy in range(lower[1], upper[1] + 1):
+                    for iz in range(lower[2], upper[2] + 1):
+                        self.cells[(ix, iy, iz)].append(int(row_id))
+
+    def _key(self, point):
+        return tuple(int(math.floor(float(value) / self.cell_size)) for value in point)
+
+    def query_bounds(self, bounds):
+        lower = self._key((bounds[0], bounds[2], bounds[4]))
+        upper = self._key((bounds[1], bounds[3], bounds[5]))
+        matches = set(self.overflow)
+        for ix in range(lower[0], upper[0] + 1):
+            for iy in range(lower[1], upper[1] + 1):
+                for iz in range(lower[2], upper[2] + 1):
+                    matches.update(self.cells.get((ix, iy, iz), ()))
+        return [self.rows[row_id] for row_id in sorted(matches)]
+
+
+def _bounds_for_points(points):
+    return (
+        min(point[0] for point in points), max(point[0] for point in points),
+        min(point[1] for point in points), max(point[1] for point in points),
+        min(point[2] for point in points), max(point[2] for point in points),
+    )
+
+
+def _component_element_indexes(by_component, nodes, maximum):
+    indexes = {}
+    for component_id, elements in by_component.items():
+        if not elements:
+            continue
+        rows = []
+        component_points = []
+        for element in elements:
+            points = [nodes[node_id] for node_id in element.node_ids]
+            component_points.extend(points)
+            rows.append((element.element_id, _bounds_for_points(points), element))
+        bounds = _bounds_for_points(component_points)
+        diagonal = math.sqrt(
+            (bounds[1] - bounds[0]) ** 2 +
+            (bounds[3] - bounds[2]) ** 2 +
+            (bounds[5] - bounds[4]) ** 2
+        )
+        cell_size = max(float(maximum), diagonal / max(math.sqrt(len(elements)), 1.0), 1.0e-6)
+        indexes[component_id] = _AabbGrid(rows, cell_size)
+    return indexes
+
+
+def _global_element_index(by_component, nodes, maximum):
+    rows = []
+    all_points = []
+    for elements in by_component.values():
+        for element in elements:
+            points = [nodes[node_id] for node_id in element.node_ids]
+            all_points.extend(points)
+            rows.append((element.element_id, _bounds_for_points(points), element))
+    if not rows:
+        return None
+    bounds = _bounds_for_points(all_points)
+    diagonal = math.sqrt(
+        (bounds[1] - bounds[0]) ** 2 +
+        (bounds[3] - bounds[2]) ** 2 +
+        (bounds[5] - bounds[4]) ** 2
+    )
+    # Whole-vehicle meshes occupy 3-D space. A cube-root scale avoids both a
+    # near-global bucket and millions of tiny cells for long shell elements.
+    cell_size = max(float(maximum), diagonal / max(len(rows) ** (1.0 / 3.0), 1.0), 1.0e-6)
+    return _AabbGrid(rows, cell_size)
+
+
+def _component_edge_indexes(topologies, nodes, maximum):
+    indexes = {}
+    for component_id, topology in topologies.items():
+        rows = []
+        for edge_id, edge in enumerate(topology.free_edges):
+            first, second, _ = edge
+            rows.append((edge_id, _bounds_for_points((nodes[first], nodes[second])), edge))
+        if rows:
+            bounds = topology.bounds
+            diagonal = math.sqrt(
+                (bounds[1] - bounds[0]) ** 2 +
+                (bounds[3] - bounds[2]) ** 2 +
+                (bounds[5] - bounds[4]) ** 2
+            )
+            cell_size = max(float(maximum), diagonal / max(math.sqrt(len(rows)), 1.0), 1.0e-6)
+            indexes[component_id] = _AabbGrid(rows, cell_size)
+    return indexes
 
 
 def _sub(a, b):
@@ -129,7 +244,17 @@ def _ray_hit_element(point, direction, element, nodes, maximum, tolerance):
     return min(hits, key=lambda row: row["distance"]) if hits else None
 
 
-def _ray_hits_component(point, direction, elements, nodes, maximum, tolerance):
+def _ray_hits_component(point, direction, elements, nodes, maximum, tolerance, element_index=None):
+    if element_index is not None:
+        endpoint = _add(point, _scale(direction, maximum))
+        padding = max(float(tolerance), element_index.cell_size * float(tolerance) * 4.0, 1.0e-9)
+        segment_bounds = _bounds_for_points((point, endpoint))
+        query_bounds = (
+            segment_bounds[0] - padding, segment_bounds[1] + padding,
+            segment_bounds[2] - padding, segment_bounds[3] + padding,
+            segment_bounds[4] - padding, segment_bounds[5] + padding,
+        )
+        elements = element_index.query_bounds(query_bounds)
     hits = []
     for element in elements:
         hit = _ray_hit_element(point, direction, element, nodes, maximum, tolerance)
@@ -182,10 +307,10 @@ def _candidate_confidence(coverage, distance_variation, angle_score, continuity=
     return round(min(0.99, 0.30 + 0.30 * coverage + 0.15 * distance_score + 0.15 * angle_score + 0.10 * continuity), 6)
 
 
-def _edge_hit_intervals(first, second, direction, target_elements, nodes, maximum, tolerance, samples=17):
+def _edge_hit_intervals(first, second, direction, target_elements, nodes, maximum, tolerance, element_index=None, samples=17):
     def hit_at(parameter):
         point = _add(nodes[first], _scale(_sub(nodes[second], nodes[first]), parameter))
-        return _ray_hits_component(point, direction, target_elements, nodes, maximum, tolerance)
+        return _ray_hits_component(point, direction, target_elements, nodes, maximum, tolerance, element_index)
 
     parameters = [index / float(samples - 1) for index in range(samples)]
     hits = [hit_at(parameter) for parameter in parameters]
@@ -227,20 +352,51 @@ def _edge_hit_intervals(first, second, direction, target_elements, nodes, maximu
     return intervals, hit_at
 
 
-def _t_candidates(model, settings, topologies):
+def _t_candidates(model, settings, topologies, source_ids=None):
     maximum = float(settings["search_distance"])
     tolerance = float(settings["ray_tolerance"])
     minimum_angle = float(settings["minimum_t_normal_angle"])
     by_component = {component_id: sorted(model.elements_for_components([component_id]), key=lambda row: row.element_id) for component_id in topologies}
+    element_indexes = _component_element_indexes(by_component, model.nodes, maximum)
+    global_element_index = _global_element_index(by_component, model.nodes, maximum)
+    component_normals = {component_id: _component_normal(elements, model.nodes) for component_id, elements in by_component.items()}
     rows = []
     for source_id, source_topology in sorted(topologies.items()):
+        if source_ids is not None and source_id not in source_ids:
+            continue
         owner_by_id = {element.element_id: element for element in by_component[source_id]}
         owner_by_edge = {tuple(sorted((first, second))): owner_id for first, second, owner_id in source_topology.free_edges}
         source_paths = connected_edge_paths(source_topology.free_edges, model.nodes)
+        local_target_ids = set()
+        if global_element_index is not None:
+            for first, second, owner_id in source_topology.free_edges:
+                owner = owner_by_id.get(owner_id)
+                if owner is None:
+                    continue
+                try:
+                    direction, _ = _edge_outward_direction((first, second), owner, model.nodes)
+                except ValueError:
+                    continue
+                swept = _bounds_for_points((
+                    model.nodes[first], model.nodes[second],
+                    _add(model.nodes[first], _scale(direction, maximum)),
+                    _add(model.nodes[second], _scale(direction, maximum)),
+                ))
+                padding = max(tolerance, global_element_index.cell_size * tolerance * 4.0, 1.0e-9)
+                expanded = (
+                    swept[0] - padding, swept[1] + padding,
+                    swept[2] - padding, swept[3] + padding,
+                    swept[4] - padding, swept[5] + padding,
+                )
+                local_target_ids.update(
+                    element.component_id
+                    for element in global_element_index.query_bounds(expanded)
+                    if element.component_id != source_id
+                )
         for target_id, target_elements in by_component.items():
-            if target_id == source_id:
+            if target_id not in local_target_ids:
                 continue
-            target_normal = _component_normal(target_elements, model.nodes)
+            target_normal = component_normals[target_id]
             if target_normal is None:
                 continue
             for boundary in source_paths:
@@ -263,7 +419,10 @@ def _t_candidates(model, settings, topologies):
                     normal_angle = angle_degrees(source_normal, target_normal)
                     if normal_angle < minimum_angle:
                         continue
-                    edge_intervals, hit_at = _edge_hit_intervals(first, second, direction, target_elements, model.nodes, maximum, tolerance)
+                    edge_intervals, hit_at = _edge_hit_intervals(
+                        first, second, direction, target_elements, model.nodes,
+                        maximum, tolerance, element_indexes.get(target_id),
+                    )
                     contexts[edge_index] = {"first": first, "second": second, "hit_at": hit_at, "angle": normal_angle}
                     for interval in edge_intervals:
                         row = dict(interval)
@@ -358,10 +517,10 @@ def _component_area(elements, nodes):
     return sum(_element_area(element, nodes) for element in elements)
 
 
-def _bidirectional_hit(point, normal, elements, nodes, maximum, tolerance):
+def _bidirectional_hit(point, normal, elements, nodes, maximum, tolerance, element_index=None):
     hits = []
     for direction in (normal, tuple(-value for value in normal)):
-        hit = _ray_hits_component(point, direction, elements, nodes, maximum, tolerance)
+        hit = _ray_hits_component(point, direction, elements, nodes, maximum, tolerance, element_index)
         if hit is not None:
             hits.append(hit)
     return min(hits, key=lambda row: (row["distance"], row["element_id"])) if hits else None
@@ -372,30 +531,37 @@ def _patch_candidates(model, settings, topologies):
     tolerance = float(settings["ray_tolerance"])
     maximum_angle = float(settings["maximum_patch_normal_angle"])
     by_component = {component_id: sorted(model.elements_for_components([component_id]), key=lambda row: row.element_id) for component_id in topologies}
+    element_indexes = _component_element_indexes(by_component, model.nodes, maximum)
+    component_normals = {component_id: _component_normal(elements, model.nodes) for component_id, elements in by_component.items()}
+    component_areas = {component_id: _component_area(elements, model.nodes) for component_id, elements in by_component.items()}
     rows = []
     component_ids = sorted(by_component)
+    candidate_pairs = set(find_candidate_component_pairs(topologies, maximum))
     for index, first_id in enumerate(component_ids):
         for second_id in component_ids[index + 1:]:
+            if (first_id, second_id) not in candidate_pairs:
+                continue
             first_elements, second_elements = by_component[first_id], by_component[second_id]
-            first_normal = _component_normal(first_elements, model.nodes)
-            second_normal = _component_normal(second_elements, model.nodes)
+            first_normal = component_normals[first_id]
+            second_normal = component_normals[second_id]
             if first_normal is None or second_normal is None:
                 continue
             angle = angle_degrees(first_normal, second_normal)
             if angle > maximum_angle:
                 continue
-            first_area, second_area = _component_area(first_elements, model.nodes), _component_area(second_elements, model.nodes)
+            first_area, second_area = component_areas[first_id], component_areas[second_id]
             if abs(first_area - second_area) <= max(first_area, second_area) * 0.02:
                 continue
             source_id, target_id = (first_id, second_id) if first_area < second_area else (second_id, first_id)
             source_elements, target_elements = by_component[source_id], by_component[target_id]
-            target_normal = _component_normal(target_elements, model.nodes)
+            target_index = element_indexes.get(target_id)
+            target_normal = component_normals[target_id]
             source_nodes = sorted(topologies[source_id].node_ids)
-            node_hits = [_bidirectional_hit(model.nodes[node_id], target_normal, target_elements, model.nodes, maximum, tolerance) for node_id in source_nodes]
+            node_hits = [_bidirectional_hit(model.nodes[node_id], target_normal, target_elements, model.nodes, maximum, tolerance, target_index) for node_id in source_nodes]
             containment_points = [model.nodes[node_id] for node_id in source_nodes]
             containment_points.extend(_midpoint(model.nodes[first], model.nodes[second]) for first, second, _ in topologies[source_id].free_edges)
             containment_points.extend(tuple(sum(model.nodes[node_id][axis] for node_id in element.node_ids) / len(element.node_ids) for axis in range(3)) for element in source_elements)
-            hits = [_bidirectional_hit(point, target_normal, target_elements, model.nodes, maximum, tolerance) for point in containment_points]
+            hits = [_bidirectional_hit(point, target_normal, target_elements, model.nodes, maximum, tolerance, target_index) for point in containment_points]
             if any(hit is None for hit in hits) or any(hit is None for hit in node_hits):
                 continue
             distances = [hit["distance"] for hit in hits]
@@ -457,15 +623,26 @@ def _near_edge_candidates(model, settings, topologies):
     tangent_limit = float(settings["near_edge_tangent_angle"])
     rows = []
     component_ids = sorted(topologies)
+    candidate_pairs = set(find_candidate_component_pairs(topologies, maximum))
+    edge_indexes = _component_edge_indexes(topologies, model.nodes, maximum)
     for index, first_id in enumerate(component_ids):
         for second_id in component_ids[index + 1:]:
+            if (first_id, second_id) not in candidate_pairs:
+                continue
             matched = []
             for first_a, first_b, owner in topologies[first_id].free_edges:
                 first_vector = _sub(model.nodes[first_b], model.nodes[first_a])
                 if norm(first_vector) <= 1.0e-12:
                     continue
                 best = None
-                for second_a, second_b, _ in topologies[second_id].free_edges:
+                first_bounds = _bounds_for_points((model.nodes[first_a], model.nodes[first_b]))
+                expanded = (
+                    first_bounds[0] - maximum, first_bounds[1] + maximum,
+                    first_bounds[2] - maximum, first_bounds[3] + maximum,
+                    first_bounds[4] - maximum, first_bounds[5] + maximum,
+                )
+                target_edges = edge_indexes[second_id].query_bounds(expanded)
+                for second_a, second_b, _ in target_edges:
                     second_vector = _sub(model.nodes[second_b], model.nodes[second_a])
                     if norm(second_vector) <= 1.0e-12:
                         continue
@@ -510,14 +687,86 @@ def _near_edge_candidates(model, settings, topologies):
     return rows
 
 
+def _initialize_detection_worker(model, settings, topologies):
+    global _DETECTION_CONTEXT
+    _DETECTION_CONTEXT = {"model": model, "settings": settings, "topologies": topologies}
+
+
+def _parallel_detection_task(task):
+    kind, source_ids = task
+    model = _DETECTION_CONTEXT["model"]
+    settings = _DETECTION_CONTEXT["settings"]
+    topologies = _DETECTION_CONTEXT["topologies"]
+    if kind == "T":
+        return _t_candidates(model, settings, topologies, set(source_ids))
+    if kind == "PATCH":
+        return _patch_candidates(model, settings, topologies)
+    if kind == "NEAR":
+        return _near_edge_candidates(model, settings, topologies)
+    raise ValueError("unsupported detection task {}".format(kind))
+
+
+def _resolved_worker_count(settings, component_count, element_count):
+    configured = int(settings.get("python_workers", 0) or 0)
+    if configured < 0:
+        raise ValueError("python_workers must not be negative")
+    available = max(1, int(os.cpu_count() or 1))
+    workers = configured if configured else min(8, max(1, available - 1))
+    workers = min(workers, max(1, component_count + 2))
+    if workers < 2 or component_count < 4 or element_count < int(settings.get("parallel_min_elements", 2000)):
+        return 1
+    return workers
+
+
+def resolved_worker_count_for_model(model, settings):
+    component_ids = {element.component_id for element in model.elements.values()}
+    return _resolved_worker_count(settings, len(component_ids), len(model.elements))
+
+
 def detect_candidates(model, settings=None):
     resolved = dict(DEFAULT_SETTINGS)
     if settings:
         resolved.update(settings)
     topologies = build_topology(model)
-    candidates = _t_candidates(model, resolved, topologies)
-    candidates.extend(_patch_candidates(model, resolved, topologies))
-    candidates.extend(_near_edge_candidates(model, resolved, topologies))
+    worker_count = _resolved_worker_count(resolved, len(topologies), len(model.elements))
+    candidates = []
+    if worker_count > 1:
+        component_ids = sorted(topologies)
+        t_partitions = max(1, worker_count - 2)
+        source_groups = [component_ids[index::t_partitions] for index in range(t_partitions)]
+        tasks = [("T", group) for group in source_groups if group]
+        tasks.extend((("PATCH", ()), ("NEAR", ())))
+        try:
+            context = multiprocessing.get_context("spawn")
+            original_executable = sys.executable
+            hidden_executable = Path(original_executable).with_name("pythonw.exe")
+            if os.name == "nt" and hidden_executable.is_file():
+                # python.exe creates one visible console per spawned worker when
+                # HyperMesh itself has no console. pythonw.exe uses the same
+                # runtime and multiprocessing pipes without flashing windows.
+                multiprocessing.set_executable(str(hidden_executable))
+            try:
+                with ProcessPoolExecutor(
+                    max_workers=worker_count,
+                    mp_context=context,
+                    initializer=_initialize_detection_worker,
+                    initargs=(model, resolved, topologies),
+                ) as executor:
+                    for rows in executor.map(_parallel_detection_task, tasks):
+                        candidates.extend(rows)
+            finally:
+                multiprocessing.set_executable(original_executable)
+        except Exception:
+            # Embedded/locked-down Python installations may prohibit child
+            # processes. Preserve the exact serial path instead of failing the
+            # engineering task solely because parallel startup was unavailable.
+            candidates = _t_candidates(model, resolved, topologies)
+            candidates.extend(_patch_candidates(model, resolved, topologies))
+            candidates.extend(_near_edge_candidates(model, resolved, topologies))
+    else:
+        candidates = _t_candidates(model, resolved, topologies)
+        candidates.extend(_patch_candidates(model, resolved, topologies))
+        candidates.extend(_near_edge_candidates(model, resolved, topologies))
     candidates.sort(key=lambda row: (row["candidate_type"], row["source_component_id"], row["target_component_id"], tuple(row["source_node_ids"])))
     for index, row in enumerate(candidates, 1):
         row["candidate_id"] = "B{:06d}".format(index)
@@ -546,6 +795,39 @@ def _allocate(counter):
     return counter[0]
 
 
+def _element_index_add(model, element):
+    index = getattr(model, "_elements_by_component", None)
+    if index is not None:
+        index.setdefault(element.component_id, []).append(element)
+    signatures = getattr(model, "_element_signature_index", None)
+    if signatures is not None:
+        signature = tuple(sorted(int(value) for value in element.node_ids))
+        signatures.setdefault(signature, set()).add(int(element.element_id))
+
+
+def _element_index_remove(model, element):
+    index = getattr(model, "_elements_by_component", None)
+    if index is not None:
+        rows = index.get(element.component_id, [])
+        index[element.component_id] = [row for row in rows if row.element_id != element.element_id]
+    signatures = getattr(model, "_element_signature_index", None)
+    if signatures is not None:
+        signature = tuple(sorted(int(value) for value in element.node_ids))
+        ids = signatures.get(signature, set())
+        ids.discard(int(element.element_id))
+        if not ids:
+            signatures.pop(signature, None)
+
+
+def _ensure_element_signature_index(model):
+    index = {}
+    for element in model.elements.values():
+        signature = tuple(sorted(int(value) for value in element.node_ids))
+        index.setdefault(signature, set()).add(int(element.element_id))
+    model._element_signature_index = index
+    return index
+
+
 def _point_on_segment(point, first, second, tolerance):
     direction = _sub(second, first)
     denominator = dot(direction, direction)
@@ -563,12 +845,41 @@ def _materialize_source_path(model, candidate, node_counter, element_counter, to
     if not source_path:
         return {"status": "READY", "node_ids": list(candidate["source_node_ids"]), "created_node_ids": [], "deleted_element_ids": [], "created_element_ids": []}
     source_component_id = int(candidate["source_component_id"])
-    topology = build_topology(model).get(source_component_id)
+    source_component = model.components.get(source_component_id)
+    source_elements = model.elements_for_components([source_component_id])
+    topology_rows = build_component_topology(
+        [{"component_id": source_component_id, "component_name": source_component.component_name if source_component else "COMP_{}".format(source_component_id)}],
+        model.nodes,
+        [{
+            "element_id": element.element_id, "component_id": element.component_id,
+            "element_type": element.element_type, "node_ids": list(element.node_ids),
+        } for element in source_elements],
+    )
+    topology = topology_rows.get(source_component_id)
     if topology is None:
         return {"status": "FAILED", "warnings": ["source component topology is unavailable"]}
     element_insertions = {}
     realized = []
     created_nodes = []
+    created_elements = []
+    deleted_elements = {}
+    node_start, element_start = node_counter[0], element_counter[0]
+
+    def rollback(warnings):
+        for element_id in created_elements:
+            created_element = model.elements.pop(element_id, None)
+            if created_element is not None:
+                _element_index_remove(model, created_element)
+            model.element_properties.pop(element_id, None)
+        for element_id, (element, property_id) in deleted_elements.items():
+            model.elements[element_id] = element
+            _element_index_add(model, element)
+            model.element_properties[element_id] = property_id
+        for node_id in created_nodes:
+            model.nodes.pop(node_id, None)
+        node_counter[0], element_counter[0] = node_start, element_start
+        return {"status": "FAILED", "warnings": list(warnings)}
+
     point_nodes = {}
     for entry in source_path:
         existing = int(entry.get("node_id", 0))
@@ -586,7 +897,7 @@ def _materialize_source_path(model, candidate, node_counter, element_counter, to
             if parameter is not None and tolerance < parameter < 1.0 - tolerance:
                 matches.append((owner_id, first, second, parameter))
         if len(matches) != 1:
-            return {"status": "FAILED", "warnings": ["partial T endpoint is not inside one unique source free edge"]}
+            return rollback(["partial T endpoint is not inside one unique source free edge"])
         owner_id, first, second, parameter = matches[0]
         node_id = _allocate(node_counter)
         model.nodes[node_id] = point
@@ -595,11 +906,11 @@ def _materialize_source_path(model, candidate, node_counter, element_counter, to
         element_insertions.setdefault(owner_id, {}).setdefault(tuple(sorted((first, second))), []).append(node_id)
         realized.append(node_id)
 
-    deleted, created = [], []
+    deleted, created = [], created_elements
     for element_id, edge_insertions in sorted(element_insertions.items()):
         element = model.elements.get(element_id)
         if element is None:
-            return {"status": "FAILED", "warnings": ["source mother shell became stale during boundary insertion"]}
+            return rollback(["source mother shell became stale during boundary insertion"])
         polygon = list(element.node_ids)
         augmented = []
         for index, first in enumerate(polygon):
@@ -613,12 +924,14 @@ def _materialize_source_path(model, candidate, node_counter, element_counter, to
         try:
             triangles = _triangulate(augmented, [local[node_id] for node_id in augmented])
         except ValueError as exc:
-            return {"status": "FAILED", "warnings": [str(exc)]}
+            return rollback([str(exc)])
         property_id = int(model.element_properties[element_id])
         original_area = element_metrics(element.node_ids, model.nodes)["area"]
         replacement_area = sum(element_metrics(node_ids, model.nodes)["area"] for node_ids in triangles)
         if original_area <= 0.0 or abs(replacement_area - original_area) / original_area > 1.0e-7:
-            return {"status": "FAILED", "warnings": ["source boundary insertion does not preserve mother-shell area"]}
+            return rollback(["source boundary insertion does not preserve mother-shell area"])
+        deleted_elements[element_id] = (element, property_id)
+        _element_index_remove(model, element)
         del model.elements[element_id]
         del model.element_properties[element_id]
         deleted.append(element_id)
@@ -629,11 +942,35 @@ def _materialize_source_path(model, candidate, node_counter, element_counter, to
                 node_ids = [node_ids[0], node_ids[2], node_ids[1]]
             new_element_id = _allocate(element_counter)
             model.elements[new_element_id] = Element(new_element_id, source_component_id, "CTRIA3", tuple(node_ids))
+            _element_index_add(model, model.elements[new_element_id])
             model.element_properties[new_element_id] = property_id
             created.append(new_element_id)
-    if hasattr(model, "_elements_by_component"):
-        delattr(model, "_elements_by_component")
-    return {"status": "READY", "node_ids": realized, "created_node_ids": created_nodes, "deleted_element_ids": deleted, "created_element_ids": created}
+    return {
+        "status": "READY", "node_ids": realized, "created_node_ids": created_nodes,
+        "deleted_element_ids": deleted, "created_element_ids": created,
+        "_transaction": {
+            "node_start": node_start, "element_start": element_start,
+            "deleted_elements": deleted_elements,
+        },
+    }
+
+
+def _rollback_source_materialization(model, source_materialization, node_counter, element_counter):
+    transaction = source_materialization.get("_transaction", {})
+    for element_id in source_materialization.get("created_element_ids", []):
+        created_element = model.elements.pop(element_id, None)
+        if created_element is not None:
+            _element_index_remove(model, created_element)
+        model.element_properties.pop(element_id, None)
+    for element_id, row in transaction.get("deleted_elements", {}).items():
+        element, property_id = row
+        model.elements[element_id] = element
+        _element_index_add(model, element)
+        model.element_properties[element_id] = property_id
+    for node_id in source_materialization.get("created_node_ids", []):
+        model.nodes.pop(node_id, None)
+    node_counter[0] = int(transaction.get("node_start", node_counter[0]))
+    element_counter[0] = int(transaction.get("element_start", element_counter[0]))
 
 
 def realize_candidates(model, candidates, settings=None):
@@ -647,6 +984,11 @@ def realize_candidates(model, candidates, settings=None):
     result.element_properties = dict(getattr(model, "element_properties", {}))
     result.pshell = dict(getattr(model, "pshell", {}))
     result.materials = dict(getattr(model, "materials", {}))
+    # Maintain this index incrementally during planning. Rebuilding it by
+    # scanning the entire vehicle for every candidate was a dominant O(C*N)
+    # cost on whole-vehicle models.
+    result.elements_for_components([])
+    _ensure_element_signature_index(result)
     id_state = resolved.get("id_state", {}) or {}
     node_counter = [max(max(nodes) if nodes else 0, int(id_state.get("max_node_id", 0)))]
     element_counter = [max(max(elements) if elements else 0, int(id_state.get("max_element_id", 0)))]
@@ -657,24 +999,8 @@ def realize_candidates(model, candidates, settings=None):
         if not candidate.get("auto_eligible") or candidate.get("candidate_type") not in ("T_SEAM", "PATCH_SEAM"):
             reports.append({"candidate_id": candidate["candidate_id"], "status": "REVIEW_REQUIRED", "created_weld_elements": 0})
             continue
-        snapshot = {
-            "components": dict(components), "nodes": dict(nodes), "elements": dict(elements),
-            "element_properties": dict(result.element_properties), "pshell": dict(result.pshell),
-            "counters": (node_counter[0], element_counter[0], component_counter[0], property_counter[0]),
-        }
-        def restore_snapshot():
-            components.clear(); components.update(snapshot["components"])
-            nodes.clear(); nodes.update(snapshot["nodes"])
-            elements.clear(); elements.update(snapshot["elements"])
-            result.element_properties.clear(); result.element_properties.update(snapshot["element_properties"])
-            result.pshell.clear(); result.pshell.update(snapshot["pshell"])
-            node_counter[0], element_counter[0], component_counter[0], property_counter[0] = snapshot["counters"]
-            if hasattr(result, "_elements_by_component"):
-                delattr(result, "_elements_by_component")
-
         source_materialization = _materialize_source_path(result, candidate, node_counter, element_counter)
         if source_materialization["status"] != "READY":
-            restore_snapshot()
             reports.append({"candidate_id": candidate["candidate_id"], "status": "FAILED", "created_weld_elements": 0, "warnings": source_materialization["warnings"]})
             continue
         source_node_ids = source_materialization["node_ids"]
@@ -691,10 +1017,34 @@ def realize_candidates(model, candidates, settings=None):
             target_points=candidate.get("target_projection_points"),
         )
         if split["status"] != "READY":
-            restore_snapshot()
+            _rollback_source_materialization(result, source_materialization, node_counter, element_counter)
             reports.append({"candidate_id": candidate["candidate_id"], "status": "FAILED", "created_weld_elements": 0, "warnings": split["warnings"]})
             continue
         coordinate_map = dict(split["coordinates"])
+        invalid_replacements = []
+        replacement_signatures = set()
+        replaced_ids = {int(value) for value in split["delete_element_ids"]}
+        for index, replacement in enumerate(split["replacement_elements"]):
+            node_ids = tuple(int(value) for value in replacement["node_ids"])
+            signature = tuple(sorted(node_ids))
+            try:
+                metrics = element_metrics(node_ids, coordinate_map)
+            except (KeyError, ValueError) as exc:
+                invalid_replacements.append("replacement {} has unresolved GRID data: {}".format(index, exc))
+                continue
+            if replacement.get("element_type") not in ("CTRIA3", "CQUAD4"):
+                invalid_replacements.append("replacement {} has unsupported shell card".format(index))
+            elif signature in replacement_signatures:
+                invalid_replacements.append("replacement {} duplicates another planned shell".format(index))
+            elif result._element_signature_index.get(signature, set()) - replaced_ids:
+                invalid_replacements.append("replacement {} duplicates an existing shell".format(index))
+            elif not metrics["valid"]:
+                invalid_replacements.append("replacement {} is degenerate".format(index))
+            replacement_signatures.add(signature)
+        if invalid_replacements:
+            _rollback_source_materialization(result, source_materialization, node_counter, element_counter)
+            reports.append({"candidate_id": candidate["candidate_id"], "status": "FAILED", "created_weld_elements": 0, "warnings": invalid_replacements})
+            continue
         try:
             weld = plan_zipper(
                 source_node_ids,
@@ -705,14 +1055,19 @@ def realize_candidates(model, candidates, settings=None):
                 max_tria_ratio=float(resolved["maximum_weld_triangle_ratio"]),
             )
         except ValueError as exc:
-            restore_snapshot()
+            _rollback_source_materialization(result, source_materialization, node_counter, element_counter)
             reports.append({"candidate_id": candidate["candidate_id"], "status": "FAILED", "created_weld_elements": 0, "warnings": [str(exc)]})
             continue
         quality = validate_weld_elements(weld, coordinate_map, max_aspect_ratio=float(resolved["maximum_weld_aspect_ratio"]))
         continuity = validate_strip_connectivity(weld, source_node_ids, split["target_node_ids"])
+        for index, element in enumerate(weld):
+            signature = tuple(sorted(int(value) for value in element["node_ids"]))
+            if signature in replacement_signatures or result._element_signature_index.get(signature, set()) - replaced_ids:
+                quality["passed"] = False
+                quality["failed_elements"].append({"index": index, "reason": "weld cell duplicates a retained shell"})
         if not quality["passed"] or not continuity["passed"]:
             warnings = [row["reason"] for row in quality["failed_elements"] + continuity["failed_elements"]]
-            restore_snapshot()
+            _rollback_source_materialization(result, source_materialization, node_counter, element_counter)
             reports.append({"candidate_id": candidate["candidate_id"], "status": "FAILED", "created_weld_elements": 0, "warnings": warnings})
             continue
 
@@ -724,14 +1079,24 @@ def realize_candidates(model, candidates, settings=None):
         def remap(node_ids):
             return tuple(placeholder_map.get(int(node_id), int(node_id)) for node_id in node_ids)
 
+        original_connectivity = {
+            str(element_id): [int(value) for value in row[0].node_ids]
+            for element_id, row in source_materialization.get("_transaction", {}).get("deleted_elements", {}).items()
+        }
         for element_id in split["delete_element_ids"]:
-            elements.pop(element_id, None)
+            if element_id in elements:
+                original_connectivity[str(element_id)] = [int(value) for value in elements[element_id].node_ids]
+        for element_id in split["delete_element_ids"]:
+            deleted_element = elements.pop(element_id, None)
+            if deleted_element is not None:
+                _element_index_remove(result, deleted_element)
             result.element_properties.pop(element_id, None)
         created_mother = []
         for replacement in split["replacement_elements"]:
             element_id = _allocate(element_counter)
             node_ids = remap(replacement["node_ids"])
             elements[element_id] = Element(element_id, int(replacement["component_id"]), replacement["element_type"], node_ids)
+            _element_index_add(result, elements[element_id])
             result.element_properties[element_id] = int(replacement["property_id"])
             created_mother.append(element_id)
 
@@ -757,17 +1122,19 @@ def realize_candidates(model, candidates, settings=None):
             element_id = _allocate(element_counter)
             node_ids = remap(planned["node_ids"])
             elements[element_id] = Element(element_id, seam_component_id, planned["element_type"], node_ids)
+            _element_index_add(result, elements[element_id])
             result.element_properties[element_id] = seam_property_id
             created_weld.append(element_id)
-        if hasattr(result, "_elements_by_component"):
-            delattr(result, "_elements_by_component")
+        all_created_nodes = sorted(source_materialization["created_node_ids"] + list(placeholder_map.values()))
+        replacement_ids = list(source_materialization["created_element_ids"]) + created_mother
+        deleted_ids = list(source_materialization["deleted_element_ids"]) + list(split["delete_element_ids"])
         reports.append({
             "candidate_id": candidate["candidate_id"],
             "status": "CREATED",
             "candidate_type": candidate["candidate_type"],
             "deleted_mother_elements": split["delete_element_ids"],
             "created_mother_elements": created_mother,
-            "created_node_ids": sorted(source_materialization["created_node_ids"] + list(placeholder_map.values())),
+            "created_node_ids": all_created_nodes,
             "created_source_node_ids": sorted(source_materialization["created_node_ids"]),
             "created_target_node_ids": sorted(placeholder_map.values()),
             "deleted_source_elements": source_materialization["deleted_element_ids"],
@@ -776,6 +1143,11 @@ def realize_candidates(model, candidates, settings=None):
             "created_weld_elements": len(created_weld),
             "seam_component_id": seam_component_id,
             "seam_component_name": seam_name,
+            "deleted_element_ids": deleted_ids,
+            "original_connectivity": original_connectivity,
+            "new_node_rows": [{"node_id": node_id, "coordinates": list(nodes[node_id])} for node_id in all_created_nodes],
+            "replacement_element_rows": [_element_row(elements[element_id], result.element_properties.get(element_id, 0)) for element_id in replacement_ids],
+            "weld_element_rows": [_element_row(elements[element_id], result.element_properties.get(element_id, 0)) for element_id in created_weld],
         })
     return result, reports
 
@@ -790,21 +1162,20 @@ def _element_row(element, property_id=0):
     }
 
 
-def plan_candidate_deltas(model, candidates, settings=None, criteria_path=None, param_path=None):
+def plan_candidate_deltas(model, candidates, settings=None):
     """Build sequential, preallocated HM-import plans from the FEM backend.
 
     Each candidate is realized against the accumulated result so shared-source
-    and multi-target cases remain deterministic.  Optional neighborhood moves
-    are attached to the final ready plan and therefore execute only after all
-    preceding topology deltas have been applied.
+    and multi-target cases remain deterministic. HyperMesh owns the final
+    neighborhood remesh; Python only identifies replacement-shell seeds and
+    seam nodes that the native batch operation must preserve.
     """
     resolved = dict(DEFAULT_SETTINGS)
     if settings:
         resolved.update(settings)
-    current = model
     plans = []
-    reports = []
-    for candidate in candidates:
+    current, reports = realize_candidates(model, candidates, resolved)
+    for candidate, report in zip(candidates, reports):
         transfer_fields = {
             "candidate_type": str(candidate.get("candidate_type", "UNKNOWN")),
             "confidence": float(candidate.get("confidence", 0.0)),
@@ -815,10 +1186,6 @@ def plan_candidate_deltas(model, candidates, settings=None, criteria_path=None, 
             "target_node_ids": [int(value) for value in candidate.get("target_node_ids", [])],
             "length": float(candidate.get("length", 0.0)),
         }
-        before = current
-        after, candidate_reports = realize_candidates(before, [candidate], resolved)
-        report = candidate_reports[0]
-        reports.append(report)
         if report.get("status") != "CREATED":
             plans.append({
                 "candidate_id": candidate["candidate_id"],
@@ -833,23 +1200,14 @@ def plan_candidate_deltas(model, candidates, settings=None, criteria_path=None, 
                 "original_connectivity": {}, "property_id": 0,
             })
             continue
-        new_node_ids = sorted(set(after.nodes).difference(before.nodes))
-        deleted_element_ids = sorted(set(before.elements).difference(after.elements))
-        new_element_ids = sorted(set(after.elements).difference(before.elements))
+        new_nodes = list(report.get("new_node_rows", []))
+        new_node_ids = [int(row["node_id"]) for row in new_nodes]
+        deleted_element_ids = [int(value) for value in report.get("deleted_element_ids", [])]
         seam_component_id = int(report["seam_component_id"])
-        replacement_elements = []
-        weld_elements = []
-        for element_id in new_element_ids:
-            element = after.elements[element_id]
-            row = _element_row(element, getattr(after, "element_properties", {}).get(element_id, 0))
-            if element.component_id == seam_component_id:
-                weld_elements.append(row)
-            else:
-                replacement_elements.append(row)
-        original_connectivity = {
-            str(element_id): [int(value) for value in before.elements[element_id].node_ids]
-            for element_id in deleted_element_ids
-        }
+        replacement_elements = list(report.get("replacement_element_rows", []))
+        weld_elements = list(report.get("weld_element_rows", []))
+        original_connectivity = dict(report.get("original_connectivity", {}))
+        read_nodes = sorted({int(value) for node_ids in original_connectivity.values() for value in node_ids})
         plan = {
             "candidate_id": candidate["candidate_id"],
             **transfer_fields,
@@ -860,13 +1218,13 @@ def plan_candidate_deltas(model, candidates, settings=None, criteria_path=None, 
             "ids_preallocated": True,
             "move_nodes": [],
             "delete_element_ids": deleted_element_ids,
-            "new_nodes": [{"node_id": node_id, "coordinates": list(after.nodes[node_id])} for node_id in new_node_ids],
+            "new_nodes": new_nodes,
             "replacement_elements": replacement_elements,
             "weld_elements": weld_elements,
             "output_component_id": seam_component_id,
             "output_component_name": str(report["seam_component_name"]),
             "property_id": int(weld_elements[0]["property_id"]) if weld_elements else 0,
-            "read_nodes": sorted({value for element_id in deleted_element_ids for value in before.elements[element_id].node_ids}),
+            "read_nodes": read_nodes,
             "write_nodes": new_node_ids,
             "read_elements": deleted_element_ids,
             "delete_elements": deleted_element_ids,
@@ -874,36 +1232,37 @@ def plan_candidate_deltas(model, candidates, settings=None, criteria_path=None, 
             "max_new_failed_elements": int(resolved.get("max_new_failed_elements", 0)),
         }
         plans.append(plan)
-        current = after
 
-    optimization = {"status": "DISABLED", "moves": []}
     ready_plans = [plan for plan in plans if plan["status"] == "READY"]
-    if ready_plans and bool(resolved.get("optimize_neighborhood", True)):
-        before_coordinates = dict(current.nodes)
-        optimization = optimize_seam_neighborhood(
-            current,
-            reports,
-            criteria_path,
-            param_path,
-            layers=int(resolved.get("optimization_layers", 2)),
-            iterations=int(resolved.get("optimization_iterations", 4)),
-            settings={"maximum_node_move": resolved.get("optimization_max_node_move", None)} if resolved.get("optimization_max_node_move") is not None else {},
-        )
-        if optimization.get("moves"):
-            last = ready_plans[-1]
-            last["move_nodes"] = list(optimization["moves"])
-            moved_ids = sorted(int(row["node_id"]) for row in optimization["moves"])
-            last["read_nodes"] = sorted(set(last["read_nodes"]).union(moved_ids))
-            last["write_nodes"] = sorted(set(last["write_nodes"]).union(moved_ids))
-            # Moves must describe the coordinates present after earlier plans,
-            # not coordinates already changed in the final in-memory result.
-            for move in last["move_nodes"]:
-                move["from"] = list(before_coordinates[int(move["node_id"])])
+    remesh_seed_ids = sorted({
+        int(element["element_id"])
+        for plan in ready_plans
+        for element in plan["replacement_elements"]
+    })
+    protected_node_ids = sorted({
+        int(node_id)
+        for plan in ready_plans
+        for element in plan["weld_elements"]
+        for node_id in element["node_ids"]
+    }.union({
+        int(node["node_id"])
+        for plan in ready_plans
+        for node in plan["new_nodes"]
+    }))
+    remesh = {
+        "status": "PLANNED" if remesh_seed_ids else "NOT_REQUIRED",
+        "seed_element_ids": remesh_seed_ids,
+        "protected_node_ids": protected_node_ids,
+        "expand_layers": int(resolved.get("remesh_expand_layers", 2)),
+        "element_size": float(resolved.get("remesh_element_size", 8.0)),
+        "feature_angle": float(resolved.get("remesh_feature_angle", 30.0)),
+        "execution_mode": "HYPERMESH_BATCH_AUTOMESH",
+    }
     return {
         "schema_version": "1.0",
         "plans": plans,
         "realization_reports": reports,
-        "optimization": optimization,
+        "remesh": remesh,
         "result_model": current,
     }
 

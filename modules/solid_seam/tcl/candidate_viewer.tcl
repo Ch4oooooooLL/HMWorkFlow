@@ -165,7 +165,7 @@ proc ::SolidSeam::showCandidateWindow {} {
     set w [::SolidSeam::candidateWindow]
     if {[winfo exists $w]} { raise $w; ::SolidSeam::refreshCandidateList; return }
     ::HWFlow::createTopLevel $w
-    wm title $w [::SolidSeam::txt "实体焊缝候选" "Solid Seam Candidates"]
+    wm title $w [::HWFlow::windowTitle [::SolidSeam::txt "实体焊缝候选" "Solid Seam Candidates"] "Solid Seam Candidates"]
     wm minsize $w 1120 600
     wm protocol $w WM_DELETE_WINDOW ::SolidSeam::closeCandidateWindow
     bind $w <Escape> ::SolidSeam::closeCandidateWindow

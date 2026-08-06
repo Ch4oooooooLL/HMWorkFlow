@@ -20,7 +20,7 @@
 File > Run > Tcl/Tk Script > hw_toolkit.tcl
 ```
 
-运行后会打开 `HyperMesh Toolkit` 主面板。模块归类为三部分显示：
+运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的双栏布局：左侧按分类切换并选择工具，右侧显示所选工具的说明与操作按钮。模块归类为三部分显示：
 
 ```text
 Geometry
@@ -28,9 +28,9 @@ Mesh
 Connection
 ```
 
-主面板中的 `刷新浏览器` 用于恢复 Model Browser 更新并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
+左侧的分类按钮切换 `Geometry` / `Mesh` / `Connection`，下方列表选择具体工具；右侧显示工具说明和 `运行` / `设置` / `快捷键` / `撤回` 操作。模块运行结束后会自动刷新 Model Browser 并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
 
-主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。每个模块行右侧会显示当前快捷键；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
+主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。选中工具后，其快捷键显示在右侧详情区；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
 
 快捷键会直接调用模块的 `proc` 执行入口，不会打开 HMWorkFlow 主界面，也不会打开模块的 `more` 配置界面。
 
@@ -121,7 +121,7 @@ AUTO_CONTACT_*
 
 - 每个模块窗口都支持 `返回主页 / Back to Home`。
 - 多数模块按 `Esc` 可关闭当前窗口；连续选择类模块在 HyperMesh 选择面板中按 `ESC` 退出连续模式。
-- 如果脚本创建了 component 但左侧 Model Browser 未立即显示，点击主面板 `刷新浏览器`。
+- 如果脚本创建了 component 但左侧 Model Browser 未立即显示，可再次运行相关模块，模块结束后会自动刷新 Model Browser。
 - 普通 Tcl 解释器只能做基础语法检查；所有 HyperMesh 命令必须在 HyperMesh 内运行。
 
 ## 3. 目录结构
@@ -469,7 +469,7 @@ SEAM_T2.0
 - 进度窗口、取消状态和日志。
 - 模块 UI 状态保存与读取。
 
-脚本创建 component 后会尽量通过 HyperMesh 2019 的 Browser API 同步登记；内部 Browser API 不可用时回退到普通 `*createentity`。如果 Browser 未立即更新，使用主面板 `刷新浏览器` 即可。
+脚本创建 component 后会尽量通过 HyperMesh 2019 的 Browser API 同步登记；内部 Browser API 不可用时回退到普通 `*createentity`。如果 Browser 未立即更新，重新运行相关模块即可触发自动刷新。
 
 ## 8. 开发和验证说明
 

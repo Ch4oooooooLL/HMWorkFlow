@@ -30,7 +30,6 @@ def prepare(output, combined=False):
     candidates = [row for row in detect_candidates(model) if row.get("auto_eligible")]
     run_id = "HM2019_STAGE2_PIPELINE"
     criteria = Path(__file__).with_name("reference.criteria").resolve()
-    param = Path(__file__).with_name("reference.param").resolve()
     request = {
         "schema_version": "1.0",
         "module": "fem_auto_seam",
@@ -46,11 +45,10 @@ def prepare(output, combined=False):
             "near_edge_distance": 8.0,
             "max_weld_tria_ratio": 0.75,
             "max_new_failed_elements": 1000,
-            "optimize_neighborhood": True,
             "criteria_path": str(criteria),
-            "param_path": str(param),
-            "optimization_layers": 2,
-            "optimization_iterations": 4,
+            "remesh_element_size": 10.0,
+            "remesh_expand_layers": 2,
+            "remesh_feature_angle": 30.0,
         },
         "accepted_candidate_ids": [row["candidate_id"] for row in candidates],
         "candidate_type_overrides": {},
@@ -90,6 +88,7 @@ def prepare(output, combined=False):
         "backend_result_manifest": str((output / "backend_result_manifest.json").resolve()),
         "transfer_manifest": str((output / "transfer_manifest.json").resolve()),
         "delta_manifest": str((output / "delta_manifest.json").resolve()),
+        "remesh_plan": str((output / "remesh_plan.json").resolve()),
         "criteria": str(criteria),
         "candidate_count": len(candidates),
         "fixture": "combined_all_cases" if combined else "case_02_angled_t",

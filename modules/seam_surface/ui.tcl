@@ -48,7 +48,7 @@ proc ::hmtoolkit::seam::ui::show {{settingsOnly 0} {initialContext {}}} {
     set runtime(status) [::HWFlow::txt "请选择局部范围后分析；创建前始终需要确认。" "Select a local scope and analyze; creation always requires confirmation."]
     catch {destroy $window}
     ::HWFlow::createTopLevel $window
-    wm title $window [::HWFlow::txt "几何焊缝" "Geometry Seam"]
+    wm title $window [::HWFlow::windowTitle [::HWFlow::txt "几何焊缝" "Geometry Seam"] "Geometry Seam"]
     wm resizable $window 1 1
 
     frame $window.body -padx 10 -pady 8
@@ -428,7 +428,7 @@ proc ::hmtoolkit::seam::ui::shortcut_selector_panel {} {
     catch {destroy .geometry_seam_shortcut_selector}
     set w .geometry_seam_shortcut_selector
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "几何焊缝选择器" "Geometry Seam Selector"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "几何焊缝选择器" "Geometry Seam Selector"] "Geometry Seam Selector"]
     wm resizable $w 0 0
     frame $w.body -padx 12 -pady 10
     pack $w.body -fill both -expand 1

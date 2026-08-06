@@ -187,7 +187,7 @@ proc ::FemAutoSeam::showAutoReview {candidates} {
     set autoOriginalVisible [::FemAutoSeam::autoVisibleComponents]
     set w .fem_auto_seam_review; catch {destroy $w}
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "FEM 自动焊缝候选复核" "FEM Automatic Seam Review"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "FEM 自动焊缝候选复核" "FEM Automatic Seam Review"] "FEM Automatic Seam Review"]
     wm minsize $w 1060 560
 
     frame $w.body -padx 12 -pady 12; pack $w.body -fill both -expand 1
@@ -295,7 +295,7 @@ proc ::FemAutoSeam::showPendingReview {candidates} {
     set autoOriginalVisible [::FemAutoSeam::autoVisibleComponents]
     set w .fem_auto_seam_review; catch {destroy $w}
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "FEM 自动焊缝 - 待人工处理" "FEM Automatic Seam - Pending Manual Work"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "FEM 自动焊缝 - 待人工处理" "FEM Automatic Seam - Pending Manual Work"] "FEM Automatic Seam - Pending Manual Work"]
     wm minsize $w 1060 560
 
     frame $w.body -padx 12 -pady 12; pack $w.body -fill both -expand 1

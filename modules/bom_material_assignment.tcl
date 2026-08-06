@@ -48,7 +48,7 @@ proc ::BomMaterialAssignment::showPanel {} {
     set ui(ok) 0
     set w .bom_material_assignment
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::txt "读取 BOM 表 / 材料赋予" "BOM Reader / Material Assignment"]
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "读取 BOM 表 / 材料赋予" "BOM Reader / Material Assignment"] "BOM Reader / Material Assignment"]
     wm resizable $w 0 0
 
     frame $w.main -padx 12 -pady 10

@@ -84,7 +84,7 @@ HMWorkFlow 是以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 20
 File > Run > Tcl/Tk Script > hw_toolkit.tcl
 ```
 
-运行后会打开 `HyperMesh Toolkit` 主面板。模块归类为三部分显示：
+运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的双栏布局：左侧按分类切换并选择工具，右侧显示所选工具的说明与操作按钮。模块归类为三部分显示：
 
 ```text
 Geometry
@@ -92,9 +92,9 @@ Mesh
 Connection
 ```
 
-主面板中的 `刷新浏览器` 用于恢复 Model Browser 更新并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
+左侧的分类按钮切换 `Geometry` / `Mesh` / `Connection`，下方列表选择具体工具；右侧显示工具说明和 `运行` / `设置` / `快捷键` / `撤回` 操作。模块运行结束后会自动刷新 Model Browser 并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
 
-主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。每个模块行右侧会显示当前快捷键；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
+主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。选中工具后，其快捷键显示在右侧详情区；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
 
 快捷键会直接调用模块的 `proc` 执行入口，不会打开 HMWorkFlow 主界面，也不会打开模块的 `more` 配置界面。
 
@@ -190,7 +190,7 @@ AUTO_CONTACT_*
 
 - 每个模块窗口都支持 `返回主页 / Back to Home`。
 - 多数模块按 `Esc` 可关闭当前窗口；连续选择类模块在 HyperMesh 选择面板中按 `ESC` 退出连续模式。
-- 如果脚本创建了 component 但左侧 Model Browser 未立即显示，点击主面板 `刷新浏览器`。
+- 如果脚本创建了 component 但左侧 Model Browser 未立即显示，可再次运行相关模块，模块结束后会自动刷新 Model Browser。
 - 普通 Tcl 解释器只能做基础语法检查；所有 HyperMesh 命令必须在 HyperMesh 内运行。
 
 ## 3. 目录结构
@@ -225,6 +225,7 @@ AUTO_CONTACT_*
     |-- shell_washer_hole_rbe2.tcl
     |-- rbe2_bolt_connector.tcl
     |-- cbush_creator.tcl
+    |-- batch_temp_nodes.tcl
     |-- contact_setup.tcl
     |-- adhesive_connector.tcl
     |-- solid_seam_connector.tcl
@@ -499,7 +500,18 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - 如果没有可识别的源 component，或源节点同时归属多个 component，工具会停止并提示，不会猜测名称。
 - 如果 CBUSH 创建失败，工具会删除本次新建的临时节点。
 
-### 6.10 Adhesive Connector
+### 6.10 批量添加临时节点
+
+入口：`::BatchTempNodes::runAction`
+
+功能：在多行文本框中按每行 `X,Y,Z` 输入坐标，并在当前 component 中一次性创建对应节点。空行会被忽略，支持小数、负数、科学计数法以及中文逗号。
+
+- 创建前会校验全部行并标出错误行号；存在任意格式错误时不会修改模型。
+- 创建过程中任一节点失败，会删除本批次已创建的节点。
+- “撤销上一批”可删除当前会话中最近一次成功创建的整批节点。
+- `Ctrl+Enter` 可直接执行创建。
+
+### 6.11 Adhesive Connector
 
 入口：`::AdhesiveConnector::runAction`
 
@@ -520,7 +532,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 模块会从当前 HyperMesh `feconfig.cfg` 动态解析 OptiStruct 的精确 `adhesives` 类型 ID，创建后回读 connector state；未生成连接或存在非 `REALIZED` 连接时会报错。首次投产前仍需在目标 HM2019 环境完成一次 smoke test。
 
-### 6.11 Contact Setup
+### 6.12 Contact Setup
 
 入口：`::ContactSetup::run`
 
@@ -548,7 +560,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - contact surface 创建时直接写入计算所得 `reverse_normals`；节点和坐标通过 mark 批量读取，不扫描整个 component。
 - 修改模式只会从当前 contact surface 中移除所选单元，不删除源 component 原始网格。
 
-### 6.12 Solid Seam Connector
+### 6.13 Solid Seam Connector
 
 入口：`::SolidSeam::run`
 
@@ -566,7 +578,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 完整识别验证可运行 `examples/SolidSeam_Validation/generate_fem.py`，并导入生成的单一组合模型 `SolidSeam_Combined_Validation.fem`。对应 manifest 给出了每组应选组件、参数和预期结果。
 
-### 6.13 网格焊缝完整性检查
+### 6.14 网格焊缝完整性检查
 
 入口：`::WeldIntegrityCheck::runAction`
 
@@ -586,23 +598,23 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 当前限制：完整性检查本身只支持 Shell–Shell 和人工审查；距离搜索是自由边节点到目标网格节点的近似，不读取 CAD。审查页的“创建焊缝”会显式转入下述自动壳焊缝流程，仍需工程人员再次确认后才修改模型。
 
-### 6.14 自动壳焊缝与快速创建
+### 6.15 自动壳焊缝与快速创建
 
 `Mesh Seam Weld` 新增 `FAST_AUTO`，与原 `LEGACY_MANUAL` 手动路径并存。自动模式原生导出所选 Shell Component，由便携式 Python 识别并分类 `T_PATH/T_LIST/CONNECT/L_SURF/L_LIST/REVIEW`，用户明确接受后才生成创建计划。自动规划优先复用已有连续目标网格边，也可在显式开启后执行受控节点微调，或对单个 CTRIA3/CQUAD4 母单元执行保守局部切分；快速路径不调用 imprint、ruled surface、automesh 或 connector。
 
 应用前会写入任务安全快照，每个候选还会建立独立检查点；导入后复核新增 ID、connectivity 和相对原始基线新增的 HyperMesh 质量失败，单个候选失败只回滚该候选。结果位于 `runtime/tasks/mesh_seam_weld/<run_id>/output/`，包含 candidate、creation plan、候选独立增量 FEM、manifest、规划 JSON/HTML 报告及执行报告。焊缝 Property 无法可靠复用时会明确标记 `property_assignment_required`，可随后使用批量 Property 模块。受控节点微调和保守单母单元局部切分均已实现但默认关闭；模块状态为 `controlled`，仍需按 [协议与 HM2019 清单](doc/mesh_seam_auto_protocol.md) 完成真实 HyperMesh 验证。
 
-### 6.15 FEM 自动焊缝（独立模块）
+### 6.16 FEM 自动焊缝（独立模块）
 
 `FEM Automatic Seam` 与 `Mesh Seam Weld` 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型、贴片型和邻近自由边候选，并在 FEM 层面切分母单元、插入节点和创建焊缝壳；后者继续处理用户已经明确选择的网格焊缝路径。
 
-该模块使用独立配置与任务目录。检测前固定生成 `before.hm`，Python 在临时工作区生成拆分、连接和规范驱动的局部优化计划，HyperMesh 校验后逐候选导入并支持回滚；完成后导出 `result.fem`，随后删除全部过程文件，因此成功任务目录严格只保留这两个文件。可直接导入的十组验收模型位于 `examples/AutoShellSeamBackend/test_fem/`。
+该模块使用独立配置与任务目录。检测前固定生成 `before.hm`，Python 在临时工作区只生成拆分和连接计划；整车规模检测按源 Component 多进程并行。检测后的创建规划只复制一次所选模型，在同一累积模型中顺序处理候选，并只记录/回滚当前候选的局部变化。HyperMesh 导入全部拓扑变化后，以 replacement mother elements 为种子向外扩展，将焊缝路径、新增切分节点及每批重绘区域外围节点设为固定节点，并按连通区域和单批单元上限分批执行 element automesh。完成后导出 `result.fem` 并删除过程文件，因此成功任务目录严格只保留这两个文件。可直接导入的十组验收模型位于 `examples/AutoShellSeamBackend/test_fem/`。
 
-`Criteria file` 和 `Param file` 均可留空。留空时模块使用 `modules/fem_auto_seam/defaults/` 中的内置 HM2019 质量标准与自适应单元尺寸参数；任一文件由用户指定时，只覆盖对应的内置默认文件。
+`Criteria file` 可留空，此时使用 `modules/fem_auto_seam/defaults/` 中的内置 HM2019 质量标准。Python 并行进程数设为 `0` 时自动使用最多 8 个进程，也可按工作站核心数显式提高；Windows 子进程通过无控制台的 `pythonw.exe` 启动，实际进程数和持续时间显示在现有进度窗口的命令流中。重绘单元尺寸、邻域扩展层数、特征角和单批重绘单元上限由模块设置直接控制。
 
-检测、后台规划、逐候选 FEM 导入、质量检查和完成态导出均显示进度。高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败、回滚项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 `Mesh Seam Weld` 继续手工创建。
+检测、后台规划、批量拓扑导入、原生 automesh、质量检查和完成态导出均显示进度。高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 `Mesh Seam Weld` 继续手工创建。
 
-该模块使用独立配置 `fem_auto_seam` 和独立任务目录 `runtime/tasks/fem_auto_seam/`。设置页可单独配置搜索距离、置信度、小孔阈值、`.criteria/.param`、优化邻域层数和迭代次数。Python 局部优化是固定流程而非可选开关：它只接受不新增规范失败、不恶化最差罚值且改善局部目标的安全节点移动；HyperMesh 2019 随后执行原生质量检查，单个候选失败只回滚该候选。
+该模块使用独立配置 `fem_auto_seam` 和独立任务目录 `runtime/tasks/fem_auto_seam/`。设置页可单独配置搜索距离、置信度、小孔阈值、`.criteria`、Python 并行进程数、重绘尺寸、扩展层数、特征角和单批重绘上限。Python 不再移动节点或优化网格；HyperMesh 使用实机录制的 `*interactiveremeshelems`、`*automesh` 和 `*storemeshtodatabase 1` 流程分批重绘，并以原生 criteria 进行最终质量裁决。执行过程不建立候选 checkpoint；只有模型已经进入原生修改阶段且发生错误时，才使用任务级 `before.hm` 恢复一次整个批次。
 
 ## 7. 公共机制
 
@@ -616,7 +628,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - 进度窗口、取消状态和日志。
 - 模块 UI 状态保存与读取。
 
-脚本创建 component 后会尽量通过 HyperMesh 2019 的 Browser API 同步登记；内部 Browser API 不可用时回退到普通 `*createentity`。如果 Browser 未立即更新，使用主面板 `刷新浏览器` 即可。
+脚本创建 component 后会尽量通过 HyperMesh 2019 的 Browser API 同步登记；内部 Browser API 不可用时回退到普通 `*createentity`。如果 Browser 未立即更新，重新运行相关模块即可触发自动刷新。
 
 ## 8. 开发和验证说明
 

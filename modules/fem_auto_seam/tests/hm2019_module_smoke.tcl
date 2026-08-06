@@ -19,28 +19,22 @@ foreach command {
     if {[llength [info commands $command]] != 1} { error "missing command: $command" }
 }
 foreach key {
-    near_edge_distance criteria_path param_path
-    optimize_neighborhood optimization_layers optimization_iterations
+    near_edge_distance criteria_path remesh_element_size
+    remesh_expand_layers remesh_feature_angle
 } {
     if {![info exists ::FemAutoSeam::cfg($key)]} { error "missing configuration key: $key" }
 }
-set ::FemAutoSeam::cfg(optimize_neighborhood) 0
 set ::FemAutoSeam::cfg(criteria_path) ""
-set ::FemAutoSeam::cfg(param_path) ""
 set defaultCriteria [::FemAutoSeam::effectiveSpecificationPath criteria_path]
-set defaultParam [::FemAutoSeam::effectiveSpecificationPath param_path]
-foreach path [list $defaultCriteria $defaultParam] {
+foreach path [list $defaultCriteria] {
     if {![file isfile $path] || [file size $path] == 0} { error "missing built-in specification: $path" }
 }
 *readqualitycriteria $defaultCriteria
 set settings [::FemAutoSeam::jsonSettings]
-foreach token {optimize_neighborhood criteria_path param_path near_edge_distance} {
+foreach token {criteria_path near_edge_distance remesh_element_size remesh_expand_layers remesh_feature_angle} {
     if {[string first $token $settings] < 0} { error "auto JSON is missing: $token" }
 }
-if {[string first {"optimize_neighborhood": true} $settings] < 0} {
-    error "Python optimization must remain enabled regardless of stale UI state"
-}
-foreach path [list $defaultCriteria $defaultParam] {
+foreach path [list $defaultCriteria] {
     if {[string first [string map {\\ \\\\} $path] $settings] < 0 && [string first $path $settings] < 0} {
         error "resolved built-in specification is missing from JSON: $path"
     }
@@ -62,5 +56,5 @@ if {[info exists ::env(HMWF_STAGE2_REPORT)] && $::env(HMWF_STAGE2_REPORT) ne ""}
 }
 file mkdir [file dirname $reportPath]
 set channel [open $reportPath w]
-puts $channel "FEM_AUTO_SEAM_TCL_SMOKE PASS version=$::FemAutoSeam::VERSION default_criteria=$defaultCriteria default_param=$defaultParam cleanup=before.hm,result.fem"
+puts $channel "FEM_AUTO_SEAM_TCL_SMOKE PASS version=$::FemAutoSeam::VERSION default_criteria=$defaultCriteria remesh=batch_automesh cleanup=before.hm,result.fem"
 close $channel

@@ -2783,7 +2783,7 @@ proc ::LocalMeshOptimizer::showAdvanced {} {
         }
     }
     ::HWFlow::createTopLevel $w
-    wm title $w [::LocalMeshOptimizer::txt "局部网格优化 - 高级设置" "Local Mesh Optimizer - Advanced Settings"]
+    wm title $w [::HWFlow::windowTitle [::LocalMeshOptimizer::txt "局部网格优化 - 高级设置" "Local Mesh Optimizer - Advanced Settings"] "Local Mesh Optimizer - Advanced Settings"]
     wm resizable $w 1 1
     frame $w.main -padx 12 -pady 10
     pack $w.main -fill both -expand 1
@@ -2874,7 +2874,7 @@ proc ::LocalMeshOptimizer::showPanel {} {
     set w .local_mesh_optimizer
     if {[winfo exists $w]} { raise $w; return }
     ::HWFlow::createTopLevel $w
-    wm title $w "[::LocalMeshOptimizer::txt "局部网格优化" "Local Mesh Optimizer"] v$VERSION"
+    wm title $w [::HWFlow::windowTitle "[::LocalMeshOptimizer::txt "局部网格优化" "Local Mesh Optimizer"] v$VERSION" "Local Mesh Optimizer v$VERSION"]
     wm minsize $w 760 620
     wm resizable $w 1 1
     frame $w.main -padx 12 -pady 10
