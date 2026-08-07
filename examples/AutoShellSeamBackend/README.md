@@ -3,7 +3,8 @@
 This directory validates the FEM-level automatic shell-seam backend and its
 topology-only split and connection planner. The same backend is available as
 the independent **FEM Automatic Seam** tool in HyperMesh 2019, where the live
-model performs one native batch element automesh after all topology imports.
+model performs one native batch element automesh after Python has written the
+modified FEM and HyperMesh has reopened it as the new model.
 
 Run the complete fixture matrix from the repository root:
 
@@ -51,11 +52,13 @@ deleted and replaced with first-order triangles that share the inserted target
 constraint path.  A quad-dominant zipper then connects the source free edge to
 that path.  Result FEMs are read back through the production shell FEM reader.
 
-Python does not move mesh nodes. The live workflow expands all replacement
-mother-shell seeds, fixes seam/interface and patch-boundary nodes, and sends the
-combined element selection through HyperMesh's native interactive remesh and
-automesh sequence. The criteria file remains the native final quality authority;
-element size, expansion layers, and feature angle are explicit module settings.
+Python does not move mesh nodes. The live workflow reopens the Python-edited
+FEM (File > Open semantics, replacing the current model; non-shell cards are
+preserved verbatim), expands all replacement mother-shell seeds, fixes
+seam/interface and patch-boundary nodes, and sends the combined element
+selection through HyperMesh's native interactive remesh and automesh sequence.
+The criteria file remains the native final quality authority; element size,
+expansion layers, and feature angle are explicit module settings.
 
 The current geometric boundary remains planar first-order target patches.  A
 curved source free-edge path is supported, but non-planar target remeshing is a
@@ -67,13 +70,15 @@ Prepare the production `main.py` result used by the live HM2019 apply test:
 python examples\AutoShellSeamBackend\prepare_stage2_pipeline.py
 ```
 
-During execution the production plan uses candidate-scoped FEM deltas for
-auditable topology import, followed by one task-scoped batch remesh. There are
-no candidate checkpoints; `before.hm` is the single transaction recovery point.
-A completed task directory is reduced to exactly two deliverables:
+During execution the production plan writes one complete modified FEM that
+replaces the current model, followed by one task-scoped batch remesh on the new
+model. There are no candidate checkpoints and no incremental imports;
+`before.hm` is the single transaction recovery point. A completed task
+directory is reduced to exactly two deliverables:
 
 - `before.hm`: the pre-task HyperMesh model used for rollback/undo;
-- `result.fem`: the selected scope plus successfully imported SEAM components.
+- `result.fem`: the complete modified model exported back from HyperMesh
+  after the native batch remesh.
 
 After the HM2019 apply stage, compare every node and element in the Python
 result against the FEM exported back from HyperMesh:

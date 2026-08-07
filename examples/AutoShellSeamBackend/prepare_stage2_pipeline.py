@@ -87,7 +87,6 @@ def prepare(output, combined=False):
         "backend_result_fem": str((output / "backend_result.fem").resolve()),
         "backend_result_manifest": str((output / "backend_result_manifest.json").resolve()),
         "transfer_manifest": str((output / "transfer_manifest.json").resolve()),
-        "delta_manifest": str((output / "delta_manifest.json").resolve()),
         "remesh_plan": str((output / "remesh_plan.json").resolve()),
         "criteria": str(criteria),
         "candidate_count": len(candidates),

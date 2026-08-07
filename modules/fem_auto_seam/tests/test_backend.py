@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "python"))
 
-from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, realize_candidates
+from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, realize_candidates, write_fem_bundle
 from hmworkflow.fem_auto_seam.delta_writer import write_shell_weld_delta
 from hmworkflow.fem_auto_seam.main import _mark_duplicates
 from hmworkflow.mesh_seam_weld.fem_mesh_reader import read_shell_fem
@@ -239,10 +239,10 @@ class OfflineBackendTests(unittest.TestCase):
             for candidate in candidates
         ))
 
-    def test_production_pipeline_writes_importable_result_and_transfer_ledger(self):
+    def test_production_pipeline_writes_modified_model_and_transfer_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = PIPELINE.prepare(Path(directory))
-            for key in ("backend_result_fem", "backend_result_manifest", "transfer_manifest", "delta_manifest", "remesh_plan"):
+            for key in ("backend_result_fem", "backend_result_manifest", "transfer_manifest", "remesh_plan"):
                 artifact = Path(manifest[key])
                 self.assertTrue(artifact.is_file(), key)
                 self.assertGreater(artifact.stat().st_size, 0, key)
@@ -251,9 +251,94 @@ class OfflineBackendTests(unittest.TestCase):
             ready = [row for row in transfer["candidates"] if row["status"] == "READY"]
             self.assertTrue(ready)
             for row in ready:
-                for key in ("candidate_type", "confidence", "source_component_id", "target_component_id", "delta_fem"):
+                for key in ("candidate_type", "confidence", "source_component_id", "target_component_id"):
                     self.assertIn(key, row)
-                self.assertTrue(Path(row["delta_fem"]).is_file())
+                self.assertNotIn("delta_fem", row)
+            result_fem = Path(manifest["backend_result_fem"])
+            text = result_fem.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("$ HMWF_OFFLINE_AUTO_SEAM_MODEL"))
+            self.assertIn("ENDDATA", text)
+            self.assertGreater(sum(line.startswith("GRID") for line in text.splitlines()), 0)
+            self.assertGreater(sum(line.startswith(("CTRIA3", "CQUAD4")) for line in text.splitlines()), 0)
+
+    def test_whole_model_passthrough_preserves_non_shell_cards_and_component_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fem = Path(directory) / "vehicle.fem"
+            fem.write_text(
+                "$HMNAME COMP 1 \"FLANGE_A\"\n"
+                "$HMCOMP ID 1\n"
+                "GRID,1,0,0.0,0.0,0.0\n"
+                "GRID,2,0,1.0,0.0,0.0\n"
+                "GRID,3,0,0.0,1.0,0.0\n"
+                "GRID,4,0,1.0,1.0,0.0\n"
+                "GRID,5,0,0.0,0.0,1.0\n"
+                "GRID,6,0,1.0,0.0,1.0\n"
+                "GRID,7,0,0.0,1.0,1.0\n"
+                "GRID,8,0,1.0,1.0,1.0\n"
+                "CQUAD4,11,10,1,2,4,3\n"
+                "$HMNAME COMP 2 \"BRACKET_SOLID\"\n"
+                "$HMCOMP ID 2\n"
+                "CTETRA,21,20,5,6,8,7\n"
+                "RBE2,22,5,123456,6,7,8\n"
+                "LOAD,31,1,1.0,1.0,32\n"
+                "FORCE,32,1,0,100.0,0.0,0.0,1.0\n",
+                encoding="utf-8",
+            )
+            model = read_shell_fem(fem, 1)
+            self.assertEqual([11], sorted(model.elements))
+            self.assertEqual({"CTETRA": 1, "RBE2": 1}, model.skipped_element_cards)
+            model.components = {1: model.components[1], 2: type(model.components[1])(2, "BRACKET_SOLID", "SOLID")}
+            written = Path(directory) / "modified.fem"
+            write_fem_bundle(model, written, Path(directory) / "modified_manifest.json")
+            text = written.read_text(encoding="utf-8")
+            self.assertIn("$HMCOMP ID 2", text)
+            self.assertIn("CTETRA,21,20,5,6,8,7", text)
+            self.assertIn("RBE2,22,5,123456,6,7,8", text)
+            self.assertIn("FORCE,32,1,0,100.0,0.0,0.0,1.0", text)
+            # The non-shell element cards stay under their own component
+            # marker; model-level load cards are emitted after the components.
+            self.assertLess(
+                text.index("$HMCOMP ID 2"),
+                text.index("CTETRA,21,20,5,6,8,7"),
+            )
+            self.assertLess(
+                text.index("CTETRA,21,20,5,6,8,7"),
+                text.index("FORCE,32,1,0,100.0,0.0,0.0,1.0"),
+            )
+            reread = read_shell_fem(written, 1)
+            self.assertEqual({"CTETRA": 1, "RBE2": 1}, reread.skipped_element_cards)
+            contexts = [group[0] for group in reread.other_card_lines]
+            self.assertEqual(4, len(contexts))
+            self.assertTrue(all(context == 2 for context in contexts))
+
+    def test_detection_stays_scoped_to_selected_components_in_whole_model_input(self):
+        fixture = EXAMPLE_DIR / "test_fem" / "combined_all_cases_manifest.json"
+        model = __import__(
+            "hmworkflow.mesh_seam_weld.fem_mesh_reader", fromlist=["read_shell_fem_bundle"]
+        ).read_shell_fem_bundle(fixture)
+        mapping = json.loads((fixture.parent / "combined_cases.json").read_text(encoding="utf-8"))
+        first_case = mapping["cases"][0]
+        selected = first_case["component_ids"]
+        candidates = detect_candidates(model, {"python_workers": 1, "selected_component_ids": selected})
+        self.assertTrue(candidates)
+        self.assertTrue(all(
+            row["source_component_id"] in selected
+            and row["target_component_id"] in selected
+            for row in candidates
+        ))
+        all_candidates = detect_candidates(model, {"python_workers": 1})
+        self.assertGreater(len(all_candidates), len(candidates))
+        def row_signature(row):
+            return (
+                row["source_component_id"],
+                row["target_component_id"],
+                tuple(row["source_node_ids"]),
+                tuple(row.get("target_node_ids", [])),
+            )
+        scoped_rows = {row_signature(row) for row in candidates}
+        full_rows = {row_signature(row) for row in all_candidates}
+        self.assertTrue(scoped_rows <= full_rows)
+        self.assertTrue(any(row["source_component_id"] not in selected for row in all_candidates))
 
     def test_complete_generated_matrix_round_trips(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -20,14 +20,12 @@ for directory in reversed((REPO_PYTHON_DIR, MODULE_DIR, COMMON_DIR, MESH_SEAM_SH
 
 try:
     from .backend import detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
-    from .delta_writer import write_manifest, write_plan_delta_files, write_shell_weld_delta
     from .schema import validate_request
 except ImportError:
     # persistent_worker loads this entry under a private module name.  Import
     # through the public package namespace so module-local schema.py files from
     # previously executed tools cannot shadow hybrid_core dependencies.
     from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
-    from hmworkflow.fem_auto_seam.delta_writer import write_manifest, write_plan_delta_files, write_shell_weld_delta
     from hmworkflow.fem_auto_seam.schema import validate_request
 
 try:
@@ -58,6 +56,7 @@ def _backend_settings(settings, request=None):
     })
     if request is not None:
         result["id_state"] = dict(request.get("id_state", {}))
+        result["selected_component_ids"] = list(request.get("selected_component_ids", []))
     return result
 
 
@@ -126,7 +125,7 @@ def _write_transfer_manifest(path, request, artifacts, plans):
                 for key in (
                     "candidate_id", "candidate_type", "confidence", "auto_eligible",
                     "source_component_id", "target_component_id", "source_node_ids",
-                    "target_node_ids", "length", "status", "delta_fem",
+                    "target_node_ids", "length", "status",
                     "output_component_id", "output_component_name",
                     "delete_element_ids", "read_elements", "write_nodes",
                 )
@@ -182,11 +181,6 @@ def main(argv=None):
                 "replaced_mother_element_count": sum(len(row["replacement_elements"]) for row in ready),
                 "remesh_seed_element_count": len(calculated["remesh"]["seed_element_ids"]),
             }
-            manifest = write_shell_weld_delta(args.output.parent / "delta.fem", plans, request)
-            delta_files = write_plan_delta_files(args.output.parent / "deltas", plans)
-            for row in manifest["plans"]:
-                row["delta_fem"] = delta_files[row["candidate_id"]]
-            write_manifest(args.output.parent / "delta_manifest.json", manifest)
             (args.output.parent / "creation_plan.json").write_text(json.dumps({key: value for key, value in calculated.items() if key != "result_model"}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             (args.output.parent / "remesh_plan.json").write_text(json.dumps(calculated["remesh"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             backend_manifest = write_fem_bundle(
@@ -197,8 +191,6 @@ def main(argv=None):
             artifact_paths = {
                 "backend_result_fem": args.output.parent / "backend_result.fem",
                 "backend_result_manifest": backend_manifest,
-                "combined_delta_fem": args.output.parent / "delta.fem",
-                "delta_manifest": args.output.parent / "delta_manifest.json",
                 "creation_plan": args.output.parent / "creation_plan.json",
                 "remesh_plan": args.output.parent / "remesh_plan.json",
             }

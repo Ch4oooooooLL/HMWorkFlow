@@ -728,6 +728,17 @@ def detect_candidates(model, settings=None):
     if settings:
         resolved.update(settings)
     topologies = build_topology(model)
+    # The input FEM is now the complete model, so detection must stay scoped
+    # to the components the engineer selected.  Filtering the topology map
+    # keeps source sweeps, patch and near-edge searches, and the worker count
+    # identical to the historical selected-only export behavior.
+    selected = {int(value) for value in resolved.get("selected_component_ids", [])}
+    if selected:
+        topologies = {
+            component_id: topology
+            for component_id, topology in topologies.items()
+            if component_id in selected
+        }
     worker_count = _resolved_worker_count(resolved, len(topologies), len(model.elements))
     candidates = []
     if worker_count > 1:
@@ -768,6 +779,12 @@ def detect_candidates(model, settings=None):
         candidates.extend(_patch_candidates(model, resolved, topologies))
         candidates.extend(_near_edge_candidates(model, resolved, topologies))
     candidates.sort(key=lambda row: (row["candidate_type"], row["source_component_id"], row["target_component_id"], tuple(row["source_node_ids"])))
+    if selected:
+        candidates = [
+            row for row in candidates
+            if int(row["source_component_id"]) in selected
+            and (not row.get("target_component_id") or int(row["target_component_id"]) in selected)
+        ]
     for index, row in enumerate(candidates, 1):
         row["candidate_id"] = "B{:06d}".format(index)
         row["joint_type"] = {"T_SEAM": "T_PATH", "PATCH_SEAM": "L_SURF"}.get(row["candidate_type"], "REVIEW")
@@ -1270,6 +1287,10 @@ def plan_candidate_deltas(model, candidates, settings=None):
 def write_fem_bundle(model, fem_path, manifest_path=None):
     fem_path = Path(fem_path)
     manifest_path = Path(manifest_path) if manifest_path else fem_path.with_suffix(".manifest.json")
+    passthrough = {}
+    for group in getattr(model, "other_card_lines", []):
+        component_id = int(group[0]) if group and group[0] not in ("", None) else 0
+        passthrough.setdefault(component_id, []).append(group[1:])
     lines = ["$ HMWF_OFFLINE_AUTO_SEAM_MODEL", "BEGIN BULK"]
     for node_id, coordinates in sorted(model.nodes.items()):
         lines.append("GRID,{},,{:.12g},{:.12g},{:.12g}".format(node_id, *coordinates))
@@ -1285,6 +1306,8 @@ def write_fem_bundle(model, fem_path, manifest_path=None):
             property_id = int(getattr(model, "element_properties", {}).get(element.element_id, 1))
             lines.append("{},{},{},{}".format(element.element_type, element.element_id, property_id, ",".join(str(value) for value in element.node_ids)))
             element_ids.append(element.element_id)
+        for group in passthrough.get(component_id, []):
+            lines.extend(group)
         component_rows.append({"component_id": component_id, "component_name": component.component_name, "element_ids": element_ids})
     for property_id, values in sorted(getattr(model, "pshell", {}).items()):
         lines.append("PSHELL,{},{},{:.12g}".format(property_id, int(values["material_id"]), float(values["thickness"])))
@@ -1295,6 +1318,8 @@ def write_fem_bundle(model, fem_path, manifest_path=None):
             lines.append("MAT1,{},{},,{}".format(material_id, young, poisson))
         else:
             lines.append("MAT1,{},{}".format(material_id, ",".join(str(value) for value in fields)))
+    for group in passthrough.get(0, []):
+        lines.extend(group)
     lines.extend(("ENDDATA", ""))
     fem_path.parent.mkdir(parents=True, exist_ok=True)
     fem_path.write_text("\n".join(lines), encoding="utf-8")

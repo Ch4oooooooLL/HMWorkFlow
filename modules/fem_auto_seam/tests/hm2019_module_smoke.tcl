@@ -10,7 +10,9 @@ foreach command {
     ::FemAutoSeam::autoReviewIsolate
     ::FemAutoSeam::browseFile
     ::FemAutoSeam::runWorkflow
-    ::FemAutoSeam::applyAutoPlanDelta
+    ::FemAutoSeam::openAutoResultModel
+    ::FemAutoSeam::validateAutoModelContents
+    ::FemAutoSeam::exportWholeModelFemBundle
     ::FemAutoSeam::workflowProgressOpen
     ::FemAutoSeam::autoReviewFitIsolated
     ::FemAutoSeam::pendingReviewOpenMeshSeamWeld

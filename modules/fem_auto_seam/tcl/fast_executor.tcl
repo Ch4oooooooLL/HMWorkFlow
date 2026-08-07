@@ -120,21 +120,6 @@ proc ::FemAutoSeam::autoElementsForNodes {nodeIds allowedComponents} {
     return $result
 }
 
-proc ::FemAutoSeam::validateAutoPlanTopology {plan} {
-    foreach expected [concat [dict get $plan replacement_elements] [dict get $plan weld_elements]] {
-        set elementId [dict get $expected element_id]
-        set actual [::FemAutoSeam::elemNodes $elementId]
-        if {[lsort -integer $actual] ne [lsort -integer [dict get $expected node_ids]]} {
-            error "created shell $elementId connectivity mismatch"
-        }
-        if {[llength $actual] ni {3 4}} { error "created shell $elementId is not a first-order shell" }
-        set actualComponent [::FemAutoSeam::autoElementComponentId $elementId]
-        if {$actualComponent ne "" && $actualComponent != [dict get $expected component_id]} {
-            error "created shell $elementId component mismatch"
-        }
-    }
-}
-
 proc ::FemAutoSeam::autoRemeshChunks {elementIds maximumElements} {
     set ordered [lsort -integer -unique $elementIds]
     if {$maximumElements <= 0 || [llength $ordered] <= $maximumElements} { return [list $ordered] }
@@ -268,46 +253,45 @@ proc ::FemAutoSeam::validateAutoBatchResult {plans protectedNodeIds allowedCompo
     return [dict create checked $afterCount failed [llength $failed]]
 }
 
-proc ::FemAutoSeam::executeAutoPlans {taskDir plans {taskSnapshot ""} {progressStart 70.0} {progressEnd 93.0}} {
+proc ::FemAutoSeam::executeAutoPlans {taskDir plans resultFem {backupSnapshot ""} {progressStart 70.0} {progressEnd 93.0}} {
     variable cfg
     set taskStarted [clock milliseconds]
-    if {$taskSnapshot eq ""} {
-        set taskSnapshot [file join $taskDir state before_auto_shell_seam.hm]
-        ::FemAutoSeam::saveAutoSnapshot $taskSnapshot
-    } elseif {![file isfile $taskSnapshot] || [file size $taskSnapshot] == 0} {
-        error "original model backup is missing or empty: $taskSnapshot"
+    if {$backupSnapshot eq ""} {
+        error "the standalone original-model backup is required for rollback"
     }
-    set readyPlans {}; set allowedComponents {}; set originalSeeds {}
+    if {![file isfile $backupSnapshot] || [file size $backupSnapshot] == 0} {
+        error "original model backup is missing or empty: $backupSnapshot"
+    }
+    set readyPlans {}; set allowedComponents {}
     foreach plan $plans {
         if {[dict get $plan status] ne "READY"} { continue }
         lappend readyPlans $plan
         lappend allowedComponents [dict get $plan source_component_id] [dict get $plan target_component_id]
-        set originalSeeds [concat $originalSeeds [dict get $plan delete_element_ids]]
     }
     set allowedComponents [lsort -integer -unique $allowedComponents]
-    set baselineIds [::FemAutoSeam::autoExpandElementPatch $originalSeeds $allowedComponents $cfg(remesh_expand_layers)]
-    set baselineFailed [::FemAutoSeam::autoNativeQualityFailures $baselineIds]
     set results {}; set created 0
     set code [catch {
-        ::FemAutoSeam::workflowProgressUpdate $progressStart [::HWFlow::txt "正在批量导入全部焊缝拓扑" "Importing all weld topology changes"] "[llength $readyPlans] candidates"
-        foreach plan $readyPlans {
-            if {[file exists [file join $taskDir state cancel.flag]]} { error "cancel requested before batch mutation completed" }
-            ::FemAutoSeam::validateAutoPlanReferences $plan
-            ::FemAutoSeam::deleteAutoPlanMotherElements $plan
-            set imported [::FemAutoSeam::applyAutoPlanDelta $plan]
-            ::FemAutoSeam::validateAutoPlanTopology $plan
-            incr created $imported
-            lappend results [::FemAutoSeam::executionRecord $plan CREATED $imported]
-        }
-
+        ::FemAutoSeam::workflowProgressUpdate $progressStart [::HWFlow::txt "正在打开修改后的 FEM 替换当前模型" "Opening the modified FEM as the new model"] "[llength $readyPlans] candidates"
+        if {[file exists [file join $taskDir state cancel.flag]]} { error "cancel requested before the model was replaced" }
+        ::FemAutoSeam::openAutoResultModel $resultFem
+        set created [::FemAutoSeam::validateAutoModelContents $readyPlans]
+        foreach plan $readyPlans { lappend results [::FemAutoSeam::executionRecord $plan CREATED [expr {[llength [dict get $plan replacement_elements]] + [llength [dict get $plan weld_elements]]}]] }
+        ::FemAutoSeam::workflowProgressUpdate [expr {$progressStart + ($progressEnd - $progressStart) * 0.15}] \
+            [::HWFlow::txt "正在校验新模型中的焊缝拓扑" "Verifying weld topology in the new model"] \
+            [::HWFlow::txt "已校验 [llength $readyPlans] 个候选" "[llength $readyPlans] candidates verified"]
         set seedIds {}; set protectedNodeIds {}
         foreach plan $readyPlans {
             foreach element [dict get $plan replacement_elements] { lappend seedIds [dict get $element element_id] }
             foreach element [dict get $plan weld_elements] { set protectedNodeIds [concat $protectedNodeIds [dict get $element node_ids]] }
             foreach node [dict get $plan new_nodes] { lappend protectedNodeIds [dict get $node node_id] }
         }
+        # Baseline quality is measured on the freshly opened model, before the
+        # native remesh touches the replacement neighborhood.  Mother shells
+        # no longer exist here; the replacement shells are the new seeds.
         set remeshIds [::FemAutoSeam::autoExpandElementPatch $seedIds $allowedComponents $cfg(remesh_expand_layers)]
-        if {![llength $remeshIds]} { error "batch remesh selection is empty after topology import" }
+        if {![llength $remeshIds]} { error "batch remesh selection is empty in the opened model" }
+        set baselineIds $remeshIds
+        set baselineFailed [::FemAutoSeam::autoNativeQualityFailures $baselineIds]
         set expectedProperties [::FemAutoSeam::autoRemeshPropertiesByComponent $remeshIds]
         set protectedNodeIds [lsort -integer -unique [concat $protectedNodeIds [::FemAutoSeam::autoBoundaryNodes $remeshIds]]]
         set remeshChunks [::FemAutoSeam::autoRemeshChunks $remeshIds $cfg(remesh_chunk_elements)]
@@ -335,7 +319,7 @@ proc ::FemAutoSeam::executeAutoPlans {taskDir plans {taskSnapshot ""} {progressS
     } error options]
     if {$code} {
         catch {*ameshclearsurface}; catch {*setusefeatures 0}
-        if {[catch {::FemAutoSeam::restoreAutoSnapshot $taskSnapshot} restoreError]} {
+        if {[catch {::FemAutoSeam::restoreAutoSnapshot $backupSnapshot} restoreError]} {
             error "batch creation/remesh failed: $error; task restore failed: $restoreError"
         }
         return -options $options "batch creation/remesh failed and the task was restored: $error"
@@ -343,5 +327,5 @@ proc ::FemAutoSeam::executeAutoPlans {taskDir plans {taskSnapshot ""} {progressS
     catch {::HWFlow::refreshBrowser}
     set totalSeconds [expr {([clock milliseconds]-$taskStarted)/1000.0}]
     set performance [dict create total_seconds $totalSeconds batch_automesh_chunks [dict get $remeshResult chunks] batch_automesh_faces [dict get $remeshResult faces] quality_checked [dict get $quality checked] quality_failed [dict get $quality failed]]
-    return [dict create created $created succeeded [llength $readyPlans] rolled_back 0 moved_nodes 0 remeshed_elements [dict get $remeshResult input_elements] results $results snapshot $taskSnapshot performance $performance]
+    return [dict create created $created succeeded [llength $readyPlans] rolled_back 0 moved_nodes 0 remeshed_elements [dict get $remeshResult input_elements] results $results snapshot $backupSnapshot performance $performance]
 }

@@ -43,21 +43,13 @@ proc ::FemAutoSeam::validateBackendTransfer {taskDir result} {
     }
     if {![dict exists $result artifacts]} { error "Python result contains no artifact manifest" }
     set artifacts [dict get $result artifacts]
-    foreach key {backend_result_fem backend_result_manifest combined_delta_fem delta_manifest creation_plan remesh_plan transfer_manifest} {
+    foreach key {backend_result_fem backend_result_manifest creation_plan remesh_plan transfer_manifest} {
         if {![dict exists $artifacts $key path]} { error "Python result is missing artifact '$key'" }
         set path [file normalize [dict get $artifacts $key path]]
         if {![::FemAutoSeam::pathWithinTask $path $taskDir]} { error "Python artifact is outside the task workspace: $path" }
         if {![file isfile $path] || [file size $path] == 0} { error "Python artifact is missing or empty: $path" }
         if {[dict exists $artifacts $key bytes] && [file size $path] != [dict get $artifacts $key bytes]} {
             error "Python artifact size changed after creation: $path"
-        }
-    }
-    foreach plan [dict get $result candidates] {
-        if {[dict get $plan status] ne "READY"} { continue }
-        if {![dict exists $plan delta_fem]} { error "ready candidate [dict get $plan candidate_id] has no delta FEM" }
-        set delta [file normalize [dict get $plan delta_fem]]
-        if {![::FemAutoSeam::pathWithinTask $delta $taskDir] || ![file isfile $delta] || [file size $delta] == 0} {
-            error "candidate delta FEM is invalid: $delta"
         }
     }
     return $artifacts
@@ -82,14 +74,8 @@ proc ::FemAutoSeam::writeCompletionManifest {taskDir runId backup inputBundle pl
         set finalFem [dict get $finalBundle fem]
         set finalManifest [dict get $finalBundle manifest]
     }
-    set imported {}
-    foreach plan [dict get $planned candidates] {
-        if {[dict get $plan status] eq "READY" && [dict exists $plan delta_fem]} {
-            lappend imported [dict get $plan delta_fem]
-        }
-    }
     set transfer [dict get $planned transfer]
-    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"fem_auto_seam\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"status\": \"COMPLETED\",\n  \"original_model_backup\": [::HybridCore::jsonString $backup],\n  \"input_fem\": [::HybridCore::jsonString [dict get $inputBundle fem]],\n  \"input_manifest\": [::HybridCore::jsonString [dict get $inputBundle manifest]],\n  \"backend_transfer_manifest\": [::HybridCore::jsonString [dict get $transfer manifest]],\n  \"backend_result_fem\": [::HybridCore::jsonString [dict get [dict get $planned artifacts] backend_result_fem path]],\n  \"imported_delta_fems\": [::HybridCore::jsonStringArray $imported],\n  \"review_state\": [::HybridCore::jsonString [file join $taskDir state review_state.json]],\n  \"execution_report\": [::HybridCore::jsonString [file join $taskDir output execution_report.json]],\n  \"completed_fem\": [::HybridCore::jsonString $finalFem],\n  \"completed_fem_manifest\": [::HybridCore::jsonString $finalManifest],\n  \"summary\": {\"accepted\": [llength [dict get $review accepted_ids]], \"succeeded\": [dict get $execution succeeded], \"rolled_back\": [dict get $execution rolled_back], \"created_shells\": [dict get $execution created], \"remeshed_elements\": [dict get $execution remeshed_elements]}\n}\n"
+    set json "{\n  \"schema_version\": \"1.0\",\n  \"module\": \"fem_auto_seam\",\n  \"run_id\": [::HybridCore::jsonString $runId],\n  \"status\": \"COMPLETED\",\n  \"original_model_backup\": [::HybridCore::jsonString $backup],\n  \"input_fem\": [::HybridCore::jsonString [dict get $inputBundle fem]],\n  \"input_manifest\": [::HybridCore::jsonString [dict get $inputBundle manifest]],\n  \"backend_transfer_manifest\": [::HybridCore::jsonString [dict get $transfer manifest]],\n  \"backend_result_fem\": [::HybridCore::jsonString [dict get [dict get $planned artifacts] backend_result_fem path]],\n  \"review_state\": [::HybridCore::jsonString [file join $taskDir state review_state.json]],\n  \"execution_report\": [::HybridCore::jsonString [file join $taskDir output execution_report.json]],\n  \"completed_fem\": [::HybridCore::jsonString $finalFem],\n  \"completed_fem_manifest\": [::HybridCore::jsonString $finalManifest],\n  \"summary\": {\"accepted\": [llength [dict get $review accepted_ids]], \"succeeded\": [dict get $execution succeeded], \"rolled_back\": [dict get $execution rolled_back], \"created_shells\": [dict get $execution created], \"remeshed_elements\": [dict get $execution remeshed_elements]}\n}\n"
     set path [file join $taskDir output completion_manifest.json]
     ::HybridCore::writeTextFile $path $json
     return $path
@@ -183,8 +169,8 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
     if {[catch {
         ::FemAutoSeam::workflowProgressUpdate 6.0 [::HWFlow::txt "正在备份原始模型" "Backing up the original model"]
         set originalBackup [::FemAutoSeam::createOriginalModelBackup $taskDir $runId $componentIds]
-        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::txt "正在导出所选 Component" "Exporting selected Components"] [::HWFlow::txt "共 [llength $componentIds] 个 Component" "[llength $componentIds] Components"]
-        set bundle [::FemAutoSeam::exportFemBundle [file join $taskDir input] $runId $componentIds]
+        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::txt "正在导出完整模型 FEM" "Exporting the complete model FEM"]
+        set bundle [::FemAutoSeam::exportWholeModelFemBundle [file join $taskDir input] $runId model]
         set existing [::FemAutoSeam::writeExistingSeams [file join $taskDir input existing_seams.json]]
         ::FemAutoSeam::workflowProgressUpdate 22.0 [::HWFlow::txt "Python 正在后台检测焊缝" "Python is detecting welds in the background"] [::HWFlow::txt "大型模型可能需要一些时间" "Large models may take some time"]
         set detected [::FemAutoSeam::runPython $taskDir $runId detect [dict get $bundle manifest] $existing $componentIds]
@@ -231,8 +217,9 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
         return
     }
     if {[tk_messageBox -type yesno -icon question -message [::HWFlow::txt "应用 $ready 个 FEM 自动焊缝创建计划？" "Apply $ready FEM automatic seam plans?"]] ne "yes"} { ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "用户取消" "Cancelled by user"] 100.0; catch {::HybridCore::finalizeTaskWorkspace $taskDir CANCELLED}; return }
-    ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::txt "正在逐项导入焊缝 FEM" "Importing weld FEM candidates"]
-    if {[catch {set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $originalBackup 70.0 93.0]} error]} {
+    ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::txt "正在应用修改后的 FEM" "Applying the modified FEM"]
+    set backendResultFem [dict get [dict get $planned artifacts] backend_result_fem path]
+    if {[catch {set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $backendResultFem $originalBackup 70.0 93.0]} error]} {
         ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "应用失败并已回滚" "Application failed and was rolled back"] 100.0
         catch {::HybridCore::finalizeTaskWorkspace $taskDir FAILED}
         tk_messageBox -icon error -message [::HWFlow::txt "应用失败并已回滚：$error\n任务目录：$taskDir" "Application failed and was rolled back: $error\nTask: $taskDir"]
@@ -243,8 +230,7 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
     if {$cfg(export_completed_fem) && [dict get $execution succeeded] > 0} {
         if {[catch {
             ::FemAutoSeam::workflowProgressUpdate 96.0 [::HWFlow::txt "正在导出完成态 FEM" "Exporting the completed FEM"]
-            set finalComponents [::FemAutoSeam::completedComponentIds $componentIds $plans $execution]
-            set finalBundle [::FemAutoSeam::exportFemBundle [file join $taskDir output] $runId $finalComponents completed_model]
+            set finalBundle [::FemAutoSeam::exportWholeModelFemBundle [file join $taskDir output] $runId completed_model]
         } exportError]} {
             tk_messageBox -icon warning -message [::HWFlow::txt "焊缝已创建，但最终 FEM 导出失败：$exportError" "Welds were created, but final FEM export failed: $exportError"]
         }
@@ -331,7 +317,10 @@ proc ::FemAutoSeam::cleanupTaskWorkspace {taskDir} {
 }
 
 proc ::FemAutoSeam::exportFinalResult {taskDir runId componentIds} {
-    set bundle [::FemAutoSeam::exportFemBundle $taskDir $runId $componentIds result]
+    # The session model after the FEM replacement is the complete modified
+    # model, so the final deliverable is a whole-model export regardless of
+    # the originally selected component scope.
+    set bundle [::FemAutoSeam::exportWholeModelFemBundle $taskDir $runId result]
     if {[dict exists $bundle manifest]} { catch {file delete -force [dict get $bundle manifest]} }
     return [dict get $bundle fem]
 }
@@ -359,8 +348,8 @@ proc ::FemAutoSeam::runWorkflow {} {
     if {[catch {
         ::FemAutoSeam::workflowProgressUpdate 6.0 [::HWFlow::txt "正在备份原始模型" "Backing up the original model"]
         set originalBackup [::FemAutoSeam::createOriginalModelBackup $taskDir $runId $componentIds]
-        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::txt "正在导出所选 Component" "Exporting selected Components"] "[llength $componentIds] Components"
-        set bundle [::FemAutoSeam::exportFemBundle [file join $taskDir input] $runId $componentIds]
+        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::txt "正在导出完整模型 FEM" "Exporting the complete model FEM"]
+        set bundle [::FemAutoSeam::exportWholeModelFemBundle [file join $taskDir input] $runId model]
         set existing [::FemAutoSeam::writeExistingSeams [file join $taskDir input existing_seams.json]]
         ::FemAutoSeam::workflowProgressUpdate 22.0 [::HWFlow::txt "Python 正在后台检测焊缝" "Python is detecting welds in the background"] [::HWFlow::txt "大型模型可能需要一些时间" "Large models may take some time"]
         set detected [::FemAutoSeam::runPython $taskDir $runId detect [dict get $bundle manifest] $existing $componentIds]
@@ -382,8 +371,9 @@ proc ::FemAutoSeam::runWorkflow {} {
             set planned [::FemAutoSeam::runPython $taskDir $runId plan [dict get $bundle manifest] $existing $componentIds $automaticIds]
             ::FemAutoSeam::validateBackendTransfer $taskDir $planned
             set plans [dict get $planned candidates]
-            ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::txt "正在导入自动创建结果" "Importing automatic weld results"]
-            set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $originalBackup 70.0 92.0]
+            ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::txt "正在打开修改后的 FEM" "Opening the modified FEM"]
+            set backendResultFem [dict get [dict get $planned artifacts] backend_result_fem path]
+            set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $backendResultFem $originalBackup 70.0 92.0]
         } error]} {
             ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "自动创建失败并已回滚" "Automatic creation failed and was rolled back"]
             # Python planning and transfer validation do not mutate HyperMesh.
@@ -399,8 +389,7 @@ proc ::FemAutoSeam::runWorkflow {} {
 
     if {[catch {
         ::FemAutoSeam::workflowProgressUpdate 95.0 [::HWFlow::txt "正在导出任务后结果 FEM" "Exporting the post-task result FEM"]
-        set finalComponents [::FemAutoSeam::completedComponentIds $componentIds $plans $execution]
-        set resultFem [::FemAutoSeam::exportFinalResult $taskDir $runId $finalComponents]
+        set resultFem [::FemAutoSeam::exportFinalResult $taskDir $runId {}]
     } error]} {
         catch {::FemAutoSeam::restoreAutoSnapshot $originalBackup}
         ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "结果导出失败并已回滚" "Result export failed and was rolled back"]

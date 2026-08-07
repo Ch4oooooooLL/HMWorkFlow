@@ -53,7 +53,7 @@ class FemAutoSeamModuleBoundaryTests(unittest.TestCase):
         executor = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "fast_executor.tcl").read_text(encoding="utf-8")
         for token in ("progressOpen", "progressUpdate", "progressClose", "Python 正在后台检测焊缝"):
             self.assertIn(token, workflow)
-        self.assertIn("Importing all weld topology changes", executor)
+        self.assertIn("Opening the modified FEM as the new model", executor)
         self.assertIn("bounded chunks", executor)
         self.assertIn("autoRemeshChunks", executor)
         self.assertIn("progressPumpEvents", executor)
@@ -76,17 +76,21 @@ class FemAutoSeamModuleBoundaryTests(unittest.TestCase):
         self.assertIn('with_name("pythonw.exe")', backend)
         self.assertIn("multiprocessing.set_executable", backend)
 
-    def test_partial_candidate_import_gets_a_focused_retry_and_diagnostics(self):
+    def test_model_is_replaced_from_the_edited_fem_without_import_merge(self):
         importer = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "delta_import.tcl").read_text(encoding="utf-8")
+        executor = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "fast_executor.tcl").read_text(encoding="utf-8")
+        workflow = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "workflow.tcl").read_text(encoding="utf-8")
         backend = (ROOT / "modules" / "fem_auto_seam" / "python" / "backend.py").read_text(encoding="utf-8")
-        self.assertIn("writeAutoPlanRepairDelta", importer)
-        self.assertIn("HMWF_AUTO_SHELL_SEAM_REPAIR_V1", importer)
-        self.assertIn("candidate delta import remained incomplete after focused retry", importer)
-        self.assertIn("candidate delta references GRID IDs that are absent before import", importer)
-        self.assertIn("invalid_replacements", backend)
-        self.assertIn("duplicates another planned shell", backend)
-        self.assertIn("duplicates an existing shell", backend)
-        self.assertIn("weld cell duplicates a retained shell", backend)
+        self.assertIn("openAutoResultModel", importer)
+        self.assertIn("*readfile [file nativename $resultFem] 0", importer)
+        self.assertIn("validateAutoModelContents", importer)
+        self.assertIn("still contains replaced mother shells", importer)
+        self.assertNotIn("feinputwithdata2", importer)
+        self.assertNotIn("writeAutoPlanRepairDelta", importer)
+        self.assertNotIn("HMWF_AUTO_SHELL_SEAM_REPAIR_V1", importer)
+        self.assertIn("executeAutoPlans owns the task transaction", workflow)
+        self.assertIn("selected_component_ids", backend)
+        self.assertIn("other_card_lines", backend)
 
     def test_python_only_plans_topology_and_hypermesh_owns_remesh(self):
         module = (ROOT / "modules" / "fem_auto_seam.tcl").read_text(encoding="utf-8")

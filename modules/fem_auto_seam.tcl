@@ -6,7 +6,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::FemAutoSeam {
-    variable VERSION "0.17"
+    variable VERSION "0.18"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] fem_auto_seam]
     variable cfg
     array set cfg {
@@ -134,8 +134,8 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     frame $w.main -padx 12 -pady 10; pack $w.main -fill both -expand 1
     label $w.main.title -text [::HWFlow::txt "FEM 自动焊缝" "FEM Automatic Seam"] -font [::HWFlow::uiFont heading]
     message $w.main.note -width 620 -text [::HWFlow::txt \
-        "独立分析孤立划分后的壳网格，识别 T 型、贴片型和邻近自由边，在 FEM 层面切分母单元并创建焊缝壳。此功能与原“网格焊缝”配置相互独立。" \
-        "Analyze independently meshed shell components, detect T/patch/near-edge candidates, split mother shells at FEM level, and create weld shells. This tool has configuration independent from Mesh Seam Weld."]
+        "独立分析孤立划分后的壳网格，识别 T 型、贴片型和邻近自由边，在 FEM 层面切分母单元并创建焊缝壳；Python 直接修改模型 FEM 后重新打开替换当前模型，再按连通区域分批重绘。此功能与原“网格焊缝”配置相互独立。" \
+        "Analyze independently meshed shell components, detect T/patch/near-edge candidates, split mother shells at FEM level, and create weld shells. Python edits the model FEM and HyperMesh reopens it as the new model, then remeshes affected regions in bounded chunks. This tool has configuration independent from Mesh Seam Weld."]
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w
     grid $w.main.note -row 1 -column 0 -columnspan 3 -sticky ew -pady {4 8}
     set fields {
@@ -171,7 +171,7 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     }
     checkbutton $w.main.exclude -text [::HWFlow::txt "排除附近已有 SEAM 焊缝" "Exclude nearby existing SEAM welds"] -variable ::FemAutoSeam::ui(exclude_existing_welds)
     grid $w.main.exclude -row $row -column 0 -columnspan 3 -sticky w; incr row
-    label $w.main.required -text [::HWFlow::txt "固定流程：Python 仅规划切分与连接；HyperMesh 按连通区域分批重绘受影响网格。" "Fixed workflow: Python plans topology only; HyperMesh remeshes affected regions in bounded chunks."] -anchor w
+    label $w.main.required -text [::HWFlow::txt "固定流程：Python 修改模型 FEM 文件，HyperMesh 重新打开该文件替换当前模型，再按连通区域分批重绘受影响网格。" "Fixed workflow: Python edits the model FEM file; HyperMesh reopens it to replace the current model, then remeshes affected regions in bounded chunks."] -anchor w
     grid $w.main.required -row $row -column 0 -columnspan 3 -sticky w
     frame $w.buttons -padx 12 -pady 10; pack $w.buttons -fill x
     button $w.buttons.cancel -text [::HWFlow::txt "取消" "Cancel"] -command [list destroy $w]

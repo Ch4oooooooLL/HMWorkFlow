@@ -608,13 +608,13 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 `FEM Automatic Seam` 与 `Mesh Seam Weld` 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型、贴片型和邻近自由边候选，并在 FEM 层面切分母单元、插入节点和创建焊缝壳；后者继续处理用户已经明确选择的网格焊缝路径。
 
-该模块使用独立配置与任务目录。检测前固定生成 `before.hm`，Python 在临时工作区只生成拆分和连接计划；整车规模检测按源 Component 多进程并行。检测后的创建规划只复制一次所选模型，在同一累积模型中顺序处理候选，并只记录/回滚当前候选的局部变化。HyperMesh 导入全部拓扑变化后，以 replacement mother elements 为种子向外扩展，将焊缝路径、新增切分节点及每批重绘区域外围节点设为固定节点，并按连通区域和单批单元上限分批执行 element automesh。完成后导出 `result.fem` 并删除过程文件，因此成功任务目录严格只保留这两个文件。可直接导入的十组验收模型位于 `examples/AutoShellSeamBackend/test_fem/`。
+该模块使用独立配置与任务目录。检测前固定生成独立的 `before.hm` 备份（唯一的回滚/撤销恢复点），随后把完整模型导出为 `input/model.fem`；整车规模检测按源 Component 多进程并行，但候选始终限制在用户选择的 Component 内。创建规划只复制一次所选模型，在同一累积模型中顺序处理候选，并把修改后的完整模型直接写回 FEM 文件；HyperMesh 以 File > Open 语义重新打开该文件替换当前模型（不再做任何增量导入/合并，非壳卡片原样保留）。替换后以 replacement mother elements 为种子向外扩展，将焊缝路径、新增切分节点及每批重绘区域外围节点设为固定节点，并按连通区域和单批单元上限在新模型上分批执行 element automesh。完成后导出 `result.fem` 并删除过程文件，因此成功任务目录严格只保留 `before.hm` 和 `result.fem`。可直接导入的十组验收模型位于 `examples/AutoShellSeamBackend/test_fem/`。
 
 `Criteria file` 可留空，此时使用 `modules/fem_auto_seam/defaults/` 中的内置 HM2019 质量标准。Python 并行进程数设为 `0` 时自动使用最多 8 个进程，也可按工作站核心数显式提高；Windows 子进程通过无控制台的 `pythonw.exe` 启动，实际进程数和持续时间显示在现有进度窗口的命令流中。重绘单元尺寸、邻域扩展层数、特征角和单批重绘单元上限由模块设置直接控制。
 
-检测、后台规划、批量拓扑导入、原生 automesh、质量检查和完成态导出均显示进度。高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 `Mesh Seam Weld` 继续手工创建。
+检测、后台规划、FEM 替换、原生 automesh、质量检查和完成态导出均显示进度。高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 `Mesh Seam Weld` 继续手工创建。
 
-该模块使用独立配置 `fem_auto_seam` 和独立任务目录 `runtime/tasks/fem_auto_seam/`。设置页可单独配置搜索距离、置信度、小孔阈值、`.criteria`、Python 并行进程数、重绘尺寸、扩展层数、特征角和单批重绘上限。Python 不再移动节点或优化网格；HyperMesh 使用实机录制的 `*interactiveremeshelems`、`*automesh` 和 `*storemeshtodatabase 1` 流程分批重绘，并以原生 criteria 进行最终质量裁决。执行过程不建立候选 checkpoint；只有模型已经进入原生修改阶段且发生错误时，才使用任务级 `before.hm` 恢复一次整个批次。
+该模块使用独立配置 `fem_auto_seam` 和独立任务目录 `runtime/tasks/fem_auto_seam/`。设置页可单独配置搜索距离、置信度、小孔阈值、`.criteria`、Python 并行进程数、重绘尺寸、扩展层数、特征角和单批重绘上限。Python 不再移动节点或优化网格；HyperMesh 使用实机录制的 `*interactiveremeshelems`、`*automesh` 和 `*storemeshtodatabase 1` 流程分批重绘，并以原生 criteria 进行最终质量裁决。执行过程不建立候选 checkpoint，也不在 HyperMesh 内做任何增量导入；只有模型已经进入替换/重绘阶段且发生错误时，才使用任务级 `before.hm` 恢复一次整个批次。
 
 ## 7. 公共机制
 

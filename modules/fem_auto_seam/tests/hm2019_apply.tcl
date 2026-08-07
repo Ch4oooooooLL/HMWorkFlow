@@ -41,7 +41,8 @@ set code [catch {
     }
     set componentIds [lsort -integer -unique $componentIds]
     set backup [::FemAutoSeam::createOriginalModelBackup $taskDir $::env(HMWF_STAGE2_RUN_ID) $componentIds]
-    set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $backup]
+    set backendResultFem [dict get [dict get $result artifacts] backend_result_fem path]
+    set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $backendResultFem $backup]
     if {[dict get $execution succeeded] < 1 || [dict get $execution rolled_back] != 0} {
         error "unexpected execution summary: $execution"
     }
