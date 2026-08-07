@@ -1533,11 +1533,15 @@ proc ::HWFlow::syncComponentInBrowser {compName {activateInactive 0}} {
     return $summary
 }
 
-proc ::HWFlow::createComponent {compName {color ""}} {
+proc ::HWFlow::createComponent {compName {color ""} {historyMode own}} {
     set compName [string trim $compName]
     if {$compName eq ""} {
         set compName COMPONENT
     }
+    # A caller that already opened its own undo/redo block (e.g. the seam
+    # transaction) passes "external" so component creation does not open a
+    # nested *startnotehistorystate block, which is not a documented contract.
+    set ownHistory [expr {$historyMode ne "external"}]
     set compId [::HWFlow::componentIdByName $compName]
     if {$compId ne ""} {
         catch {*currentcollector component $compName}
@@ -1556,7 +1560,7 @@ proc ::HWFlow::createComponent {compName {color ""}} {
     set compId ""
     if {$compId eq ""} {
         set histName "Created Component $compName"
-        catch {*startnotehistorystate $histName}
+        if {$ownHistory} { catch {*startnotehistorystate $histName} }
         set createCode [catch {*createentity comps includeid=0 name=$compName} err1]
         if {$createCode} {
             set createCode [catch {*createentity components includeid=0 name=$compName} err1]
@@ -1568,10 +1572,10 @@ proc ::HWFlow::createComponent {compName {color ""}} {
             set createCode [catch {*collectorcreateonly components $compName "" $color} err2]
         }
         if {$createCode} {
-            catch {*endnotehistorystate $histName}
+            if {$ownHistory} { catch {*endnotehistorystate $histName} }
             error [::HWFlow::txt "无法创建组件 $compName：$err1 / $err2" "Cannot create component $compName: $err1 / $err2"]
         }
-        catch {*endnotehistorystate $histName}
+        if {$ownHistory} { catch {*endnotehistorystate $histName} }
         set compId [::HWFlow::componentIdByName $compName]
     }
 
@@ -1770,7 +1774,6 @@ proc ::HWFlow::displayComponent {compName state} {
 proc ::HWFlow::resetBrowserBlocks {} {
     foreach cmd {
         {hm_blockbrowserupdate 0}
-        {*setoption block_browser_update=0}
         {*setoption block_redraw=0}
         {*setoption block_messages=0}
         {*setoption command_file_state=1}

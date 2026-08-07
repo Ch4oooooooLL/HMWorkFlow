@@ -1432,7 +1432,6 @@ proc ::RB2Bolt::beginBulkCreate {} {
     set bulkTouchedOutputComps {}
 
     catch {hm_blockbrowserupdate 1}
-    catch {*setoption block_browser_update=1}
     catch {*setoption block_redraw=1}
     catch {*setoption block_messages=1}
     catch {hm_blockredraw 1}
@@ -1452,7 +1451,6 @@ proc ::RB2Bolt::endBulkCreate {} {
     catch {hm_blockredraw 0}
     catch {*setoption block_messages=0}
     catch {*setoption block_redraw=0}
-    catch {*setoption block_browser_update=0}
     catch {hm_blockbrowserupdate 0}
 
     set touched [::RB2Bolt::uniqList $bulkTouchedOutputComps]

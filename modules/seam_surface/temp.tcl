@@ -29,10 +29,12 @@ proc ::hmtoolkit::seam::temp::register_entity {token entityType ids} {
 proc ::hmtoolkit::seam::temp::create_component {token} {
     set name [::hmtoolkit::seam::temp::unique_name]
     if {[::HWFlow::componentIdByName $name] ne ""} { error "Temporary component collision: $name" }
-    set id [::HWFlow::createComponent $name]
+    # -history external: the seam transaction owns the undo/redo block; nested
+    # history states from component creation are not a supported contract.
+    set id [::HWFlow::createComponent $name "" external]
     if {$id eq ""} { error "Unable to create temporary component $name" }
     ::hmtoolkit::seam::temp::register_entity $token components [list $id]
-    catch {*currentcollector component $name}
+    ::hmtoolkit::seam::native::set_current_component_checked $name $id
     return [list $name $id]
 }
 

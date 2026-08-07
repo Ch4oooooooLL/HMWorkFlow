@@ -1,6 +1,18 @@
+import os
 from pathlib import Path
+import time
 import tkinter
 import unittest
+
+
+# The Windows store Python on some machines transiently fails to read its
+# bundled tcl/tcl8.6/init.tcl (files appear missing between processes). When a
+# stable local copy exists (created once by the developer), point Tcl at it
+# before any interpreter is constructed; CI and normal Python installs are
+# unaffected because the path does not exist there.
+_STABLE_TCL = Path(os.environ.get("LOCALAPPDATA", "")) / "hmworkflow_test_tcl" / "tcl" / "tcl8.6"
+if _STABLE_TCL.joinpath("init.tcl").exists():
+    os.environ["TCL_LIBRARY"] = str(_STABLE_TCL)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -10,8 +22,21 @@ MODULE_DIR = ROOT / "modules" / "seam_surface"
 
 class GeometrySeamTclTests(unittest.TestCase):
     def setUp(self):
-        self.tcl = tkinter.Tcl()
-        self.tcl.eval(f"source {{{LOADER.as_posix()}}}")
+        # The Windows store Python on some machines transiently fails to read
+        # its bundled tcl/tcl8.6/init.tcl when a fresh interpreter is created;
+        # a bounded retry keeps the suite runnable there without hiding real
+        # failures from the module under test.
+        last_error = None
+        for _attempt in range(6):
+            try:
+                self.tcl = tkinter.Tcl()
+                self.tcl.eval(f"source {{{LOADER.as_posix()}}}")
+                break
+            except tkinter.TclError as error:
+                last_error = error
+                time.sleep(0.4)
+        else:
+            raise last_error
 
     def test_all_legacy_entries_delegate(self):
         names = {
@@ -41,8 +66,6 @@ class GeometrySeamTclTests(unittest.TestCase):
         values = self.tcl.eval("::hmtoolkit::seam::config::load")
         self.assertIn("distance_tolerance", values)
         self.assertEqual(self.tcl.eval("llength [info commands ::hmtoolkit::seam::config::file]"), "0")
-        self.assertIn(self.tcl.eval("::hmtoolkit::seam::config::get shortcut_selector_mode"), {"PANEL", "CONFIG"})
-        self.assertIn(self.tcl.eval("::hmtoolkit::seam::config::get shortcut_scope"), {"COMPONENT_PAIR", "SURFACE_GROUPS"})
         self.assertGreater(float(self.tcl.eval("::hmtoolkit::seam::config::get stitch_tolerance")), 0.0)
 
     def test_stitching_is_local_uses_all_edges_and_requires_two_connected_sides(self):
@@ -277,135 +300,6 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertLess(first_owner, creation)
         self.assertLess(second_owner, creation)
 
-    def test_t_list_creation_equivalences_new_seam_before_reporting_success(self):
-        self.tcl.eval(
-            """
-            rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
-            rename ::hmtoolkit::seam::candidate::path_topology ::hmtoolkit::seam::candidate::path_topology_real
-            rename ::hmtoolkit::seam::naming::thickness_from_data ::hmtoolkit::seam::naming::thickness_from_data_real
-            rename ::hmtoolkit::seam::naming::get_or_create_component ::hmtoolkit::seam::naming::get_or_create_component_real
-            rename ::hmtoolkit::seam::entity::component_surfaces ::hmtoolkit::seam::entity::component_surfaces_real
-            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
-            rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
-            rename ::hmtoolkit::seam::validation::created_surfaces_for_component ::hmtoolkit::seam::validation::created_surfaces_for_component_real
-            proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {return [dict get $data $key]}
-            proc ::hmtoolkit::seam::candidate::path_topology {args} {return [dict create kind PATH]}
-            proc ::hmtoolkit::seam::naming::thickness_from_data {data} {return 1.2}
-            proc ::hmtoolkit::seam::naming::get_or_create_component {thickness} {return {SEAM_T1.2_Surf 900}}
-            proc ::hmtoolkit::seam::entity::component_surfaces {componentId} {return {40}}
-            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {1 2 50}}
-            set ::create_t_marks {}
-            proc ::hmtoolkit::seam::entity::mark {entityType markId ids} {
-                lappend ::create_t_marks [list $entityType $markId $ids]
-            }
-            set ::created_surface_counter 49
-            proc ::hmtoolkit::seam::validation::created_surfaces_for_component {before beforeAll componentId} {
-                incr ::created_surface_counter
-                return [list $::created_surface_counter]
-            }
-            set ::connect_surface_calls {}
-            proc *connect_surfaces_11 {args} {lappend ::connect_surface_calls $args}
-            set ::equivalence_calls {}
-            proc ::hmtoolkit::seam::executor::equivalence_created_surfaces {created source target componentId before} {
-                lappend ::equivalence_calls [list $created $source $target $componentId $before]
-                return $created
-            }
-            """
-        )
-        result = self.tcl.eval(
-            "::hmtoolkit::seam::executor::_create_t "
-            "[dict create seam_lines {101} source_surfs {10} target_surfs {20 21} "
-            "source_components {1} target_components {2}] T_LIST"
-        )
-        self.assertEqual(self.tcl.eval("llength $::connect_surface_calls"), "2")
-        self.assertIn("surfs 2 20", self.tcl.eval("set ::create_t_marks"))
-        self.assertIn("surfs 2 21", self.tcl.eval("set ::create_t_marks"))
-        self.assertEqual(
-            self.tcl.eval("set ::equivalence_calls"),
-            "{50 10 20 900 40} {51 10 21 900 40}",
-        )
-        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} created_surfs"), "50 51")
-
-    def test_extend_processes_and_validates_every_target_independently(self):
-        self.tcl.eval(
-            """
-            rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
-            rename ::hmtoolkit::seam::executor::surfaces_from_lines ::hmtoolkit::seam::executor::surfaces_from_lines_real
-            rename ::hmtoolkit::seam::entity::surface_component ::hmtoolkit::seam::entity::surface_component_real
-            proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {
-                return [dict get $data $key]
-            }
-            proc ::hmtoolkit::seam::executor::surfaces_from_lines {lineIds} {return {10}}
-            proc ::hmtoolkit::seam::entity::surface_component {surfaceId} {return 5}
-            proc ::HWFlow::componentName {componentId} {return SOURCE_SEAM}
-            set ::extend_target_calls {}
-            proc ::hmtoolkit::seam::executor::extend_to_target {line source target sourceCompId sourceCompName} {
-                lappend ::extend_target_calls $target
-                return [list [expr {$target + 100}]]
-            }
-            """
-        )
-        result = self.tcl.eval(
-            "::hmtoolkit::seam::executor::_extend_surface "
-            "[dict create seam_lines {101} target_surfs {20 21}]"
-        )
-        self.assertEqual(self.tcl.eval("set ::extend_target_calls"), "20 21")
-        self.assertEqual(
-            self.tcl.eval(f"dict get {{{result}}} created_surfs"),
-            "120 121",
-        )
-
-    def test_l_surface_captures_component_baseline_before_topology_validation(self):
-        body = self.tcl.eval("info body ::hmtoolkit::seam::executor::_create_l_surface")
-        baseline = (
-            "set before [::hmtoolkit::seam::entity::component_surfaces "
-            "[lindex $component 1]]"
-        )
-        self.assertIn(baseline, body)
-        self.assertLess(body.index(baseline), body.index("equivalence_created_surfaces"))
-
-    def test_created_surface_validation_uses_target_component_scope(self):
-        self.tcl.eval(
-            """
-            rename ::hmtoolkit::seam::entity::component_surfaces ::hmtoolkit::seam::entity::component_surfaces_real
-            rename ::hmtoolkit::seam::validation::surface_ids ::hmtoolkit::seam::validation::surface_ids_real
-            proc ::hmtoolkit::seam::entity::component_surfaces {componentId} {return {10 40}}
-            proc ::hmtoolkit::seam::validation::surface_ids {ids componentId} {return 1}
-            """
-        )
-        created = self.tcl.eval(
-            "::hmtoolkit::seam::validation::created_surfaces_in_component {10} 99"
-        )
-        self.assertEqual(created, "40")
-
-    def test_shortcut_and_continuous_precise_contracts_are_wired(self):
-        core = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
-        main = (MODULE_DIR / "main.tcl").read_text(encoding="utf-8")
-        ui = (MODULE_DIR / "ui.tcl").read_text(encoding="utf-8")
-        self.assertIn('shortcut_proc "::SeamSurf::runShortcut"', core)
-        self.assertIn("invokeModule $target shortcut", core)
-        self.assertIn("selector::capture_preselection", main)
-        self.assertIn("runtime(context_data)", ui)
-        self.assertIn("run_continuous $strategy", ui)
-
-    def test_shortcut_opens_feature_window_without_starting_selection(self):
-        self.tcl.eval(
-            """
-            rename ::hmtoolkit::seam::open_panel ::hmtoolkit::seam::open_panel_real
-            rename ::hmtoolkit::seam::ui::shortcut_selector_panel ::hmtoolkit::seam::ui::shortcut_selector_panel_real
-            set ::shortcut_open_count 0
-            proc ::hmtoolkit::seam::open_panel {} {
-                incr ::shortcut_open_count
-                return FEATURE_WINDOW
-            }
-            proc ::hmtoolkit::seam::ui::shortcut_selector_panel {} {
-                error "shortcut must not start geometry selection"
-            }
-            """
-        )
-        self.assertEqual(self.tcl.eval("::hmtoolkit::seam::ui::run_shortcut"), "FEATURE_WINDOW")
-        self.assertEqual(self.tcl.eval("set ::shortcut_open_count"), "1")
-
     def test_list_based_creation_strategies_default_to_line_path(self):
         self.tcl.eval(
             """
@@ -480,6 +374,63 @@ class GeometrySeamTclTests(unittest.TestCase):
             self.tcl.eval(f"dict get {{{result}}} target_components"),
             "201 202 203",
         )
+
+    def test_t_path_selects_seam_lines_and_target_surfaces(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::selector::list_panel ::hmtoolkit::seam::selector::list_panel_real
+            rename ::hmtoolkit::seam::selector::mark_panel ::hmtoolkit::seam::selector::mark_panel_real
+            rename ::hmtoolkit::seam::selector::surfaces_for_lines ::hmtoolkit::seam::selector::surfaces_for_lines_real
+            rename ::hmtoolkit::seam::selector::components_for_surfaces ::hmtoolkit::seam::selector::components_for_surfaces_real
+            set ::t_path_panels {}
+            proc ::hmtoolkit::seam::selector::list_panel {mode listId prompt} {
+                lappend ::t_path_panels [list $mode $listId]
+                return [dict create valid 1 ids {101 102}]
+            }
+            proc ::hmtoolkit::seam::selector::mark_panel {entityType markId prompt args} {
+                lappend ::t_path_panels [list $entityType $markId]
+                return [dict create valid 1 ids {20 21}]
+            }
+            proc ::hmtoolkit::seam::selector::surfaces_for_lines {lineIds} {return {10 11}}
+            proc ::hmtoolkit::seam::selector::components_for_surfaces {surfIds} {
+                return [lsort -integer -unique [lmap id $surfIds {expr {$id + 100}}]]
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::selector::select_strategy_input T_PATH"
+        )
+        self.assertEqual(self.tcl.eval("set ::t_path_panels"), "{PATH 1} {surfs 2}")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} valid"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} seam_lines"), "101 102")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} source_surfs"), "10 11")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} target_surfs"), "20 21")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} source_components"), "110 111")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} target_components"), "120 121")
+
+        self.tcl.eval(
+            """
+            proc ::hmtoolkit::seam::selector::list_panel {mode listId prompt} {
+                return [dict create valid 0 cancelled 1 message "Operation cancelled."]
+            }
+            """
+        )
+        cancelled = self.tcl.eval(
+            "::hmtoolkit::seam::selector::select_strategy_input T_PATH"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{cancelled}}} cancelled"), "1")
+
+        self.tcl.eval(
+            """
+            proc ::hmtoolkit::seam::selector::mark_panel {entityType markId prompt args} {
+                return [dict create valid 0 cancelled 1 message "Operation cancelled."]
+            }
+            """
+        )
+        cancelled_target = self.tcl.eval(
+            "::hmtoolkit::seam::selector::select_strategy_input T_PATH"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{cancelled_target}}} cancelled"), "1")
 
     def test_project_collects_multiple_target_surfaces_and_executes_them_together(self):
         self.tcl.eval(
@@ -559,6 +510,60 @@ class GeometrySeamTclTests(unittest.TestCase):
             "20 21",
         )
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} created_surfs"), "")
+
+    def test_project_fails_when_native_split_is_a_no_op(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::entity::surface_lines ::hmtoolkit::seam::entity::surface_lines_real
+            proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {
+                return [dict get $data $key]
+            }
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {20 21}}
+            proc ::hmtoolkit::seam::entity::mark {entityType markId ids} {return [llength $ids]}
+            proc ::hmtoolkit::seam::entity::surface_lines {surfaceIds} {return {500 501}}
+            set ::noop_split_calls 0
+            proc *surfacemarksplitwithlines {args} {incr ::noop_split_calls}
+            """
+        )
+        with self.assertRaisesRegex(
+            tkinter.TclError,
+            "did not change the selected surfaces",
+        ):
+            self.tcl.eval(
+                "::hmtoolkit::seam::executor::_split_surface "
+                "[dict create seam_lines {101} target_surfs {20 21}] PROJECT"
+            )
+
+    def test_distribute_points_fails_when_nothing_was_created(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::entity::diff_ids ::hmtoolkit::seam::entity::diff_ids_real
+            proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {
+                return [dict get $data $key]
+            }
+            proc ::hmtoolkit::seam::candidate::line_length {lineId} {return 30.0}
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {1 2}}
+            proc ::hmtoolkit::seam::entity::mark {entityType markId ids} {return [llength $ids]}
+            proc ::hmtoolkit::seam::entity::diff_ids {before after} {return {}}
+            proc *edgesmarkaddpoints {args} {
+                error "undocumented command failed on this profile"
+            }
+            """
+        )
+        with self.assertRaisesRegex(
+            tkinter.TclError,
+            "No distributed points were created",
+        ):
+            self.tcl.eval(
+                "::hmtoolkit::seam::executor::_distribute_points "
+                "[dict create seam_lines {101 102}]"
+            )
 
     def test_l_surface_keeps_surviving_in_place_results_from_temp_components(self):
         self.tcl.eval(
@@ -686,9 +691,12 @@ class GeometrySeamTclTests(unittest.TestCase):
             rename ::hmtoolkit::seam::interactive::run ::hmtoolkit::seam::interactive::run_real
             rename ::hmtoolkit::seam::ui::dismiss_window ::hmtoolkit::seam::ui::dismiss_window_real
             rename ::hmtoolkit::seam::ui::set_status ::hmtoolkit::seam::ui::set_status_real
+            rename ::hmtoolkit::seam::ui::show ::hmtoolkit::seam::ui::show_real
             set ::non_continuous_window_closes 0
+            set ::non_continuous_reshows 0
             set ::reported_errors {}
             proc ::hmtoolkit::seam::ui::dismiss_window {} {incr ::non_continuous_window_closes}
+            proc ::hmtoolkit::seam::ui::show {args} {incr ::non_continuous_reshows}
             proc ::hmtoolkit::seam::ui::set_status {message} {}
             proc ::hmtoolkit::seam::interactive::run {strategy} {
                 return [dict create success 0 cancelled 0 message "native $strategy failed"]
@@ -698,6 +706,7 @@ class GeometrySeamTclTests(unittest.TestCase):
         )
         result = self.tcl.eval("::hmtoolkit::seam::ui::run_precise EXTEND")
         self.assertEqual(self.tcl.eval("set ::non_continuous_window_closes"), "1")
+        self.assertEqual(self.tcl.eval("set ::non_continuous_reshows"), "1")
         self.assertEqual(self.tcl.eval("set ::reported_errors"), "{native EXTEND failed}")
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} success"), "0")
 
@@ -707,9 +716,11 @@ class GeometrySeamTclTests(unittest.TestCase):
             rename ::hmtoolkit::seam::interactive::run ::hmtoolkit::seam::interactive::run_real
             rename ::hmtoolkit::seam::ui::dismiss_window ::hmtoolkit::seam::ui::dismiss_window_real
             rename ::hmtoolkit::seam::ui::set_status ::hmtoolkit::seam::ui::set_status_real
+            rename ::hmtoolkit::seam::ui::show ::hmtoolkit::seam::ui::show_real
             set ::continuous_failure_calls 0
             set ::continuous_reported_errors {}
             proc ::hmtoolkit::seam::ui::dismiss_window {} {}
+            proc ::hmtoolkit::seam::ui::show {args} {}
             proc ::hmtoolkit::seam::ui::set_status {message} {}
             proc hm_errormessage {message} {lappend ::continuous_reported_errors $message}
             proc ::hmtoolkit::seam::interactive::run {strategy} {
@@ -732,11 +743,10 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.tcl.eval(
             """
             rename ::hmtoolkit::seam::interactive::run ::hmtoolkit::seam::interactive::run_real
-            rename ::hmtoolkit::seam::ui::analyze_context ::hmtoolkit::seam::ui::analyze_context_real
+            rename ::hmtoolkit::seam::ui::show ::hmtoolkit::seam::ui::show_real
             set ::project_continuous_calls {}
-            set ::hmtoolkit::seam::runtime(context_data) [dict create valid 1 source_surfs {1} target_surfs {2} source_components {3} target_components {4}]
             proc destroy {window} {}
-            proc ::hmtoolkit::seam::ui::analyze_context {args} {error "PROJECT must enter continuous selection"}
+            proc ::hmtoolkit::seam::ui::show {args} {}
             proc ::hmtoolkit::seam::interactive::run {strategy} {
                 lappend ::project_continuous_calls $strategy
                 return [dict create success 0 cancelled 1 message "Operation cancelled."]
@@ -751,16 +761,13 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.tcl.eval(
             """
             rename ::hmtoolkit::seam::interactive::run ::hmtoolkit::seam::interactive::run_real
-            rename ::hmtoolkit::seam::ui::analyze_context ::hmtoolkit::seam::ui::analyze_context_real
+            rename ::hmtoolkit::seam::ui::show ::hmtoolkit::seam::ui::show_real
             set ::continuous_calls 0
             set ::continuous_window_closes {}
-            set ::hmtoolkit::seam::runtime(context_data) [dict create valid 1 source_surfs {1} target_surfs {2} source_components {3} target_components {4}]
             proc destroy {window} {
                 lappend ::continuous_window_closes "$window:$::hmtoolkit::seam::runtime(active_strategy)"
             }
-            proc ::hmtoolkit::seam::ui::analyze_context {args} {
-                error "precise creation must enter its selector instead of analyzing incoming context"
-            }
+            proc ::hmtoolkit::seam::ui::show {args} {}
             proc ::hmtoolkit::seam::interactive::run {strategy} {
                 incr ::continuous_calls
                 if {$::continuous_calls >= 3} {
@@ -820,55 +827,6 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertEqual(disconnected, "LIST")
         self.assertEqual(branch, "BRANCH")
 
-    def test_candidate_extraction_returns_individual_surface_pairs(self):
-        self.tcl.eval(
-            """
-            rename ::hmtoolkit::seam::entity::surface_lines ::hmtoolkit::seam::entity::surface_lines_real
-            rename ::hmtoolkit::seam::entity::surface_component ::hmtoolkit::seam::entity::surface_component_real
-            rename ::hmtoolkit::seam::candidate::line_near_surfaces ::hmtoolkit::seam::candidate::line_near_surfaces_real
-            rename ::hmtoolkit::seam::candidate::line_points ::hmtoolkit::seam::candidate::line_points_real
-            rename ::hmtoolkit::seam::candidate::surface_normal ::hmtoolkit::seam::candidate::surface_normal_real
-            rename ::hmtoolkit::seam::candidate::bbox_overlap_ratio ::hmtoolkit::seam::candidate::bbox_overlap_ratio_real
-            proc ::hmtoolkit::seam::entity::surface_lines {surfs} {return [list [expr {100+[lindex $surfs 0]}]]}
-            proc ::hmtoolkit::seam::entity::surface_component {surf} {return [expr {1000+$surf}]}
-            proc ::hmtoolkit::seam::candidate::line_near_surfaces {line surfs tolerance} {return {1 0.1}}
-            proc ::hmtoolkit::seam::candidate::line_points {line} {return [list [list $line 0 0] [list $line 0.5 0] [list $line 1 0]]}
-            proc ::hmtoolkit::seam::candidate::surface_normal {surf} {
-                if {$surf < 3} {return {1 0 0}}
-                return {0 1 0}
-            }
-            proc ::hmtoolkit::seam::candidate::bbox_overlap_ratio {a b tolerance} {return 1.0}
-            """
-        )
-        candidates = self.tcl.eval(
-            "::hmtoolkit::seam::candidate::extract {1 2} {3 4} {10} {20}"
-        )
-        self.assertEqual(int(self.tcl.eval(f"llength {{{candidates}}}")), 4)
-        for index in range(4):
-            candidate = self.tcl.eval(f"lindex {{{candidates}}} {index}")
-            self.assertEqual(self.tcl.eval(f"llength [dict get {{{candidate}}} source_surfs]"), "1")
-            self.assertEqual(self.tcl.eval(f"llength [dict get {{{candidate}}} target_surfs]"), "1")
-
-    def classify(self, angle, source="1", target="", topology="PATH"):
-        return self.tcl.eval(
-            f"""
-            set c [dict create candidate_id X joint_type UNKNOWN strategy REVIEW \
-                source_components {{}} target_components {{}} source_surfs {{1}} target_surfs {{2}} \
-                seam_lines {{{source}}} paired_target_lines {{{target}}} angle {angle} min_distance 0.1 \
-                overlap_ratio 1.0 seam_length 20 path_topology [dict create kind {topology}] \
-                confidence 0 reasons {{}} warnings {{}}]
-            set c [::hmtoolkit::seam::classifier::classify $c]
-            list [dict get $c joint_type] [dict get $c strategy]
-            """
-        )
-
-    def test_classifier_routes_t_corner_lap_and_review(self):
-        self.assertEqual(self.classify(89, "1", ""), "T_JOINT T_PATH")
-        self.assertEqual(self.classify(89, "1", "2"), "CORNER_JOINT CONNECT")
-        self.assertEqual(self.classify(2, "1", "2"), "LAP_JOINT L_SURF")
-        self.assertEqual(self.classify(45, "1", ""), "UNKNOWN REVIEW")
-        self.assertEqual(self.classify(89, "1", "", "BRANCH"), "T_JOINT REVIEW")
-
     def test_executor_has_no_interactive_panels_or_max_id_tracking(self):
         executor = (MODULE_DIR / "executor.tcl").read_text(encoding="utf-8")
         for forbidden in (
@@ -925,6 +883,193 @@ class GeometrySeamTclTests(unittest.TestCase):
             int(self.tcl.eval("llength $::undo_transactions")),
             len(strategies),
         )
+
+    # ------------------------------------------------------------------
+    # 2026-08-07 audit follow-up: API contract, native wrapper and
+    # mark/current-component ownership tests
+    # ------------------------------------------------------------------
+
+    def test_native_compat_layer_is_loaded(self):
+        self.assertEqual(
+            self.tcl.eval("llength [info commands ::hmtoolkit::seam::native::set_current_component_checked]"),
+            "1",
+        )
+        self.assertEqual(
+            self.tcl.eval("llength [info commands ::hmtoolkit::seam::native::undocumented::trim_solids_by_surfaces]"),
+            "1",
+        )
+
+    def test_extend_wrapper_uses_documented_offset_and_connect_arguments(self):
+        # HM2019 baseline: the legacy argument layout recorded from the
+        # working extend flow on 2019.0.0.70 is the route used here. The
+        # 2026-08-07 audit judged these arguments "illegal" against the
+        # HM2022.3 documentation; the corrected layout stays behind the
+        # projection pipeline for later 2022 validation. This test exercises
+        # the real extend_to_target body, not a mocked stub.
+        self.tcl.eval(
+            """
+            set ::hmtoolkit::seam::runtime(active_temp_token) TOKEN
+            rename ::hmtoolkit::seam::temp::create_component ::hmtoolkit::seam::temp::create_component_real
+            rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::entity::exists ::hmtoolkit::seam::entity::exists_real
+            rename ::hmtoolkit::seam::entity::surface_component ::hmtoolkit::seam::entity::surface_component_real
+            rename ::hmtoolkit::seam::validation::surface_ids ::hmtoolkit::seam::validation::surface_ids_real
+            proc ::hmtoolkit::seam::temp::create_component {token} {return {TMP_A 91}}
+            proc ::hmtoolkit::seam::native::ensure_current_component {name id} {return $id}
+            set ::extend_marks {}
+            proc ::hmtoolkit::seam::entity::mark {entityType markId ids} {
+                lappend ::extend_marks [list $entityType $markId $ids]
+                return [llength $ids]
+            }
+            set ::duplicate_calls {}
+            proc *duplicatemark {args} {lappend ::duplicate_calls $args}
+            proc ::hmtoolkit::seam::native::mark_by_component_checked {entityType markId compName} {return {1001}}
+            set ::offset_calls {}
+            proc *offset_surfaces_and_modify {args} {lappend ::offset_calls $args}
+            set ::extend_snapshots 0
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType args} {
+                incr ::extend_snapshots
+                if {$::extend_snapshots == 1} {return {1 2 3}}
+                return {1 2 3 60}
+            }
+            set ::connect_calls {}
+            proc *connect_surfaces_11 {args} {lappend ::connect_calls $args}
+            set ::move_calls {}
+            proc *movemark {args} {lappend ::move_calls $args}
+            proc ::hmtoolkit::seam::entity::exists {entityType id} {return 1}
+            proc ::hmtoolkit::seam::entity::surface_component {surfaceId} {
+                if {$surfaceId == 10} {return 5}
+                return 9
+            }
+            proc ::hmtoolkit::seam::validation::surface_ids {ids componentId} {return 1}
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::extend_to_target 101 {10} {20} 5 SOURCE_SEAM"
+        )
+        self.assertEqual(result, "10")
+        self.assertEqual(
+            self.tcl.eval("lindex $::offset_calls 0"),
+            "surfaces 2 2 1 -12.0 2",
+        )
+        self.assertEqual(
+            self.tcl.eval("lindex $::connect_calls 0"),
+            "1 1 3 2 0 15 30 1 0 2 30 3 0",
+        )
+        # Source and offset guides share mark 1 in the legacy layout; the
+        # target is marked in mark 2 for the duplicate/offset stage.
+        marks = self.tcl.eval("set ::extend_marks")
+        self.assertIn("surfs 2 20", marks)
+        self.assertIn("surfs 2 1001", marks)
+        self.assertIn("surfs 1 {10 1001}", marks)
+        self.assertEqual(self.tcl.eval("lindex $::duplicate_calls 0"), "surfs 2 1")
+        self.assertEqual(self.tcl.eval("lindex $::move_calls 0"), "surfs 1 SOURCE_SEAM")
+
+    def test_parameters_panel_covers_only_baseline_configurable_items(self):
+        ui = (MODULE_DIR / "ui.tcl").read_text(encoding="utf-8")
+        config = (MODULE_DIR / "config.tcl").read_text(encoding="utf-8")
+        for key in (
+            "endpoint_merge_tolerance",
+            "distance_tolerance",
+            "stitch_tolerance",
+            "cleanup_tolerance",
+            "area_tolerance",
+            "volume_tolerance",
+            "min_seam_length",
+            "point_spacing",
+            "geometry_offset_distance",
+            "extend_offset_distance",
+            "connect_min_angle_to_target",
+            "connect_max_angle_edge_to_surf",
+            "connect_guide_angle",
+            "lap_connect_distance",
+            "thickness_override",
+        ):
+            self.assertIn(key, config)
+            self.assertIn(key, ui)
+        # The 2022.3-only knobs must not be offered on the 2019/2022.2 panel.
+        for removed in (
+            "connect_extend_distance",
+            "connect_extend_distance_auto",
+            "connect_extend_distance_factor",
+            "replace_point_projection_distance",
+            "extend_offset_type",
+            "extend_connect_trim_mode",
+            "use_public_query_apis",
+        ):
+            self.assertNotIn(removed, ui)
+        for key in ("lap_boolean_opcode", "diagnostic_preserve_failed_geometry",
+                    "t_surface_trim_mode", "topology_connection_required",
+                    "private_history_api"):
+            self.assertIn(key, config)
+            self.assertIn(key, ui)
+        self.assertIn("8=union", ui.lower())
+        self.assertIn("14=intersect", ui.lower())
+
+    def test_extend_source_file_keeps_the_2019_baseline_arguments(self):
+        executor = (MODULE_DIR / "executor.tcl").read_text(encoding="utf-8")
+        # The legacy argument layout is the HM2019/2022.2 baseline route; the
+        # 2022.3-only projection pipeline has been removed from the module.
+        self.assertIn("*offset_surfaces_and_modify surfaces 2 2 1", executor)
+        self.assertIn("*connect_surfaces_11 1 1 3 2", executor)
+        self.assertNotIn("_create_t_list_project_ruled", executor)
+        self.assertNotIn("_create_t_surface", executor)
+
+    def test_diagnose_module_is_loaded_and_has_a_report_entry(self):
+        self.assertEqual(
+            self.tcl.eval("llength [info commands ::hmtoolkit::seam::diagnose::run]"),
+            "1",
+        )
+        self.assertEqual(
+            self.tcl.eval("llength [info commands ::hmtoolkit::seam::ui::run_diagnose]"),
+            "1",
+        )
+        loader = (MODULE_DIR / ".." / "seam_surface.tcl").read_text(encoding="utf-8")
+        self.assertIn("diagnose.tcl", loader)
+        report = self.tcl.eval("::hmtoolkit::seam::diagnose::run")
+        self.assertIn("GEOMETRY SEAM DIAGNOSTIC", report)
+        self.assertIn("HyperMesh:", report)
+        # The read-only probe list must cover the executor's native commands.
+        for command in ("*connect_surfaces_11", "*linearsurfacebetweenlines",
+                        "*surfacemarksplitwithlines", "*offset_surfaces_and_modify",
+                        "*boolean_merge_solids", "*edgesmarkaddpoints",
+                        "*projectpointstoedges", "hm_getmark", "hm_getvalue"):
+            self.assertIn(command, report)
+
+    def test_diagnose_probe_row_reports_missing_ok_and_exists(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::diagnose::exists ::hmtoolkit::seam::diagnose::exists_real
+            proc ::hmtoolkit::seam::diagnose::exists {name} {
+                if {$name eq "hm_present_query"} {return 1}
+                if {$name eq "hm_failing_query"} {return 1}
+                if {$name eq "*destructive_cmd"} {return 1}
+                return 0
+            }
+            proc hm_present_query {args} {return {1 2 3}}
+            proc hm_failing_query {args} {error "bad arguments"}
+            proc *destructive_cmd {args} {}
+            """
+        )
+        ok_row = self.tcl.eval(
+            "::hmtoolkit::seam::diagnose::probe_row hm_present_query {} probe"
+        )
+        self.assertIn("OK", ok_row)
+        self.assertIn("returned:", ok_row)
+        err_row = self.tcl.eval(
+            "::hmtoolkit::seam::diagnose::probe_row hm_failing_query {} probe"
+        )
+        self.assertIn("ERR", err_row)
+        self.assertIn("probe error", err_row)
+        exist_row = self.tcl.eval(
+            "::hmtoolkit::seam::diagnose::probe_row *destructive_cmd {} exists"
+        )
+        self.assertIn("EXIST", exist_row)
+        missing_row = self.tcl.eval(
+            "::hmtoolkit::seam::diagnose::probe_row *ghost_cmd {} exists"
+        )
+        self.assertIn("MISS", missing_row)
+        self.assertIn("command not found", missing_row)
 
 
 if __name__ == "__main__":

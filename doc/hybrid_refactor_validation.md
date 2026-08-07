@@ -44,8 +44,10 @@ bolt_created=1
 auto_status=SUCCESS
 ```
 
-说明：hmbatch 对若干交互显示选项输出 `*setoption: Invalid option specified`，但这些调用
-均位于原有容错路径中，不影响实体导出、Python 识别或创建，最终退出码为 0。
+说明：此前 hmbatch 对 `*setoption block_browser_update` 输出 `*setoption: Invalid option
+specified`（该选项不是 HyperMesh 文档化的 `*setoption` 选项），已从 workflow_common.tcl、
+auto_hole_rbe2.tcl 与 rbe2_bolt_connector.tcl 中移除，浏览器刷新统一改用官方
+`hm_blockbrowserupdate`；实体导出、Python 识别与创建均不受影响，最终退出码为 0。
 
 ## 对比模式与任务证据
 

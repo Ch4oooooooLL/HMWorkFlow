@@ -1,55 +1,6 @@
 namespace eval ::hmtoolkit::seam::selector {}
 namespace eval ::hmtoolkit::seam::interactive {}
 
-proc ::hmtoolkit::seam::selector::marked_ids {entityType markId} {
-    set ids {}
-    catch {set ids [hm_getmark $entityType $markId]}
-    return [lsort -integer -unique $ids]
-}
-
-proc ::hmtoolkit::seam::selector::context_from_components {source target} {
-    set source [lsort -integer -unique $source]
-    set target [lsort -integer -unique $target]
-    if {[llength $source] == 0 || [llength $target] == 0} { return {} }
-    set sourceSurfs {}; set targetSurfs {}
-    foreach compId $source { set sourceSurfs [concat $sourceSurfs [::hmtoolkit::seam::entity::component_surfaces $compId]] }
-    foreach compId $target { set targetSurfs [concat $targetSurfs [::hmtoolkit::seam::entity::component_surfaces $compId]] }
-    if {[llength $sourceSurfs] == 0 || [llength $targetSurfs] == 0} { return {} }
-    return [dict create valid 1 origin PRESELECTED_COMPONENTS source_components $source target_components $target \
-        source_surfs [lsort -integer -unique $sourceSurfs] target_surfs [lsort -integer -unique $targetSurfs]]
-}
-
-proc ::hmtoolkit::seam::selector::context_from_surfaces {source target} {
-    set source [lsort -integer -unique $source]
-    set target [lsort -integer -unique $target]
-    if {[llength $source] == 0 || [llength $target] == 0} { return {} }
-    return [dict create valid 1 origin PRESELECTED_SURFACES source_surfs $source target_surfs $target \
-        source_components [::hmtoolkit::seam::selector::components_for_surfaces $source] \
-        target_components [::hmtoolkit::seam::selector::components_for_surfaces $target]]
-}
-
-proc ::hmtoolkit::seam::selector::capture_preselection {} {
-    set comps1 [::hmtoolkit::seam::selector::marked_ids comps 1]
-    set comps2 [::hmtoolkit::seam::selector::marked_ids comps 2]
-    if {[llength $comps1] > 0 && [llength $comps2] > 0} {
-        set context [::hmtoolkit::seam::selector::context_from_components $comps1 $comps2]
-        if {$context ne ""} { return $context }
-    }
-    if {[llength $comps1] >= 2} {
-        set context [::hmtoolkit::seam::selector::context_from_components [list [lindex $comps1 0]] [lrange $comps1 1 end]]
-        if {$context ne ""} { return $context }
-    }
-    set surfs1 [::hmtoolkit::seam::selector::marked_ids surfs 1]
-    set surfs2 [::hmtoolkit::seam::selector::marked_ids surfs 2]
-    if {[llength $surfs1] > 0 && [llength $surfs2] > 0} {
-        return [::hmtoolkit::seam::selector::context_from_surfaces $surfs1 $surfs2]
-    }
-    if {[llength $surfs1] >= 2} {
-        return [::hmtoolkit::seam::selector::context_from_surfaces [list [lindex $surfs1 0]] [lrange $surfs1 1 end]]
-    }
-    return {}
-}
-
 proc ::hmtoolkit::seam::selector::strategy_needs_thickness {strategy} {
     return [expr {$strategy in {T_PATH T_LIST L_SURF L_LIST CONNECT}}]
 }
@@ -140,6 +91,16 @@ proc ::hmtoolkit::seam::selector::list_panel {mode listId prompt} {
     return [dict create valid 1 ids $ids]
 }
 
+proc ::hmtoolkit::seam::selector::duplicate_ids {first second} {
+    array set seen {}
+    foreach id $first { set seen($id) 1 }
+    set duplicates {}
+    foreach id $second {
+        if {[info exists seen($id)]} { lappend duplicates $id }
+    }
+    return [lsort -integer -unique $duplicates]
+}
+
 proc ::hmtoolkit::seam::selector::surface_list_panel {listId prompt} {
     catch {*createlist surfs $listId}
     *createlistpanel surfs $listId $prompt
@@ -179,36 +140,22 @@ proc ::hmtoolkit::seam::selector::selection_error {selection} {
     return [dict create success 0 cancelled [dict get $selection cancelled] message [dict get $selection message]]
 }
 
-proc ::hmtoolkit::seam::selector::select_analysis_scope {scope} {
-    switch -- $scope {
-        COMPONENT_PAIR {
-            set first [::hmtoolkit::seam::selector::mark_panel comps 1 "Select the first seam component" 1]
-            if {![dict get $first valid]} { return $first }
-            set second [::hmtoolkit::seam::selector::mark_panel comps 2 "Select the second seam component" 1]
-            if {![dict get $second valid]} { return $second }
-            set a [dict get $first ids]; set b [dict get $second ids]
-            if {[lindex $a 0] == [lindex $b 0]} { return [dict create valid 0 cancelled 0 message "The two components must be different."] }
-            return [dict create valid 1 source_components $a target_components $b \
-                source_surfs [::hmtoolkit::seam::entity::component_surfaces [lindex $a 0]] \
-                target_surfs [::hmtoolkit::seam::entity::component_surfaces [lindex $b 0]]]
-        }
-        SURFACE_GROUPS {
-            set first [::hmtoolkit::seam::selector::mark_panel surfs 1 "Select the first surface group"]
-            if {![dict get $first valid]} { return $first }
-            set second [::hmtoolkit::seam::selector::mark_panel surfs 2 "Select the second surface group"]
-            if {![dict get $second valid]} { return $second }
-            set a [dict get $first ids]; set b [dict get $second ids]
-            return [dict create valid 1 source_surfs $a target_surfs $b \
-                source_components [::hmtoolkit::seam::selector::components_for_surfaces $a] \
-                target_components [::hmtoolkit::seam::selector::components_for_surfaces $b]]
-        }
-        default { return [dict create valid 0 cancelled 0 message "Unsupported analysis scope: $scope"] }
-    }
-}
-
 proc ::hmtoolkit::seam::selector::select_strategy_input {strategy} {
     switch -- $strategy {
-        T_PATH - T_LIST - L_LIST {
+        # "T路径" flow (HM2019 baseline): seam lines + target surfaces. This
+        # is the line-based route that produced results on 2019.0.0.70; the
+        # two-surface-group variant was only verified on HM2022.3.
+        T_PATH {
+            set lines [::hmtoolkit::seam::selector::list_panel PATH 1 "Select seam lines"]
+            if {![dict get $lines valid]} { return $lines }
+            set targets [::hmtoolkit::seam::selector::mark_panel surfs 2 "Select target surfaces"]
+            if {![dict get $targets valid]} { return $targets }
+            set source [::hmtoolkit::seam::selector::surfaces_for_lines [dict get $lines ids]]
+            return [dict create valid 1 seam_lines [dict get $lines ids] source_surfs $source target_surfs [dict get $targets ids] \
+                source_components [::hmtoolkit::seam::selector::components_for_surfaces $source] \
+                target_components [::hmtoolkit::seam::selector::components_for_surfaces [dict get $targets ids]]]
+        }
+        T_LIST - L_LIST {
             set lines [::hmtoolkit::seam::selector::list_panel PATH 1 "Select seam lines"]
             if {![dict get $lines valid]} { return $lines }
             if {$strategy eq "L_LIST"} {

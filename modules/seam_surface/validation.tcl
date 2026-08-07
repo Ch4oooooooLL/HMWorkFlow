@@ -37,15 +37,48 @@ proc ::hmtoolkit::seam::validation::created_surfaces_in_component {before compon
 }
 
 proc ::hmtoolkit::seam::validation::created_surfaces_for_component {beforeComponent beforeAll componentId} {
+    # Global diff first: if the kernel created surfaces, they must be reported
+    # even when the current component was wrong and they landed elsewhere.
+    # This separates the three failure classes:
+    #   A. no new surface at all (distance/angles/topology)
+    #   B. new surfaces in the wrong component (current collector problem)
+    #   C. created correctly, later validation steps may still fail
+    set globalCreated [::hmtoolkit::seam::entity::diff_ids \
+        $beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]]
+    if {[llength $globalCreated] > 0} {
+        set correctOwner {}
+        set wrongOwner {}
+        foreach surfId $globalCreated {
+            set owner [::hmtoolkit::seam::entity::surface_component $surfId]
+            if {$owner ne "" && $owner == $componentId} {
+                lappend correctOwner $surfId
+            } else {
+                lappend wrongOwner [list $surfId $owner]
+            }
+        }
+        set correctOwner [lsort -integer -unique $correctOwner]
+        if {[llength $correctOwner] == 0} {
+            error "New surfaces were created, but none is in the expected seam component $componentId. New surface/owner pairs: $wrongOwner"
+        }
+        ::hmtoolkit::seam::validation::surface_ids $correctOwner $componentId
+        set ownerReport {}
+        foreach surfId $correctOwner {
+            lappend ownerReport [list $surfId \
+                [::hmtoolkit::seam::entity::surface_component $surfId] \
+                [::hmtoolkit::seam::validation::surface_area $surfId]]
+        }
+        ::hmtoolkit::seam::log::write INFO \
+            "Created surfaces (id owner area): $ownerReport"
+        return $correctOwner
+    }
+    # No global new surfaces: kernels that modify in place (some advanced
+    # option combinations) can still add surfaces inside the component scope.
     set afterComponent [::hmtoolkit::seam::entity::component_surfaces $componentId]
     set created [::hmtoolkit::seam::entity::diff_ids $beforeComponent $afterComponent]
-    if {[llength $created] == 0 && [llength $beforeAll] > 0} {
-        set globalCreated [::hmtoolkit::seam::entity::diff_ids $beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]]
-        foreach surfId $globalCreated {
-            if {[string equal [::hmtoolkit::seam::entity::surface_component $surfId] $componentId]} { lappend created $surfId }
-        }
-    }
     set created [lsort -integer -unique $created]
+    if {[llength $created] == 0} {
+        error "Native surface command completed but created no new surface. Check extension distance, angles and topology."
+    }
     ::hmtoolkit::seam::validation::surface_ids $created $componentId
     return $created
 }

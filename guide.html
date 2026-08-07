@@ -1105,7 +1105,7 @@
                     <div class="dashboard-card" id="card-geometry-seam">
                         <div class="card-header"><span class="card-title">几何焊缝</span><span class="card-badge geometry">几何</span></div>
                         <div class="card-path">seam_surface.tcl</div>
-                        <div class="card-desc">识别 T 型、角接和搭接候选，复核策略后创建、编辑或删除几何焊缝。</div>
+                        <div class="card-desc">按类型精确选取几何，创建、编辑或删除曲面焊缝。</div>
                         <a href="#mod-geometry-seam" class="card-btn">查看使用说明</a>
                     </div>
 
@@ -1456,20 +1456,23 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
             <section id="mod-geometry-seam" class="module-section" data-module="seam_surface">
                 <h1 class="section-title">几何焊缝 (Geometry Seam)</h1>
                 <div class="module-detail">
-                    <div class="detail-header"><div class="detail-title"><span class="card-badge geometry">几何</span><span>候选识别、复核与精确编辑</span></div><div class="detail-path-badge">modules/seam_surface.tcl</div></div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">在局部几何范围内识别 T 型、角接和搭接接头。自动分析只生成候选和建议策略，创建前始终要求确认；也可直接使用精确创建、编辑和删除动作。</p>
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge geometry">几何</span><span>精确创建、编辑与删除</span></div><div class="detail-path-badge">modules/seam_surface.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">按焊缝类型精确选取几何后创建曲面焊缝（HM2019 基线流程）。自动识别候选与自动搭建流程已移除：所有创建都要求人工确认，创建前始终需要确认，快捷键直接打开功能面板。</p>
                     <div class="step-list">
-                        <div class="step-item"><span class="step-num">1</span><div class="step-title">选择分析范围</div><div class="step-detail">选择“两个组件”或“两组曲面”，再执行分析；快捷键可配置为面板选择或预设范围。</div></div>
-                        <div class="step-item"><span class="step-num">2</span><div class="step-title">复核候选</div><div class="step-detail">定位/孤立候选，检查接头类型、置信度和建议策略；必要时强制指定 T、Corner 或 Lap 类型及创建策略。</div></div>
-                        <div class="step-item"><span class="step-num">3</span><div class="step-title">确认创建或精确编辑</div><div class="step-detail">支持 T Path、T List、Lap Surface、Lap Edges、Connect、Project/Split，以及延伸、合并、拆分、替换点、分布点和删除。</div></div>
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">选择焊缝类型</div><div class="step-detail">T Path（T路径）、T List、Lap Surface、Lap Edges、Connect、Project/Split、延伸、合并、拆分、替换点、分布点或删除。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">精确选取几何</div><div class="step-detail">按提示在 HyperMesh 中选择焊缝边线/目标面、两组曲面、边线组或点；可连续创建，按 Esc 退出。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">确认创建</div><div class="step-detail">创建前始终要求确认；失败会回滚并给出明确的几何诊断。</div></div>
+                        <div class="step-item"><span class="step-num">4</span><div class="step-title">命令诊断</div><div class="step-detail">面板右下角"诊断"按钮逐条探测模块依赖的 HyperMesh 命令（只读命令实际调用、破坏性命令仅查存在性），弹出精简报告窗口便于拍照，并保存到 <code>%APPDATA%\HMWorkFlow\logs\geometry_seam_diagnose_*.log</code>。</div></div>
                     </div>
                     <table class="param-table"><thead><tr><th>关键参数</th><th>作用</th></tr></thead><tbody>
-                        <tr><td>平行/垂直角阈值</td><td>用于接头几何关系分类。</td></tr>
-                        <tr><td>距离与拓扑缝合容差</td><td>控制候选邻近判断和创建后的拓扑处理。</td></tr>
-                        <tr><td>最小焊缝长度、点间距</td><td>过滤短候选并控制分布点密度。</td></tr>
+                        <tr><td>距离/端点/面积/体积/缝合/清理容差</td><td>控制判定严苛性与创建后的拓扑处理。</td></tr>
+                        <tr><td>连接角度、搭接距离</td><td>控制 T 型/搭接创建参数（HM2019 基线）。</td></tr>
+                        <tr><td>搭接布尔模式、失败保留几何</td><td>兼容性选项：8=并、14=交；1 时失败保留几何供排查。</td></tr>
+                        <tr><td>T 曲面修剪模式</td><td>HM2019/HM2022 行为对照：修剪模式取合法值 0/1。</td></tr>
+                        <tr><td>强制拓扑连接、私有历史接口、官方查询接口</td><td>判定严苛性与兼容开关：拓扑连接失败可降级为警告；可关闭私有 <code>hm_private_frwk</code>；可切回旧版查询 API。</td></tr>
                         <tr><td>厚度覆盖</td><td><code>0</code> 表示自动读取或询问；正值强制使用指定厚度。</td></tr>
                     </tbody></table>
-                    <div class="alert-box warning"><div class="alert-content"><h4>受控功能，创建前必须确认</h4><p>自动分类和策略推荐不能替代工程判断。首次在目标 HyperMesh 版本使用时，应先以代表性模型验证曲面创建、trim、equivalence 和撤销行为。</p></div></div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>受控功能，创建前必须确认</h4><p>几何创建依赖 HyperMesh 原生内核。首次在目标 HyperMesh 版本使用时，应先以代表性模型验证曲面创建、trim、equivalence 和撤销行为。</p></div></div>
                 </div>
             </section>
 

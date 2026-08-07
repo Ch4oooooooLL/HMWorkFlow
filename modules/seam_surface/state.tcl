@@ -2,38 +2,49 @@ namespace eval ::hmtoolkit::seam::state {}
 namespace eval ::hmtoolkit::seam::transaction {}
 
 proc ::hmtoolkit::seam::state::capture {} {
-    set result [dict create current_component "" visible_components {} visibility_readable 0]
-    foreach command {{hm_info currentcomponent} {hm_getcurrentcollector components}} {
-        if {![catch {set value [eval $command]}] && $value ne ""} {
-            dict set result current_component $value
-            break
+    # Only components that exist before the transaction may be restored later.
+    # Newly created seam components must never be hidden by the restore step.
+    set existing [::hmtoolkit::seam::entity::snapshot_ids comps]
+    set display [dict create]
+    foreach compId $existing {
+        set geometry [::hmtoolkit::seam::native::geometry_visible $compId]
+        set elements [::hmtoolkit::seam::native::elements_visible $compId]
+        if {$geometry ne "" || $elements ne ""} {
+            dict set display $compId [list $geometry $elements]
         }
     }
-    set visible {}
-    set readable 0
-    foreach compId [::hmtoolkit::seam::entity::snapshot_ids comps] {
-        foreach dataname {visible displayed} {
-            if {![catch {set value [hm_getvalue comps id=$compId dataname=$dataname]}]} {
-                set readable 1
-                if {$value} { lappend visible $compId }
-                break
-            }
-        }
-    }
-    dict set result visible_components $visible
-    dict set result visibility_readable $readable
+    set result [dict create \
+        current_component [::hmtoolkit::seam::native::current_component] \
+        existing_components $existing \
+        display_states $display]
     return $result
 }
 
 proc ::hmtoolkit::seam::state::restore {state} {
     set warnings {}
-    if {[dict get $state visibility_readable]} {
-        set all [::hmtoolkit::seam::entity::snapshot_ids comps]
-        catch {::hmtoolkit::seam::entity::mark comps 1 $all; *displaycollectorsbymark comps 1 off 1 1}
-        set visible [dict get $state visible_components]
-        if {[llength $visible] > 0} { catch {::hmtoolkit::seam::entity::mark comps 1 $visible; *displaycollectorsbymark comps 1 on 1 1} }
+    set display [dict get $state display_states]
+    # Restore the geometry/elements display state only for components that
+    # already existed when the transaction started. Components created by the
+    # operation are deliberately left untouched.
+    if {[dict size $display] > 0} {
+        foreach compId [dict keys $display] {
+            if {![::hmtoolkit::seam::entity::exists comps $compId]} { continue }
+            lassign [dict get $display $compId] geometry elements
+            if {$geometry ne ""} {
+                catch {
+                    ::hmtoolkit::seam::entity::mark comps 1 [list $compId]
+                    *displaycollectorsbymark comps 1 [expr {$geometry ? "on" : "off"}] 1 0
+                }
+            }
+            if {$elements ne ""} {
+                catch {
+                    ::hmtoolkit::seam::entity::mark comps 1 [list $compId]
+                    *displaycollectorsbymark comps 1 [expr {$elements ? "on" : "off"}] 0 1
+                }
+            }
+        }
     } else {
-        lappend warnings "HyperMesh 2019 did not expose a readable component visibility state; visibility was not forced."
+        lappend warnings "Component visibility state was not readable on this profile; visibility was not forced."
     }
     set current [dict get $state current_component]
     if {$current ne ""} {
@@ -52,16 +63,23 @@ proc ::hmtoolkit::seam::transaction::run {label scriptBody} {
     set tempToken [::hmtoolkit::seam::temp::new_scope]
     set runtime(active_temp_token) $tempToken
     set historyStarted 0
-    catch {hm_private_frwk enablehistoryfromtcl 1}
+    ::hmtoolkit::seam::native::history_from_tcl 1
     if {![catch {*startnotehistorystate $label}]} { set historyStarted 1 }
     set code [catch {uplevel 1 $scriptBody} value options]
-    # Cleanup belongs to the same undo unit as the geometry operation.
-    catch {::hmtoolkit::seam::temp::cleanup $tempToken}
+    set preserve [expr {[::hmtoolkit::seam::config::get diagnostic_preserve_failed_geometry] > 0}]
+    if {!$code || !$preserve} {
+        # Cleanup belongs to the same undo unit as the geometry operation.
+        catch {::hmtoolkit::seam::temp::cleanup $tempToken}
+    }
     if {$historyStarted} { catch {*endnotehistorystate $label} }
-    catch {hm_private_frwk enablehistoryfromtcl 0}
+    ::hmtoolkit::seam::native::history_from_tcl 0
     set runtime(active_temp_token) ""
-    if {$code && $historyStarted} { catch {*undohistorystate 1} }
+    if {$code && $historyStarted && !$preserve} { catch {*undohistorystate 1} }
     set restoreWarnings [::hmtoolkit::seam::state::restore $state]
+    if {$code && $preserve} {
+        lappend restoreWarnings \
+            "diagnostic_preserve_failed_geometry=1: rollback skipped, temp scope $tempToken was kept for inspection"
+    }
     if {$code} {
         set info ""
         if {[dict exists $options -errorinfo]} { set info [dict get $options -errorinfo] }

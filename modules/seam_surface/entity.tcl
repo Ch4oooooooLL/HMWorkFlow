@@ -11,7 +11,11 @@ proc ::hmtoolkit::seam::entity::normalize_type {entityType} {
     }
 }
 
-proc ::hmtoolkit::seam::entity::snapshot_ids {entityType {markId 2}} {
+# Internal query helpers must not reuse the shared native marks 1/2 that
+# wrappers own during a geometry call. Mark 5 is used because HyperMesh 2019
+# rejects mark numbers outside its supported range (mark 99 fails with
+# "markmask should be ...", verified by the built-in diagnostic).
+proc ::hmtoolkit::seam::entity::snapshot_ids {entityType {markId 5}} {
     set entityType [::hmtoolkit::seam::entity::normalize_type $entityType]
     catch {*clearmark $entityType $markId}
     set ids {}
@@ -35,11 +39,14 @@ proc ::hmtoolkit::seam::entity::diff_ids {before after} {
 proc ::hmtoolkit::seam::entity::exists {entityType id} {
     if {![string is integer -strict $id] || $id <= 0} { return 0 }
     set entityType [::hmtoolkit::seam::entity::normalize_type $entityType]
-    catch {*clearmark $entityType 2}
-    if {[catch {*createmark $entityType 2 $id}]} { return 0 }
+    # HM2019 baseline: mark-based existence on mark 5 so it can never disturb
+    # an in-flight wrapper mark 1/2. The hm_entityinfo exist -byid public query
+    # introduced with the 2026-08-07 audit was verified on 2022.3 only.
+    catch {*clearmark $entityType 5}
+    if {[catch {*createmark $entityType 5 $id}]} { return 0 }
     set ids {}
-    catch {set ids [hm_getmark $entityType 2]}
-    catch {*clearmark $entityType 2}
+    catch {set ids [hm_getmark $entityType 5]}
+    catch {*clearmark $entityType 5}
     return [expr {[lsearch -exact $ids $id] >= 0}]
 }
 
@@ -68,14 +75,14 @@ proc ::hmtoolkit::seam::entity::component_surfaces {compId} {
             return [lsort -integer -unique $ids]
         }
     }
-    catch {*clearmark surfs 2}
+    catch {*clearmark surfs 5}
     set ids {}
-    if {![catch {*createmark surfs 2 "by comp id" $compId}]} { catch {set ids [hm_getmark surfs 2]} }
+    if {![catch {*createmark surfs 5 "by comp id" $compId}]} { catch {set ids [hm_getmark surfs 5]} }
     if {[llength $ids] == 0} {
         set compName [::HWFlow::componentName $compId]
-        if {$compName ne "" && ![catch {*createmark surfs 2 "by comp" $compName}]} { catch {set ids [hm_getmark surfs 2]} }
+        if {$compName ne "" && ![catch {*createmark surfs 5 "by comp" $compName}]} { catch {set ids [hm_getmark surfs 5]} }
     }
-    catch {*clearmark surfs 2}
+    catch {*clearmark surfs 5}
     return [lsort -integer -unique $ids]
 }
 

@@ -10,11 +10,21 @@ proc ::hmtoolkit::seam::naming::thickness_from_data {data} {
         set value [dict get $data thickness]
         if {[string is double -strict $value] && $value > 0.0} { return [expr {double($value)}] }
     }
+    # Primary source: real Property thickness via the public query API.
+    # The Component-name _Txx parser is only a legacy fallback and logs a
+    # warning so the report's "thickness from name" issue stays visible.
     set values {}
     foreach key {source_components target_components} {
         if {![dict exists $data $key]} { continue }
         foreach compId [dict get $data $key] {
-            set value [::HWFlow::thicknessFromComponentName [::HWFlow::componentName $compId]]
+            set value [::hmtoolkit::seam::native::component_thickness $compId]
+            if {$value eq ""} {
+                set value [::HWFlow::thicknessFromComponentName [::HWFlow::componentName $compId]]
+                if {$value ne ""} {
+                    ::hmtoolkit::seam::log::write WARN \
+                        "Component $compId has no readable Property thickness; using _Txx name fallback"
+                }
+            }
             if {$value ne ""} { lappend values $value }
         }
     }
@@ -24,10 +34,13 @@ proc ::hmtoolkit::seam::naming::thickness_from_data {data} {
 
 proc ::hmtoolkit::seam::naming::get_or_create_component {thickness} {
     set name "SEAM_T[::hmtoolkit::seam::naming::format_thickness $thickness]_Surf"
-    set id [::HWFlow::createComponent $name]
+    # -history external: the seam transaction owns the undo/redo block.
+    set id [::HWFlow::createComponent $name "" external]
     if {$id eq ""} { error "Unable to create or reuse seam component $name" }
     ::HWFlow::addComponentsToAssembly Seam_Comps [list $id] 11
-    catch {*currentcollector component $name}
+    # Every native geometry command that routes new entities into this
+    # component depends on the current collector; verify it, never swallow it.
+    ::hmtoolkit::seam::native::set_current_component_checked $name $id
     return [list $name $id]
 }
 
@@ -172,10 +185,22 @@ proc ::hmtoolkit::seam::executor::equivalence_created_surfaces {created sourceSu
             }
         }
     }
+    set final [::hmtoolkit::seam::validation::created_surfaces_in_component $beforeComponentSurfs $componentId]
+    set message ""
     if {!$ran} {
-        error "Topology equivalence command could not run for the local seam surfaces"
+        set message "Topology equivalence command could not run for the local seam surfaces"
+    } else {
+        set message "The seam surface was created geometrically but is not topologically connected to both contacting sides"
     }
-    error "The seam surface was created geometrically but is not topologically connected to both contacting sides"
+    if {[::hmtoolkit::seam::config::get topology_connection_required] > 0} {
+        error $message
+    }
+    # Audit section 19.1: a strict equivalence failure rolls back geometry.
+    # With topology_connection_required=0 the failure is downgraded to a
+    # warning and the created, correctly-owned geometry is kept for review.
+    ::hmtoolkit::seam::log::write WARN \
+        "$message; topology_connection_required=0 keeps the created geometry: $final"
+    return $final
 }
 
 proc ::hmtoolkit::seam::executor::lap_result_surfaces {tempComponents newlyCreated} {
@@ -198,9 +223,12 @@ proc ::hmtoolkit::seam::executor::temp_component_solids {tempComponents} {
     set solids {}
     foreach component $tempComponents {
         catch {*clearmark solids 1}
-        if {![catch {*createmark solids 1 "by comp" [lindex $component 0]}]} {
-            catch {set solids [concat $solids [hm_getmark solids 1]]}
+        if {[catch {*createmark solids 1 "by comp" [lindex $component 0]} markErr]} {
+            error "Failed to mark solids in temporary component '[lindex $component 0]': $markErr"
         }
+        set found {}
+        catch {set found [hm_getmark solids 1]}
+        set solids [concat $solids $found]
     }
     catch {*clearmark solids 1}
     return [lsort -integer -unique $solids]
@@ -242,6 +270,18 @@ proc ::hmtoolkit::seam::executor::prepare_ruled_surface_lists {first second} {
     *createlist nodes 2
 }
 
+# Shared CONNECT/T_LIST post-processing after *linearsurfacebetweenlines:
+# mark the preliminary ruled surfaces and merge their edges under the pinned
+# session cleanup tolerance. This is what turns a free-standing ruled sheet
+# into a seam that is topologically connected to the contacting sides.
+proc ::hmtoolkit::seam::executor::merge_ruled_surfaces {preliminary} {
+    ::hmtoolkit::seam::entity::mark surfs 1 $preliminary
+    ::hmtoolkit::seam::native::with_cleanup_tolerance \
+        [::hmtoolkit::seam::config::get cleanup_tolerance] {
+        *multi_surfs_lines_merge 1 0 0
+    }
+}
+
 proc ::hmtoolkit::seam::executor::_create_t {data strategy} {
     set lines [::hmtoolkit::seam::validation::require_ids $data seam_lines lines]
     set sourceSurfs [::hmtoolkit::seam::validation::require_ids $data source_surfs surfs]
@@ -253,32 +293,50 @@ proc ::hmtoolkit::seam::executor::_create_t {data strategy} {
     if {$strategy eq "T_PATH" && [dict get $topology kind] ne "PATH"} { error "T_PATH requires one connected, unbranched path" }
     set thickness [::hmtoolkit::seam::naming::thickness_from_data $data]
     set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
+    set componentName [lindex $component 0]
+    set componentId [lindex $component 1]
+    set minAngle [::hmtoolkit::seam::config::get connect_min_angle_to_target]
+    set maxAngle [::hmtoolkit::seam::config::get connect_max_angle_edge_to_surf]
+    set guideAngle [::hmtoolkit::seam::config::get connect_guide_angle]
+    set trimMode [::hmtoolkit::seam::config::get t_surface_trim_mode]
     set created {}
     foreach targetSurf $targetSurfs {
-        set before [::hmtoolkit::seam::entity::component_surfaces [lindex $component 1]]
+        ::hmtoolkit::seam::native::ensure_current_component $componentName $componentId
+        set before [::hmtoolkit::seam::entity::component_surfaces $componentId]
         set beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]
+        foreach type {surfs lines} {
+            foreach markId {1 2} {
+                catch {*clearmark $type $markId}
+            }
+        }
         ::hmtoolkit::seam::entity::mark lines 1 $lines
         ::hmtoolkit::seam::entity::mark surfs 1 $sourceSurfs
         ::hmtoolkit::seam::entity::mark surfs 2 [list $targetSurf]
         # Process every target independently. A grouped target mark can produce
         # valid geometry for only the first intersected surface and silently
         # leave the remaining targets topologically detached.
-        *connect_surfaces_11 1 2 3 1 0 15 30 1 0 2 30 59 0
+        ::hmtoolkit::seam::log::write INFO \
+            "T List native args: *connect_surfaces_11 1 2 3 $trimMode 0 $minAngle $maxAngle 1 0 2 $guideAngle 59 0; target=$targetSurf"
+        *connect_surfaces_11 1 2 3 $trimMode 0 $minAngle $maxAngle 1 0 2 $guideAngle 59 0
         set targetCreated [::hmtoolkit::seam::validation::created_surfaces_for_component \
-            $before $beforeAll [lindex $component 1]]
+            $before $beforeAll $componentId]
         set targetCreated [::hmtoolkit::seam::executor::equivalence_created_surfaces \
-            $targetCreated $sourceSurfs [list $targetSurf] [lindex $component 1] $before]
+            $targetCreated $sourceSurfs [list $targetSurf] $componentId $before]
         set created [concat $created $targetCreated]
     }
     set created [lsort -integer -unique $created]
-    return [::hmtoolkit::seam::executor::success $strategy $created [list [lindex $component 0]] {} "Seam surfaces created successfully."]
+    return [::hmtoolkit::seam::executor::success $strategy $created [list $componentName] {} "Seam surfaces created successfully."]
 }
 
 proc ::hmtoolkit::seam::executor::create_t_path {data} {
+    # Project baseline (HM2019 / 2022.2): the line-based T path flow
+    # (`*connect_surfaces_11 1 2 3 ... 59 0`) is the T-type creation route.
     return [::hmtoolkit::seam::transaction::run "Create T Path Seam" [list ::hmtoolkit::seam::executor::_create_t $data T_PATH]]
 }
 
 proc ::hmtoolkit::seam::executor::create_t_list {data} {
+    # Project baseline (HM2019 / 2022.2): same line-based route as the
+    # legacy T list flow.
     return [::hmtoolkit::seam::transaction::run "Create T List Seam" [list ::hmtoolkit::seam::executor::_create_t $data T_LIST]]
 }
 
@@ -295,28 +353,42 @@ proc ::hmtoolkit::seam::executor::_create_l_surface {data} {
     set scope $runtime(active_temp_token)
     set tempA [::hmtoolkit::seam::temp::create_component $scope]
     set tempB [::hmtoolkit::seam::temp::create_component $scope]
-    catch {*currentcollector component [lindex $tempA 0]}
+    # Duplicate the two plate surfaces into their own temporary components so
+    # the solid pipeline never touches the originals. Each duplicate step is
+    # verified: the copies must really be owned by the temp component.
+    ::hmtoolkit::seam::native::ensure_current_component [lindex $tempA 0] [lindex $tempA 1]
     ::hmtoolkit::seam::entity::mark surfs 1 $sourceSurfs
     *duplicatemark surfs 1 1
-    catch {*currentcollector component [lindex $tempB 0]}
+    set copiesA [::hmtoolkit::seam::native::mark_by_component_checked surfs 1 [lindex $tempA 0]]
+    ::hmtoolkit::seam::native::ensure_current_component [lindex $tempB 0] [lindex $tempB 1]
     ::hmtoolkit::seam::entity::mark surfs 1 $targetSurfs
     *duplicatemark surfs 1 1
+    set copiesB [::hmtoolkit::seam::native::mark_by_component_checked surfs 1 [lindex $tempB 0]]
 
-    catch {*createmark surfs 1 "by comp" [lindex $tempA 0]}
+    ::hmtoolkit::seam::entity::mark surfs 1 $copiesA
     *solid_offset_from_surfs 1 [expr {-$offset}] 5 2
-    catch {*createmark surfs 1 "by comp" [lindex $tempB 0]}
+    ::hmtoolkit::seam::entity::mark surfs 1 $copiesB
     *solid_offset_from_surfs 1 [expr {-$offset}] 5 2
-    catch {*createmark solids 1 "by comp" [lindex $tempA 0]}
-    catch {*createmark solids 2 "by comp" [lindex $tempB 0]}
-    *boolean_merge_solids 1 2 8 3
+    set solidsA [::hmtoolkit::seam::native::mark_by_component_checked solids 1 [lindex $tempA 0]]
+    set solidsB [::hmtoolkit::seam::native::mark_by_component_checked solids 2 [lindex $tempB 0]]
+    # Boolean semantics: the reviewed pipeline executes a Union of the two
+    # offset solids (lap_boolean_opcode=8). The audit flagged that the previous
+    # error message claimed an "intersection" while the opcode was a Union;
+    # the message is now neutral. Switching to Intersection (14) is a real
+    # algorithm change: re-validate trim/volume-ranking/face extraction with
+    # audit Experiment 1 before flipping this configuration.
+    set booleanOpcode [::hmtoolkit::seam::config::get lap_boolean_opcode]
+    ::hmtoolkit::seam::log::write INFO \
+        "Lap boolean: *boolean_merge_solids 1 2 $booleanOpcode 3 (opcode 8=Union, 14=Intersection)"
+    *boolean_merge_solids 1 2 $booleanOpcode 3
     set merged [::hmtoolkit::seam::executor::temp_component_solids [list $tempA $tempB]]
     ::hmtoolkit::seam::temp::register_entity $scope solids $merged
-    if {[llength $merged] != 1} { error "Offset boolean produced [llength $merged] solids; exactly one intersection was expected" }
+    if {[llength $merged] != 1} { error "Offset boolean produced [llength $merged] solids; exactly one merged solid was expected" }
     set mergedVolume [hm_getvolumeofsolid solids [lindex $merged 0]]
 
     ::hmtoolkit::seam::entity::mark solids 1 $merged
     ::hmtoolkit::seam::entity::mark surfs 2 [concat $sourceSurfs $targetSurfs]
-    *trim_solids_by_surfaces 1 2 1
+    ::hmtoolkit::seam::native::undocumented::trim_solids_by_surfaces 1 2 1
     set trimSolids [::hmtoolkit::seam::executor::temp_component_solids [list $tempA $tempB]]
     ::hmtoolkit::seam::temp::register_entity $scope solids $trimSolids
     if {[llength $trimSolids] < 2} { error "Solid trim did not create enough transaction-owned regions" }
@@ -346,9 +418,19 @@ proc ::hmtoolkit::seam::executor::_create_l_surface {data} {
     }
 
     set seamBefore [::hmtoolkit::seam::entity::snapshot_ids surfs]
-    catch {*createmark surfaces 1 "by comp" [lindex $tempA 0] [lindex $tempB 0]}
+    set tempFaces [lsort -integer -unique \
+        [concat [::hmtoolkit::seam::entity::component_surfaces [lindex $tempA 1]] \
+                [::hmtoolkit::seam::entity::component_surfaces [lindex $tempB 1]]]]
+    if {[llength $tempFaces] == 0} {
+        error "No temporary faces survived the lap solid pipeline"
+    }
+    ::hmtoolkit::seam::entity::mark surfaces 1 $tempFaces
     ::hmtoolkit::seam::entity::mark surfaces 2 [concat $sourceSurfs $targetSurfs]
-    *connect_surfaces_11 1 2 1 1 5 15 30 1 0 2 30 3 0
+    set lapDistance [::hmtoolkit::seam::config::get lap_connect_distance]
+    set minAngle [::hmtoolkit::seam::config::get connect_min_angle_to_target]
+    set maxAngle [::hmtoolkit::seam::config::get connect_max_angle_edge_to_surf]
+    set guideAngle [::hmtoolkit::seam::config::get connect_guide_angle]
+    *connect_surfaces_11 1 2 1 1 $lapDistance $minAngle $maxAngle 1 0 2 $guideAngle 3 0
     set created [::hmtoolkit::seam::entity::diff_ids $seamBefore [::hmtoolkit::seam::entity::snapshot_ids surfs]]
     # advanced_options=3 extends the temporary faces in place. Those faces are
     # valid results even when HyperMesh allocates no new surface IDs.
@@ -387,8 +469,9 @@ proc ::hmtoolkit::seam::executor::_connect_edges {data} {
     ::hmtoolkit::seam::executor::prepare_ruled_surface_lists $first $second
     *linearsurfacebetweenlines 1 1 2 2 1
     set preliminary [::hmtoolkit::seam::validation::created_surfaces_for_component $before $beforeAll [lindex $component 1]]
-    ::hmtoolkit::seam::entity::mark surfs 1 $preliminary
-    *multi_surfs_lines_merge 1 0 0
+    # *multi_surfs_lines_merge consumes the global cleanup tolerance; the
+    # shared helper pins it for this call and restores the session value.
+    ::hmtoolkit::seam::executor::merge_ruled_surfaces $preliminary
     set created [::hmtoolkit::seam::validation::created_surfaces_for_component $before $beforeAll [lindex $component 1]]
     set created [::hmtoolkit::seam::executor::equivalence_created_surfaces \
         $created $firstSurfs $secondSurfs [lindex $component 1] $before]
@@ -402,6 +485,7 @@ proc ::hmtoolkit::seam::executor::connect_edges {data} {
 proc ::hmtoolkit::seam::executor::_split_surface {data strategy} {
     set lines [::hmtoolkit::seam::validation::require_ids $data seam_lines lines]
     set surfaces [::hmtoolkit::seam::validation::require_ids $data target_surfs surfs]
+    set beforeEdges [::hmtoolkit::seam::entity::surface_lines $surfaces]
     set created {}
     foreach surfaceId $surfaces {
         set before [::hmtoolkit::seam::entity::snapshot_ids surfs]
@@ -416,6 +500,11 @@ proc ::hmtoolkit::seam::executor::_split_surface {data strategy} {
     # Surface splitting can update the selected surface in place. A successful
     # native command therefore remains valid even when no new surface ID is
     # allocated; rolling it back here made Project appear to do nothing.
+    set afterEdges [::hmtoolkit::seam::entity::surface_lines \
+        [::hmtoolkit::seam::executor::existing_surfaces $surfaces]]
+    if {[llength $created] == 0 && $beforeEdges ne "" && $beforeEdges eq $afterEdges} {
+        error "The surface split created no new surface and did not change the selected surfaces; check the projection direction and line-to-surface distance"
+    }
     set result [::hmtoolkit::seam::executor::success \
         $strategy $created {} {} "Target surfaces split successfully."]
     dict set result modified_surfs [lsort -integer -unique $surfaces]
@@ -433,8 +522,17 @@ proc ::hmtoolkit::seam::executor::split_surface {data} {
 proc ::hmtoolkit::seam::executor::_combine_surfaces {data} {
     set surfaces [::hmtoolkit::seam::validation::require_ids $data surfaces surfs]
     ::hmtoolkit::seam::entity::mark surfs 1 $surfaces
-    *multi_surfs_lines_merge 1 0 0
-    return [::hmtoolkit::seam::executor::success COMBINE {} {}]
+    set beforeEdges [::hmtoolkit::seam::entity::surface_lines $surfaces]
+    ::hmtoolkit::seam::native::with_cleanup_tolerance \
+        [::hmtoolkit::seam::config::get cleanup_tolerance] {
+        *multi_surfs_lines_merge 1 0 0
+    }
+    set afterEdges [::hmtoolkit::seam::entity::surface_lines $surfaces]
+    set warnings {}
+    if {[lsort -integer -unique $beforeEdges] eq [lsort -integer -unique $afterEdges]} {
+        lappend warnings "No topology change was required: the surfaces were already equivalent."
+    }
+    return [::hmtoolkit::seam::executor::success COMBINE {} {} $warnings]
 }
 
 proc ::hmtoolkit::seam::executor::combine_surfaces {data} {
@@ -453,12 +551,19 @@ proc ::hmtoolkit::seam::executor::_distribute_points {data} {
         set count [expr {$segments-1}]
         if {$count < 1} { lappend warnings "Line $lineId is too short; no point was created."; continue }
         set before [::hmtoolkit::seam::entity::snapshot_ids points]
-        if {[catch {::hmtoolkit::seam::entity::mark lines 1 [list $lineId]; *edgesmarkaddpoints 1 $count} message]} {
+        if {[catch {
+            ::hmtoolkit::seam::entity::mark lines 1 [list $lineId]
+            ::hmtoolkit::seam::native::undocumented::edges_mark_add_points 1 $count
+        } message]} {
             lappend warnings "Line $lineId failed: $message"; continue
         }
         set created [concat $created [::hmtoolkit::seam::entity::diff_ids $before [::hmtoolkit::seam::entity::snapshot_ids points]]]
     }
-    return [dict create success 1 strategy DISTRIBUTE_POINTS created_points [lsort -integer -unique $created] created_surfs {} created_components {} warnings $warnings message "Distributed points completed."]
+    set created [lsort -integer -unique $created]
+    if {[llength $created] == 0} {
+        error "No distributed points were created. [join $warnings {; }]"
+    }
+    return [dict create success 1 strategy DISTRIBUTE_POINTS created_points $created created_surfs {} created_components {} warnings $warnings message "Distributed points completed."]
 }
 
 proc ::hmtoolkit::seam::executor::distribute_points {data} {
@@ -471,6 +576,9 @@ proc ::hmtoolkit::seam::executor::_replace_point {data} {
     set before [::hmtoolkit::seam::entity::snapshot_ids points]
     ::hmtoolkit::seam::entity::mark points 1 [list $point]
     ::hmtoolkit::seam::entity::mark lines 2 [list $line]
+    # HM2019 baseline: -1 is the legacy "nearest edge, unlimited distance"
+    # behavior recorded from the working replace-point flow. The audit's
+    # explicit 1e6 tolerance was verified on HM2022.3 only.
     *projectpointstoedges 2 1 -1 0
     set projected [::hmtoolkit::seam::entity::diff_ids $before [::hmtoolkit::seam::entity::snapshot_ids points]]
     if {[llength $projected] > 1} { error "Projection created [llength $projected] points; at most one was expected" }
@@ -494,20 +602,49 @@ proc ::hmtoolkit::seam::executor::replace_point {data} {
 proc ::hmtoolkit::seam::executor::extend_to_target {line source target sourceCompId sourceCompName} {
     variable ::hmtoolkit::seam::runtime
     set temp [::hmtoolkit::seam::temp::create_component $runtime(active_temp_token)]
-    catch {*currentcollector component [lindex $temp 0]}
+    set tempName [lindex $temp 0]
+    set tempId [lindex $temp 1]
+    ::hmtoolkit::seam::native::ensure_current_component $tempName $tempId
+    # Duplicate the target into the temporary component and verify ownership
+    # before anything else: the offset/extension pipeline depends on it.
     ::hmtoolkit::seam::entity::mark surfs 2 [list $target]
     *duplicatemark surfs 2 1
-    catch {*createmark surfs 2 "by comp" [lindex $temp 0]}
-    *offset_surfaces_and_modify surfaces 2 2 1 [expr {-[::hmtoolkit::seam::config::get extend_offset_distance]}] 2
-    set copies [hm_getmark surfs 2]
+    set copies [::hmtoolkit::seam::native::mark_by_component_checked surfs 2 $tempName]
+    # HM2019 baseline argument order, recorded from the legacy extend flow
+    # that produced extensions on the project baseline (2019.0.0.70):
+    #   *offset_surfaces_and_modify surfaces mark_id surf_mark_id line_mark
+    #     offset_type offset
+    #   *connect_surfaces_11 1 1 3 2 0 15 30 1 0 2 30 3 0
+    # The 2026-08-07 audit judged these "illegal" against the HM2022.3
+    # documentation, but the corrected layout was only verified on 2022.3;
+    # swapping it in would break the 2019 route that users validated.
+    ::hmtoolkit::seam::entity::mark surfs 2 $copies
+    *offset_surfaces_and_modify surfaces 2 2 1 \
+        [expr {-[::hmtoolkit::seam::config::get extend_offset_distance]}] 2
+    # The offset may modify the copies in place or create new guide surfaces;
+    # either way the guide set is everything the temp component owns now.
+    set copies [::hmtoolkit::seam::native::mark_by_component_checked surfs 2 $tempName]
     set before [::hmtoolkit::seam::entity::snapshot_ids surfs]
+    set sourceEdgesBefore [::hmtoolkit::seam::entity::surface_lines $source]
     ::hmtoolkit::seam::entity::mark lines 1 [list $line]
     ::hmtoolkit::seam::entity::mark surfs 1 [concat $source $copies]
+    ::hmtoolkit::seam::log::write INFO \
+        "Extend native args: *offset_surfaces_and_modify surfaces 2 2 1 [expr {-[::hmtoolkit::seam::config::get extend_offset_distance]}] 2; *connect_surfaces_11 1 1 3 2 0 15 30 1 0 2 30 3 0; target=$target"
     *connect_surfaces_11 1 1 3 2 0 15 30 1 0 2 30 3 0
     set created [::hmtoolkit::seam::entity::diff_ids $before [::hmtoolkit::seam::entity::snapshot_ids surfs]]
     if {[llength $created] > 0} {
         ::hmtoolkit::seam::entity::mark surfs 1 $created
         *movemark surfs 1 $sourceCompName
+    }
+    # A no-op native extension must not be reported as a successful seam
+    # extension: created surfaces are the normal outcome; an in-place source
+    # modification is the only legitimate empty-created case, detected through
+    # the source edge topology. When the edge query itself is unavailable the
+    # guard degrades to the legacy behavior instead of guessing.
+    set sourceEdgesAfter [::hmtoolkit::seam::entity::surface_lines \
+        [::hmtoolkit::seam::executor::existing_surfaces $source]]
+    if {[llength $created] == 0 && $sourceEdgesBefore ne "" && $sourceEdgesBefore eq $sourceEdgesAfter} {
+        error "The native extension created no seam surface and left the source surface unchanged; check the extension offset distance and trim mode"
     }
     set extended [::hmtoolkit::seam::executor::extended_result_surfaces \
         $source $created $sourceCompId]

@@ -1,6 +1,5 @@
 proc ::hmtoolkit::seam::open_panel {} {
-    set context [::hmtoolkit::seam::selector::capture_preselection]
-    return [::hmtoolkit::seam::ui::show 0 $context]
+    return [::hmtoolkit::seam::ui::show 0]
 }
 
 proc ::hmtoolkit::seam::open_settings {} {

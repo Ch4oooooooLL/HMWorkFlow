@@ -11,15 +11,16 @@ foreach ::hmtoolkit_seam_file {
     config.tcl
     log.tcl
     entity.tcl
+    native_compat.tcl
     temp.tcl
     state.tcl
     validation.tcl
     candidate.tcl
-    classifier.tcl
     executor.tcl
     selector.tcl
     legacy.tcl
     ui.tcl
+    diagnose.tcl
     main.tcl
 } {
     ::HWFlow::sourceUtf8 [file join $::hmtoolkit_seam_dir $::hmtoolkit_seam_file]

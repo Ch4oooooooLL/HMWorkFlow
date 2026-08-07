@@ -3,36 +3,33 @@ namespace eval ::hmtoolkit::seam {
     variable MODULE_DIR [file dirname [file normalize [info script]]]
     variable config
     array set config {
-        angle_parallel_max        15.0
-        angle_perpendicular_min   75.0
         distance_tolerance        1.0
         endpoint_merge_tolerance  0.1
         stitch_tolerance          0.2
+        cleanup_tolerance         0.2
         min_seam_length           5.0
         point_spacing             7.0
         area_tolerance            1.0e-6
         volume_tolerance          1.0e-6
         geometry_offset_distance  50.0
         extend_offset_distance    12.0
-        auto_accept_confidence    0.85
-        review_confidence         0.60
-        auto_create_enabled       0
+        t_surface_trim_mode       1
+        connect_min_angle_to_target 15.0
+        connect_max_angle_edge_to_surf 30.0
+        connect_guide_angle       30.0
+        lap_connect_distance      5.0
+        lap_boolean_opcode        8
+        diagnostic_preserve_failed_geometry 0
+        topology_connection_required 1
+        private_history_api       1
         thickness_override        0.0
-        shortcut_selector_mode    PANEL
-        shortcut_scope            COMPONENT_PAIR
     }
     variable runtime
     array set runtime {
         candidates {}
         log_file ""
         temp_counter 0
-        selection_scope COMPONENT_PAIR
-        forced_joint AUTO
-        forced_strategy AUTO
         status ""
-        context_data {}
-        context_text "No incoming geometry"
-        shortcut_panel_scope COMPONENT_PAIR
         prompt_value ""
         prompt_ok 0
         active_strategy ""
@@ -47,7 +44,18 @@ proc ::hmtoolkit::seam::config::path {} {
 
 proc ::hmtoolkit::seam::config::default_text {} {
     variable ::hmtoolkit::seam::config
-    set rows [list "# Geometry seam defaults (HyperMesh 2019)." "key|value|note"]
+    set rows [list \
+        "# Geometry seam defaults (HyperMesh 2019 / 2022.2 baseline)." \
+        "# distance/angle/tolerance units follow the model unit system." \
+        "# lap_boolean_opcode: 8=Union, 14=Intersection. Union is the reviewed" \
+        "# default matching the legacy L_SURF behavior; 14 is untested on the" \
+        "# project baseline." \
+        "# t_surface_trim_mode: legal values 0/1; 1 matches the legacy T Path /" \
+        "# T List flow on the project baseline." \
+        "# topology_connection_required=0 downgrades equivalence failures to" \
+        "# warnings and keeps the created geometry (diagnostic mode)." \
+        "# private_history_api=0 disables the private hm_private_frwk call." \
+        "key|value|note"]
     foreach key [lsort [array names config]] {
         lappend rows "$key|$config($key)|geometry seam setting"
     }

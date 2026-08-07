@@ -2,6 +2,80 @@
 
 ## Unreleased - platform stabilization
 
+- Fix the geometry seam "everything succeeds but nothing appears" failure on
+  HyperMesh 2019. The on-machine diagnostic showed mark 99 is rejected by
+  HM2019 (`hm_getmark: markmask should be ...`), and the module used mark 99
+  for every internal snapshot/existence/component-surface fallback query, so
+  those queries silently returned empty: REPLACE_POINT reported success
+  without moving anything, DISTRIBUTE_POINTS reported failure even when points
+  were created, and creation flows lost their model-wide new-entity
+  detection. All internal mark 99 uses now use mark 5 (business marks 1/2 are
+  untouched). `set_current_component_checked` no longer hard-fails when the
+  current component cannot be re-read after `*currentcollector` (HM2019 has
+  no `hm_getcurrentcollector`); it logs a warning and continues, while the
+  created-surface owner check still catches wrong-component results. The
+  diagnostic gained probes for `hm_info currentcomponent`, component
+  surface-list datanames (`surfaces`/`surfs`), `collector.id`, list creation
+  and a mark-slot sweep (slots 1/2/3/5/9/10/20/99) so the supported mark
+  range can be confirmed directly on the target machine.
+- Add a built-in command diagnostic to the geometry seam module (new
+  `modules/seam_surface/diagnose.tcl`, "诊断" button on the panel). It probes
+  every HyperMesh Tcl command the module relies on (62 commands): read-only
+  queries are exercised with safe arguments and reported as OK/ERR with the
+  returned value or error; destructive, panel and history commands are
+  checked for existence only (EXIST/MISS) so the diagnostic never modifies
+  the model. The compact per-line report is shown in a narrow Tk window sized
+  for a phone photo, echoed to the HyperMesh command window, and saved to
+  `%APPDATA%\HMWorkFlow\logs\geometry_seam_diagnose_*.log` for sharing.
+- Remove every geometry seam feature that depended on behavior verified only
+  on HyperMesh 2022.3, because the target workstations run 2019 and 2022.2:
+  the projection + ruled T_LIST pipeline (`*surfacemarksplitwithlines` normal
+  trim, path matching, `*surfacemode 4` + `*linearsurfacebetweenlines`,
+  endpoint-gap repair) and its candidate helpers are deleted; the
+  two-surface-group T Surface flow (`*connect_surfaces_11 1 2 1 ... 59 0`) is
+  deleted; the `hm_entityinfo geometryvisible/elementsvisible` display queries
+  and `hm_entityinfo exist -byid` existence query fall back to the legacy
+  `hm_getvalue ... dataname=visible/displayed` and mark-based lookups;
+  `suggest_extend_distance` (adaptive T extend distance) is deleted. The
+  settings panel no longer offers the 2022.3-only knobs (adaptive extend
+  distance, extend offset type, extend connect trim mode, point projection
+  tolerance, public query API switch) and its validation list matches the
+  retained 2019/2022.2 configuration keys. Tests were reduced to the baseline
+  routes (38 geometry seam tests, all passing).
+- Restore the geometry seam module's HM2019 baseline native calls. The
+  2026-08-07 audit corrected `*connect_surfaces_11`, `*offset_surfaces_and_modify`
+  and `*projectpointstoedges` argument layouts against the HM2022.3
+  documentation, but the project baseline (and the offline workstations) is
+  HyperMesh 2019.0.0.70, where the legacy layouts are the ones that produced
+  results. The T Path / T List entries now route through the line-based
+  `*connect_surfaces_11 1 2 3 ... 59 0` flow again (seam lines + target
+  surfaces, thickness prompt restored), EXTEND uses the recorded
+  `*offset_surfaces_and_modify surfaces 2 2 1 <dist> 2` + `*connect_surfaces_11
+  1 1 3 2 ...` layout, and REPLACE_POINT uses the legacy `-1` projection
+  distance. The projection + ruled pipeline and the audit-corrected wrappers
+  are retained in the codebase (with their tests) for later HM2022 validation,
+  but are no longer the active 2019 route. Settings that only apply to the
+  retained 2022 flows (adaptive extend distance, extend offset type, extend
+  connect trim mode) were removed from the settings panel so users are not
+  misled by knobs that do not affect the 2019 baseline.
+- Fix geometry seam operations that previously reported success while producing
+  no usable result: EXTEND now fails when the native extension created no seam
+  surface and left the source surface untouched (previously it returned the
+  unchanged source surfaces as the "extended" result); DISTRIBUTE_POINTS now
+  fails when no point was created instead of completing with zero points;
+  PROJECT/SPLIT now fails when the split command neither created nor modified
+  the selected surfaces; the T Surface flow now runs the same topology
+  equivalence gate as the other creation flows so a disconnected seam is
+  rejected (or downgraded to a warning with `topology_connection_required=0`)
+  instead of being reported as a success. The module panel is reopened after
+  each precise operation (and after leaving continuous mode) so the result
+  message and warnings are actually visible, and operation warnings are now
+  appended to the status message instead of being silently dropped.
+- Complete the geometry seam `T_LIST` connection stage and repair projected-path endpoint gaps. The ruled surface creation keeps the HyperMesh kernel API (`*surfacemode 4` + `*linearsurfacebetweenlines 1 1 2 2 1`), but the post-processing now reuses the CONNECT strategy's verified connection chain: the preliminary ruled surfaces are merged with `*multi_surfs_lines_merge 1 0 0` under the pinned session cleanup tolerance (shared `merge_ruled_surfaces` helper, CONNECT and T_LIST both use it) before topology equivalence, so the seam is topologically connected instead of a free-standing sheet. When one source path is trimmed across adjacent Target Surfaces and the kernel leaves nearly-coincident-but-not-identical segment endpoints at the surface transition, the pipeline now detects those gaps (configurable `projected_path_merge_tolerance`, default 0.5) and merges each pair through the existing Replace Seam Point flow (`*projectpointstoedges` + `*verticescombine`), then rebuilds the projected candidate paths so one source path maps to one continuous path before the ruled call. Add tests for the merge step and the endpoint-gap repair (tests 78 -> 80).
+- Replace the geometry seam `T_LIST` algorithm with the projection + ruled pipeline from the 2026-08-07 refactor spec: source lines are partitioned into connected unbranched paths (branches rejected, disconnected groups handled independently), all selected Target Surfaces are trimmed in one grouped `*surfacemarksplitwithlines 1 2 0 13 0` call (Normal to Surface + Entire Surface + Keep Line Endpoints), the projected trim path is re-identified from the real post-trim target fragments via edge-diff + owner topology + multi-sample arc-length coverage scoring (ambiguous matches are refused), the target path is aligned with same/reverse multi-sample orientation scoring, and one ruled surface per path pair is created with `*surfacemode 4` + `*linearsurfacebetweenlines 1 1 2 2 1` (kernel bow-tie protection). `*connect_surfaces_11` is no longer used on the T_LIST code path (L_LIST keeps the old extend route via `_create_t`), topology equivalence runs against the surviving fragments instead of stale target IDs, and every fatal stage (NORMAL_TRIM_FAILED / PROJECTED_PATH_NOT_FOUND / PROJECTED_PATH_AMBIGUOUS / BRANCHED_SOURCE_PATH / RULED_CREATION_FAILED / TOPOLOGY_EQUIVALENCE_FAILED) rolls the whole transaction back. Add `split_connected_line_paths`, `simple_paths_from_lines`, `sample_ordered_path`, `path_distance_score`, `path_orientation_scores` and `align_ruled_paths` to candidate.tcl, and rewrite the T_LIST unit tests around projection, path ordering, different segmentation counts, reversal, branches, ambiguity, fragment re-identification and rollback.
+- Remove the undocumented `*setoption block_browser_update` calls from the shared browser-reset path (`workflow_common.tcl`) and the Auto Hole RBE2 / RBE2 Bolt bulk-create paths, so HyperMesh no longer prints `setoption: Invalid option specified` in the status bar on every run regardless of module outcome; browser throttling now uses the documented `hm_blockbrowserupdate` command exclusively.
+- Fix the geometry seam module's HyperMesh API usage found by the 2026-08-07 audit: correct `*offset_surfaces_and_modify` argument order in EXTEND (reserved `surf_mark_id`/`line_mark`, legal `offset_type`, real signed offset), restore distinct source/target marks and a legal `trim_mode` for `*connect_surfaces_11`, verify the Current Component before every native call instead of swallowing `*currentcollector` failures, fail fast on critical `*createmark` failures, source plate thickness from `hm_getthickness` with the Component-name `_Txx` parser as a logged fallback, pin and restore the session `cleanup_tolerance` around `*multi_surfs_lines_merge`, make T-surface distance/angles configuration-driven with an optional gap-adaptive distance, and report global surface diffs with owner/area diagnostics so "nothing was created" is distinguishable from "created in the wrong component". L_SURF's Boolean error message no longer claims an intersection for the reviewed Union opcode (switch via `lap_boolean_opcode` after real-kernel Experiment 1), undocumented commands (`*trim_solids_by_surfaces`, `*edgesmarkaddpoints`, `hm_private_frwk`) are isolated in the new `native_compat.tcl`, state restore uses `hm_entityinfo geometryvisible/elementsvisible` and only touches pre-existing components, `*projectpointstoedges` uses an explicit positive tolerance, component creation no longer opens nested history blocks under the seam transaction, and candidate-mode failures surface through `show_result`. Add API-contract, EXTEND wrapper, mark-ownership, current-component, thickness-source and cleanup-tolerance tests (43 -> 56).
+- Remove the geometry seam module's automatic recognition and automatic seam-building flows (analyze/candidate/classifier UI, auto-confidence settings, forced joint/strategy, shortcut scope selector); only precise, manually confirmed creation remains. Extend the settings panel with the remaining audit-configurable parameters: `extend_offset_type`, `extend_connect_trim_mode`, `t_surface_trim_mode`, `topology_connection_required`, `private_history_api` and `use_public_query_apis` for HM2019/HM2022 behavior comparison, plus judgement-strictness controls (`area_tolerance`, `volume_tolerance`, `cleanup_tolerance`, `endpoint_merge_tolerance`) and geometry parameters (`geometry_offset_distance`, `connect_*`, `lap_connect_distance`, `replace_point_projection_distance`, `diagnostic_preserve_failed_geometry`) (tests 56 -> 64).
 - Replace FEM Automatic Seam's incremental import-merge with a file-level pipeline: the standalone `before.hm` backup is the only rollback point, the whole model is exported once, Python edits the FEM file itself (shell topology plus verbatim passthrough of non-shell cards), HyperMesh reopens the modified FEM with File > Open semantics to replace the current model, and the ordered chunked native remesh runs directly on the new model. Detection stays scoped to the selected components even though the input FEM now covers the complete model, per-candidate delta files and the combined delta are no longer written, and the second full-model snapshot during execution was removed.
 - Add a Batch Temporary Nodes module with multiline `X,Y,Z` input, full-batch validation, rollback on creation failure, and undo for the most recent batch.
 - Accelerate FEM Automatic Seam detection with component AABB pruning plus conservative uniform-grid indexes for ray/element and free-edge searches, while retaining the original exact geometry tests and deterministic candidate ordering. Record mesh read, detection, duplicate-check, planning and artifact-write timings separately.
