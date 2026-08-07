@@ -1668,14 +1668,12 @@ proc ::ContactSetup::removeElemsFromSurface {surfName elems} {
     if {[catch {eval *createmark elems 1 $elems}]} {
         return 0
     }
+    # *removeelemsfromcontactsurf is the documented command on 2019/2022;
+    # the legacy *contactsurfremoveelems name exists on neither installed
+    # build (verified by the 2026-08-07 existence probe).
     set ok 0
-    foreach cmd [list \
-        [list *removeelemsfromcontactsurf $surfName 1] \
-        [list *contactsurfremoveelems $surfName 1]] {
-        if {![catch {uplevel #0 $cmd}]} {
-            set ok 1
-            break
-        }
+    if {![catch {uplevel #0 [list *removeelemsfromcontactsurf $surfName 1]}]} {
+        set ok 1
     }
     catch {*clearmark elems 1}
     return $ok

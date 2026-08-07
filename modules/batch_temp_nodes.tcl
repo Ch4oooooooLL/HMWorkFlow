@@ -84,7 +84,7 @@ proc ::BatchTempNodes::deleteNodes {nodeIds} {
     if {$code} {
         return -code error $message
     }
-    catch {*redraw}
+    catch {hm_redraw}
     return 1
 }
 
@@ -135,7 +135,7 @@ proc ::BatchTempNodes::createNodes {points} {
             *numbersmark nodes 1 1
             *clearmark nodes 1
         }
-        catch {*redraw}
+        catch {hm_redraw}
     }
     return $created
 }

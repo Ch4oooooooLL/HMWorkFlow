@@ -30,9 +30,16 @@ namespace eval ::hmtoolkit::seam::native::undocumented {}
 # hm_getcurrentcollector components stays as a legacy fallback only.
 proc ::hmtoolkit::seam::native::current_component {} {
     if {[llength [info commands ::hm_info]] > 0} {
-        if {![catch {set id [hm_info currentcomponent]}] &&
-            [string is integer -strict $id] && $id > 0} {
-            return $id
+        if {![catch {set value [hm_info currentcomponent]}] && $value ne ""} {
+            if {[string is integer -strict $value] && $value > 0} {
+                return $value
+            }
+            # hm_info currentcomponent returns the component NAME on the
+            # locally installed builds (2019.0.0.70 and 2022.0.0.33),
+            # verified by the 2026-08-07 dual-version probe; convert it so
+            # the post-set re-read verification actually runs.
+            set byName [::HWFlow::componentIdByName $value]
+            if {$byName ne ""} { return $byName }
         }
     }
     if {[llength [info commands ::hm_getcurrentcollector]] > 0} {

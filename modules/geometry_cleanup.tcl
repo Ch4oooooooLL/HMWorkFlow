@@ -514,10 +514,11 @@ proc ::GeomCleanup::sortLoopsByPerimeter {loops} {
 
 proc ::GeomCleanup::edgeOwnerSurfaces {edgeId} {
     set out {}
-    foreach cmd [list [list hm_getsurfacesfromedge $edgeId] [list hm_getsurfacesfromline $edgeId]] {
-        if {![catch {set ids [eval $cmd]}] && [llength $ids] > 0} {
-            set out [concat $out $ids]
-        }
+    # hm_getsurfacesfromedge is the documented query on 2019/2022;
+    # hm_getsurfacesfromline exists on neither installed build (2026-08-07
+    # existence probe), so it was removed from the fallback chain.
+    if {![catch {set ids [hm_getsurfacesfromedge $edgeId]}] && [llength $ids] > 0} {
+        set out [concat $out $ids]
     }
     return [::GeomCleanup::uniq $out]
 }
@@ -1076,7 +1077,9 @@ proc ::GeomCleanup::createSurfaceBetweenLoops {innerLines baseLines} {
             error [::HWFlow::txt "ruled 连接失败且无法标记回退边界：$errRuled" "Ruled connection failed and the fallback boundaries could not be marked: $errRuled"]
         }
         set errPatch ""
-        if {[catch {*surface_patch line_mark=1 tangency=best_fit stitch=1 solid_stitch=1 dest_component=original} errPatch]} {
+        # *surface_patch exists on 2022 but not on the installed 2019.0.0.70
+        # (2026-08-07 existence probe); only attempt it when available.
+        if {[llength [info commands ::*surface_patch]] > 0 && [catch {*surface_patch line_mark=1 tangency=best_fit stitch=1 solid_stitch=1 dest_component=original} errPatch]} {
             catch {*clearmark $markType 1}
             error [::HWFlow::txt "内边与基准边连接失败：ruled=$errRuled；patch=$errPatch" "Failed to connect the inner and datum loops: ruled=$errRuled; patch=$errPatch"]
         }

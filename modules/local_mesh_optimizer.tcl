@@ -484,11 +484,10 @@ proc ::LocalMeshOptimizer::showScope {} {
     set ids [hm_getmark elems 1]
     if {[llength $ids] <= 200} {
         catch {*numbersmark elems 1 1}
-        catch {*shownumbers elems 1}
     } else {
         catch {hm_usermessage [::LocalMeshOptimizer::txt "范围包含 [llength $ids] 个单元，为避免图形卡顿不显示逐单元编号。" "Scope contains [llength $ids] elements; individual labels are suppressed to keep graphics responsive."]}
     }
-    catch {*viewfit}
+    catch {hm_viewfit}
     catch {hm_usermessage [::LocalMeshOptimizer::txt "已在图形区标记当前处理范围。" "Current scope was marked in the graphics area."]}
 }
 
@@ -1192,11 +1191,10 @@ proc ::LocalMeshOptimizer::showFailed {} {
     eval *createmark elems 1 $runtime(failedElements)
     if {[llength $runtime(failedElements)] <= 200} {
         catch {*numbersmark elems 1 1}
-        catch {*shownumbers elems 1}
     } else {
         catch {hm_usermessage [::LocalMeshOptimizer::txt "失败单元较多，已跳过逐单元编号显示。" "Many failed elements were found; individual labels were skipped."]}
     }
-    catch {*viewfit}
+    catch {hm_viewfit}
 }
 
 proc ::LocalMeshOptimizer::showOptimized {} {
@@ -1210,11 +1208,10 @@ proc ::LocalMeshOptimizer::showOptimized {} {
     eval *createmark elems 1 $runtime(optimizedElements)
     if {[llength $runtime(optimizedElements)] <= 200} {
         catch {*numbersmark elems 1 1}
-        catch {*shownumbers elems 1}
     } else {
         catch {hm_usermessage [::LocalMeshOptimizer::txt "已优化单元较多，已跳过逐单元编号显示。" "Many optimized elements are recorded; individual labels were skipped."]}
     }
-    catch {*viewfit}
+    catch {hm_viewfit}
 }
 
 proc ::LocalMeshOptimizer::semicolonIds {text} {

@@ -2,6 +2,40 @@
 
 ## Unreleased - platform stabilization
 
+- Align the geometry seam module with the locally installed HyperMesh builds
+  (2019.0.0.70 and 2022.0.0.33, verified headless with the same fixtures on
+  both; see docs/geometry_seam_dual_version_alignment_2026-08-07.md). Both
+  builds accept only mark slots 1/2/3, so the mark-5 internal snapshots used
+  since the mark-99 fix silently returned empty on every strategy; the module
+  now detects a usable internal slot at runtime (`internal_mark_slot` config
+  override, probes 5 then 3). `hm_info currentcomponent` returns the
+  component name on both builds, so `native::current_component` converts it
+  to an id before the collector re-read verification. `*offset_surfaces_and_modify`
+  parses with the signed distance last on both builds (measured z=+2 for the
+  previous "recorded" layout vs z=-12 documented); EXTEND now calls
+  `surfaces 2 0 1 2 -<distance>` so the configured `extend_offset_distance`
+  actually applies. `*connect_surfaces_11` extend-mode-3 consumes the source
+  surface (rebuilds it with a new id) and creates seam strips sharing the
+  target's edge lines; T_PATH/T_LIST/L_LIST identify the strips, re-home them
+  into the seam component and use the rebuilt source as the source-side
+  topology partner. A headless 12-strategy harness
+  (tools/probe_geometry_seam_harness.tcl) passes all functions on both
+  versions with identical created-entity ids; offline suite 40 passed.
+- Audit every HyperMesh Tcl command used by the production modules against
+  the two local builds (238 native candidates probed headless on both;
+  tools/audit_hm_commands.py + tools/check_hm_command_signatures.py). All
+  documented commands match their call sites. Corrected commands that exist
+  on neither build: `*viewfit` -> `hm_viewfit` (fem_auto_seam, mesh_seam_weld,
+  weld_integrity_check, local_mesh_optimizer), `*redraw` -> `hm_redraw`
+  (batch_temp_nodes, cbush_creator), `*shownumbers` removed (local_mesh_optimizer,
+  `*numbersmark` already covers it), `*contactsurfremoveelems` fallback
+  removed (contact_setup; `*removeelemsfromcontactsurf` is the documented
+  command), `hm_getsurfacesfromline` fallback removed (geometry_cleanup),
+  and `*surface_patch` is now guarded by an existence check because it exists
+  on 2022 but not on 2019 (geometry_cleanup). GUI-only commands that cannot
+  be verified headless (hm_viewfit, hm_registerkeyproc, hm_blockbrowserupdate)
+  remain catch/existence-guarded. The mesh_seam_weld offline suite keeps a
+  pre-existing order-dependent failure pair unrelated to these changes.
 - Fix the geometry seam "everything succeeds but nothing appears" failure on
   HyperMesh 2019. The on-machine diagnostic showed mark 99 is rejected by
   HM2019 (`hm_getmark: markmask should be ...`), and the module used mark 99

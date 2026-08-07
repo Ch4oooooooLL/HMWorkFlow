@@ -68,10 +68,11 @@ proc ::hmtoolkit::seam::executor::existing_surfaces {surfaceIds} {
 
 proc ::hmtoolkit::seam::executor::line_owner_surfaces {lineId} {
     set owners {}
-    foreach command [list [list hm_getsurfacesfromedge $lineId] [list hm_getsurfacesfromline $lineId]] {
-        if {![catch {set found [eval $command]}] && [llength $found] > 0} {
-            set owners [concat $owners $found]
-        }
+    # hm_getsurfacesfromedge is the documented query present on both local
+    # builds; hm_getsurfacesfromline exists on neither (2026-08-07 probe) and
+    # was removed from the fallback chain.
+    if {![catch {set found [hm_getsurfacesfromedge $lineId]}] && [llength $found] > 0} {
+        set owners [concat $owners $found]
     }
     return [lsort -integer -unique $owners]
 }
@@ -300,6 +301,7 @@ proc ::hmtoolkit::seam::executor::_create_t {data strategy} {
     set guideAngle [::hmtoolkit::seam::config::get connect_guide_angle]
     set trimMode [::hmtoolkit::seam::config::get t_surface_trim_mode]
     set created {}
+    set warnings {}
     foreach targetSurf $targetSurfs {
         ::hmtoolkit::seam::native::ensure_current_component $componentName $componentId
         set before [::hmtoolkit::seam::entity::component_surfaces $componentId]
@@ -318,14 +320,50 @@ proc ::hmtoolkit::seam::executor::_create_t {data strategy} {
         ::hmtoolkit::seam::log::write INFO \
             "T List native args: *connect_surfaces_11 1 2 3 $trimMode 0 $minAngle $maxAngle 1 0 2 $guideAngle 59 0; target=$targetSurf"
         *connect_surfaces_11 1 2 3 $trimMode 0 $minAngle $maxAngle 1 0 2 $guideAngle 59 0
+        # 2026-08-07 dual-version kernel evidence (2019.0.0.70 / 2022.0.0.33,
+        # gapped T-joint fixture, identical on both): extend_mode 3 consumes
+        # the source surface (the kernel rebuilds it with a new id) and
+        # creates the seam strips as new surfaces. The strips share the
+        # target's edge lines; the rebuilt source does not. Identify the
+        # strips, re-home them into the seam component, and use the rebuilt
+        # surface as the source-side topology partner.
+        set globalCreated [::hmtoolkit::seam::entity::diff_ids \
+            $beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]]
+        if {[llength $globalCreated] == 0} {
+            error "The native extension created no seam surface. Check the seam line, gap and angle settings."
+        }
+        set targetLines [::hmtoolkit::seam::entity::surface_lines [list $targetSurf]]
+        set strips {}
+        set rebuilt {}
+        foreach surfId $globalCreated {
+            set sharesTarget 0
+            foreach lineId [::hmtoolkit::seam::entity::surface_lines [list $surfId]] {
+                if {[lsearch -exact $targetLines $lineId] >= 0} { set sharesTarget 1; break }
+            }
+            if {$sharesTarget} { lappend strips $surfId } else { lappend rebuilt $surfId }
+        }
+        if {[llength $strips] == 0} {
+            error "The native extension created surfaces but none shares the target edge; the seam is not connected to the target."
+        }
+        ::hmtoolkit::seam::entity::mark surfs 1 $strips
+        *movemark surfs 1 $componentName
         set targetCreated [::hmtoolkit::seam::validation::created_surfaces_for_component \
             $before $beforeAll $componentId]
+        set sourceNow [::hmtoolkit::seam::executor::existing_surfaces $sourceSurfs]
+        if {[llength $sourceNow] == 0 && [llength $rebuilt] > 0} {
+            lappend warnings \
+                "The native extension renumbered the source surface ($sourceSurfs -> $rebuilt); seam geometry was created against the rebuilt source."
+            set sourceNow $rebuilt
+        }
+        if {[llength $sourceNow] == 0} {
+            error "The native extension consumed the source surface and no replacement was created"
+        }
         set targetCreated [::hmtoolkit::seam::executor::equivalence_created_surfaces \
-            $targetCreated $sourceSurfs [list $targetSurf] $componentId $before]
+            $targetCreated $sourceNow [list $targetSurf] $componentId $before]
         set created [concat $created $targetCreated]
     }
     set created [lsort -integer -unique $created]
-    return [::hmtoolkit::seam::executor::success $strategy $created [list $componentName] {} "Seam surfaces created successfully."]
+    return [::hmtoolkit::seam::executor::success $strategy $created [list $componentName] $warnings "Seam surfaces created successfully."]
 }
 
 proc ::hmtoolkit::seam::executor::create_t_path {data} {
@@ -610,17 +648,20 @@ proc ::hmtoolkit::seam::executor::extend_to_target {line source target sourceCom
     ::hmtoolkit::seam::entity::mark surfs 2 [list $target]
     *duplicatemark surfs 2 1
     set copies [::hmtoolkit::seam::native::mark_by_component_checked surfs 2 $tempName]
-    # HM2019 baseline argument order, recorded from the legacy extend flow
-    # that produced extensions on the project baseline (2019.0.0.70):
-    #   *offset_surfaces_and_modify surfaces mark_id surf_mark_id line_mark
-    #     offset_type offset
-    #   *connect_surfaces_11 1 1 3 2 0 15 30 1 0 2 30 3 0
-    # The 2026-08-07 audit judged these "illegal" against the HM2022.3
-    # documentation, but the corrected layout was only verified on 2022.3;
-    # swapping it in would break the 2019 route that users validated.
+    # Dual-version probe evidence (2026-08-07, local 2019.0.0.70 and
+    # 2022.0.0.33, identical fixture on both): *offset_surfaces_and_modify
+    # parses
+    #   entity_type mark_id surf_mark_id line_mark offset_type offset
+    # with the signed distance LAST. The previous "recorded" layout
+    # (surfaces 2 2 1 -<dist> 2) consumed the configured distance as an
+    # ignored offset_type flag and hard-coded a +2 offset on BOTH builds
+    # (measured new-vertex z=+2 vs the documented -12), so
+    # extend_offset_distance never took effect. surf_mark_id is reserved and
+    # must be 0 or an empty mark; offset_type=2 is disjoint offset with
+    # degeneration removal (probe-verified to execute on both builds).
     ::hmtoolkit::seam::entity::mark surfs 2 $copies
-    *offset_surfaces_and_modify surfaces 2 2 1 \
-        [expr {-[::hmtoolkit::seam::config::get extend_offset_distance]}] 2
+    *offset_surfaces_and_modify surfaces 2 0 1 2 \
+        [expr {-[::hmtoolkit::seam::config::get extend_offset_distance]}]
     # The offset may modify the copies in place or create new guide surfaces;
     # either way the guide set is everything the temp component owns now.
     set copies [::hmtoolkit::seam::native::mark_by_component_checked surfs 2 $tempName]
@@ -629,7 +670,7 @@ proc ::hmtoolkit::seam::executor::extend_to_target {line source target sourceCom
     ::hmtoolkit::seam::entity::mark lines 1 [list $line]
     ::hmtoolkit::seam::entity::mark surfs 1 [concat $source $copies]
     ::hmtoolkit::seam::log::write INFO \
-        "Extend native args: *offset_surfaces_and_modify surfaces 2 2 1 [expr {-[::hmtoolkit::seam::config::get extend_offset_distance]}] 2; *connect_surfaces_11 1 1 3 2 0 15 30 1 0 2 30 3 0; target=$target"
+        "Extend native args: *offset_surfaces_and_modify surfaces 2 0 1 2 [expr {-[::hmtoolkit::seam::config::get extend_offset_distance]}]; *connect_surfaces_11 1 1 3 2 0 15 30 1 0 2 30 3 0; target=$target"
     *connect_surfaces_11 1 1 3 2 0 15 30 1 0 2 30 3 0
     set created [::hmtoolkit::seam::entity::diff_ids $before [::hmtoolkit::seam::entity::snapshot_ids surfs]]
     if {[llength $created] > 0} {

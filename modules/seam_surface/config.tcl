@@ -22,6 +22,7 @@ namespace eval ::hmtoolkit::seam {
         diagnostic_preserve_failed_geometry 0
         topology_connection_required 1
         private_history_api       1
+        internal_mark_slot        0
         thickness_override        0.0
     }
     variable runtime

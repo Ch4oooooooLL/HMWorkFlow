@@ -458,8 +458,10 @@ class GeometrySeamTclTests(unittest.TestCase):
             rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
             rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
             rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::entity::exists ::hmtoolkit::seam::entity::exists_real
             rename ::hmtoolkit::seam::entity::diff_ids ::hmtoolkit::seam::entity::diff_ids_real
             proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {return [dict get $data $key]}
+            proc ::hmtoolkit::seam::entity::exists {entityType id} {return 1}
             set ::project_snapshot_count 0
             proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {
                 incr ::project_snapshot_count
@@ -490,9 +492,11 @@ class GeometrySeamTclTests(unittest.TestCase):
             rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
             rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
             rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::entity::exists ::hmtoolkit::seam::entity::exists_real
             proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {
                 return [dict get $data $key]
             }
+            proc ::hmtoolkit::seam::entity::exists {entityType id} {return 1}
             proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {20 21}}
             proc ::hmtoolkit::seam::entity::mark {entityType markId ids} {return [llength $ids]}
             set ::in_place_split_calls 0
@@ -517,10 +521,12 @@ class GeometrySeamTclTests(unittest.TestCase):
             rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
             rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
             rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::entity::exists ::hmtoolkit::seam::entity::exists_real
             rename ::hmtoolkit::seam::entity::surface_lines ::hmtoolkit::seam::entity::surface_lines_real
             proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {
                 return [dict get $data $key]
             }
+            proc ::hmtoolkit::seam::entity::exists {entityType id} {return 1}
             proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {20 21}}
             proc ::hmtoolkit::seam::entity::mark {entityType markId ids} {return [llength $ids]}
             proc ::hmtoolkit::seam::entity::surface_lines {surfaceIds} {return {500 501}}
@@ -900,12 +906,13 @@ class GeometrySeamTclTests(unittest.TestCase):
         )
 
     def test_extend_wrapper_uses_documented_offset_and_connect_arguments(self):
-        # HM2019 baseline: the legacy argument layout recorded from the
-        # working extend flow on 2019.0.0.70 is the route used here. The
-        # 2026-08-07 audit judged these arguments "illegal" against the
-        # HM2022.3 documentation; the corrected layout stays behind the
-        # projection pipeline for later 2022 validation. This test exercises
-        # the real extend_to_target body, not a mocked stub.
+        # Dual-version probe evidence (2026-08-07, local 2019.0.0.70 and
+        # 2022.0.0.33): *offset_surfaces_and_modify parses
+        # entity_type mark_id surf_mark_id line_mark offset_type offset with
+        # the signed distance LAST. The old "recorded" layout consumed the
+        # configured distance as an ignored flag and hard-coded a +2 offset
+        # on both builds; the documented layout is the route used here. This
+        # test exercises the real extend_to_target body, not a mocked stub.
         self.tcl.eval(
             """
             set ::hmtoolkit::seam::runtime(active_temp_token) TOKEN
@@ -950,14 +957,14 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertEqual(result, "10")
         self.assertEqual(
             self.tcl.eval("lindex $::offset_calls 0"),
-            "surfaces 2 2 1 -12.0 2",
+            "surfaces 2 0 1 2 -12.0",
         )
         self.assertEqual(
             self.tcl.eval("lindex $::connect_calls 0"),
             "1 1 3 2 0 15 30 1 0 2 30 3 0",
         )
-        # Source and offset guides share mark 1 in the legacy layout; the
-        # target is marked in mark 2 for the duplicate/offset stage.
+        # Source and offset guides share mark 1; the target is marked in
+        # mark 2 for the duplicate/offset stage.
         marks = self.tcl.eval("set ::extend_marks")
         self.assertIn("surfs 2 20", marks)
         self.assertIn("surfs 2 1001", marks)
@@ -1008,9 +1015,10 @@ class GeometrySeamTclTests(unittest.TestCase):
 
     def test_extend_source_file_keeps_the_2019_baseline_arguments(self):
         executor = (MODULE_DIR / "executor.tcl").read_text(encoding="utf-8")
-        # The legacy argument layout is the HM2019/2022.2 baseline route; the
+        # The documented offset layout (distance last) is the dual-version
+        # baseline route verified on 2019.0.0.70 and 2022.0.0.33; the
         # 2022.3-only projection pipeline has been removed from the module.
-        self.assertIn("*offset_surfaces_and_modify surfaces 2 2 1", executor)
+        self.assertIn("*offset_surfaces_and_modify surfaces 2 0 1 2", executor)
         self.assertIn("*connect_surfaces_11 1 1 3 2", executor)
         self.assertNotIn("_create_t_list_project_ruled", executor)
         self.assertNotIn("_create_t_surface", executor)

@@ -73,7 +73,7 @@ proc ::MeshSeamWeld::autoReviewLocate {} {
     catch {*numbersclear}; catch {*clearmark nodes 1}; catch {*clearmark elems 1}
     if {[llength $nodes]} { eval *createmark nodes 1 $nodes; catch {*numbersmark nodes 1 1} }
     if {[llength $elements]} { eval *createmark elems 1 $elements; catch {*numbersmark elems 1 1} }
-    catch {*viewfit}; catch {hm_redraw}
+    catch {hm_viewfit}; catch {hm_redraw}
 }
 
 proc ::MeshSeamWeld::autoReviewIsolate {} {

@@ -237,7 +237,7 @@ proc ::CBushCreator::createForNode {sourceNodeId} {
     catch {*numbersmark elems 1 1}
     catch {*clearmark elems 1}
     catch {hm_entityrecorder elems off}
-    catch {*redraw}
+    catch {hm_redraw}
     return [dict create \
         source_node $sourceNodeId \
         offset_node $offsetNodeId \

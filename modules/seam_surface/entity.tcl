@@ -1,4 +1,35 @@
-namespace eval ::hmtoolkit::seam::entity {}
+namespace eval ::hmtoolkit::seam::entity {
+    variable INTERNAL_SLOT 0
+}
+
+# Detect a mark slot the running HyperMesh accepts for internal
+# snapshots/existence queries. The locally installed builds (2019.0.0.70 and
+# 2022.0.0.33) reject slots 4+ with "Invalid mark id found in file" and
+# accept only 1/2/3 (verified by the built-in diagnostic sweep and the
+# 2026-08-07 dual-version hmbatch probe). Slot 5 is probed first because the
+# offline HM2019 baseline reported it usable there; slot 3 is the fallback
+# that works on both local builds. Business marks 1/2 are never touched.
+proc ::hmtoolkit::seam::entity::internal_slot {} {
+    variable INTERNAL_SLOT
+    if {$INTERNAL_SLOT > 0} { return $INTERNAL_SLOT }
+    set configured [::hmtoolkit::seam::config::get internal_mark_slot]
+    set candidates [expr {$configured > 0 ? [list $configured] : [list 5 3]}]
+    foreach slot $candidates {
+        catch {*clearmark surfs $slot}
+        if {![catch {*createmark surfs $slot all}]} {
+            set got {}
+            if {![catch {set got [hm_getmark surfs $slot]}]} {
+                catch {*clearmark surfs $slot}
+                set INTERNAL_SLOT $slot
+                ::hmtoolkit::seam::log::write INFO \
+                    "Internal mark slot detected: $slot"
+                return $slot
+            }
+        }
+        catch {*clearmark surfs $slot}
+    }
+    error "No usable HyperMesh mark slot for internal snapshots (probed: $candidates)"
+}
 
 proc ::hmtoolkit::seam::entity::normalize_type {entityType} {
     switch -- $entityType {
@@ -12,11 +43,11 @@ proc ::hmtoolkit::seam::entity::normalize_type {entityType} {
 }
 
 # Internal query helpers must not reuse the shared native marks 1/2 that
-# wrappers own during a geometry call. Mark 5 is used because HyperMesh 2019
-# rejects mark numbers outside its supported range (mark 99 fails with
-# "markmask should be ...", verified by the built-in diagnostic).
-proc ::hmtoolkit::seam::entity::snapshot_ids {entityType {markId 5}} {
+# wrappers own during a geometry call. The slot is detected at runtime
+# because supported mark ranges differ between HyperMesh builds.
+proc ::hmtoolkit::seam::entity::snapshot_ids {entityType {markId ""}} {
     set entityType [::hmtoolkit::seam::entity::normalize_type $entityType]
+    if {$markId eq ""} { set markId [::hmtoolkit::seam::entity::internal_slot] }
     catch {*clearmark $entityType $markId}
     set ids {}
     if {![catch {*createmark $entityType $markId all}]} {
@@ -39,14 +70,16 @@ proc ::hmtoolkit::seam::entity::diff_ids {before after} {
 proc ::hmtoolkit::seam::entity::exists {entityType id} {
     if {![string is integer -strict $id] || $id <= 0} { return 0 }
     set entityType [::hmtoolkit::seam::entity::normalize_type $entityType]
-    # HM2019 baseline: mark-based existence on mark 5 so it can never disturb
-    # an in-flight wrapper mark 1/2. The hm_entityinfo exist -byid public query
-    # introduced with the 2026-08-07 audit was verified on 2022.3 only.
-    catch {*clearmark $entityType 5}
-    if {[catch {*createmark $entityType 5 $id}]} { return 0 }
+    # Mark-based existence on a detected internal slot so it can never
+    # disturb an in-flight wrapper mark 1/2. The hm_entityinfo exist -byid
+    # public query introduced with the 2026-08-07 audit was verified on
+    # 2022.3 only.
+    set slot [::hmtoolkit::seam::entity::internal_slot]
+    catch {*clearmark $entityType $slot}
+    if {[catch {*createmark $entityType $slot $id}]} { return 0 }
     set ids {}
-    catch {set ids [hm_getmark $entityType 5]}
-    catch {*clearmark $entityType 5}
+    catch {set ids [hm_getmark $entityType $slot]}
+    catch {*clearmark $entityType $slot}
     return [expr {[lsearch -exact $ids $id] >= 0}]
 }
 
@@ -75,14 +108,15 @@ proc ::hmtoolkit::seam::entity::component_surfaces {compId} {
             return [lsort -integer -unique $ids]
         }
     }
-    catch {*clearmark surfs 5}
+    set slot [::hmtoolkit::seam::entity::internal_slot]
+    catch {*clearmark surfs $slot}
     set ids {}
-    if {![catch {*createmark surfs 5 "by comp id" $compId}]} { catch {set ids [hm_getmark surfs 5]} }
+    if {![catch {*createmark surfs $slot "by comp id" $compId}]} { catch {set ids [hm_getmark surfs $slot]} }
     if {[llength $ids] == 0} {
         set compName [::HWFlow::componentName $compId]
-        if {$compName ne "" && ![catch {*createmark surfs 5 "by comp" $compName}]} { catch {set ids [hm_getmark surfs 5]} }
+        if {$compName ne "" && ![catch {*createmark surfs $slot "by comp" $compName}]} { catch {set ids [hm_getmark surfs $slot]} }
     }
-    catch {*clearmark surfs 5}
+    catch {*clearmark surfs $slot}
     return [lsort -integer -unique $ids]
 }
 

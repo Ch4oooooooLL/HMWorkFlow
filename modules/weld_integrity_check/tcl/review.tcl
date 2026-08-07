@@ -174,7 +174,7 @@ proc ::WeldIntegrityCheck::isolateCurrent {} {
     }
     ::WeldIntegrityCheck::setAllComponentsDisplay off
     ::WeldIntegrityCheck::setComponentsDisplay [list [dict get $a id] [dict get $b id]] on
-    set isolated 1; catch {*viewfit}; catch {hm_redraw}
+    set isolated 1; catch {hm_viewfit}; catch {hm_redraw}
     ::WeldIntegrityCheck::highlightCurrentRegion
 }
 
