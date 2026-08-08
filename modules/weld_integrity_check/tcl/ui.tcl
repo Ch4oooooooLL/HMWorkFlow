@@ -109,7 +109,7 @@ proc ::WeldIntegrityCheck::showConfig {{settingsOnly 0}} {
     }
     bind $w <Escape> {set ::WeldIntegrityCheck::ui(accepted) 0; destroy .weld_integrity_config}
     wm protocol $w WM_DELETE_WINDOW {set ::WeldIntegrityCheck::ui(accepted) 0; destroy .weld_integrity_config}
-    update idletasks; wm geometry $w +[expr {([winfo screenwidth $w]-[winfo reqwidth $w])/2}]+[expr {([winfo screenheight $w]-[winfo reqheight $w])/2}]
+    ::HWFlow::centerWindow $w
     tkwait window $w
     return $ui(accepted)
 }

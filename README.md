@@ -7,7 +7,7 @@ HMWorkFlow 是以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 20
 | 工作阶段 | 主要功能 | 解决的问题 |
 | --- | --- | --- |
 | 几何准备 | 统一组件命名、中面抽取、倒角/圆角/沉台清理、几何焊缝 | 统一模型命名，减少手动抽中面和重复补面的工作量。 |
-| 网格处理 | 钣金 BatchMesh 与 washer、铸件 TetraMesh、网格焊缝、批量 Property、局部网格优化 | 将网格生成、属性赋予和局部质量修复串成可配置流程，只处理需要修改的区域。 |
+| 网格处理 | 钣金 BatchMesh 与 washer、网格焊缝、批量 Property、局部网格优化 | 将网格生成、属性赋予和局部质量修复串成可配置流程，只处理需要修改的区域。 |
 | 连接创建 | 壳孔/实体孔 RIGIDS、CBEAM/CBAR 螺栓、CBUSH、接触、打胶、实体焊缝 | 自动识别连接位置和几何关系，批量生成可用于 OptiStruct 的连接实体。 |
 | 质量复核 | 重复连接检查、结果回读校验、网格焊缝完整性检查、候选逐项审查 | 在修改模型前后保留明确的确认与校验环节，降低漏焊、重复创建和错误连接风险。 |
 
@@ -72,7 +72,7 @@ HMWorkFlow 是以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 20
 
 默认界面语言为中文。需要英文界面时，将项目根目录 `config.yaml` 中的 `workflow.language` 改为 `en_US`。
 
-界面基础设施已统一迁移到 `hwtk`。主面板、所有模块顶层窗口和公共进度窗口通过 `modules/workflow_common.tcl` 中的统一适配层创建；在非 HyperWorks Tcl 环境中会自动回退到 Tk/ttk。2019 与 2022 的启动链和模块加载器都会显式按 UTF-8 读取仓库脚本，避免 2022 新界面进程按 Windows ANSI 代码页读取中文而产生乱码。
+界面基础设施使用统一的经典 Tk 后端（进度条等少量控件用 ttk），配色直接采用 HyperMesh 原生系统色板（面板灰、输入框白、选择蓝），因此 2019 与 2022 的窗口外观和布局完全一致。`modules/workflow_common.tcl` 提供共享构建器（分组标题、操作条、表单行、滚动容器、窗口居中）。2019 与 2022 的启动链和模块加载器都会显式按 UTF-8 读取仓库脚本，避免 2022 新界面进程按 Windows ANSI 代码页读取中文而产生乱码。
 
 窗口不再使用永久 `-topmost`。调用 HyperMesh 原生实体选择面板时，只临时隐藏由工具箱登记的窗口，不影响同一 HyperMesh 进程中的其他 Tcl 窗口。HyperWorks 2022 若无法创建 panel mark，会自动改用新版选择条对应的 edit widget；原生 FEM 导入/导出则统一防重入并自动处理被遮挡的 translator 确认提示。
 
@@ -84,7 +84,7 @@ HMWorkFlow 是以 HyperMesh 2019 为已验证基线、逐步兼容 HyperWorks 20
 File > Run > Tcl/Tk Script > hw_toolkit.tcl
 ```
 
-运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的双栏布局：左侧按分类切换并选择工具，右侧显示所选工具的说明与操作按钮。模块归类为三部分显示：
+运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的扁平单层布局：所有工具按分类分组、一屏列出，点击工具名称直接运行，无需先选分类再选工具。模块归类为三部分显示：
 
 ```text
 Geometry
@@ -92,9 +92,9 @@ Mesh
 Connection
 ```
 
-左侧的分类按钮切换 `Geometry` / `Mesh` / `Connection`，下方列表选择具体工具；右侧显示工具说明和 `运行` / `设置` / `快捷键` / `撤回` 操作。模块运行结束后会自动刷新 Model Browser 并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
+每个工具一行：名称（点击即运行，悬停高亮）＋ 一句话说明 ＋ `设置` / `绑定快捷键` 两个按钮。未提供设置项的模块其 `设置` 按钮自动置灰；无快捷键绑定时按钮显示 `绑定快捷键`，已绑定时直接显示快捷键。窗口可拉伸，工具较多或屏幕较小时自动出现滚动条。模块运行结束后会自动刷新 Model Browser 并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
 
-主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。选中工具后，其快捷键显示在右侧详情区；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
+主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理全部模块快捷键。每个工具行的 `绑定快捷键` 按钮会直接打开快捷键管理器并选中对应模块；按钮上同时显示当前绑定状态。
 
 快捷键会直接调用模块的 `proc` 执行入口，不会打开 HMWorkFlow 主界面，也不会打开模块的 `more` 配置界面。
 
@@ -143,8 +143,7 @@ HyperMesh 2019 会在读取 `hmcustom.tcl` 时直接恢复快捷键；HyperMesh 
 
 1. 确认源组件保留 `Vxx_件号` 基础名称；中面完成后可运行 `读取 BOM 表` 模块，当前版本会给 `MIDSURFED` Assembly 中所有 component 统一赋予 Q355。
 2. 在 `BatchMesher 自动网格划分` 中配置受支持的 HyperMesh 2019 或 2022 `hmbatch.exe` 及用户维护的 `.criteria` / `.param` 预设；hmbatch 可以与当前主会话版本不同，washer 行为完全由 `.param` 文件控制。
-3. 检查 `config/casting_mesh_rules.txt`，确认铸件三角面网格、质量迭代和 TetraMesh 参数。
-4. 检查 `config/seam_rules.txt`、`config/geometry_cleanup_rules.txt`、`config/contact_rules.txt`，确认焊缝面、几何清理和接触默认参数。
+3. 检查 `config/seam_rules.txt`、`config/geometry_cleanup_rules.txt`、`config/contact_rules.txt`，确认焊缝面、几何清理和接触默认参数。
 
 这些配置文件都是 `|` 分隔文本，模块面板中修改参数后，部分模块会把最新 UI 状态保存到 `config/*_state.txt`。
 
@@ -181,10 +180,9 @@ AUTO_CONTACT_*
 实体件和铸件的前置组织由后续重构模块负责；当前工具箱从已有的统一组件命名开始执行：
 
 1. `Geometry Cleanup: Chamfer/Recess`：按需要清理小特征、倒角或沉台。
-2. `Casting TetraMesh`：对铸件执行 surface 清理、三角面网格质量迭代和 TetraMesh。
-3. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
-4. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
-5. `Contact Setup`：基于两次 Face 单元选择建立相向接触。
+2. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
+3. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
+4. `Contact Setup`：基于两次 Face 单元选择建立相向接触。
 
 ### 2.5 中断、返回和刷新
 
@@ -205,7 +203,6 @@ AUTO_CONTACT_*
 |   |-- washer_rules.txt
 |   |-- seam_rules.txt
 |   |-- geometry_cleanup_rules.txt
-|   |-- casting_mesh_rules.txt
 |   `-- contact_rules.txt
 `-- modules/
     |-- workflow_common.tcl
@@ -215,7 +212,6 @@ AUTO_CONTACT_*
     |-- seam_surface.tcl
     |-- batch_mesher.tcl
     |-- batch_mesher/
-    |-- casting_tetramesh.tcl
     |-- batch_property_assignment.tcl
     |-- local_mesh_optimizer.tcl
     |-- local_mesh_optimizer/
@@ -260,7 +256,6 @@ workflow:
 | `washer_rules.txt` | 孔径与 washer 规则。 |
 | `seam_rules.txt` | Seam Surface Creation 默认参数。 |
 | `geometry_cleanup_rules.txt` | Geometry Cleanup 默认参数。 |
-| `casting_mesh_rules.txt` | Casting TetraMesh 默认参数。 |
 | `contact_rules.txt` | Contact Setup 默认参数。 |
 | `*_state.txt` | 模块 UI 状态缓存，由脚本自动生成。 |
 
@@ -388,29 +383,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - `*hm_batchmesh2` 后只要新增了 Elements，任务就视为有可用结果；质量或迭代问题作为警告保留，不会删除网格。成功任务保存原生 HM 作为恢复文件，并按结果 Component 使用 `*feoutputwithdata` 输出包含完整 Elements/依赖的 FE-only FEM。合并 worker 在空白模型中用默认 OptiStruct reader 和 `overwrite_flag=0` 逐个导入 FEM、验证 Element 增量，再保存 `merged_result.hm` 和导出 `batchmesh_result.fem`。主会话优先导入完整原生 FE，跨版本不兼容时回退到唯一的最终合并 FEM。网格状态与结果封装状态相互独立。
 - 报告位于共享任务存储的 `batch_mesher/<run-id>/`，包含汇总状态、`monitor_batchmesher.cmd`、`monitor_status.txt`、各 worker 的 `launch.log`、必要时生成的 `manager_failure.log`、stdout/stderr、`run.json`、`result.json` 和逐任务日志。即使 Altair launcher 没有输出，管理端日志也会记录实际命令、独立工作目录、PID 和启动握手超时诊断。关闭汇总监视窗口不会终止后台任务。
 
-### 6.5 Casting TetraMesh
-
-入口：`::CastingTetMesh::run`
-
-功能：执行铸件 surface 清理、三角面网格质量迭代和 TetraMesh 体网格填充。
-
-用法：
-
-1. 在主面板运行 `Casting TetraMesh`。
-2. 点击 `选择/重选组件`，选择铸件几何 component。
-3. 检查删除 solid、surface 清理、三角面网格、2D 质量迭代和 TetraMesh 选项。
-4. 检查 criteria、cleanup 参数、`tet_string` 和 `pars_string`。
-5. 点击开始执行。
-
-输出：
-
-- 可删除 solid 并保留边界 surface。
-- 可清理小孔、小圆角、短边等微小特征。
-- 创建三角面网格并进行 2D 质量迭代。
-- 质量通过后执行 TetraMesh 体网格填充。
-- 可将失败壳单元组织到 `AUTO_CASTING_FAILED_2D`。
-
-### 6.6 Shell Washer-Hole RBE2
+### 6.5 Shell Washer-Hole RBE2
 
 入口：`::RB2W::run`
 
@@ -433,7 +406,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - RBE2 只移动到输出 component，不移动源节点。
 - 模块会检查已有 RBE2，避免重复创建。
 
-### 6.7 Solid Through-Hole RBE2
+### 6.6 Solid Through-Hole RBE2
 
 入口：`::AutoHoleRBE2::run`
 
@@ -454,7 +427,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - 输出到指定结果 component。
 - 运行结束后可自动删除临时自由面 component。
 
-### 6.8 RBE2 Bolt Connector
+### 6.7 RBE2 Bolt Connector
 
 入口：`::RB2Bolt::run`
 
@@ -480,7 +453,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - 输出属性按孔径和属性卡命名，例如 `BOLT_D12_PBEAM`，避免 CBEAM/CBAR 只有几何线而没有求解刚度。
 - 只组织新建的一维连接单元，不移动源节点。
 
-### 6.9 CBUSH Creator
+### 6.8 CBUSH Creator
 
 入口：`::CBushCreator::runAction`
 
@@ -500,7 +473,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - 如果没有可识别的源 component，或源节点同时归属多个 component，工具会停止并提示，不会猜测名称。
 - 如果 CBUSH 创建失败，工具会删除本次新建的临时节点。
 
-### 6.10 批量添加临时节点
+### 6.9 批量添加临时节点
 
 入口：`::BatchTempNodes::runAction`
 
@@ -511,7 +484,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - “撤销上一批”可删除当前会话中最近一次成功创建的整批节点。
 - `Ctrl+Enter` 可直接执行创建。
 
-### 6.11 Adhesive Connector
+### 6.10 Adhesive Connector
 
 入口：`::AdhesiveConnector::runAction`
 
@@ -532,7 +505,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 模块会从当前 HyperMesh `feconfig.cfg` 动态解析 OptiStruct 的精确 `adhesives` 类型 ID，创建后回读 connector state；未生成连接或存在非 `REALIZED` 连接时会报错。首次投产前仍需在目标 HM2019 环境完成一次 smoke test。
 
-### 6.12 Contact Setup
+### 6.11 Contact Setup
 
 入口：`::ContactSetup::run`
 
@@ -560,25 +533,25 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - contact surface 创建时直接写入计算所得 `reverse_normals`；节点和坐标通过 mark 批量读取，不扫描整个 component。
 - 修改模式只会从当前 contact surface 中移除所选单元，不删除源 component 原始网格。
 
-### 6.13 Solid Seam Connector
+### 6.12 Solid Seam Connector
 
 入口：`::SolidSeam::run`
 
-功能：从选中 Solid Components 的外表面边界边或特征边中识别焊缝候选，支持双组件 Solid–Shell / Solid–Solid 和多组件 Solid×Shell 模式，并推荐 `PENTA_MIG_T/L/B` 或通用 `PENTA_MIG` realization。
+功能：选择两个 Components 后自动识别交界焊缝位置与接头类型，并按原生 1D connector seam 流程直接创建 `PENTA6 + RBE3` 实体焊缝（推荐 `PENTA_MIG_T/L/B` 或通用 `PENTA_MIG`），输出到 `SEAM_SOLID` 组件。
 
 用法：
 
 1. 在主面板运行 `实体焊缝 / Solid Seam Connector`。
-2. 设置搜索距离、最短焊缝长度、特征角和有效采样比例。
-3. 点击 `选择组件并识别`，在 HyperMesh 原生 Components 面板中选择两个或更多组件。
-4. 在候选页预览节点、接受/拒绝候选、修改 PENTA 类型或反转 nodelist。
-5. 只对已接受候选执行创建。每条失败独立记录，不中断后续候选。
+2. 设置搜索距离、最小焊缝长度、链断点容差；焊缝宽度与节点间距默认 6，模块会根据实际网格尺寸自动修正。
+3. 点击 `选择组件并创建`，在 HyperMesh 原生 Components 面板中选择两个组件。
+4. 模块自动检测交界节点链、判断接头类型（T/LAP/BUTT/ANGLED）、计算容差并批量创建；每条失败独立记录，不中断后续候选。
+5. 创建结果（PENTA6/RBE3）移入 `SEAM_SOLID` 组件，结果写入 `temp/solid_seam/<run_id>/realization_result.json` 与 `operation.log`。
 
-识别结果和日志写入 `temp/solid_seam/<run_id>/`。为防止未经验证的 connector 参数修改模型，仓库默认关闭 realization；必须先按 [模块说明](modules/solid_seam/README.md) 从目标 HM2019 Command File 制作并启用 profile。
+realization 容差自适应：`max(6.0, 1.5 × 网格尺寸, 最大间隙 + 网格尺寸)`，确保原生 seam 搜索始终覆盖局部网格与焊缝间隙（真实模型上 1–2 mm 容差会导致 realize 失败，3 mm 以上成功）。
 
-完整识别验证可运行 `examples/SolidSeam_Validation/generate_fem.py`，并导入生成的单一组合模型 `SolidSeam_Combined_Validation.fem`。对应 manifest 给出了每组应选组件、参数和预期结果。
+双版本实机验证（2019.0.0.70 / 2022.0.0.33）见 `docs/solid_seam_dual_version_alignment_2026-08-08.md`。
 
-### 6.14 网格焊缝完整性检查
+### 6.13 网格焊缝完整性检查
 
 入口：`::WeldIntegrityCheck::runAction`
 
@@ -598,13 +571,13 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 当前限制：完整性检查本身只支持 Shell–Shell 和人工审查；距离搜索是自由边节点到目标网格节点的近似，不读取 CAD。审查页的“创建焊缝”会显式转入下述自动壳焊缝流程，仍需工程人员再次确认后才修改模型。
 
-### 6.15 自动壳焊缝与快速创建
+### 6.14 自动壳焊缝与快速创建
 
 `Mesh Seam Weld` 新增 `FAST_AUTO`，与原 `LEGACY_MANUAL` 手动路径并存。自动模式原生导出所选 Shell Component，由便携式 Python 识别并分类 `T_PATH/T_LIST/CONNECT/L_SURF/L_LIST/REVIEW`，用户明确接受后才生成创建计划。自动规划优先复用已有连续目标网格边，也可在显式开启后执行受控节点微调，或对单个 CTRIA3/CQUAD4 母单元执行保守局部切分；快速路径不调用 imprint、ruled surface、automesh 或 connector。
 
 应用前会写入任务安全快照，每个候选还会建立独立检查点；导入后复核新增 ID、connectivity 和相对原始基线新增的 HyperMesh 质量失败，单个候选失败只回滚该候选。结果位于 `runtime/tasks/mesh_seam_weld/<run_id>/output/`，包含 candidate、creation plan、候选独立增量 FEM、manifest、规划 JSON/HTML 报告及执行报告。焊缝 Property 无法可靠复用时会明确标记 `property_assignment_required`，可随后使用批量 Property 模块。受控节点微调和保守单母单元局部切分均已实现但默认关闭；模块状态为 `controlled`，仍需按 [协议与 HM2019 清单](doc/mesh_seam_auto_protocol.md) 完成真实 HyperMesh 验证。
 
-### 6.16 FEM 自动焊缝（独立模块）
+### 6.15 FEM 自动焊缝（独立模块）
 
 `FEM Automatic Seam` 与 `Mesh Seam Weld` 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型、贴片型和邻近自由边候选，并在 FEM 层面切分母单元、插入节点和创建焊缝壳；后者继续处理用户已经明确选择的网格焊缝路径。
 
@@ -621,7 +594,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 `modules/workflow_common.tcl` 提供跨模块共享能力：
 
 - 全局语言配置读取。
-- 项目级 Tk/hwtk 窗口置顶开关、状态持久化，以及对当前和后续项目窗口的统一应用。
+- 项目级窗口置顶开关、状态持久化，以及对当前和后续项目窗口的统一应用。
 - HyperMesh 材料实体名称匹配和重复后缀归一化。
 - component 命名、重命名和装配组织。
 - Model Browser 创建、同步和刷新。
@@ -633,7 +606,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 ## 8. 开发和验证说明
 
 - 目标环境：HyperMesh 2019 Tcl/Tk（已验证基线）和 HyperWorks 2022 新界面（迁移兼容目标）。
-- 2022 当前覆盖启动、hwtk/Tk 窗口和 UTF-8 中文显示；各模块的 HyperMesh 原生命令仍需按模块在 2022 实机模型上逐步回归。
+- 2022 当前覆盖启动、统一 Tk 界面和 UTF-8 中文显示；各模块的 HyperMesh 原生命令仍需按模块在 2022 实机模型上逐步回归。
 - 本项目不依赖普通 Tcl 以外的第三方运行时，但核心命令依赖 HyperMesh。
 - 普通 Tcl 解释器可用于基础语法检查，不能验证 HyperMesh 命令行为。
 - 修改模块后，建议在 HyperMesh 中至少验证对应模块的窗口打开、选择流程、输出 component 和 Model Browser 刷新。

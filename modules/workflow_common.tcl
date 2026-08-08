@@ -379,10 +379,10 @@ proc ::HWFlow::firstAvailableFont {candidates fallback} {
     return $fallback
 }
 
-# Keep the established HyperMesh 2019 presentation untouched.  HyperWorks
-# 2022 uses a lighter Tk profile because its hwtk bridge is noticeably more
-# expensive when many small widgets are created and has inconsistent CJK font
-# fallback on some Windows installations.
+# Both host generations share one widget backend, one system palette and one
+# font scale, so the profile only answers the remaining host-compatibility
+# questions: HyperWorks 2022 window titles stay ASCII (see windowTitle) and
+# diagnostics report the active profile.
 proc ::HWFlow::uiProfile {{version ""}} {
     variable UI_PROFILE
     if {$version ne ""} {
@@ -411,9 +411,13 @@ proc ::HWFlow::windowTitle {legacyTitle asciiTitle} {
     return $legacyTitle
 }
 
-proc ::HWFlow::configure2022NamedFont {role family size weight} {
+# One named-font set serves both host generations.  HyperMesh 2019 and
+# HyperWorks 2022 both embed Tk 8.5 with the same default family and metrics
+# on Windows (verified through hmbatch probes of both installations), so a
+# single scale keeps every dialog at the same density on either version.
+proc ::HWFlow::configureNamedFont {role family size weight} {
     variable UI_NAMED_FONTS
-    set name "HWFlow2022[string totitle $role]Font"
+    set name "HWFlow[string totitle $role]Font"
     if {[lsearch -exact [font names] $name] < 0} {
         font create $name
     }
@@ -437,37 +441,21 @@ proc ::HWFlow::initFonts {} {
         set UI_FONT_FAMILY [::HWFlow::firstAvailableFont [list "Microsoft YaHei UI" "Microsoft YaHei" "SimHei" "SimSun" "NSimSun" "Arial Unicode MS" "Arial"] "Arial"]
         set UI_FIXED_FONT_FAMILY [::HWFlow::firstAvailableFont [list "NSimSun" "SimSun" "Microsoft YaHei UI" "Microsoft YaHei" "Consolas" "Courier New"] $UI_FONT_FAMILY]
 
-        if {[::HWFlow::uiProfile] eq "hw2022"} {
-            # Named fonts let Tk cache glyph metrics and ensure every classic
-            # widget uses a Windows font with Simplified Chinese coverage.
-            ::HWFlow::configure2022NamedFont default $UI_FONT_FAMILY 10 normal
-            ::HWFlow::configure2022NamedFont header $UI_FONT_FAMILY 16 bold
-            ::HWFlow::configure2022NamedFont title $UI_FONT_FAMILY 12 bold
-            ::HWFlow::configure2022NamedFont heading $UI_FONT_FAMILY 11 bold
-            ::HWFlow::configure2022NamedFont module $UI_FONT_FAMILY 10 bold
-            ::HWFlow::configure2022NamedFont small $UI_FONT_FAMILY 9 normal
-            ::HWFlow::configure2022NamedFont fixed $UI_FIXED_FONT_FAMILY 10 normal
-            ::HWFlow::configure2022NamedFont fixedSmall $UI_FIXED_FONT_FAMILY 9 normal
-            catch {font configure TkDefaultFont -family $UI_FONT_FAMILY -size 10 -weight normal}
-            catch {font configure TkTextFont -family $UI_FONT_FAMILY -size 10 -weight normal}
-            catch {font configure TkMenuFont -family $UI_FONT_FAMILY -size 10 -weight normal}
-            catch {font configure TkCaptionFont -family $UI_FONT_FAMILY -size 10 -weight bold}
-            catch {font configure TkHeadingFont -family $UI_FONT_FAMILY -size 10 -weight bold}
-            catch {font configure TkFixedFont -family $UI_FIXED_FONT_FAMILY -size 10 -weight normal}
-            catch {option add *Font HWFlow2022DefaultFont widgetDefault}
-            set FONT_INITIALIZED 1
-            return
-        }
-
+        ::HWFlow::configureNamedFont default $UI_FONT_FAMILY 9 normal
+        ::HWFlow::configureNamedFont header $UI_FONT_FAMILY 12 bold
+        ::HWFlow::configureNamedFont title $UI_FONT_FAMILY 10 bold
+        ::HWFlow::configureNamedFont heading $UI_FONT_FAMILY 9 bold
+        ::HWFlow::configureNamedFont module $UI_FONT_FAMILY 9 bold
+        ::HWFlow::configureNamedFont small $UI_FONT_FAMILY 8 normal
+        ::HWFlow::configureNamedFont fixed $UI_FIXED_FONT_FAMILY 9 normal
+        ::HWFlow::configureNamedFont fixedSmall $UI_FIXED_FONT_FAMILY 8 normal
         catch {font configure TkDefaultFont -family $UI_FONT_FAMILY -size 9 -weight normal}
         catch {font configure TkTextFont -family $UI_FONT_FAMILY -size 9 -weight normal}
         catch {font configure TkMenuFont -family $UI_FONT_FAMILY -size 9 -weight normal}
         catch {font configure TkCaptionFont -family $UI_FONT_FAMILY -size 9 -weight bold}
         catch {font configure TkHeadingFont -family $UI_FONT_FAMILY -size 9 -weight bold}
         catch {font configure TkFixedFont -family $UI_FIXED_FONT_FAMILY -size 9 -weight normal}
-        catch {option add *Font TkDefaultFont}
-
-
+        catch {option add *Font TkDefaultFont widgetDefault}
     }
 
     set FONT_INITIALIZED 1
@@ -525,18 +513,18 @@ proc ::HWFlow::uiFont {{role default}} {
     variable UI_NAMED_FONTS
 
     ::HWFlow::initFonts
-    if {[::HWFlow::uiProfile] eq "hw2022" && [info exists UI_NAMED_FONTS($role)]} {
+    if {[info exists UI_NAMED_FONTS($role)]} {
         return $UI_NAMED_FONTS($role)
     }
     switch -- $role {
         header {
-            return [list $UI_FONT_FAMILY 14 bold]
+            return [list $UI_FONT_FAMILY 12 bold]
         }
         title {
-            return [list $UI_FONT_FAMILY 11 bold]
+            return [list $UI_FONT_FAMILY 10 bold]
         }
         heading {
-            return [list $UI_FONT_FAMILY 10 bold]
+            return [list $UI_FONT_FAMILY 9 bold]
         }
         module {
             return [list $UI_FONT_FAMILY 9 bold]
@@ -556,26 +544,34 @@ proc ::HWFlow::uiFont {{role default}} {
     }
 }
 
-# Shared light palette for the unified home panel and progress windows.  Plain
-# Tk color names keep the same look across classic Tk, ttk and hwtk widgets.
+# HM-native system palette for every toolkit window.  Symbolic System* color
+# names resolve against the active Windows theme inside HyperMesh, so toolkit
+# windows pick up the same panel gray, input white and selection blue that
+# native HyperMesh dialogs use, identically on 2019 and 2022 (both verified
+# through hmbatch probes of the local installations).
 proc ::HWFlow::uiColors {{key ""}} {
     variable UI_COLORS
     if {[array size UI_COLORS] == 0} {
         array set UI_COLORS {
-            headerBg       #f3f6fa
-            headerAccent   #2563eb
-            bodyBg         #eef1f6
-            cardBg         #ffffff
-            border         #d5dbe4
-            accent         #2563eb
-            accentDark     #1d4ed8
-            accentSoft     #dbeafe
-            accentSoftText #1e40af
-            textPrimary    #1f2937
-            textSecondary  #4b5563
-            listBg         #ffffff
-            listSelBg      #2563eb
-            listSelFg      #ffffff
+            headerBg       SystemButtonFace
+            headerAccent   SystemHighlight
+            bodyBg         SystemButtonFace
+            cardBg         SystemButtonFace
+            border         SystemButtonShadow
+            accent         SystemHighlight
+            accentDark     SystemHighlight
+            accentSoft     SystemButtonFace
+            accentSoftText SystemWindowText
+            textPrimary    SystemWindowText
+            textSecondary  SystemGrayText
+            listBg         SystemWindow
+            listSelBg      SystemHighlight
+            listSelFg      SystemHighlightText
+            inputBg        SystemWindow
+            inputFg        SystemWindowText
+            disabledFg     SystemGrayText
+            grooveShadow   SystemButtonShadow
+            grooveLight    SystemButtonHighlight
         }
     }
     if {$key eq ""} {
@@ -587,6 +583,11 @@ proc ::HWFlow::uiColors {{key ""}} {
     return ""
 }
 
+# Both host generations share one classic Tk backend.  hwtk is deliberately
+# never loaded: on HyperWorks 2022 a bare `package require hwtk` terminates
+# the hmbatch interpreter outright (verified locally), and classic Tk renders
+# the same system colors and fonts on both versions, which keeps every layout
+# pixel-consistent between 2019 and 2022.
 proc ::HWFlow::initUI {} {
     variable UI_INITIALIZED
     variable UI_BACKEND
@@ -596,19 +597,6 @@ proc ::HWFlow::initUI {} {
     }
 
     set UI_BACKEND "tk"
-    if {[::HWFlow::uiProfile] eq "hw2022"} {
-        # Loading hwtk is intentionally skipped on 2022.  Apart from startup
-        # cost, failed hwtk/ttk option probes used to recreate every widget up
-        # to three times before falling back to classic Tk.
-        set UI_BACKEND "tk2022"
-        catch {puts "HWToolkit: HyperWorks 2022 UI backend=tk"}
-    } elseif {![catch {package require hwtk} hwtkVersion] &&
-        [llength [info commands ::hwtk::toplevel]] > 0} {
-        set UI_BACKEND "hwtk"
-        catch {puts "HWToolkit: using hwtk $hwtkVersion UI backend"}
-    } else {
-        catch {puts "HWToolkit: hwtk unavailable; using Tk compatibility backend"}
-    }
     set UI_INITIALIZED 1
     return $UI_BACKEND
 }
@@ -617,28 +605,25 @@ proc ::HWFlow::uiBackend {} {
     return [::HWFlow::initUI]
 }
 
+# hwtk is no longer used on either host generation; this predicate stays so
+# code written against the old adapter keeps taking the Tk path.
 proc ::HWFlow::usingHwtk {} {
-    return [expr {[::HWFlow::uiBackend] eq "hwtk"}]
+    return 0
 }
 
-# Create a child widget through the active UI backend.  Only shared and shell
-# UI should use this adapter during the first migration stage; module-specific
-# parameter layouts intentionally remain compatible with their existing Tk
-# widget paths and commands.
+# Create a child widget through the shared backend.  Classic Tk widgets come
+# first because they accept every classic option (-background, -font,
+# -activebackground, ...) and render in system colors on both HyperMesh
+# generations; ttk supplies the widget kinds classic Tk lacks (progressbar,
+# notebook, separator).
 proc ::HWFlow::uiWidget {kind w args} {
     set candidates {}
-    if {[::HWFlow::usingHwtk] && [llength [info commands ::hwtk::$kind]] > 0} {
-        lappend candidates ::hwtk::$kind
-    }
     if {$kind in {frame label button labelframe scrollbar checkbutton radiobutton entry}} {
-        if {[::HWFlow::uiProfile] eq "hw2022" && [llength [info commands ::$kind]] > 0} {
+        if {[llength [info commands ::$kind]] > 0} {
             lappend candidates ::$kind
         }
         if {[llength [info commands ::ttk::$kind]] > 0} {
             lappend candidates ::ttk::$kind
-        }
-        if {[::HWFlow::uiProfile] ne "hw2022" && [llength [info commands ::$kind]] > 0} {
-            lappend candidates ::$kind
         }
     } elseif {$kind eq "separator"} {
         if {[llength [info commands ::ttk::separator]] == 0} {
@@ -948,17 +933,7 @@ proc ::HWFlow::nativeMarkPanelSequence {requests} {
 }
 
 proc ::HWFlow::createTopLevel {w {role module}} {
-    set created 0
-    if {[::HWFlow::usingHwtk] && [llength [info commands ::hwtk::toplevel]] > 0} {
-        if {![catch {::hwtk::toplevel $w}]} {
-            set created 1
-        } else {
-            catch {destroy $w}
-        }
-    }
-    if {!$created} {
-        toplevel $w
-    }
+    toplevel $w
     ::HWFlow::registerWindow $w $role
     return $w
 }
@@ -1773,7 +1748,6 @@ proc ::HWFlow::displayComponent {compName state} {
 
 proc ::HWFlow::resetBrowserBlocks {} {
     foreach cmd {
-        {hm_blockbrowserupdate 0}
         {*setoption block_redraw=0}
         {*setoption block_messages=0}
         {*setoption command_file_state=1}
@@ -1781,7 +1755,6 @@ proc ::HWFlow::resetBrowserBlocks {} {
         {hm_blockmessages 0}
         {hm_blockerrormessages 0}
         {hm_commandfilestate 1}
-        {hmbr_signals buffer stop}
     } {
         catch {uplevel #0 $cmd}
     }
@@ -1789,12 +1762,9 @@ proc ::HWFlow::resetBrowserBlocks {} {
 
 proc ::HWFlow::browserFlushPulse {} {
     foreach cmd {
-        {hm_blockbrowserupdate 0}
-        {hmbr_signals buffer stop}
         {hwbrowsermanager view flush true}
         {hwbrowsermanager view flush 1}
         {hwbrowsermanager view flush on}
-        {hm_blockbrowserupdate 0}
         {hm_redraw}
     } {
         catch {uplevel #0 $cmd}
@@ -1928,7 +1898,7 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         ::HWFlow::uiWidget progressbar $w.main.bar -mode determinate -value 0
         ::HWFlow::uiWidget label $w.main.percent -textvariable ::HWFlow::progressPercentText -width 7 -anchor e
         ::HWFlow::uiWidget labelframe $w.main.stream -text [::HWFlow::txt "命令流" "Command Stream"]
-        text $w.main.stream.text -width 78 -height 11 -wrap word -font [::HWFlow::uiFont fixedSmall] -state disabled -background #f8f8f8
+        text $w.main.stream.text -width 78 -height 11 -wrap word -font [::HWFlow::uiFont fixedSmall] -state disabled -background [::HWFlow::uiColors inputBg] -foreground [::HWFlow::uiColors inputFg]
         ::HWFlow::uiWidget scrollbar $w.main.stream.scroll -orient vertical -command "$w.main.stream.text yview"
         $w.main.stream.text configure -yscrollcommand "$w.main.stream.scroll set"
         grid $w.main.stream.text -row 0 -column 0 -sticky nsew
@@ -2269,4 +2239,162 @@ proc ::HWFlow::padString {str width} {
     set pad [expr {$width - $curLen}]
     if {$pad < 0} { set pad 0 }
     return "$str[string repeat " " $pad]"
+}
+
+# ============================================================================
+# Shared native-style form builders (HyperMesh 2019 and HyperWorks 2022)
+#
+# Every builder uses classic Tk widgets and the system palette only, so the
+# result looks like a native HyperMesh panel and renders identically on both
+# host generations.  Module dialogs should compose these instead of
+# hand-rolling frames, paddings and button bars.
+# ============================================================================
+
+# Horizontal (or vertical) groove separator, like the rules that native
+# HyperMesh panels draw between groups.
+proc ::HWFlow::groove {w {orient horizontal}} {
+    if {$orient eq "vertical"} {
+        frame $w -width 2 -relief groove -borderwidth 1
+    } else {
+        frame $w -height 2 -relief groove -borderwidth 1
+    }
+    return $w
+}
+
+# Flat group header: a bold label followed by a groove that fills the rest of
+# the line.  Used by the home panel to separate tool categories without
+# boxing every group.
+proc ::HWFlow::groupHeader {w text} {
+    set bg [::HWFlow::uiColors bodyBg]
+    frame $w -background $bg
+    label $w.text -text $text -font [::HWFlow::uiFont heading] \
+        -foreground [::HWFlow::uiColors textPrimary] -background $bg -anchor w
+    ::HWFlow::groove $w.rule
+    pack $w.text -side left -padx {0 8}
+    pack $w.rule -side left -fill x -expand 1 -pady 4
+    return $w
+}
+
+# Consistent section box for module parameter dialogs.
+proc ::HWFlow::sectionFrame {w text} {
+    labelframe $w -text $text -font [::HWFlow::uiFont default] -padx 8 -pady 6
+    return $w
+}
+
+# Bottom action bar with a groove on top.  Returns the inner frame that
+# action buttons should be packed into (right side first).
+proc ::HWFlow::actionBar {w} {
+    frame $w
+    ::HWFlow::groove $w.rule
+    frame $w.buttons
+    pack $w.rule -fill x -pady {0 8}
+    pack $w.buttons -fill x
+    return $w.buttons
+}
+
+# Standard action-bar button.  A primary button gets the default ring so
+# Enter triggers it, matching native dialog behavior.
+proc ::HWFlow::actionButton {w text command {primary 0} {width 12}} {
+    button $w -text $text -width $width -command $command \
+        -font [::HWFlow::uiFont default]
+    if {$primary} {
+        catch {$w configure -default active}
+    }
+    return $w
+}
+
+# One labeled entry row inside a grid-managed parent.  Returns the entry
+# widget path.  An optional tip renders in the muted hint color.
+proc ::HWFlow::formRow {parent row labelText varName {width 18} {tip ""}} {
+    label $parent.fl_$row -text $labelText -anchor w -font [::HWFlow::uiFont default]
+    entry $parent.fe_$row -textvariable $varName -width $width \
+        -font [::HWFlow::uiFont default] \
+        -background [::HWFlow::uiColors inputBg] \
+        -foreground [::HWFlow::uiColors inputFg]
+    grid $parent.fl_$row -row $row -column 0 -sticky w -padx {0 6} -pady 2
+    grid $parent.fe_$row -row $row -column 1 -sticky w -padx {0 10} -pady 2
+    if {$tip ne ""} {
+        label $parent.ft_$row -text $tip -anchor w -justify left \
+            -font [::HWFlow::uiFont small] \
+            -foreground [::HWFlow::uiColors textSecondary]
+        grid $parent.ft_$row -row $row -column 2 -sticky w -pady 2
+    }
+    return $parent.fe_$row
+}
+
+# Canvas-backed scrollable container; returns the inner frame that content
+# should be packed or gridded into.  Pack/grid the container $w itself; the
+# canvas and its scrollbar are managed inside.  The mouse wheel scrolls while
+# the pointer is over the area, and the inner frame tracks the canvas width.
+proc ::HWFlow::scrollableFrame {w} {
+    set bg [::HWFlow::uiColors bodyBg]
+    frame $w -background $bg
+    canvas $w.c -borderwidth 0 -highlightthickness 0 -background $bg
+    scrollbar $w.vsb -orient vertical -command [list $w.c yview]
+    frame $w.c.inner -background $bg
+    $w.c create window 0 0 -anchor nw -window $w.c.inner -tags inner
+    $w.c configure -yscrollcommand [list $w.vsb set]
+    pack $w.vsb -side right -fill y
+    pack $w.c -side left -fill both -expand 1
+    bind $w.c.inner <Configure> [list ::HWFlow::scrollableInnerConfigure $w.c]
+    bind $w.c <Configure> [list ::HWFlow::scrollableCanvasConfigure $w.c]
+    bind $w.c <Destroy> +[list ::HWFlow::scrollableUnbindWheel $w.c]
+    bind all <MouseWheel> +[list ::HWFlow::scrollableWheel $w.c %D]
+    return $w.c.inner
+}
+
+proc ::HWFlow::scrollableInnerConfigure {canvas} {
+    catch {$canvas configure -scrollregion [$canvas bbox all]}
+}
+
+proc ::HWFlow::scrollableCanvasConfigure {canvas} {
+    if {[winfo exists $canvas]} {
+        catch {$canvas itemconfigure inner -width [winfo width $canvas]}
+    }
+}
+
+# Wheel events are registered globally because Tk delivers them to the
+# deepest widget under the pointer, which is usually a row child rather than
+# the canvas.  Route the scroll to this canvas only while the pointer is
+# actually inside it; stale bindings of destroyed canvases are removed.
+proc ::HWFlow::scrollableWheel {canvas delta} {
+    if {![winfo exists $canvas]} {
+        return
+    }
+    set target [winfo containing -displayof $canvas [winfo pointerx $canvas] [winfo pointery $canvas]]
+    set inside 0
+    while {$target ne ""} {
+        if {$target eq $canvas} {
+            set inside 1
+            break
+        }
+        set target [winfo parent $target]
+    }
+    if {!$inside} {
+        return
+    }
+    catch {$canvas yview scroll [expr {int(-1 * ($delta / 120))}] units}
+}
+
+proc ::HWFlow::scrollableUnbindWheel {canvas} {
+    bind all <MouseWheel> ""
+}
+
+# Center a toplevel on screen, capping it to the usable screen area.  With no
+# explicit size the window keeps its requested size (possibly capped).
+proc ::HWFlow::centerWindow {w {reqWidth 0} {reqHeight 0}} {
+    catch {update idletasks}
+    set width $reqWidth
+    set height $reqHeight
+    if {$width <= 0} { set width [winfo reqwidth $w] }
+    if {$height <= 0} { set height [winfo reqheight $w] }
+    set maxWidth [expr {int([winfo screenwidth $w] * 0.9)}]
+    set maxHeight [expr {int([winfo screenheight $w] * 0.85)}]
+    if {$width > $maxWidth} { set width $maxWidth }
+    if {$height > $maxHeight} { set height $maxHeight }
+    set x [expr {([winfo screenwidth $w] - $width) / 2}]
+    set y [expr {([winfo screenheight $w] - $height) / 2}]
+    if {$x < 0} { set x 0 }
+    if {$y < 0} { set y 0 }
+    wm geometry $w ${width}x${height}+$x+$y
 }

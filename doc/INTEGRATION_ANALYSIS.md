@@ -35,13 +35,13 @@ hw_toolkit.tcl
 
 ### 2.2 主界面入口
 
-主界面定义在 `hw_toolkit_core.tcl` 的 `::HWToolkit::showPanel`。2019 与 2022 使用相同的双栏布局：左侧是 `Geometry`、`Mesh`、`Connector` 分类按钮和工具列表，右侧是选中工具的详情卡片，包含：
+主界面定义在 `hw_toolkit_core.tcl` 的 `::HWToolkit::showPanelHome`（`showPanel` 直接委托给它，`showPanel2022` / `showPanelLegacy` 保留为兼容别名）。2019 与 2022 使用同一个扁平单层布局：所有可见工具按 `Geometry`、`Mesh`、`Connector` 分组一屏列出，每个工具一行，包含：
 
-- 工具名称与所属分类（含当前快捷键）；
-- 描述文字；
-- `运行` / `设置` / `快捷键` / `撤回` 操作按钮。
+- 工具名称（点击直接运行，悬停高亮）；
+- 一句话描述；
+- `设置` 与 `绑定快捷键` 两个按钮（未提供设置项的模块按钮置灰；已绑定快捷键时按钮直接显示快捷键）。
 
-`::HWToolkit::showPanel2022` 是统一的布局实现，`::HWToolkit::showPanelLegacy` 在 2019 上委托给同一实现；两代的差异仅由 `::HWFlow::uiFont` 与 `::HWFlow::uiWidget` 按宿主版本处理。
+窗口使用系统色板（`SystemButtonFace` 面板灰、`SystemWindow` 输入区、`SystemHighlight` 选择蓝），后端统一为经典 Tk（进度条等用 ttk），不再加载 hwtk：2022 的 batch 解释器在 `package require hwtk` 时会直接崩溃（已用本机 hmbatch 实测），且统一后端保证两代布局像素级一致。字体在 `::HWFlow::initFonts` 中统一为 Microsoft YaHei UI 9pt 系列，两代相同。
 
 Local Mesh Optimizer 应加入 `::HWToolkit::MODULES` 字典的 `Mesh` 组，使用现有 `label_zh/label_en`、`desc_zh/desc_en`、`proc`、`settings_proc` 字段。模块入口建议为：
 
@@ -84,13 +84,13 @@ modules/local_mesh_optimizer/
 
 `modules/workflow_common.tcl` 已提供：
 
-- `::HWFlow::createTopLevel`：通过 hwtk/Tk 适配层创建并登记顶层窗口，不使用永久置顶；
+- `::HWFlow::createTopLevel`：创建并登记顶层窗口，不使用永久置顶；
 - `::HWFlow::uiFont`：`header/title/heading/module/small/fixed` 字体角色；
 - `::HWFlow::txt`：中英文切换；
 - `::HWFlow::bindAutoWrap`：描述文字自动换行；
 - `::HWFlow::backToHome`：返回主界面。
 
-主界面按钮宽度、字体和布局由 `hw_toolkit_core.tcl` 统一生成。界面基础设施现以 HyperWorks 2019 内置 `hwtk 1.0` 为首选后端并保留 Tk/ttk 回退；新模块不得建立独立 GUI 后端或复制窗口生命周期逻辑。
+主界面按钮宽度、字体和布局由 `hw_toolkit_core.tcl` 统一生成。界面基础设施统一使用经典 Tk 后端（进度条等用 ttk）和系统色板，2019/2022 共用同一实现；新模块不得建立独立 GUI 后端或复制窗口生命周期逻辑。
 
 ### 3.2 配置持久化
 
@@ -140,7 +140,7 @@ set ids [hm_getmark ... 1]
 
 ### 3.7 临时目录
 
-项目没有统一临时目录 API。现有铸件模块把一个质量临时文件放在 `config/`，不适合长任务和模型快照。
+项目没有统一临时目录 API。历史铸件模块曾把质量临时文件放在 `config/`（该模块已废弃移除），不适合长任务和模型快照。
 
 建议在工具箱根目录下使用被构建脚本明确包含/排除策略管理的：
 
@@ -168,14 +168,7 @@ temp/local_mesh_optimizer/task_YYYYMMDD_HHMMSS_<pid>/
 
 ### 4.1 源码中已存在的命令
 
-`modules/casting_tetramesh.tcl` 当前包含：
-
-- `hm_getelementsqualityinfo 1 1 2`：读取 2D 质量信息并期望失败单元进入 mark 2；
-- `*getqualitysummary 1 <file> 2 1`：作为失败 mark 的回退尝试；
-- `*hm_failed_elements_cleanup 2 0 <min_size> <feature_angle> 150`：失败单元清理；
-- `hm_getelemchecksummary3d`：3D 质量摘要。
-
-`modules/batch_mesh_washer.tcl` 当前包含：
+`modules/batch_mesher/`（原 `modules/batch_mesh_washer.tcl` 已并入 BatchMesher 模块）当前包含：
 
 - `*hm_batchmesh2`；
 - `*createstringarray`；
@@ -187,15 +180,15 @@ temp/local_mesh_optimizer/task_YYYYMMDD_HHMMSS_<pid>/
 
 | 命令/能力 | 仓库证据 | 当前环境动态验证 | 集成策略 |
 | --- | --- | --- | --- |
-| `hm_getelementsqualityinfo` | 已在铸件模块调用 | 未验证 | capability probe 后用于质量摘要/失败 mark；必须确认 criteria 上下文 |
-| `*getqualitysummary` | 已在铸件模块调用 | 未验证 | 仅在 HM2019 录制确认参数及失败 mark 语义后使用 |
+| `hm_getelementsqualityinfo` | 原铸件模块曾调用（模块已废弃移除） | 未验证 | capability probe 后用于质量摘要/失败 mark；必须确认 criteria 上下文 |
+| `*getqualitysummary` | 原铸件模块曾调用（模块已废弃移除） | 未验证 | 仅在 HM2019 录制确认参数及失败 mark 语义后使用 |
 | `*readqualitycriteria` | 仓库无调用；Altair 官方参考给出单文件参数，版本历史注明 2019.1 更新 3D criteria | 未验证 | 已按官方单文件签名封装；仍需实机确认路径、错误和当前 criteria 上下文 |
 | `*splitelements` | 官方旧版参考给出 `method mark_id`，方法 2 为最短对角、加 100 反向 | 未验证 | Python 比较两种切分的最差三角形得分，Tcl 仅对目标 quad 执行方法 2/102 |
 | `*elementqualitysetup` | 官方旧版 Element Quality 命令示例使用区域 mark | 未验证 | 仅为短边塌缩建立局部上下文；修改阶段任何错误触发全任务恢复 |
 | `*elementqualitycollapseedge` | 官方参考版本历史为 13.0，旧版签名 `elem_id edge_index` | 未验证 | 仅处理规划器确认的瘦长三角形或内部细长 quad 短边 |
 | `*elementqualityshutdown` | 官方示例与 setup 成对 | 未验证 | 无论动作成功与否都尝试关闭上下文；关闭失败同样回退 |
 | `*nodemodify` | 官方参考给出 `nodeid x y z` | 未验证 | 仅用于经二次自由边核验的细长条带协调外扩；保持几何关联开启时跳过 |
-| `*hm_failed_elements_cleanup` | 已在铸件模块调用 | 未验证 | 不能替代 criteria 最终判定；可作为受控兼容候选 |
+| `*hm_failed_elements_cleanup` | 原铸件模块曾调用（模块已废弃移除） | 未验证 | 不能替代 criteria 最终判定；可作为受控兼容候选 |
 | 模型另存/读取快照命令 | 仓库无封装 | 未验证 | 在实现恢复功能前必须录制确认；不得用 Undo 次数恢复 |
 | mask/display/current collector 快照 | 仅有零散显示函数 | 未验证 | 模块内封装并实测恢复 |
 

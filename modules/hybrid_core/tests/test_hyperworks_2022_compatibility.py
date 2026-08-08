@@ -74,7 +74,7 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
         self.assertEqual(tcl.eval("::HWFlow::uiProfile {HyperMesh 2019.0}"), "legacy")
         self.assertEqual(tcl.eval("::HWFlow::uiProfile {HyperWorks 2022.3}"), "hw2022")
 
-    def test_2022_ui_skips_hwtk_while_2019_keeps_the_existing_backend(self) -> None:
+    def test_both_hosts_share_one_tk_backend_without_loading_hwtk(self) -> None:
         modern = tkinter.Tcl()
         modern.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
         modern.eval(
@@ -85,7 +85,8 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
             package provide hwtk 9.9
             '''
         )
-        self.assertEqual(modern.eval("::HWFlow::uiBackend"), "tk2022")
+        self.assertEqual(modern.eval("::HWFlow::uiBackend"), "tk")
+        self.assertEqual(modern.eval("::HWFlow::usingHwtk"), "0")
 
         legacy = tkinter.Tcl()
         legacy.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
@@ -97,38 +98,54 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
             package provide hwtk 9.9
             '''
         )
-        self.assertEqual(legacy.eval("::HWFlow::uiBackend"), "hwtk")
+        self.assertEqual(legacy.eval("::HWFlow::uiBackend"), "tk")
+        self.assertEqual(legacy.eval("::HWFlow::usingHwtk"), "0")
 
-    def test_2022_basic_widgets_use_the_single_pass_tk_path(self) -> None:
-        tcl = tkinter.Tcl()
-        tcl.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
-        tcl.eval(
-            r'''
-            proc hm_info {args} { return "HyperWorks 2022.3" }
-            set ::widget_calls {}
-            proc frame {w args} { lappend ::widget_calls tk; return $w }
-            namespace eval ::ttk {}
-            proc ::ttk::frame {w args} { lappend ::widget_calls ttk; return $w }
-            '''
-        )
-        self.assertEqual(tcl.eval("::HWFlow::uiWidget frame .probe"), ".probe")
-        self.assertEqual(tcl.splitlist(tcl.eval("set ::widget_calls")), ("tk",))
+    def test_both_hosts_basic_widgets_take_the_single_pass_tk_path(self) -> None:
+        for version in ("HyperWorks 2022.3", "HyperMesh 2019.0"):
+            with self.subTest(version=version):
+                tcl = tkinter.Tcl()
+                tcl.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+                tcl.eval(
+                    rf'''
+                    proc hm_info {{args}} {{ return "{version}" }}
+                    set ::widget_calls {{}}
+                    proc frame {{w args}} {{ lappend ::widget_calls tk; return $w }}
+                    namespace eval ::ttk {{}}
+                    proc ::ttk::frame {{w args}} {{ lappend ::widget_calls ttk; return $w }}
+                    '''
+                )
+                self.assertEqual(
+                    tcl.eval("::HWFlow::uiWidget frame .probe"), ".probe"
+                )
+                self.assertEqual(
+                    tcl.splitlist(tcl.eval("set ::widget_calls")), ("tk",)
+                )
 
-    def test_2022_home_panel_is_a_separate_lightweight_layout(self) -> None:
+    def test_home_panel_is_a_flat_shared_layout_for_both_generations(self) -> None:
         core = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
         dispatcher = core[
             core.index("proc ::HWToolkit::showPanel") :
-            core.index("proc ::HWToolkit::showPanel2022")
+            core.index("proc ::HWToolkit::shortcutText")
         ]
-        optimized = core[
-            core.index("proc ::HWToolkit::showPanel2022") :
-            core.index("proc ::HWToolkit::showPanelLegacy")
-        ]
-        self.assertIn('uiProfile] eq "hw2022"', dispatcher)
-        self.assertIn("::HWToolkit::showPanelLegacy", dispatcher)
-        self.assertIn("wm withdraw $w", optimized)
-        self.assertIn("select2022Group", optimized)
-        self.assertNotIn("row_$key", optimized)
+        # One flat builder for both host generations: no profile branch and no
+        # two-pane navigation/detail split anymore.
+        self.assertIn("return [::HWToolkit::showPanelHome]", dispatcher)
+        self.assertNotIn('uiProfile] eq "hw2022"', dispatcher)
+        self.assertNotIn("body.navigation", dispatcher)
+        self.assertNotIn("select2022Group", dispatcher)
+        self.assertNotIn("listbox", dispatcher)
+        # Every visible tool is one row: clicking the name runs it, and the
+        # two row buttons are settings and shortcut binding.
+        self.assertIn("proc ::HWToolkit::buildHomeRow", dispatcher)
+        self.assertIn("bind $row.name <Button-1>", dispatcher)
+        self.assertIn("[list ::HWToolkit::runModule $key]", dispatcher)
+        self.assertIn("::HWToolkit::settingsModule $key", dispatcher)
+        self.assertIn("::HWShortcut::showForModule $key", dispatcher)
+        # The shared row buttons keep their legacy widget paths so window
+        # cleanup and tests stay stable.
+        self.assertIn("$row.settings", dispatcher)
+        self.assertIn("$row.shortcut", dispatcher)
 
     def test_2022_window_titles_use_ascii_without_changing_2019_titles(self) -> None:
         modern = tkinter.Tcl()

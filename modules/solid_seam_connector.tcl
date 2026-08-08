@@ -7,7 +7,7 @@ if {![namespace exists ::HybridCore]} {
 }
 foreach _solidSeamFile {
     logger.tcl component_selector.tcl mesh_exporter.tcl
-    python_bridge.tcl realization_profiles.tcl realization_validator.tcl
+    auto_detect.tcl realization_profiles.tcl realization_validator.tcl
     candidate_editor.tcl candidate_viewer.tcl seam_creator.tcl ui.tcl main.tcl
 } {
     source -encoding utf-8 [file join $::SolidSeam::MODULE_DIR tcl $_solidSeamFile]

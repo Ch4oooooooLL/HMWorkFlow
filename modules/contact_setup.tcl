@@ -133,7 +133,7 @@ proc ::ContactSetup::msg {text} {
 
 proc ::ContactSetup::centerWindow {w} {
     update idletasks
-    wm geometry $w +[expr {([winfo screenwidth $w] - [winfo reqwidth $w]) / 2}]+[expr {([winfo screenheight $w] - [winfo reqheight $w]) / 2}]
+    ::HWFlow::centerWindow $w
 }
 
 proc ::ContactSetup::backToHome {w} {

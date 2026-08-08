@@ -6,22 +6,10 @@ proc ::SolidSeam::runDetection {} {
         set ui(status) [::SolidSeam::txt "正在选择组件..." "Selecting components..."]; update idletasks
         set componentIds [::SolidSeam::selectComponents]
         if {[llength $componentIds] == 0} { error "__SOLID_SEAM_CANCEL__" }
-        ::SolidSeam::newRun
-        set ui(status) [::SolidSeam::txt "正在导出所选 Components 为 FEM..." "Exporting selected components to FEM..."]; update idletasks
-        set meshPath [::SolidSeam::exportSelectedFem]
-        set requestPath [::SolidSeam::writeRequest]
-        set ui(status) [::SolidSeam::txt "Python 正在识别候选焊缝..." "Python is detecting seam candidates..."]; update idletasks
-        ::SolidSeam::runPythonDetection $requestPath $meshPath
-        set mode $detectedMode
-        set ui(status) [::SolidSeam::txt "识别完成：模式 $mode；候选 [llength $candidateRows] 条。运行目录：$runtimeDir" "Detection complete: mode $mode; [llength $candidateRows] candidates. Run directory: $runtimeDir"]
-        if {$requiresReview} {
-            if {$ui(auto_accept_high)} { ::SolidSeam::acceptHighConfidence }
-            ::SolidSeam::showCandidateWindow
-        } else {
-            if {[llength $candidateRows] == 0} { error [::SolidSeam::txt "未识别到可创建的焊缝位置。" "No weld location was detected."] }
-            ::SolidSeam::acceptAllCandidates
-            ::SolidSeam::createAcceptedCandidates
-        }
+        set primaryIds [lsort -integer -unique [::SolidSeam::selectedComponentsForDetection]]
+        set ui(status) [::SolidSeam::txt "正在自动识别焊缝位置与类型..." "Auto-detecting seam locations and types..."]; update idletasks
+        ::SolidSeam::autoDetectAndCreate $primaryIds
+        set ui(status) [::SolidSeam::txt "创建批次完成：$::SolidSeam::lastResultSummary" "Creation batch complete: $::SolidSeam::lastResultSummary"]
     } err opts]} {
         if {$err eq "__SOLID_SEAM_CANCEL__"} {
             set ui(status) [::SolidSeam::txt "用户取消选择。" "Selection cancelled."]

@@ -33,7 +33,9 @@ python tools/repository_audit.py
 - 本机工具目录、pytest 缓存、`dist/`、`logs/`、`temp/`；
 - HyperMesh 命令捕获、求解器输出、用户 UI state；
 - `__pycache__`、`.pyc`、`.pyo`；
-- 示例目录中由生成器产生的 FEM 和 `*_manifest.json`；
+- 示例目录中由生成器产生的 FEM 和 `*_manifest.json`（版本化的
+  `examples/AutoShellSeamBackend/test_fem/` 验收模型除外，与 `.gitignore`
+  的 `!/examples/AutoShellSeamBackend/test_fem/` 例外保持一致）；
 - `runtime/` 中除批准的便携 Python 文件外的任何内容；
 - `runtime/python/` 下的嵌套目录，特别是解压的 `python38/`。
 

@@ -165,7 +165,7 @@ proc ::MidSurf::showPanel {} {
     set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
+    ::HWFlow::centerWindow $w
 
     tkwait window $w
     return $ui(ok)
@@ -389,7 +389,6 @@ proc ::MidSurf::markComponentByName {compName markId} {
 }
 
 proc ::MidSurf::enableInteractiveBrowserUpdates {} {
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {*setoption block_redraw=0}
     catch {*setoption block_messages=0}
@@ -418,7 +417,6 @@ proc ::MidSurf::refreshComponentBrowser {compName} {
     catch {*displaycollector components on $compName 1 1}
     catch {*displaycollectorwithfilter component on $compName 1 1}
     catch {*displaycollectorwithfilter components on $compName 1 1}
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {hm_redraw}
     catch {update idletasks}

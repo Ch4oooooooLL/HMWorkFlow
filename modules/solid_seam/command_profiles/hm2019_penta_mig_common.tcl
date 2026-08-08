@@ -47,6 +47,47 @@ proc ::SolidSeamCommandProfile::candidateValue {candidate key fallback} {
     return $fallback
 }
 
+# Estimate a minimum realization tolerance from the actual model so the
+# native seam realization cannot fail with "connector realization failed"
+# because the search tolerance is smaller than the local mesh/gap scale.
+# The user's default width/spacing is 6; the tolerance must cover at least
+# the local mesh size plus the joint gap.
+proc ::SolidSeamCommandProfile::adaptiveTolerance {candidate requestedTolerance} {
+    set nodeIds [dict get $candidate node_ids]
+    set meshSize [::SolidSeamCommandProfile::candidateValue $candidate mesh_size 0.0]
+    set maxGap [::SolidSeamCommandProfile::candidateValue $candidate maximum_gap 0.0]
+    if {$meshSize <= 0.0} {
+        # measure from the node list: median edge length along the chain
+        set lengths {}
+        set previous ""
+        foreach nodeId $nodeIds {
+            if {$previous ne ""} {
+                set x1 [hm_getvalue nodes id=$previous dataname=x]
+                set y1 [hm_getvalue nodes id=$previous dataname=y]
+                set z1 [hm_getvalue nodes id=$previous dataname=z]
+                set x2 [hm_getvalue nodes id=$nodeId dataname=x]
+                set y2 [hm_getvalue nodes id=$nodeId dataname=y]
+                set z2 [hm_getvalue nodes id=$nodeId dataname=z]
+                set d [expr {sqrt(($x2-$x1)*($x2-$x1) + ($y2-$y1)*($y2-$y1) + ($z2-$z1)*($z2-$z1))}]
+                if {$d > 1.0e-8} { lappend lengths $d }
+            }
+            set previous $nodeId
+        }
+        if {[llength $lengths] > 0} {
+            set sorted [lsort -real $lengths]
+            set mid [expr {[llength $sorted] / 2}]
+            set meshSize [lindex $sorted $mid]
+        }
+    }
+    # tolerance must comfortably cover one mesh edge plus the joint gap;
+    # never below the caller default (user's 6) so small models still work.
+    set floor [expr {max(6.0, 1.5 * $meshSize, $maxGap + $meshSize)}]
+    if {$requestedTolerance < $floor} {
+        set requestedTolerance $floor
+    }
+    return $requestedTolerance
+}
+
 proc ::SolidSeamCommandProfile::ensureOutputComponent {} {
     set componentName "SEAM_SOLID"
     set componentColor 3
@@ -100,6 +141,7 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
     set targetComponentId [dict get $candidate target_component_id]
     set nodeIds [dict get $candidate node_ids]
     set tolerance [::SolidSeamCommandProfile::candidateValue $candidate realization_tolerance [dict get $profile default_tolerance]]
+    set tolerance [::SolidSeamCommandProfile::adaptiveTolerance $candidate $tolerance]
     set width [::SolidSeamCommandProfile::candidateValue $candidate weld_width [dict get $profile default_width]]
     set spacing [::SolidSeamCommandProfile::candidateValue $candidate line_spacing $width]
     set rightAngledRaw [string tolower [::SolidSeamCommandProfile::candidateValue $candidate right_angled false]]
@@ -110,13 +152,21 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
     set beforeConnectors [::SolidSeamCommandProfile::snapshotIds connectors]
     set beforeElements [::SolidSeamCommandProfile::snapshotIds elems]
 
+    # Location must be an ORDERED node list (native 1D connector seam flow).
+    catch {*clearmark nodes 1}
     eval *createlist nodes 1 $nodeIds
+    catch {*clearmark comps 2}
     eval *createmark comps 2 $sourceComponentId $targetComponentId
 
     set executableDir [hm_info -appinfo EXECUTABLEDIR]
     set feConfigPath [file join $executableDir feconfig.cfg]
     if {![file isfile $feConfigPath]} { error "HM2019 connector configuration is missing: $feConfigPath" }
 
+    # Option set verified on 2019.0.0.70 and 2022.0.0.33 (user-recorded
+    # command file + headless harness): the 45 native seam options with
+    # ce_pentafitoption=2, width fed into ce_fedepth, spacing into
+    # line_spacing.  ce_configfile/ce_propertyscript are optional; the
+    # explicit config file keeps the custom (1001) FE types resolvable.
     set options [list \
         "link_elems_geom=elems" \
         "link_rule=now" \
@@ -139,9 +189,10 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
         "ce_fe_factor_b=2.500000" \
         "ce_fe_edgesnapping_t=2" \
         "ce_fe_edgesnapping_l=1" \
+        "ce_pentafitoption=2" \
         "ce_fe_offsetangle=45.000000" \
-        "ce_fe_density=1" \
         "ce_fe_thck_flag=1" \
+        "ce_fe_density=1" \
         "ce_fe_strips=1" \
         "ce_fe_rows=1" \
         "ce_fe_const_height=0.000000" \

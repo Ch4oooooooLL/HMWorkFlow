@@ -3,8 +3,12 @@
 # HyperMesh 2019 / OptiStruct
 #
 # Creates and realizes an Area / adhesives connector from element locations.
-# Location elements are cleaned before model modification: every node of each
-# element must pass HyperMesh's native projection check for every target link.
+# Location elements are cleaned before model modification: an element is kept
+# only if its face samples project inside every target component's shell
+# footprint within the tolerance.  The check is pure geometry; HyperMesh's
+# hm_findprojected ("Find Projected" panel) rejects every call outside its
+# panel context on the supported builds (2019.0.0.70 / 2022.0.0.33), so it is
+# never used here.
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -204,6 +208,10 @@ proc ::AdhesiveConnector::primeGeometryCache {selectedElems componentIds {includ
     set allElems [::AdhesiveConnector::uniq $allElems]
     if {[llength $allElems] == 0} { return }
 
+    # hm_getvalue ... mark=N returns rows ordered by entity ID, not in mark
+    # creation order (verified headless on 2019.0.0.70 and 2022.0.0.33).
+    # Sort so the row index maps back onto the right element.
+    set allElems [lsort -integer $allElems]
     catch {*clearmark elems 1}
     eval *createmark elems 1 $allElems
     foreach elementId $allElems { set geometryElemConfig($elementId) "" }
@@ -223,7 +231,7 @@ proc ::AdhesiveConnector::primeGeometryCache {selectedElems componentIds {includ
         set geometryElemNodes($elementId) [lindex $nodeRows $index]
         lappend allNodes {*}$geometryElemNodes($elementId)
     }
-    set allNodes [::AdhesiveConnector::uniq $allNodes]
+    set allNodes [lsort -unique -integer $allNodes]
     if {!$includeCoordinates} { return }
     catch {*clearmark nodes 2}
     eval *createmark nodes 2 $allNodes
@@ -333,29 +341,57 @@ proc ::AdhesiveConnector::gridCoordinate {value cellSize} {
     return [expr {int(floor(double($value)/double($cellSize)))}]
 }
 
+proc ::AdhesiveConnector::normalAxis {normal} {
+    # The dominant axis of a polygon normal: the projection direction in
+    # which the polygon is "thin".  The grid expands only this axis by the
+    # tolerance, so a projected sample (offset <= tolerance from the face)
+    # always lands in an expanded layer while the in-plane axes keep the
+    # cell population at the local mesh density.
+    set axis 0
+    set best [expr {abs([lindex $normal 0])}]
+    for {set candidate 1} {$candidate < 3} {incr candidate} {
+        set magnitude [expr {abs([lindex $normal $candidate])}]
+        if {$magnitude > $best} { set axis $candidate; set best $magnitude }
+    }
+    return $axis
+}
+
 proc ::AdhesiveConnector::buildPolygonGrid {polygons tolerance} {
     set sampled 0
     set spanSum 0.0
     foreach polygon [lrange $polygons 0 99] {
         lassign [::AdhesiveConnector::polygonBounds [dict get $polygon points]] minimum maximum
+        set axisN [::AdhesiveConnector::normalAxis [dict get $polygon normal]]
         set span 0.0
         for {set axis 0} {$axis < 3} {incr axis} {
-            set span [expr {max($span, double([lindex $maximum $axis]) - double([lindex $minimum $axis]))}]
+            if {$axis == $axisN} { continue }
+            set axisSpan [expr {double([lindex $maximum $axis]) - double([lindex $minimum $axis])}]
+            if {$axisSpan > $span} { set span $axisSpan }
         }
         if {$span > 1.0e-9} { set spanSum [expr {$spanSum+$span}]; incr sampled }
     }
     set typicalSpan [expr {$sampled > 0 ? $spanSum/double($sampled) : 0.0}]
-    set cellSize [expr {max(double($tolerance), $typicalSpan, 1.0e-6)}]
+    # The cell follows the mesh density, not the tolerance: a large
+    # tolerance must only widen the normal-axis layers, otherwise a coarse
+    # tolerance collapses the whole component into one cell and every sample
+    # point scans every polygon.
+    set cellSize [expr {max(2.0*$typicalSpan, 1.0e-6)}]
     set grid [dict create __cell_size__ $cellSize]
     set polygonIndex 0
     foreach polygon $polygons {
         lassign [::AdhesiveConnector::polygonBounds [dict get $polygon points]] minimum maximum
+        set axisN [::AdhesiveConnector::normalAxis [dict get $polygon normal]]
         set ranges {}
         for {set axis 0} {$axis < 3} {incr axis} {
+            # The normal axis expands by the tolerance (a projected sample
+            # sits up to `tolerance` off the face); the in-plane axes get a
+            # one-cell margin so a slightly oblique projection (offset less
+            # than one cell) still finds its polygon.
+            set margin [expr {$axis == $axisN ? double($tolerance) : $cellSize}]
             set first [::AdhesiveConnector::gridCoordinate \
-                [expr {double([lindex $minimum $axis])-double($tolerance)}] $cellSize]
+                [expr {double([lindex $minimum $axis])-$margin}] $cellSize]
             set last [::AdhesiveConnector::gridCoordinate \
-                [expr {double([lindex $maximum $axis])+double($tolerance)}] $cellSize]
+                [expr {double([lindex $maximum $axis])+$margin}] $cellSize]
             lappend ranges [list $first $last]
         }
         lassign [lindex $ranges 0] x0 x1
@@ -515,103 +551,15 @@ proc ::AdhesiveConnector::cleanLocationElemsFallback {elementIds componentIds to
     return [dict create kept $kept rejected $rejected]
 }
 
-proc ::AdhesiveConnector::markLength {entityType markId} {
-    if {![catch {set count [hm_marklength $entityType $markId]}] &&
-        [string is integer -strict $count]} {
-        return $count
-    }
-    if {![catch {set values [hm_getmark $entityType $markId]}]} {
-        return [llength $values]
-    }
-    return 0
-}
-
-proc ::AdhesiveConnector::nativeProjectionClean {elementIds componentIds tolerance} {
-    set elementIds [::AdhesiveConnector::uniq $elementIds]
-    set componentIds [::AdhesiveConnector::uniq $componentIds]
-    array set elementsBySource {}
-    set rejected {}
-
-    foreach elementId $elementIds {
-        if {[catch {set isShell [::AdhesiveConnector::isShellElement $elementId]}] || !$isShell ||
-            [catch {set sourceComponent [::AdhesiveConnector::elementComponentId $elementId]}] ||
-            $sourceComponent eq ""} {
-            lappend rejected $elementId
-            continue
-        }
-        lappend elementsBySource($sourceComponent) $elementId
-    }
-
-    set kept {}
-    foreach sourceComponent [array names elementsBySource] {
-        set candidates $elementsBySource($sourceComponent)
-        set checkedTargets 0
-        foreach targetComponent $componentIds {
-            if {$targetComponent eq $sourceComponent} { continue }
-            incr checkedTargets
-            if {[llength $candidates] == 0} { break }
-
-            catch {*clearmark elems 2}
-            eval *createmark elems 2 [list "by comp id"] $targetComponent
-            if {[::AdhesiveConnector::markLength elems 2] == 0} {
-                set rejected [concat $rejected $candidates]
-                set candidates {}
-                break
-            }
-
-            catch {*clearmark elems 1}
-            eval *createmark elems 1 $candidates
-            catch {*clearmark nodes 1}
-            if {[catch {
-                hm_findprojected elems 1 2 0 $tolerance 0.0 1 0.0 0.0 0.0 2 1 0
-            } projectionError]} {
-                error "HyperMesh native projection check failed for component $targetComponent: $projectionError"
-            }
-            set projectedNodes {}
-            catch {set projectedNodes [hm_getmark nodes 1]}
-            array set projectedSet {}
-            foreach nodeId $projectedNodes { set projectedSet($nodeId) 1 }
-
-            set acceptedForTarget {}
-            foreach elementId $candidates {
-                set complete 1
-                foreach nodeId [::AdhesiveConnector::elementNodes $elementId] {
-                    if {![info exists projectedSet($nodeId)]} {
-                        set complete 0
-                        break
-                    }
-                }
-                if {$complete} {
-                    lappend acceptedForTarget $elementId
-                } else {
-                    lappend rejected $elementId
-                }
-            }
-            set candidates $acceptedForTarget
-            ::AdhesiveConnector::responsiveCheckpoint
-        }
-        if {$checkedTargets == 0} {
-            set rejected [concat $rejected $candidates]
-        } else {
-            set kept [concat $kept $candidates]
-        }
-    }
-    catch {*clearmark elems 1}
-    catch {*clearmark elems 2}
-    catch {*clearmark nodes 1}
-    return [dict create \
-        kept [::AdhesiveConnector::uniq $kept] \
-        rejected [::AdhesiveConnector::uniq $rejected]]
-}
-
 proc ::AdhesiveConnector::cleanLocationElems {elementIds componentIds tolerance} {
-    if {[llength [info commands hm_findprojected]] > 0} {
-        ::AdhesiveConnector::primeGeometryCache $elementIds {} 0
-        return [::AdhesiveConnector::nativeProjectionClean $elementIds $componentIds $tolerance]
-    }
-    # Offline Tcl tests and unusually old/custom HyperMesh installations retain
-    # the geometry fallback. Production HM2019 uses the native multi-threaded
-    # projection tree above and never loads complete target components into Tcl.
+    # Geometry-only cleaning.  The "native" fast path (hm_findprojected, the
+    # Find Projected panel command) is not usable on the supported builds
+    # (2019.0.0.70 / 2022.0.0.33): outside its panel context every call - even
+    # the exact shape recorded by HyperForm - returns a usage error, so the
+    # projected-node mark is always empty and every location element would be
+    # rejected.  cleanLocationElemsFallback performs the same footprint check
+    # in pure Tcl (face samples projected onto each target component's shell
+    # polygons within the tolerance) and is verified offline and headless.
     if {[llength [info commands *createmark]] > 0} {
         ::AdhesiveConnector::primeGeometryCache $elementIds $componentIds
     }

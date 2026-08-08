@@ -20,6 +20,7 @@ namespace eval ::SolidSeam {
         gap_jump_limit 5.0 allow_closed_loop 1 detect_duplicates 1
         high_confidence_threshold 0.85 review_confidence_threshold 0.60
         default_realization PENTA_MIG_T auto_accept_high 1 status "Ready"
+        default_width 6.0 default_spacing 6.0
     }
 }
 

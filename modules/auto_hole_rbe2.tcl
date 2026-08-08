@@ -216,7 +216,7 @@ proc ::AutoHoleRBE2::showPanel {{settingsOnly 0}} {
     set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
+    ::HWFlow::centerWindow $w
 
     tkwait window $w
     return $ui(ok)
@@ -1003,7 +1003,6 @@ proc ::AutoHoleRBE2::deleteComponentByName {compName} {
 }
 
 proc ::AutoHoleRBE2::enableInteractiveBrowserUpdates {} {
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {*setoption block_redraw=0}
     catch {*setoption block_messages=0}
@@ -1096,7 +1095,6 @@ proc ::AutoHoleRBE2::refreshComponentBrowser {compName} {
     catch {*displaycollector components on $compName 1 1}
     catch {*displaycollectorwithfilter component on $compName 1 1}
     catch {*displaycollectorwithfilter components on $compName 1 1}
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {hm_redraw}
     catch {update idletasks}
@@ -1252,7 +1250,6 @@ proc ::AutoHoleRBE2::cleanupFailedRBE2 {centerNode elemId} {
 }
 
 proc ::AutoHoleRBE2::beginBulkCreate {} {
-    catch {hm_blockbrowserupdate 1}
     catch {*setoption block_redraw=1}
     catch {*setoption block_messages=1}
     catch {hm_blockredraw 1}
@@ -1268,7 +1265,6 @@ proc ::AutoHoleRBE2::endBulkCreate {resultCompName} {
     catch {hm_blockredraw 0}
     catch {*setoption block_messages=0}
     catch {*setoption block_redraw=0}
-    catch {hm_blockbrowserupdate 0}
     if {$resultCompName ne ""} { catch {::AutoHoleRBE2::refreshComponentBrowser $resultCompName} }
     catch {hm_redraw}
     catch {update idletasks}

@@ -104,7 +104,7 @@ proc ::HWInstaller::prepareLiveSession {} {
     # module namespaces so this session cannot mix two installed generations.
     foreach namespaceName {
         ::AdhesiveConnector ::AutoHoleRBE2 ::BatchMesher
-        ::BatchPropertyAssignment ::BatchTempNodes ::CastingTetMesh ::CBushCreator
+        ::BatchPropertyAssignment ::BatchTempNodes ::CBushCreator
         ::ContactSetup ::GeomCleanup ::LocalMeshOptimizer
         ::MeshSeamWeld ::MidSurf ::RB2Bolt ::RB2W ::SeamSurf
         ::BomMaterialAssignment ::SolidSeam ::SolidSeamCommandProfile ::WeldIntegrityCheck

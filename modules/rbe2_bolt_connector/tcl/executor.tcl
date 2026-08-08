@@ -204,7 +204,14 @@ proc ::RB2Bolt::verifyEndpointCoordinates {segments tolerance incrementalFem rea
             set nodeId [dict get $row $nodeKey]
             set actual {}
             set err ""
-            if {[catch {set actual [hm_getvalue nodes id=$nodeId dataname=coordinates]} err] || [llength $actual] != 3} {
+            # dataname=coordinates is not a valid node dataname on either
+            # build (verified in audit); read x/y/z like ::RB2Bolt::nodeXYZ.
+            if {[catch {
+                set x [hm_getvalue nodes id=$nodeId dataname=x]
+                set y [hm_getvalue nodes id=$nodeId dataname=y]
+                set z [hm_getvalue nodes id=$nodeId dataname=z]
+                set actual [list $x $y $z]
+            } err]} {
                 error [::RB2Bolt::incrementalImportError preflight $incrementalFem $reader \
                     "could not read endpoint GRID $nodeId coordinates; hm_error=$err" $expectedElementIds {}]
             }

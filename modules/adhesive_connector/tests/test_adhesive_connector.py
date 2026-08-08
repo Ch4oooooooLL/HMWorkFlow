@@ -140,36 +140,29 @@ list $accepted $::projection_checks [dict size $grid]
         self.assertIn("dataname=config", prime)
         self.assertIn("geometryElemConfig", prime)
 
-    def test_native_projection_rejects_elem_when_any_node_is_not_projected(self) -> None:
+    def test_cleaner_never_depends_on_hm_findprojected(self) -> None:
+        # hm_findprojected (the Find Projected panel command) rejects every
+        # call outside its panel context on 2019.0.0.70 / 2022.0.0.33, so the
+        # cleaner must never call it; the geometry fallback decides instead.
         self.install_mesh()
         self.tcl.eval(
             r"""
-proc hm_findprojected args {set ::projection_call $args; set ::projected_nodes {1 2 4}}
-proc *clearmark args {}
-proc *createmark {entity mark args} {set ::mark_${entity}_${mark} $args}
-proc hm_getmark {entity mark} {
-    if {$entity eq {elems} && $mark == 2} {return {20}}
-    if {$entity eq {nodes} && $mark == 1} {return $::projected_nodes}
-    return {}
-}
+proc hm_findprojected args {error "hm_findprojected must not be called"}
 """
         )
-        result = self.tcl.eval("::AdhesiveConnector::nativeProjectionClean {10} {100 200} 50")
-        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} kept"), "")
-        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} rejected"), "10")
-        self.assertIn("elems 1 2 0 50", self.tcl.eval("set ::projection_call"))
+        result = self.tcl.eval("::AdhesiveConnector::cleanLocationElems {10 11} {100 200} 50")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} kept"), "10")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} rejected"), "11")
 
-    def test_production_cleaner_prefers_native_projection_without_loading_target_mesh(self) -> None:
+    def test_production_cleaner_uses_geometry_fallback_without_hm_findprojected(self) -> None:
         source = MODULE.read_text(encoding="utf-8")
         body = source.split("proc ::AdhesiveConnector::cleanLocationElems {", 1)[1].split(
             "proc ::AdhesiveConnector::adhesivesFeType", 1
         )[0]
-        self.assertIn("hm_findprojected", body)
-        self.assertIn("nativeProjectionClean", body)
-        native_body = source.split("proc ::AdhesiveConnector::nativeProjectionClean", 1)[1].split(
-            "proc ::AdhesiveConnector::cleanLocationElems", 1
-        )[0]
-        self.assertNotIn("componentElements", native_body)
+        self.assertIn("cleanLocationElemsFallback", body)
+        self.assertNotIn("hm_findprojected elems", body)
+        self.assertNotIn("nativeProjectionClean", body)
+        self.assertIn("primeGeometryCache", body)
 
     def test_feconfig_type_is_resolved_by_solver_and_exact_name(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

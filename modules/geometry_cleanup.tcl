@@ -163,7 +163,7 @@ proc ::GeomCleanup::centerWindow {w} {
     set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
+    ::HWFlow::centerWindow $w
 }
 
 proc ::GeomCleanup::backToHome {w} {
@@ -307,7 +307,6 @@ proc ::GeomCleanup::beginPerformanceMode {} {
     catch {*setoption block_redraw=1}
     catch {*setoption block_messages=1}
     catch {hwbrowsermanager view flush false}
-    catch {hmbr_signals buffer start}
 }
 
 proc ::GeomCleanup::endPerformanceMode {} {
@@ -315,7 +314,6 @@ proc ::GeomCleanup::endPerformanceMode {} {
     if {![info exists ui(PERFORMANCE_MODE)] || !$ui(PERFORMANCE_MODE)} {
         return
     }
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {*setoption block_redraw=0}
     catch {*setoption block_messages=0}
@@ -871,10 +869,27 @@ proc ::GeomCleanup::removeChamfer {seed} {
 
     set err1 ""
     if {[catch {*surfacefilletremove 1 1 2} err1]} {
-        ::GeomCleanup::msg [::HWFlow::txt "surfacefilletremove 未完成：$err1；尝试 line fillet 回退。" "surfacefilletremove did not finish: $err1; trying line-fillet fallback."]
-        if {[catch {*surfacemarkremovelinefillets 1 $ui(FILLET_MIN_R) $ui(FILLET_MAX_R) 0 1 0} err2]} {
+        # HM2022 rejects *surfacefilletremove (probe fix_probe_geometry_cleanup22:
+        # 19 OK / 22 ERR) and the old line-fillet fallback
+        # *surfacemarkremovelinefillets fails on both builds.  Use the verified
+        # replacement: hm_getfilletfacesfrommark (works both builds) then
+        # *deletemark surfs (works both builds).
+        set err2 ""
+        set filletFaces {}
+        if {[catch {set filletFaces [hm_getfilletfacesfrommark surfs 1 $ui(FILLET_MIN_R) $ui(FILLET_MAX_R)]} err2]} {
+            set filletFaces {}
+        }
+        if {[llength $filletFaces]} {
+            ::GeomCleanup::msg [::HWFlow::txt "surfacefilletremove 未完成：$err1；按半径范围删除圆角面。" "surfacefilletremove did not finish: $err1; deleting fillet faces by radius range."]
+            catch {*clearmark surfs 1}
+            eval *createmark surfs 1 $filletFaces
+            if {[catch {*deletemark surfs 1} delErr]} {
+                catch {*clearmark $markType 1}
+                error [::HWFlow::txt "倒角/圆角清理失败：surfacefilletremove=$err1；fillet query=$err2；delete=$delErr" "Chamfer/fillet cleanup failed: surfacefilletremove=$err1; fillet query=$err2; delete=$delErr"]
+            }
+        } else {
             catch {*clearmark $markType 1}
-            error [::HWFlow::txt "倒角/圆角清理失败：surfacefilletremove=$err1；linefillets=$err2" "Chamfer/fillet cleanup failed: surfacefilletremove=$err1; linefillets=$err2"]
+            error [::HWFlow::txt "倒角/圆角清理失败：surfacefilletremove=$err1；fillet query=$err2" "Chamfer/fillet cleanup failed: surfacefilletremove=$err1; fillet query=$err2"]
         }
     }
     catch {*clearmark $markType 1}

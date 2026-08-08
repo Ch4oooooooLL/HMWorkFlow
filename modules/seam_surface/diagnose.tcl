@@ -76,7 +76,6 @@ proc ::hmtoolkit::seam::diagnose::run {} {
         {hm_linelength {1}}
         {hm_getareaofsurface {surfs 1}}
         {hm_getvolumeofsolid {solids 1}}
-        {hm_blockbrowserupdate {0}}
         {*clearmark {surfs 5}}
         {*createmark {surfs 5 all}}
         {*createlist {lines 5}}
@@ -154,12 +153,16 @@ proc ::hmtoolkit::seam::diagnose::show_report {report} {
     variable window .geometry_seam_diagnose
     catch {destroy $window}
     ::HWFlow::createTopLevel $window diagnostic
-    wm title $window [::HWFlow::txt "几何焊缝诊断报告" "Geometry Seam Diagnostic"]
+    wm title $window [::HWFlow::windowTitle \
+        [::HWFlow::txt "几何焊缝诊断报告" "Geometry Seam Diagnostic"] \
+        "Geometry Seam Diagnostic"]
     wm resizable $window 0 0
     frame $window.body -padx 8 -pady 6
     pack $window.body -fill both -expand 1
     text $window.body.text -width 68 -height 30 -wrap none -font [::HWFlow::uiFont fixed] \
-        -state disabled -background white -foreground black
+        -state disabled \
+        -background [::HWFlow::uiColors inputBg] \
+        -foreground [::HWFlow::uiColors inputFg]
     scrollbar $window.body.scroll -orient vertical -command "$window.body.text yview"
     $window.body.text configure -yscrollcommand "$window.body.scroll set"
     grid $window.body.text -row 0 -column 0 -sticky nsew

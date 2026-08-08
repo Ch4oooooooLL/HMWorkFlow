@@ -233,5 +233,5 @@ proc ::SolidSeam::showCandidateWindow {} {
     update idletasks
     set x [expr {([winfo screenwidth $w] - [winfo reqwidth $w]) / 2}]
     set y [expr {([winfo screenheight $w] - [winfo reqheight $w]) / 2}]
-    wm geometry $w +$x+$y
+    ::HWFlow::centerWindow $w
 }

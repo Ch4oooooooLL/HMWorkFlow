@@ -60,7 +60,7 @@ proc ::FemAutoSeam::saveState {} {
 
 proc ::FemAutoSeam::centerWindow {w} {
     update idletasks
-    wm geometry $w +[expr {([winfo screenwidth $w]-[winfo reqwidth $w])/2}]+[expr {([winfo screenheight $w]-[winfo reqheight $w])/2}]
+    ::HWFlow::centerWindow $w
 }
 
 proc ::FemAutoSeam::browseFile {key extension zh en} {
@@ -177,6 +177,8 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     button $w.buttons.cancel -text [::HWFlow::txt "取消" "Cancel"] -command [list destroy $w]
     button $w.buttons.save -text [::HWFlow::txt "保存配置" "Save Configuration"] -command [list ::FemAutoSeam::acceptPanel 0]
     pack $w.buttons.cancel $w.buttons.save -side right -padx {6 0}
+    button $w.buttons.undo -text [::HWFlow::txt "撤销上一批" "Undo Last Batch"] -command [list ::FemAutoSeam::undoLast]
+    pack $w.buttons.undo -side right -padx {6 0}
     if {!$settingsOnly} {
         button $w.buttons.run -text [::HWFlow::txt "保存并开始" "Save and Start"] -command [list ::FemAutoSeam::acceptPanel 1]
         pack $w.buttons.run -side right -padx {6 0}

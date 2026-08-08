@@ -84,7 +84,7 @@ proc ::BomMaterialAssignment::showPanel {} {
     set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
+    ::HWFlow::centerWindow $w
 
     tkwait window $w
     return $ui(ok)

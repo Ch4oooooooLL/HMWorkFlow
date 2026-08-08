@@ -9,6 +9,10 @@ from typing import List
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Versioned acceptance fixtures that .gitignore intentionally tracks
+# (see the !/examples/AutoShellSeamBackend/test_fem/ negation rules).
+VERSIONED_EXAMPLE_FIXTURES = "examples/autoshellseambackend/test_fem/"
+
 
 def tracked_paths() -> List[str]:
     completed = subprocess.run(
@@ -35,6 +39,8 @@ def violation(path: str) -> str:
     if lower.startswith("examples/") and (
         pure.suffix.lower() == ".fem" or lower.endswith("_manifest.json")
     ):
+        if lower.startswith(VERSIONED_EXAMPLE_FIXTURES):
+            return ""  # versioned acceptance fixtures (see .gitignore)
         return "generated example model"
     if lower.startswith("runtime/") and not lower.startswith("runtime/python/"):
         return "non-distributable runtime data"

@@ -32,7 +32,6 @@
     modules/fem_auto_seam/tcl/fast_executor.tcl
     modules/mesh_seam_weld.tcl
 *autotopocleanup  (1 file(s))
-    modules/casting_tetramesh.tcl
 *barelementcreatewithoffsets  (1 file(s))
     modules/rbe2_bolt_connector.tcl
 *batchmesh_mc  (1 file(s))
@@ -56,7 +55,7 @@
 *clearlist  (2 file(s))
     command.tcl
     modules/mesh_seam_weld.tcl
-*clearmark  (56 file(s))
+*clearmark  (57 file(s))
     command.tcl
     modules/adhesive_connector.tcl
     modules/auto_hole_rbe2.tcl
@@ -72,7 +71,6 @@
     modules/batch_property_assignment.tcl
     modules/batch_temp_nodes.tcl
     modules/bom_material_assignment.tcl
-    modules/casting_tetramesh.tcl
     modules/cbush_creator.tcl
     modules/contact_setup.tcl
     modules/fem_auto_seam.tcl
@@ -104,6 +102,7 @@
     modules/shell_washer_hole_rbe2.tcl
     modules/shell_washer_hole_rbe2/tcl/exporter.tcl
     modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl
+    modules/solid_seam/tcl/auto_detect.tcl
     modules/solid_seam/tcl/candidate_viewer.tcl
     modules/solid_seam/tcl/component_classifier.tcl
     modules/solid_seam/tcl/component_selector.tcl
@@ -120,7 +119,6 @@
 *collectorcreateonly  (13 file(s))
     command.tcl
     modules/auto_hole_rbe2.tcl
-    modules/casting_tetramesh.tcl
     modules/contact_setup/tests/hm2019_contact_performance_smoke.tcl
     modules/contact_setup/tests/hm2019_contact_surface_smoke.tcl
     modules/hybrid_core/tests/hm_hybrid_export_smoke.tcl
@@ -148,7 +146,6 @@
 *createdoublearray  (5 file(s))
     command.tcl
     modules/auto_hole_rbe2.tcl
-    modules/casting_tetramesh.tcl
     modules/rbe2_bolt_connector.tcl
     modules/shell_washer_hole_rbe2.tcl
 *createelement  (6 file(s))
@@ -164,7 +161,6 @@
     modules/batch_mesher/tests/hm2022_batchmesh_smoke.tcl
     modules/batch_property_assignment.tcl
     modules/bom_material_assignment.tcl
-    modules/casting_tetramesh.tcl
     modules/contact_setup.tcl
     modules/mesh_seam_weld.tcl
     modules/rbe2_bolt_connector.tcl
@@ -192,7 +188,7 @@
     modules/mesh_seam_weld.tcl
     modules/seam_surface/diagnose.tcl
     modules/seam_surface/selector.tcl
-*createmark  (56 file(s))
+*createmark  (57 file(s))
     command.tcl
     modules/adhesive_connector.tcl
     modules/auto_hole_rbe2.tcl
@@ -209,7 +205,6 @@
     modules/batch_property_assignment.tcl
     modules/batch_temp_nodes.tcl
     modules/bom_material_assignment.tcl
-    modules/casting_tetramesh.tcl
     modules/cbush_creator.tcl
     modules/contact_setup.tcl
     modules/fem_auto_seam.tcl
@@ -243,6 +238,7 @@
     modules/shell_washer_hole_rbe2.tcl
     modules/shell_washer_hole_rbe2/tcl/exporter.tcl
     modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl
+    modules/solid_seam/tcl/auto_detect.tcl
     modules/solid_seam/tcl/candidate_viewer.tcl
     modules/solid_seam/tcl/component_classifier.tcl
     modules/solid_seam/tcl/mesh_exporter.tcl
@@ -273,7 +269,6 @@
     command.tcl
     modules/adhesive_connector.tcl
     modules/batch_mesher/tests/hm2022_capability_probe.tcl
-    modules/casting_tetramesh.tcl
     modules/fem_auto_seam/tests/hm2019_apply.tcl
     modules/fem_auto_seam/tests/hm2019_combined_fixture_smoke.tcl
     modules/hybrid_core/tcl/incremental_import.tcl
@@ -308,7 +303,6 @@
     modules/batch_mesher/background.tcl
     modules/batch_mesher/background_worker.tcl
     modules/batch_temp_nodes.tcl
-    modules/casting_tetramesh.tcl
     modules/cbush_creator.tcl
     modules/contact_setup.tcl
     modules/geometry_cleanup.tcl
@@ -330,7 +324,6 @@
     modules/batch_mesher/tests/hm2022_merge_verify.tcl
     modules/batch_mesher/tests/hm2022_model_verify.tcl
 *deletesolidswithelems  (4 file(s))
-    modules/casting_tetramesh.tcl
     modules/seam_surface/diagnose.tcl
     modules/seam_surface/executor.tcl
     modules/seam_surface/temp.tcl
@@ -454,7 +447,6 @@
     modules/auto_hole_rbe2/tcl/exporter.tcl
     modules/contact_setup.tcl
 *getqualitysummary  (1 file(s))
-    modules/casting_tetramesh.tcl
 *graphuserwindow_by  (2 file(s))
     modules/solid_seam/tcl/candidate_viewer.tcl
     modules/weld_integrity_check/tcl/review.tcl
@@ -467,7 +459,6 @@
     modules/batch_mesher/tests/hm2022_batchmesh_smoke.tcl
     modules/batch_mesher/tests/hm2022_capability_probe.tcl
 *hm_failed_elements_cleanup  (1 file(s))
-    modules/casting_tetramesh.tcl
 *imprint_nodelist  (2 file(s))
     command.tcl
     modules/mesh_seam_weld.tcl
@@ -515,7 +506,6 @@
     modules/midsurf.tcl
 *movemark  (10 file(s))
     command.tcl
-    modules/casting_tetramesh.tcl
     modules/contact_setup.tcl
     modules/geometry_cleanup.tcl
     modules/hybrid_core/tcl/incremental_import.tcl
@@ -547,7 +537,6 @@
     modules/seam_surface/diagnose.tcl
     modules/seam_surface/executor.tcl
 *optimized_mesh  (1 file(s))
-    modules/casting_tetramesh.tcl
 *projectpointstoedges  (3 file(s))
     command.tcl
     modules/seam_surface/diagnose.tcl
@@ -621,7 +610,6 @@
 *setoption  (9 file(s))
     command.tcl
     modules/auto_hole_rbe2.tcl
-    modules/casting_tetramesh.tcl
     modules/geometry_cleanup.tcl
     modules/midsurf.tcl
     modules/rbe2_bolt_connector.tcl
@@ -687,11 +675,8 @@
 *surfacefilletremove  (1 file(s))
     modules/geometry_cleanup.tcl
 *surfacemarkfeatures  (1 file(s))
-    modules/casting_tetramesh.tcl
 *surfacemarkremoveallpinholes  (1 file(s))
-    modules/casting_tetramesh.tcl
 *surfacemarkremovelinefillets  (2 file(s))
-    modules/casting_tetramesh.tcl
     modules/geometry_cleanup.tcl
 *surfacemarksplitwithline  (1 file(s))
     command.tcl
@@ -725,7 +710,6 @@
     modules/hybrid_core/tests/hm_hybrid_export_smoke.tcl
     modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl
 *tetmesh  (1 file(s))
-    modules/casting_tetramesh.tcl
 *translatemark  (3 file(s))
     command.tcl
     modules/local_mesh_optimizer.tcl
@@ -787,21 +771,18 @@ hm_blockbrowserupdate  (4 file(s))
     modules/workflow_common.tcl
 hm_blockerrormessages  (6 file(s))
     modules/auto_hole_rbe2.tcl
-    modules/casting_tetramesh.tcl
     modules/geometry_cleanup.tcl
     modules/midsurf.tcl
     modules/rbe2_bolt_connector.tcl
     modules/workflow_common.tcl
 hm_blockmessages  (6 file(s))
     modules/auto_hole_rbe2.tcl
-    modules/casting_tetramesh.tcl
     modules/geometry_cleanup.tcl
     modules/midsurf.tcl
     modules/rbe2_bolt_connector.tcl
     modules/workflow_common.tcl
 hm_blockredraw  (6 file(s))
     modules/auto_hole_rbe2.tcl
-    modules/casting_tetramesh.tcl
     modules/geometry_cleanup.tcl
     modules/midsurf.tcl
     modules/rbe2_bolt_connector.tcl
@@ -880,9 +861,7 @@ hm_getedgesfromsurface  (2 file(s))
     modules/seam_surface/diagnose.tcl
     modules/seam_surface/entity.tcl
 hm_getelemchecksummary3d  (1 file(s))
-    modules/casting_tetramesh.tcl
 hm_getelementsqualityinfo  (4 file(s))
-    modules/casting_tetramesh.tcl
     modules/fem_auto_seam/tcl/quality_validator.tcl
     modules/local_mesh_optimizer.tcl
     modules/mesh_seam_weld/tcl/quality_validator.tcl
@@ -905,7 +884,7 @@ hm_getlist  (3 file(s))
     modules/mesh_seam_weld.tcl
     modules/seam_surface/diagnose.tcl
     modules/seam_surface/selector.tcl
-hm_getmark  (53 file(s))
+hm_getmark  (54 file(s))
     modules/adhesive_connector.tcl
     modules/auto_hole_rbe2.tcl
     modules/auto_hole_rbe2/tcl/exporter.tcl
@@ -920,7 +899,6 @@ hm_getmark  (53 file(s))
     modules/batch_mesher/tests/hm2022_model_verify.tcl
     modules/batch_property_assignment.tcl
     modules/bom_material_assignment.tcl
-    modules/casting_tetramesh.tcl
     modules/cbush_creator.tcl
     modules/contact_setup.tcl
     modules/fem_auto_seam.tcl
@@ -952,6 +930,7 @@ hm_getmark  (53 file(s))
     modules/shell_washer_hole_rbe2.tcl
     modules/shell_washer_hole_rbe2/tcl/exporter.tcl
     modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl
+    modules/solid_seam/tcl/auto_detect.tcl
     modules/solid_seam/tcl/component_classifier.tcl
     modules/solid_seam/tcl/component_selector.tcl
     modules/solid_seam/tcl/mesh_exporter.tcl
@@ -992,7 +971,7 @@ hm_getthickness  (4 file(s))
     modules/midsurf.tcl
     modules/seam_surface/diagnose.tcl
     modules/seam_surface/native_compat.tcl
-hm_getvalue  (44 file(s))
+hm_getvalue  (45 file(s))
     modules/adhesive_connector.tcl
     modules/auto_hole_rbe2.tcl
     modules/auto_hole_rbe2/tcl/exporter.tcl
@@ -1002,7 +981,6 @@ hm_getvalue  (44 file(s))
     modules/batch_mesher/selection.tcl
     modules/batch_property_assignment.tcl
     modules/bom_material_assignment.tcl
-    modules/casting_tetramesh.tcl
     modules/cbush_creator.tcl
     modules/contact_setup.tcl
     modules/contact_setup/tests/hm2019_contact_surface_smoke.tcl
@@ -1032,6 +1010,7 @@ hm_getvalue  (44 file(s))
     modules/shell_washer_hole_rbe2.tcl
     modules/shell_washer_hole_rbe2/tcl/executor.tcl
     modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl
+    modules/solid_seam/tcl/auto_detect.tcl
     modules/solid_seam/tcl/candidate_viewer.tcl
     modules/solid_seam/tcl/component_classifier.tcl
     modules/solid_seam/tcl/realization_validator.tcl
@@ -1102,8 +1081,7 @@ hm_markclear  (3 file(s))
     modules/rbe2_bolt_connector.tcl
     modules/shell_washer_hole_rbe2.tcl
     modules/solid_seam/tcl/seam_creator.tcl
-hm_marklength  (2 file(s))
-    modules/adhesive_connector.tcl
+hm_marklength  (1 file(s))
     modules/contact_setup.tcl
 hm_model_fem  (1 file(s))
     modules/fem_auto_seam/tcl/exporter.tcl
@@ -1171,7 +1149,6 @@ hm_usermessage  (16 file(s))
     modules/adhesive_connector.tcl
     modules/auto_hole_rbe2.tcl
     modules/bom_material_assignment.tcl
-    modules/casting_tetramesh.tcl
     modules/contact_setup.tcl
     modules/geometry_cleanup.tcl
     modules/local_mesh_optimizer.tcl
@@ -1213,9 +1190,12 @@ hm_worker_benchmark  (1 file(s))
     acceptPanel
     accept_thickness
     accumulateMoveProposal
+    actionBar
+    actionButton
     activateAndShowComponent
     adaptiveCrossLayerCounts
     adaptiveStructuredStripElementNodeLists
+    adaptiveTolerance
     addAssemblyToAssembly
     addComponentsToAssembly
     addUniqueToArrayList
@@ -1232,6 +1212,8 @@ hm_worker_benchmark  (1 file(s))
     analyzeConnectivity
     anchoredTargetCorrespondence
     anchoredUnequalStripElementNodeLists
+    angleBetween
+    angleDeg
     appendFemRBE2
     appendLog
     appendProgress
@@ -1260,6 +1242,8 @@ hm_worker_benchmark  (1 file(s))
     autoCandidateLabel
     autoCandidateValue
     autoChunkProtectedNodes
+    autoDetectAndCreate
+    autoDetectSeams
     autoElementComponentId
     autoElementPropertyId
     autoElementsForNodes
@@ -1304,6 +1288,7 @@ hm_worker_benchmark  (1 file(s))
     bindAutoWrap
     boltComponentInfo
     boundaryLoops
+    boundaryNodesOfComponent
     boundedTargetCandidates
     briefFailureDetail
     browseCriteria
@@ -1311,10 +1296,13 @@ hm_worker_benchmark  (1 file(s))
     browseReportDir
     browserFlushPulse
     buildBoltPairList
+    buildChains
     buildGraph
     buildGroups
     buildGroupsForAxis
     buildHmbatchCommand
+    buildHomeGroup
+    buildHomeRow
     buildLoopsFromEdges
     buildNativeFreeEdgeGraphs
     buildPolygonGrid
@@ -1345,6 +1333,7 @@ hm_worker_benchmark  (1 file(s))
     center
     centerWindow
     centroidNodes
+    chainSpacings
     chamferChain
     changeRegion
     check2DQuality
@@ -1355,7 +1344,9 @@ hm_worker_benchmark  (1 file(s))
     chooseThickness
     circleSection
     circumcenterFromPath
+    clamp
     classifyComponent
+    classifyJoint
     classifyPocketLoops
     classifySelection
     cleanLocationElems
@@ -1417,6 +1408,7 @@ hm_worker_benchmark  (1 file(s))
     compare_points
     completeProgressRange
     completedComponentIds
+    componentAverageNormal
     componentElementIds
     componentElementIdsSlow
     componentElements
@@ -1434,6 +1426,7 @@ hm_worker_benchmark  (1 file(s))
     componentIds
     componentIdsFromNodes
     componentInfoForSurfaces
+    componentIsSolid
     componentMaterialId
     componentName
     componentNameById
@@ -1443,6 +1436,7 @@ hm_worker_benchmark  (1 file(s))
     componentNames
     componentNamesEquivalent
     componentNodeIds
+    componentPairs
     componentPolygons
     componentSnapshot
     componentSolids
@@ -1454,8 +1448,8 @@ hm_worker_benchmark  (1 file(s))
     configBoolean
     configDir
     configScalar
-    configure2022NamedFont
     configureImportedBoltAssignments
+    configureNamedFont
     connect_edges
     connectedChain
     contactElemsForComponent
@@ -1565,9 +1559,11 @@ hm_worker_benchmark  (1 file(s))
     deleteUnretained
     delete_ids
     delete_seam_surface
+    deriveParameters
     destroyManagedWindows
     detachedStatusValue
     detachedWaitTick
+    detectJunctionNodes
     diagnoseFailure
     diagnosticSummary
     dictValueOr
@@ -1614,6 +1610,7 @@ hm_worker_benchmark  (1 file(s))
     elementComponentId
     elementConfig
     elementContainsEdge
+    elementFaces
     elementFamily
     elementIdsByConfig
     elementIncidenceForNode
@@ -1710,6 +1707,7 @@ hm_worker_benchmark  (1 file(s))
     extractMidsurface
     faceEdges
     faceGeometryData
+    faceKey
     faceNormal
     faceRecords
     failure
@@ -1729,6 +1727,7 @@ hm_worker_benchmark  (1 file(s))
     fitNodes
     flushLog
     forceBeamEndpointNodes
+    formRow
     formatDuration
     formatEngineeringPreflight
     formatMidsurfName
@@ -1762,10 +1761,12 @@ hm_worker_benchmark  (1 file(s))
     globalConfigFile
     gridCoordinate
     gridKey
+    groove
     groupById
     groupDefinitionMode
     groupDiameter
     groupHasPlanar
+    groupHeader
     groupJson
     groupKey
     groupReferenceIds
@@ -1778,6 +1779,7 @@ hm_worker_benchmark  (1 file(s))
     history_from_tcl
     hmVersion
     hmbatchPreflightCurrent
+    homeRowHover
     hybridComponentName
     hybridNodeExists
     hyperWorksCompatibility
@@ -1909,7 +1911,6 @@ hm_worker_benchmark  (1 file(s))
     markElementsForManualDelete
     markIds
     markInputGeometry
-    markLength
     markList
     markMergedMeshForExport
     markOneDElementCandidates
@@ -1972,7 +1973,6 @@ hm_worker_benchmark  (1 file(s))
     nativeMarkPanelSequence
     nativePanelSessionBegin
     nativePanelSessionEnd
-    nativeProjectionClean
     nativeQualityCheck
     nativeRegister
     nearbyPolygonIndices
@@ -1993,6 +1993,7 @@ hm_worker_benchmark  (1 file(s))
     nodeCoordinate
     nodeCoordinateMap
     nodeCoordinates
+    nodeDistance
     nodeDistanceById
     nodeElementIds
     nodeEntityExists
@@ -2062,6 +2063,7 @@ hm_worker_benchmark  (1 file(s))
     pairGroupRecords
     pairLabel
     pairMatchAxis
+    pairSourceIds
     parseComponentName
     parseCoordinates
     path
@@ -2363,13 +2365,19 @@ hm_worker_benchmark  (1 file(s))
     saveUndoSnapshot
     save_settings
     scheduleBrowserRefresh
+    scheduleHomeScroll
     scheduleInstanceWorker
     scopeWithTopologyContext
+    scrollableCanvasConfigure
+    scrollableFrame
+    scrollableInnerConfigure
+    scrollableUnbindWheel
+    scrollableWheel
     seamComponentForRelatedComps
     seam_connects_all_inputs
+    sectionFrame
     seedElemsFromLoop
     segmentFaces
-    select2022Group
     selectAllSurfaces
     selectComponents
     selectDisplayedSurfaces
@@ -2379,6 +2387,7 @@ hm_worker_benchmark  (1 file(s))
     select_strategy_input
     selectedAutoCandidate
     selectedCandidate
+    selectedComponentsForDetection
     selectedElementIds
     selectedElementIdsInteractive
     selectedElements
@@ -2420,6 +2429,7 @@ hm_worker_benchmark  (1 file(s))
     setupCaptureMainShortcut
     setupUseRecommendedMainShortcut
     shortcutAliases
+    shortcutButtonText
     shortcutFromEvent
     shortcutLaunchBlocked
     shortcutText
@@ -2447,6 +2457,7 @@ hm_worker_benchmark  (1 file(s))
     showOutputComponent
     showPanel
     showPanel2022
+    showPanelHome
     showPanelLegacy
     showPendingReview
     showReview
@@ -2461,6 +2472,7 @@ hm_worker_benchmark  (1 file(s))
     snapshotConnectors
     snapshotIds
     snapshot_ids
+    solidFacingBoundaryNodes
     sortGroupByAxis
     sortLoopsByPerimeter
     sourceComponentId
@@ -2495,7 +2507,6 @@ hm_worker_benchmark  (1 file(s))
     strategy_needs_thickness
     stripHyperMeshDuplicateSuffix
     stripPythonPathQuotes
-    styleGroupButton
     success
     supportedHyperMeshYear
     surfaceArea
@@ -2577,11 +2588,11 @@ hm_worker_benchmark  (1 file(s))
     unusedRBE2ExportTemplate
     unusedRBE2IdsFromIncidence
     unusedShellRBE2Records
-    update2022Selection
     updateBackgroundPids
     updateCandidate
     updateCriteriaStatus
     updateDetails
+    updateHomeScroll
     updateLabelWrap
     updateModeUi
     updateReportPath

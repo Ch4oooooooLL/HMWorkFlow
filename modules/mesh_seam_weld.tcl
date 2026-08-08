@@ -301,7 +301,7 @@ proc ::MeshSeamWeld::centerWindow {w} {
     set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw - $ww) / 2}]+[expr {($sh - $wh) / 2}]
+    ::HWFlow::centerWindow $w
 }
 
 proc ::MeshSeamWeld::updateModeUi {} {
@@ -404,8 +404,10 @@ proc ::MeshSeamWeld::showPanel {} {
     button $w.btn.close -text [::HWFlow::txt "关闭" "Close"] -width 10 -command "destroy .mesh_seam_weld"
     button $w.btn.more -text [::HWFlow::txt "更多" "More"] -width 10 -command "::MeshSeamWeld::showMorePanel"
     button $w.btn.save -text [::HWFlow::txt "保存" "Save"] -width 10 -command "::MeshSeamWeld::acceptPanel"
+    button $w.btn.undo -text [::HWFlow::txt "撤销上一批" "Undo Last Batch"] -width 10 -command "::MeshSeamWeld::undoLast"
     pack $w.btn.close -side right -padx 4
     pack $w.btn.save -side right -padx 4
+    pack $w.btn.undo -side right -padx 4
     pack $w.btn.more -side right -padx 4
 
     bind $w <Escape> "destroy .mesh_seam_weld"

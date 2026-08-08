@@ -487,7 +487,6 @@ proc ::LocalMeshOptimizer::showScope {} {
     } else {
         catch {hm_usermessage [::LocalMeshOptimizer::txt "范围包含 [llength $ids] 个单元，为避免图形卡顿不显示逐单元编号。" "Scope contains [llength $ids] elements; individual labels are suppressed to keep graphics responsive."]}
     }
-    catch {hm_viewfit}
     catch {hm_usermessage [::LocalMeshOptimizer::txt "已在图形区标记当前处理范围。" "Current scope was marked in the graphics area."]}
 }
 
@@ -1194,7 +1193,6 @@ proc ::LocalMeshOptimizer::showFailed {} {
     } else {
         catch {hm_usermessage [::LocalMeshOptimizer::txt "失败单元较多，已跳过逐单元编号显示。" "Many failed elements were found; individual labels were skipped."]}
     }
-    catch {hm_viewfit}
 }
 
 proc ::LocalMeshOptimizer::showOptimized {} {
@@ -1211,7 +1209,6 @@ proc ::LocalMeshOptimizer::showOptimized {} {
     } else {
         catch {hm_usermessage [::LocalMeshOptimizer::txt "已优化单元较多，已跳过逐单元编号显示。" "Many optimized elements are recorded; individual labels were skipped."]}
     }
-    catch {hm_viewfit}
 }
 
 proc ::LocalMeshOptimizer::semicolonIds {text} {
@@ -2991,7 +2988,7 @@ proc ::LocalMeshOptimizer::showPanel {} {
     update idletasks
     set sw [winfo screenwidth $w]; set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]; set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
+    ::HWFlow::centerWindow $w
 }
 
 proc ::LocalMeshOptimizer::runAction {} { ::LocalMeshOptimizer::showPanel }

@@ -189,9 +189,10 @@ proc ::FemAutoSeam::runBatchElementAutomesh {elementIds protectedNodeIds element
         # area. Probe consecutive face indices and mesh every valid face before
         # committing all generated elements to the database once.
         for {set faceIndex 0} {$faceIndex < [llength $elementIds]} {incr faceIndex} {
+            # hm_getmeshfaceparams reports "entity not found" on both builds
+            # even right after a successful *set_meshfaceparams (audit probe
+            # fem_auto_seam_semantics), so it cannot be used as the loop guard.
             if {[catch {*set_meshfaceparams $faceIndex 2 2 0 0 1 0.5 1 1}]} { break }
-            set params ""; catch {set params [hm_getmeshfaceparams $faceIndex]}
-            if {$params eq ""} { break }
             if {[catch {*automesh $faceIndex 2 2} meshError]} {
                 if {$faceIndex == 0} { error $meshError }
                 break

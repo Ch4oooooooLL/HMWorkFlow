@@ -280,7 +280,7 @@ proc ::BatchTempNodes::runAction {} {
     bind $w <Control-Return> ::BatchTempNodes::createFromInput
     wm protocol $w WM_DELETE_WINDOW ::BatchTempNodes::backToHome
     update idletasks
-    wm geometry $w +[expr {([winfo screenwidth $w] - [winfo reqwidth $w]) / 2}]+[expr {([winfo screenheight $w] - [winfo reqheight $w]) / 2}]
+    ::HWFlow::centerWindow $w
     focus $w.main.editor.text
     tkwait window $w
     return ""

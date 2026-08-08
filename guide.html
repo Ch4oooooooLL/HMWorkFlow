@@ -989,6 +989,12 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#mod-fem-auto-seam" class="nav-link" onclick="activateLink(this)">
+                        <svg viewBox="0 0 24 24"><path d="M7,2H17V7L14,11V20A2,2 0 0,1 12,22A2,2 0 0,1 10,20V11L7,7V2M9,4V6L12,10L15,6V4H9Z"/></svg>
+                        FEM 自动焊缝
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#mod-batch-property" class="nav-link" onclick="activateLink(this)">
                         <svg viewBox="0 0 24 24"><path d="M4,3H20A2,2 0 0,1 22,5V19A2,2 0 0,1 20,21H4A2,2 0 0,1 2,19V5A2,2 0 0,1 4,3M4,7V11H10V7H4M12,7V11H20V7H12M4,13V17H10V13H4M12,13V17H20V13H12Z"/></svg>
                         批量 Property
@@ -1120,6 +1126,13 @@
                             <svg viewBox="0 0 24 24"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/></svg>
                             查看详情 & 参数
                         </a>
+                    </div>
+
+                    <div class="dashboard-card" id="card-fem-auto-seam">
+                        <div class="card-header"><span class="card-title">FEM 自动焊缝</span><span class="card-badge mesh">网格</span></div>
+                        <div class="card-path">fem_auto_seam.tcl</div>
+                        <div class="card-desc">从互不共节点的壳 Component 检测 T 型/贴片型/邻近自由边候选，在 FEM 层面切分与重绘并整模型替换，直接生成焊缝壳。</div>
+                        <a href="#mod-fem-auto-seam" class="card-btn">查看使用说明</a>
                     </div>
 
                     <!-- Shell Washer RBE2 Card -->
@@ -1607,6 +1620,92 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 </div>
             </section>
 
+            <!-- Module: FEM Auto Seam -->
+            <section id="mod-fem-auto-seam" class="module-section" data-module="fem_auto_seam">
+                <h1 class="section-title">FEM 自动焊缝 (FEM Automatic Seam)</h1>
+                <div class="module-detail">
+                    <div class="detail-header">
+                        <div class="detail-title">
+                            <span class="card-badge mesh">网格</span>
+                            <span>独立 FEM 层面自动壳焊缝</span>
+                        </div>
+                        <div class="detail-path-badge">modules/fem_auto_seam.tcl</div>
+                    </div>
+
+                    <div class="detail-tabs-nav">
+                        <button class="detail-tab-btn active" onclick="switchTab(this, 'femseam-desc')">功能与原理</button>
+                        <button class="detail-tab-btn" onclick="switchTab(this, 'femseam-steps')">使用步骤</button>
+                        <button class="detail-tab-btn" onclick="switchTab(this, 'femseam-params')">参数配置表</button>
+                        <button class="detail-tab-btn" onclick="switchTab(this, 'femseam-safety')">安全边界</button>
+                    </div>
+
+                    <!-- Tab Content: Desc -->
+                    <div class="detail-tab-pane active" id="femseam-desc">
+                        <p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">
+                            <strong>FEM Automatic Seam</strong> 与 <strong>Mesh Seam Weld</strong> 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型、贴片型和邻近自由边候选，并在 FEM 层面切分母单元、插入节点和创建焊缝壳；后者继续处理用户已经明确选择的网格焊缝路径。
+                        </p>
+                        <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
+                            <li><strong>独立配置与任务目录</strong>：使用独立配置 <code>fem_auto_seam</code> 与任务目录 <code>runtime/tasks/fem_auto_seam/</code>；检测前固定生成独立的 <code>before.hm</code> 备份（唯一的回滚/撤销恢复点），随后把完整模型导出为 <code>input/model.fem</code>。</li>
+                            <li><strong>多进程并行检测</strong>：整车规模检测按源 Component 多进程并行，候选始终限制在用户选择的 Component 内；Python 并行进程数设为 <code>0</code> 时自动使用最多 8 个进程，Windows 子进程通过无控制台的 <code>pythonw.exe</code> 启动，实际进程数和持续时间显示在进度窗口命令流中。</li>
+                            <li><strong>FEM 文件直接替换</strong>：创建规划只复制一次所选模型，在同一累积模型中顺序处理候选，并把修改后的完整模型直接写回 FEM 文件；HyperMesh 以 File &gt; Open 语义重新打开该文件替换当前模型（不再做任何增量导入/合并，非壳卡片原样保留）。</li>
+                            <li><strong>原生重绘与质量裁决</strong>：替换后以 replacement mother elements 为种子向外扩展，将焊缝路径、新增切分节点及每批重绘区域外围节点设为固定节点，并按连通区域和单批单元上限在新模型上分批执行 <code>*interactiveremeshelems</code>、<code>*automesh</code> 与 <code>*storemeshtodatabase 1</code> 流程重绘；Python 不移动节点、不优化网格，最终质量以原生 criteria 裁决。</li>
+                            <li><strong>任务产物精简</strong>：完成后导出 <code>result.fem</code> 并删除过程文件，成功任务目录严格只保留 <code>before.hm</code> 和 <code>result.fem</code>；执行过程不建立候选 checkpoint，模型已进入替换/重绘阶段且出错时，用任务级 <code>before.hm</code> 恢复一次整个批次。</li>
+                            <li><strong>候选分流</strong>：高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 <code>Mesh Seam Weld</code> 继续手工创建。</li>
+                            <li><strong>验收模型</strong>：可直接导入的十组验收模型位于 <code>examples/AutoShellSeamBackend/test_fem/</code>。</li>
+                        </ul>
+                    </div>
+
+                    <!-- Tab Content: Steps -->
+                    <div class="detail-tab-pane" id="femseam-steps">
+                        <div class="step-list">
+                            <div class="step-item"><span class="step-num">1</span><div class="step-title">选择壳 Component</div><div class="step-detail">在面板运行 <strong>FEM 自动焊缝</strong> 模块，选择需要检测与创建焊缝的互不共节点壳 Component。</div></div>
+                            <div class="step-item"><span class="step-num">2</span><div class="step-title">执行检测</div><div class="step-detail">模块生成 <code>before.hm</code> 备份、导出 <code>input/model.fem</code>，按源 Component 多进程并行检测 T 型、贴片型和邻近自由边候选。</div></div>
+                            <div class="step-item"><span class="step-num">3</span><div class="step-title">后台规划与 FEM 替换</div><div class="step-detail">创建规划只复制一次所选模型，顺序处理候选并直接写回 FEM 文件；HyperMesh 以 File &gt; Open 语义重新打开替换当前模型。</div></div>
+                            <div class="step-item"><span class="step-num">4</span><div class="step-title">原生重绘与质量检查</div><div class="step-detail">固定焊缝路径与外围节点后按连通区域分批执行原生 automesh，最终以原生 criteria 判定质量并导出 <code>result.fem</code>。</div></div>
+                            <div class="step-item"><span class="step-num">5</span><div class="step-title">处理待定候选</div><div class="step-detail">高置信度候选直接创建；其余候选与规划失败项进入待处理表，可逐项隔离定位，或转入 <strong>Mesh Seam Weld</strong> 手工创建。</div></div>
+                        </div>
+                    </div>
+
+                    <!-- Tab Content: Params -->
+                    <div class="detail-tab-pane" id="femseam-params">
+                        <div class="param-table-container">
+                            <table class="param-table">
+                                <thead>
+                                    <tr>
+                                        <th>参数 Key</th>
+                                        <th>默认值</th>
+                                        <th>说明与作用</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><code>search_distance</code></td><td><code>12.0</code></td><td>候选搜索距离（模型单位），控制邻近自由边进入候选的范围。</td></tr>
+                                    <tr><td><code>min_seam_length</code></td><td><code>20.0</code></td><td>最短焊缝长度，过滤过短的候选。</td></tr>
+                                    <tr><td><code>parallel_angle_max / perpendicular_angle_min</code></td><td><code>15.0 / 70.0</code></td><td>贴片候选的平行与垂直角度阈值。</td></tr>
+                                    <tr><td><code>small_hole_diameter</code></td><td><code>30.0</code></td><td>人工复核孔径阈值，小孔附近的候选转人工复核。</td></tr>
+                                    <tr><td><code>auto_accept_confidence / review_confidence</code></td><td><code>0.88 / 0.60</code></td><td>自动创建与进入复核的置信度阈值。</td></tr>
+                                    <tr><td><code>criteria_path</code></td><td><code>空</code></td><td><code>.criteria</code> 文件路径；留空时使用 <code>modules/fem_auto_seam/defaults/</code> 中的内置 HM2019 质量标准。</td></tr>
+                                    <tr><td><code>python_workers</code></td><td><code>0</code></td><td>Python 并行进程数；<code>0</code> 自动使用最多 8 个进程，也可按工作站核心数显式提高。</td></tr>
+                                    <tr><td><code>remesh_element_size</code></td><td><code>8.0</code></td><td>重绘单元尺寸。</td></tr>
+                                    <tr><td><code>remesh_expand_layers</code></td><td><code>2</code></td><td>重绘邻域扩展层数。</td></tr>
+                                    <tr><td><code>remesh_feature_angle</code></td><td><code>30.0</code></td><td>重绘特征角。</td></tr>
+                                    <tr><td><code>remesh_chunk_elements</code></td><td><code>1000</code></td><td>单批重绘单元上限，直接控制原生 automesh 分批行为。</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tab Content: Safety -->
+                    <div class="detail-tab-pane" id="femseam-safety">
+                        <div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>会以替换模型的方式修改模型</h4><p>模块会把修改后的完整 FEM 文件重新打开为当前模型，并在替换后执行原生 automesh 重绘。开始前请确认 <code>before.hm</code> 已生成；替换/重绘阶段出错时整批恢复一次。</p></div></div>
+                        <ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);">
+                            <li>候选始终限制在用户选择的 Component 内，不做整车范围的创建。</li>
+                            <li>只允许在用户明确接受规划后执行；Python 不移动节点、不优化网格，质量以原生 criteria 为最终裁决。</li>
+                            <li>该模块为受控功能，首次投产前需按协议在目标 HM2019 环境完成真实 HyperMesh 验证。</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
             <section id="mod-batch-mesher" class="module-section" data-module="batch_mesher">
                 <h1 class="section-title">BatchMesher 自动网格划分</h1>
                 <div class="module-detail">
@@ -1990,15 +2089,14 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
             <section id="mod-solid-seam" class="module-section" data-module="solid_seam_connector">
                 <h1 class="section-title">实体焊缝 (Solid Seam Connector)</h1>
                 <div class="module-detail">
-                    <div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>Solid 外表面焊缝候选与 PENTA realization</span></div><div class="detail-path-badge">modules/solid_seam_connector.tcl</div></div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">从所选 Solid Components 的外表面边界边或特征边识别候选，支持双组件 Solid–Shell / Solid–Solid 和多组件 Solid×Shell 模式，并推荐 <code>PENTA_MIG_T/L/B</code> 或通用 <code>PENTA_MIG</code> realization。</p>
+                    <div class="detail-header"><div class="detail-title"><span class="card-badge connector">连接</span><span>交界焊缝自动识别与 PENTA+RBE3 创建</span></div><div class="detail-path-badge">modules/solid_seam_connector.tcl</div></div>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">选择两个 Components 后自动识别交界焊缝位置与接头类型，并按原生 1D connector seam 流程直接创建 <code>PENTA6 + RBE3</code> 实体焊缝，输出到 <code>SEAM_SOLID</code> 组件。</p>
                     <div class="step-list">
-                        <div class="step-item"><span class="step-num">1</span><div class="step-title">配置识别阈值</div><div class="step-detail">设置搜索距离、最短焊缝长度、特征角和有效采样比例。</div></div>
-                        <div class="step-item"><span class="step-num">2</span><div class="step-title">选择并识别</div><div class="step-detail">选择两个或更多组件。识别结果和日志写入 <code>temp/solid_seam/&lt;run_id&gt;/</code>。</div></div>
-                        <div class="step-item"><span class="step-num">3</span><div class="step-title">逐条复核</div><div class="step-detail">预览节点，接受或拒绝候选；可修改 PENTA 类型或反转 nodelist。</div></div>
-                        <div class="step-item"><span class="step-num">4</span><div class="step-title">创建已接受项</div><div class="step-detail">只 realization 已接受候选。单条失败独立记录，不中断后续候选。</div></div>
+                        <div class="step-item"><span class="step-num">1</span><div class="step-title">配置参数</div><div class="step-detail">设置搜索距离、最小焊缝长度、链断点容差；焊缝宽度与节点间距默认 6，随网格尺寸自动修正。</div></div>
+                        <div class="step-item"><span class="step-num">2</span><div class="step-title">选择组件并创建</div><div class="step-detail">选择两个组件；自动检测交界节点链、判断接头类型（T/LAP/BUTT/ANGLED）、计算容差并批量创建。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">结果输出</div><div class="step-detail">PENTA6/RBE3 移入 <code>SEAM_SOLID</code>；单条失败独立记录，结果写入 <code>temp/solid_seam/&lt;run_id&gt;/realization_result.json</code>。</div></div>
                     </div>
-                    <div class="alert-box warning"><div class="alert-content"><h4>默认禁止未经验证的 realization</h4><p>该模块为 Controlled 状态。必须先按 <code>modules/solid_seam/README.md</code> 从目标 HM2019 Command File 制作并启用已验证 profile；否则仓库会保持 realization 关闭，以防错误 connector 参数修改模型。</p></div></div>
+                    <div class="alert-box warning"><div class="alert-content"><h4>容差自适应</h4><p>realization 容差为 <code>max(6.0, 1.5 × 网格尺寸, 最大间隙 + 网格尺寸)</code>；真实模型上 1–2 mm 容差会导致 realize 失败，3 mm 以上成功。双版本（2019.0.0.70 / 2022.0.0.33）实机验证通过。</p></div></div>
                 </div>
             </section>
 

@@ -5,7 +5,7 @@ namespace eval ::hmtoolkit::seam::ui {
 
 proc ::hmtoolkit::seam::ui::center {w} {
     update idletasks
-    wm geometry $w +[expr {([winfo screenwidth $w]-[winfo reqwidth $w])/2}]+[expr {([winfo screenheight $w]-[winfo reqheight $w])/2}]
+    ::HWFlow::centerWindow $w
 }
 
 proc ::hmtoolkit::seam::ui::set_status {text} {

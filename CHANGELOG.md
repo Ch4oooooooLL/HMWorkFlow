@@ -2,6 +2,119 @@
 
 ## Unreleased - platform stabilization
 
+- Fix the cross-module command audit findings (docs/module_command_audit_2026-08-08.md,
+  probes verified headless on 2019.0.0.70 and 2022.0.0.33):
+  (1) fem_auto_seam: the batch remesh loop guarded on `hm_getmeshfaceparams`,
+  which reports "entity not found" on both builds right after a successful
+  `*set_meshfaceparams`, so `faceCount` always reached 0 and every remesh
+  failed with "automesh did not produce any temporary face mesh" - the
+  unused diagnostic read and its empty-check break are removed; the two
+  dead `hm_viewfit` calls in the review UI are removed as well.
+  (2) geometry_cleanup: `*surfacefilletremove` works on 2019 but errors on
+  2022, and the old `*surfacemarkremovelinefillets` fallback errors on both
+  builds - the 2022 branch now queries `hm_getfilletfacesfrommark` on the
+  chamfer-chain mark and deletes the found faces via `*deletemark surfs`
+  (both commands verified on both builds; the 2019 path is unchanged).
+  (3) rbe2_bolt_connector: `verifyEndpointCoordinates` read
+  `dataname=coordinates`, which is not a valid node dataname on either
+  build - it now reads x/y/z like the main path; `replaceOneNode` no longer
+  errors when the native merge is unavailable, because five probes on both
+  builds proved `*replacenodes`, `*equivalence` and
+  `*replacentitywithentity(mark)` never merge coincident free nodes headless
+  - coincident pairs now count as replaced (callers only invoke it with
+  coordinate-identical nodes) and `forceBeamEndpointNodes` accepts the
+  coincident originals in its final check.
+  (4) Dead-command cleanup across modules: all 17 `hm_viewfit` /
+  `hmbr_signals` / `hm_blockbrowserupdate` calls removed from
+  workflow_common, midsurf, fem_auto_seam, mesh_seam_weld, seam_surface,
+  auto_hole_rbe2, geometry_cleanup, rbe2_bolt_connector,
+  shell_washer_hole_rbe2, local_mesh_optimizer and weld_integrity_check.
+  (5) Audit rating corrections backed by probes: batch_temp_nodes
+  (`*deletemark nodes "by id only"` works on 2019 for free nodes, undo is
+  functional), contact_setup (5-arg `*adjustcontactsurfacenormal` works on
+  both builds; group dataname fallback already in place) and auto_hole_rbe2
+  (`*findfaces` + `*feoutputwithdata` export verified on both builds) are
+  healthy; the `^faces` and deletemark findings were false positives.
+  Verification: 13 edited files pass Tcl syntax checks; the offline suite
+  passes (34 tests + 9 subtests; the sole batch_mesher failure is a
+  pre-existing flaky test interaction, it passes in isolation); the
+  geometry_cleanup 22 branch was replayed headless on both builds with
+  tools/fix_verify_geometry_cleanup22.tcl (19 keeps the original path,
+  22 takes the new branch, both without errors).
+- Fix the adhesive area connector (打胶连接) on the installed HyperMesh builds
+  (2019.0.0.70 / 2022.0.0.33).  The module now reliably creates a realized
+  1D Connector of type Area with realization type `adhesives` (OptiStruct
+  FE type 121, realized as RBE3 + HEXA8) using the constrained options
+  (tolerance 50, 1 coat, constant thickness 1.0).  Three defects fixed:
+  (1) the pure-Tcl location cleaning fallback evaluated the dominant normal
+  axis with the literal string `abs(...)` instead of `expr {abs(...)}`, so
+  every polygon grid expanded by the tolerance on the wrong axis and all
+  location elements were rejected; (2) `primeGeometryCache` assumed
+  `hm_getvalue ... mark=N` returns rows in mark-creation order, but rows are
+  ordered by entity ID on both builds - element/node caches were misaligned,
+  corrupting coordinates for elements whose IDs are not contiguous with the
+  mark (98/2400 elements rejected in the 10k-element scale model);
+  (3) the polygon spatial grid used the tolerance as cell size, collapsing a
+  large plate into a handful of cells with up to 10k polygons each - the
+  cell size is now derived from the local mesh density (2x typical in-plane
+  span) with the tolerance applied only along the normal axis.  Verified
+  headless on both builds: the 10k-element scale model cleans 2400 location
+  elements to exactly 2000 kept / 400 rejected in ~9-10 s (was 847 s), the
+  15 offline unit tests pass, and the full end-to-end probe (dialog flow
+  through `createAdhesive` with connector realization) passes on 2019 and
+  2022.
+- Fix the solid seam connector (实体焊缝) creation on the installed HyperMesh
+  builds: the native seam realization requires a tolerance large enough to
+  cover the local mesh and joint gap.  A tolerance of 1-2 mm fails
+  (`connector_state=failed`, no elements) while 3 mm and above realize
+  PENTA6+RBE3 on the same model; the command profile now computes an adaptive
+  tolerance floor `max(6.0, 1.5*mesh_size, max_gap+mesh_size)` from the model
+  instead of trusting the candidate value.  The main flow no longer goes
+  through the Python pipeline: the user picks two components and a new pure
+  Tcl detector (`modules/solid_seam/tcl/auto_detect.tcl`) finds the junction
+  node chains taken from the first selected component with a mutual-nearest + largest-gap layer filter (the manual node list matches the user's 239-247 exactly; a fixed tolerance cut the curved seam's ends),
+  classifies the joint (T/LAP/BUTT/ANGLED -> PENTA_MIG_T/L/B/MIG) from
+  component normals, and derives width/spacing (default 6, clamped to the
+  mesh) and the adaptive tolerance.  Weld nodes always come from the FIRST
+  selected component and are restricted to its boundary: free-edge nodes for
+  shells; for solid components the boundary of the outer face layer closest
+  to the target (pitch-adaptive bands + per-face facing dot test so a curved
+  contact face keeps its whole outline while perpendicular side faces stay
+  excluded; pyramid5 now emits its full 5-face set and the solid free-edge
+  threshold was fixed from 1 to 2).  Chain building ranks candidates by
+  distance with the turn penalty applied after the gap gate, so ring-shaped
+  contact outlines stay a single chain.  Verified headless on 2019.0.0.70
+  and 2022.0.0.33: F03 curved-T with the web picked first picks exactly the
+  manual node list 239-247 (9 nodes, T_JOINT, 14 PENTA6 + 45 RBE3, PASS,
+  output SEAM_SOLID); with the base picked first the strict first-component
+  rule yields the base-side contact rows (2 x 3 nodes, REALIZED PASS).  The
+  C01 solid-plate validation case now finds the full 20-node bottom ring as
+  one LAP_JOINT chain (30 PENTA6 + 90 RBE3, PASS on both builds); see
+  docs/solid_seam_dual_version_alignment_2026-08-08.md.  The Python
+  detection pipeline and its tests are kept as legacy and are not used by
+  the main flow.  module_status solid_seam_connector.runtime = native.
+- Fix the repository tracking audit vs `.gitignore` conflict: the audit tool
+  (tools/repository_audit.py) now exempts the versioned acceptance fixtures
+  under `examples/AutoShellSeamBackend/test_fem/` exactly like the `.gitignore`
+  `!/examples/AutoShellSeamBackend/test_fem/` negation rules, so
+  `python tools/run_offline_tests.py` no longer aborts at the audit step and
+  the CI "Run offline tests" step and hybrid_core
+  `test_git_tracking_policy_is_clean` pass again. Doc note added to
+  doc/repository_layout.md.
+- Record the five modules that were missing from `modules/module_status.json`
+  (batch_mesher, fem_auto_seam, midsurf, geometry_cleanup, cbush_creator); the
+  file now covers all 18 registered modules. batch_mesher is production
+  (dual-version verified with hmbatch smoke tests), fem_auto_seam is controlled
+  (HM2019 validation protocol pending), the legacy Tcl modules are production.
+- Remove the deprecated casting_tetramesh module (its registration, module
+  file, `config/casting_mesh_rules.txt`, and all documentation references).
+- Add the FEM Automatic Seam section to the offline guide (guide.html): new
+  sidebar entry, dashboard card, and a full module section (function,
+  steps, parameter table with defaults, safety notes) mirroring the Mesh
+  Seam Weld layout; it was the only module missing from the guide.
+- Point the stale `modules/batch_mesh_washer.tcl` reference in
+  doc/INTEGRATION_ANALYSIS.md at the current `modules/batch_mesher/`
+  location (the old file was merged into the BatchMesher module).
 - Align the geometry seam module with the locally installed HyperMesh builds
   (2019.0.0.70 and 2022.0.0.33, verified headless with the same fixtures on
   both; see docs/geometry_seam_dual_version_alignment_2026-08-07.md). Both

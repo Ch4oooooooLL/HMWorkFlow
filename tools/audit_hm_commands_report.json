@@ -43,7 +43,6 @@
       "modules/mesh_seam_weld.tcl"
     ],
     "*autotopocleanup": [
-      "modules/casting_tetramesh.tcl"
     ],
     "*barelementcreatewithoffsets": [
       "modules/rbe2_bolt_connector.tcl"
@@ -93,7 +92,6 @@
       "modules/batch_property_assignment.tcl",
       "modules/batch_temp_nodes.tcl",
       "modules/bom_material_assignment.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/cbush_creator.tcl",
       "modules/contact_setup.tcl",
       "modules/fem_auto_seam.tcl",
@@ -125,6 +123,7 @@
       "modules/shell_washer_hole_rbe2.tcl",
       "modules/shell_washer_hole_rbe2/tcl/exporter.tcl",
       "modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl",
+      "modules/solid_seam/tcl/auto_detect.tcl",
       "modules/solid_seam/tcl/candidate_viewer.tcl",
       "modules/solid_seam/tcl/component_classifier.tcl",
       "modules/solid_seam/tcl/component_selector.tcl",
@@ -143,7 +142,6 @@
     "*collectorcreateonly": [
       "command.tcl",
       "modules/auto_hole_rbe2.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/contact_setup/tests/hm2019_contact_performance_smoke.tcl",
       "modules/contact_setup/tests/hm2019_contact_surface_smoke.tcl",
       "modules/hybrid_core/tests/hm_hybrid_export_smoke.tcl",
@@ -177,7 +175,6 @@
     "*createdoublearray": [
       "command.tcl",
       "modules/auto_hole_rbe2.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/rbe2_bolt_connector.tcl",
       "modules/shell_washer_hole_rbe2.tcl"
     ],
@@ -195,7 +192,6 @@
       "modules/batch_mesher/tests/hm2022_batchmesh_smoke.tcl",
       "modules/batch_property_assignment.tcl",
       "modules/bom_material_assignment.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/contact_setup.tcl",
       "modules/mesh_seam_weld.tcl",
       "modules/rbe2_bolt_connector.tcl",
@@ -244,7 +240,6 @@
       "modules/batch_property_assignment.tcl",
       "modules/batch_temp_nodes.tcl",
       "modules/bom_material_assignment.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/cbush_creator.tcl",
       "modules/contact_setup.tcl",
       "modules/fem_auto_seam.tcl",
@@ -278,6 +273,7 @@
       "modules/shell_washer_hole_rbe2.tcl",
       "modules/shell_washer_hole_rbe2/tcl/exporter.tcl",
       "modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl",
+      "modules/solid_seam/tcl/auto_detect.tcl",
       "modules/solid_seam/tcl/candidate_viewer.tcl",
       "modules/solid_seam/tcl/component_classifier.tcl",
       "modules/solid_seam/tcl/mesh_exporter.tcl",
@@ -313,7 +309,6 @@
       "command.tcl",
       "modules/adhesive_connector.tcl",
       "modules/batch_mesher/tests/hm2022_capability_probe.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/fem_auto_seam/tests/hm2019_apply.tcl",
       "modules/fem_auto_seam/tests/hm2019_combined_fixture_smoke.tcl",
       "modules/hybrid_core/tcl/incremental_import.tcl",
@@ -351,7 +346,6 @@
       "modules/batch_mesher/background.tcl",
       "modules/batch_mesher/background_worker.tcl",
       "modules/batch_temp_nodes.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/cbush_creator.tcl",
       "modules/contact_setup.tcl",
       "modules/geometry_cleanup.tcl",
@@ -375,7 +369,6 @@
       "modules/batch_mesher/tests/hm2022_model_verify.tcl"
     ],
     "*deletesolidswithelems": [
-      "modules/casting_tetramesh.tcl",
       "modules/seam_surface/diagnose.tcl",
       "modules/seam_surface/executor.tcl",
       "modules/seam_surface/temp.tcl"
@@ -527,7 +520,6 @@
       "modules/contact_setup.tcl"
     ],
     "*getqualitysummary": [
-      "modules/casting_tetramesh.tcl"
     ],
     "*graphuserwindow_by": [
       "modules/solid_seam/tcl/candidate_viewer.tcl",
@@ -544,7 +536,6 @@
       "modules/batch_mesher/tests/hm2022_capability_probe.tcl"
     ],
     "*hm_failed_elements_cleanup": [
-      "modules/casting_tetramesh.tcl"
     ],
     "*imprint_nodelist": [
       "command.tcl",
@@ -607,7 +598,6 @@
     ],
     "*movemark": [
       "command.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/contact_setup.tcl",
       "modules/geometry_cleanup.tcl",
       "modules/hybrid_core/tcl/incremental_import.tcl",
@@ -645,7 +635,6 @@
       "modules/seam_surface/executor.tcl"
     ],
     "*optimized_mesh": [
-      "modules/casting_tetramesh.tcl"
     ],
     "*projectpointstoedges": [
       "command.tcl",
@@ -739,7 +728,6 @@
     "*setoption": [
       "command.tcl",
       "modules/auto_hole_rbe2.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/geometry_cleanup.tcl",
       "modules/midsurf.tcl",
       "modules/rbe2_bolt_connector.tcl",
@@ -822,13 +810,10 @@
       "modules/geometry_cleanup.tcl"
     ],
     "*surfacemarkfeatures": [
-      "modules/casting_tetramesh.tcl"
     ],
     "*surfacemarkremoveallpinholes": [
-      "modules/casting_tetramesh.tcl"
     ],
     "*surfacemarkremovelinefillets": [
-      "modules/casting_tetramesh.tcl",
       "modules/geometry_cleanup.tcl"
     ],
     "*surfacemarksplitwithline": [
@@ -872,7 +857,6 @@
       "modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl"
     ],
     "*tetmesh": [
-      "modules/casting_tetramesh.tcl"
     ],
     "*translatemark": [
       "command.tcl",
@@ -947,7 +931,6 @@
     ],
     "hm_blockerrormessages": [
       "modules/auto_hole_rbe2.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/geometry_cleanup.tcl",
       "modules/midsurf.tcl",
       "modules/rbe2_bolt_connector.tcl",
@@ -955,7 +938,6 @@
     ],
     "hm_blockmessages": [
       "modules/auto_hole_rbe2.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/geometry_cleanup.tcl",
       "modules/midsurf.tcl",
       "modules/rbe2_bolt_connector.tcl",
@@ -963,7 +945,6 @@
     ],
     "hm_blockredraw": [
       "modules/auto_hole_rbe2.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/geometry_cleanup.tcl",
       "modules/midsurf.tcl",
       "modules/rbe2_bolt_connector.tcl",
@@ -1065,10 +1046,8 @@
       "modules/seam_surface/entity.tcl"
     ],
     "hm_getelemchecksummary3d": [
-      "modules/casting_tetramesh.tcl"
     ],
     "hm_getelementsqualityinfo": [
-      "modules/casting_tetramesh.tcl",
       "modules/fem_auto_seam/tcl/quality_validator.tcl",
       "modules/local_mesh_optimizer.tcl",
       "modules/mesh_seam_weld/tcl/quality_validator.tcl"
@@ -1114,7 +1093,6 @@
       "modules/batch_mesher/tests/hm2022_model_verify.tcl",
       "modules/batch_property_assignment.tcl",
       "modules/bom_material_assignment.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/cbush_creator.tcl",
       "modules/contact_setup.tcl",
       "modules/fem_auto_seam.tcl",
@@ -1146,6 +1124,7 @@
       "modules/shell_washer_hole_rbe2.tcl",
       "modules/shell_washer_hole_rbe2/tcl/exporter.tcl",
       "modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl",
+      "modules/solid_seam/tcl/auto_detect.tcl",
       "modules/solid_seam/tcl/component_classifier.tcl",
       "modules/solid_seam/tcl/component_selector.tcl",
       "modules/solid_seam/tcl/mesh_exporter.tcl",
@@ -1206,7 +1185,6 @@
       "modules/batch_mesher/selection.tcl",
       "modules/batch_property_assignment.tcl",
       "modules/bom_material_assignment.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/cbush_creator.tcl",
       "modules/contact_setup.tcl",
       "modules/contact_setup/tests/hm2019_contact_surface_smoke.tcl",
@@ -1236,6 +1214,7 @@
       "modules/shell_washer_hole_rbe2.tcl",
       "modules/shell_washer_hole_rbe2/tcl/executor.tcl",
       "modules/solid_seam/command_profiles/hm2019_penta_mig_common.tcl",
+      "modules/solid_seam/tcl/auto_detect.tcl",
       "modules/solid_seam/tcl/candidate_viewer.tcl",
       "modules/solid_seam/tcl/component_classifier.tcl",
       "modules/solid_seam/tcl/realization_validator.tcl",
@@ -1319,7 +1298,6 @@
       "modules/solid_seam/tcl/seam_creator.tcl"
     ],
     "hm_marklength": [
-      "modules/adhesive_connector.tcl",
       "modules/contact_setup.tcl"
     ],
     "hm_model_fem": [
@@ -1403,7 +1381,6 @@
       "modules/adhesive_connector.tcl",
       "modules/auto_hole_rbe2.tcl",
       "modules/bom_material_assignment.tcl",
-      "modules/casting_tetramesh.tcl",
       "modules/contact_setup.tcl",
       "modules/geometry_cleanup.tcl",
       "modules/local_mesh_optimizer.tcl",
@@ -1450,9 +1427,12 @@
     "acceptPanel",
     "accept_thickness",
     "accumulateMoveProposal",
+    "actionBar",
+    "actionButton",
     "activateAndShowComponent",
     "adaptiveCrossLayerCounts",
     "adaptiveStructuredStripElementNodeLists",
+    "adaptiveTolerance",
     "addAssemblyToAssembly",
     "addComponentsToAssembly",
     "addUniqueToArrayList",
@@ -1469,6 +1449,8 @@
     "analyzeConnectivity",
     "anchoredTargetCorrespondence",
     "anchoredUnequalStripElementNodeLists",
+    "angleBetween",
+    "angleDeg",
     "appendFemRBE2",
     "appendLog",
     "appendProgress",
@@ -1497,6 +1479,8 @@
     "autoCandidateLabel",
     "autoCandidateValue",
     "autoChunkProtectedNodes",
+    "autoDetectAndCreate",
+    "autoDetectSeams",
     "autoElementComponentId",
     "autoElementPropertyId",
     "autoElementsForNodes",
@@ -1541,6 +1525,7 @@
     "bindAutoWrap",
     "boltComponentInfo",
     "boundaryLoops",
+    "boundaryNodesOfComponent",
     "boundedTargetCandidates",
     "briefFailureDetail",
     "browseCriteria",
@@ -1548,10 +1533,13 @@
     "browseReportDir",
     "browserFlushPulse",
     "buildBoltPairList",
+    "buildChains",
     "buildGraph",
     "buildGroups",
     "buildGroupsForAxis",
     "buildHmbatchCommand",
+    "buildHomeGroup",
+    "buildHomeRow",
     "buildLoopsFromEdges",
     "buildNativeFreeEdgeGraphs",
     "buildPolygonGrid",
@@ -1582,6 +1570,7 @@
     "center",
     "centerWindow",
     "centroidNodes",
+    "chainSpacings",
     "chamferChain",
     "changeRegion",
     "check2DQuality",
@@ -1592,7 +1581,9 @@
     "chooseThickness",
     "circleSection",
     "circumcenterFromPath",
+    "clamp",
     "classifyComponent",
+    "classifyJoint",
     "classifyPocketLoops",
     "classifySelection",
     "cleanLocationElems",
@@ -1654,6 +1645,7 @@
     "compare_points",
     "completeProgressRange",
     "completedComponentIds",
+    "componentAverageNormal",
     "componentElementIds",
     "componentElementIdsSlow",
     "componentElements",
@@ -1671,6 +1663,7 @@
     "componentIds",
     "componentIdsFromNodes",
     "componentInfoForSurfaces",
+    "componentIsSolid",
     "componentMaterialId",
     "componentName",
     "componentNameById",
@@ -1680,6 +1673,7 @@
     "componentNames",
     "componentNamesEquivalent",
     "componentNodeIds",
+    "componentPairs",
     "componentPolygons",
     "componentSnapshot",
     "componentSolids",
@@ -1691,8 +1685,8 @@
     "configBoolean",
     "configDir",
     "configScalar",
-    "configure2022NamedFont",
     "configureImportedBoltAssignments",
+    "configureNamedFont",
     "connect_edges",
     "connectedChain",
     "contactElemsForComponent",
@@ -1802,9 +1796,11 @@
     "deleteUnretained",
     "delete_ids",
     "delete_seam_surface",
+    "deriveParameters",
     "destroyManagedWindows",
     "detachedStatusValue",
     "detachedWaitTick",
+    "detectJunctionNodes",
     "diagnoseFailure",
     "diagnosticSummary",
     "dictValueOr",
@@ -1851,6 +1847,7 @@
     "elementComponentId",
     "elementConfig",
     "elementContainsEdge",
+    "elementFaces",
     "elementFamily",
     "elementIdsByConfig",
     "elementIncidenceForNode",
@@ -1947,6 +1944,7 @@
     "extractMidsurface",
     "faceEdges",
     "faceGeometryData",
+    "faceKey",
     "faceNormal",
     "faceRecords",
     "failure",
@@ -1966,6 +1964,7 @@
     "fitNodes",
     "flushLog",
     "forceBeamEndpointNodes",
+    "formRow",
     "formatDuration",
     "formatEngineeringPreflight",
     "formatMidsurfName",
@@ -1999,10 +1998,12 @@
     "globalConfigFile",
     "gridCoordinate",
     "gridKey",
+    "groove",
     "groupById",
     "groupDefinitionMode",
     "groupDiameter",
     "groupHasPlanar",
+    "groupHeader",
     "groupJson",
     "groupKey",
     "groupReferenceIds",
@@ -2015,6 +2016,7 @@
     "history_from_tcl",
     "hmVersion",
     "hmbatchPreflightCurrent",
+    "homeRowHover",
     "hybridComponentName",
     "hybridNodeExists",
     "hyperWorksCompatibility",
@@ -2146,7 +2148,6 @@
     "markElementsForManualDelete",
     "markIds",
     "markInputGeometry",
-    "markLength",
     "markList",
     "markMergedMeshForExport",
     "markOneDElementCandidates",
@@ -2209,7 +2210,6 @@
     "nativeMarkPanelSequence",
     "nativePanelSessionBegin",
     "nativePanelSessionEnd",
-    "nativeProjectionClean",
     "nativeQualityCheck",
     "nativeRegister",
     "nearbyPolygonIndices",
@@ -2230,6 +2230,7 @@
     "nodeCoordinate",
     "nodeCoordinateMap",
     "nodeCoordinates",
+    "nodeDistance",
     "nodeDistanceById",
     "nodeElementIds",
     "nodeEntityExists",
@@ -2299,6 +2300,7 @@
     "pairGroupRecords",
     "pairLabel",
     "pairMatchAxis",
+    "pairSourceIds",
     "parseComponentName",
     "parseCoordinates",
     "path",
@@ -2600,13 +2602,19 @@
     "saveUndoSnapshot",
     "save_settings",
     "scheduleBrowserRefresh",
+    "scheduleHomeScroll",
     "scheduleInstanceWorker",
     "scopeWithTopologyContext",
+    "scrollableCanvasConfigure",
+    "scrollableFrame",
+    "scrollableInnerConfigure",
+    "scrollableUnbindWheel",
+    "scrollableWheel",
     "seamComponentForRelatedComps",
     "seam_connects_all_inputs",
+    "sectionFrame",
     "seedElemsFromLoop",
     "segmentFaces",
-    "select2022Group",
     "selectAllSurfaces",
     "selectComponents",
     "selectDisplayedSurfaces",
@@ -2616,6 +2624,7 @@
     "select_strategy_input",
     "selectedAutoCandidate",
     "selectedCandidate",
+    "selectedComponentsForDetection",
     "selectedElementIds",
     "selectedElementIdsInteractive",
     "selectedElements",
@@ -2657,6 +2666,7 @@
     "setupCaptureMainShortcut",
     "setupUseRecommendedMainShortcut",
     "shortcutAliases",
+    "shortcutButtonText",
     "shortcutFromEvent",
     "shortcutLaunchBlocked",
     "shortcutText",
@@ -2684,6 +2694,7 @@
     "showOutputComponent",
     "showPanel",
     "showPanel2022",
+    "showPanelHome",
     "showPanelLegacy",
     "showPendingReview",
     "showReview",
@@ -2698,6 +2709,7 @@
     "snapshotConnectors",
     "snapshotIds",
     "snapshot_ids",
+    "solidFacingBoundaryNodes",
     "sortGroupByAxis",
     "sortLoopsByPerimeter",
     "sourceComponentId",
@@ -2732,7 +2744,6 @@
     "strategy_needs_thickness",
     "stripHyperMeshDuplicateSuffix",
     "stripPythonPathQuotes",
-    "styleGroupButton",
     "success",
     "supportedHyperMeshYear",
     "surfaceArea",
@@ -2814,11 +2825,11 @@
     "unusedRBE2ExportTemplate",
     "unusedRBE2IdsFromIncidence",
     "unusedShellRBE2Records",
-    "update2022Selection",
     "updateBackgroundPids",
     "updateCandidate",
     "updateCriteriaStatus",
     "updateDetails",
+    "updateHomeScroll",
     "updateLabelWrap",
     "updateModeUi",
     "updateReportPath",

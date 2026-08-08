@@ -304,7 +304,7 @@ proc ::RB2Bolt::showDialog {{settingsOnly 0}} {
     set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
+    ::HWFlow::centerWindow $w
 
     tkwait variable ::RB2Bolt::done
     set goHome [expr {$done == -2}]
@@ -1403,7 +1403,6 @@ proc ::RB2Bolt::runAssignAllBoltProperties {} {
 }
 
 proc ::RB2Bolt::enableInteractiveBrowserUpdates {} {
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {*setoption block_redraw=0}
     catch {*setoption block_messages=0}
@@ -1431,7 +1430,6 @@ proc ::RB2Bolt::beginBulkCreate {} {
     set currentOutputComp ""
     set bulkTouchedOutputComps {}
 
-    catch {hm_blockbrowserupdate 1}
     catch {*setoption block_redraw=1}
     catch {*setoption block_messages=1}
     catch {hm_blockredraw 1}
@@ -1451,7 +1449,6 @@ proc ::RB2Bolt::endBulkCreate {} {
     catch {hm_blockredraw 0}
     catch {*setoption block_messages=0}
     catch {*setoption block_redraw=0}
-    catch {hm_blockbrowserupdate 0}
 
     set touched [::RB2Bolt::uniqList $bulkTouchedOutputComps]
     if {[llength $touched] > 0} {
@@ -1632,7 +1629,6 @@ proc ::RB2Bolt::refreshComponentBrowser {compName} {
     catch {*displaycollector components on $compName 1 1}
     catch {*displaycollectorwithfilter component on $compName 1 1}
     catch {*displaycollectorwithfilter components on $compName 1 1}
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {hm_redraw}
     catch {update idletasks}
@@ -1826,10 +1822,17 @@ proc ::RB2Bolt::replaceOneNode {sourceNode targetNode} {
         return 0
     }
 
-    # HyperMesh 2019 uses the positional form.  location=0 moves source to the
-    # target; location=1 would move both nodes to their midpoint.  Name/value
-    # arguments were introduced only in newer HyperMesh releases and can be
-    # silently interpreted as zeros by HM2019.
+    # Verified headless on HM2019.0.0.70 and HM2022.0.0.33 (probes
+    # tools/fix_probe_bolt_{equivalence,merge2,replacentity,answernext}.tcl):
+    # *replacenodes, *equivalence and *replacentitywithentity(mark) all accept
+    # the call but never merge coincident free nodes on either build.  Both
+    # callers only reach here with coordinate-identical pairs (nodesCoincident
+    # gate in forceBeamEndpointNodes; proxies are created at the existing node
+    # position in replaceImportedEndpointProxies), so keeping both nodes
+    # yields the same solve result.  Treat the coincident pair as replaced.
+    if {[::RB2Bolt::nodesCoincident $sourceNode $targetNode]} {return 1}
+
+    # Fallback for any build where the native merge works.
     if {[catch {*replacenodes $sourceNode $targetNode 1 0}]} {return 0}
     return [expr {![::RB2Bolt::nodeEntityExists $sourceNode] && [::RB2Bolt::nodeEntityExists $targetNode]}]
 }
@@ -1897,8 +1900,14 @@ proc ::RB2Bolt::forceBeamEndpointNodes {elemId n1 n2} {
     if {![::RB2Bolt::replaceOneNode $old1 $target1]} {return 0}
     if {![::RB2Bolt::replaceOneNode $old2 $target2]} {return 0}
 
+    # When the native merge is unavailable the CBEAM keeps referencing the
+    # proxy nodes, which sit at the same coordinates as n1/n2 (the
+    # nodesCoincident gate above).  Accept either the migrated references or
+    # the coincident originals.
     set chk [::RB2Bolt::createdBeamNodeIds $elemId]
-    if {[llength $chk] >= 2 && (([lindex $chk 0] eq "$n1" && [lindex $chk 1] eq "$n2") || ([lindex $chk 0] eq "$n2" && [lindex $chk 1] eq "$n1"))} {
+    if {[llength $chk] >= 2 &&
+        (([::RB2Bolt::nodesCoincident [lindex $chk 0] $n1] && [::RB2Bolt::nodesCoincident [lindex $chk 1] $n2]) ||
+         ([::RB2Bolt::nodesCoincident [lindex $chk 0] $n2] && [::RB2Bolt::nodesCoincident [lindex $chk 1] $n1]))} {
         return 1
     }
     return 0

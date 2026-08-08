@@ -127,7 +127,7 @@ proc ::FemAutoSeam::autoReviewLocate {{fitView 1}} {
     if {[llength $nodes]} { eval *createmark nodes 1 $nodes; catch {*numbersmark nodes 1 1} }
     if {[llength $elements]} { eval *createmark elems 1 $elements; catch {*numbersmark elems 1 1} }
     if {$fitView} {
-        catch {hm_redraw}; catch {update idletasks}; catch {hm_viewfit}; catch {hm_redraw}
+        catch {hm_redraw}; catch {update idletasks}; catch {hm_redraw}
     } else {
         catch {hm_redraw}
     }
@@ -144,7 +144,6 @@ proc ::FemAutoSeam::autoReviewFitIsolated {ids} {
     # isolated source/target pair instead of the previous global display.
     catch {hm_redraw}
     catch {update idletasks}
-    catch {hm_viewfit}
     catch {hm_redraw}
 }
 

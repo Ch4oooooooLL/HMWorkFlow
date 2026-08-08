@@ -22,7 +22,7 @@ class ProjectTopmostTests(unittest.TestCase):
     def test_main_panel_exposes_one_project_wide_toggle(self):
         toolkit = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
         self.assertIn("proc ::HWToolkit::toggleProjectTopmost", toolkit)
-        self.assertIn("$w.foot.topmost", toolkit)
+        self.assertIn("foot.buttons.topmost", toolkit)
         self.assertIn("Always on Top: On", toolkit)
         self.assertIn("Always on Top: Off", toolkit)
 

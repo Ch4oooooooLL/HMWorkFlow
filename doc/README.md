@@ -2,13 +2,13 @@
 
 快捷键的首次安装、更新和恢复流程见 [快捷键安装与更新](shortcut_installation.md)。请优先运行 `install_update.tcl`；`hw_toolkit.tcl` 保留为兼容入口。
 
-面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：中面抽取、几何清理、焊缝面、钣金网格与 washer、局部网格优化、铸件四面体网格、RBE2、螺栓连接和接触设置。
+面向 HyperMesh 2019 的 Tcl/Tk 前处理工具集。项目把常用的车身/结构件前处理动作组织成一个主入口：中面抽取、几何清理、焊缝面、钣金网格与 washer、局部网格优化、RBE2、螺栓连接和接触设置。
 
 局部网格优化模块的集成状态、使用步骤、HM2019 运行验证和已知限制见 [README_LocalMeshOptimizer.md](README_LocalMeshOptimizer.md)。该模块坚持以 HyperMesh criteria 和原生质量结果为最终判定，并保留运行时错误处理、任务快照、复检和回滚。
 
 默认界面语言为中文。需要英文界面时，将项目根目录 `config.yaml` 中的 `workflow.language` 改为 `en_US`。
 
-界面基础设施已统一迁移到 HyperWorks 2019 内置的 `hwtk 1.0`。主面板、所有模块顶层窗口和公共进度窗口通过 `modules/workflow_common.tcl` 中的统一适配层创建；在非 HyperWorks Tcl 环境中会自动回退到 Tk/ttk。第一阶段保留各模块内部的既有参数控件和业务逻辑，后续可以按模块逐步替换为 hwtk 控件。
+界面基础设施统一使用经典 Tk 后端（进度条等少量控件用 ttk），配色直接采用 HyperMesh 原生系统色板，因此 2019 与 2022 的窗口外观和布局完全一致。`modules/workflow_common.tcl` 提供共享构建器（分组标题、操作条、表单行、滚动容器、窗口居中）。
 
 窗口不再使用永久 `-topmost`。调用 HyperMesh 原生实体选择面板时，只临时隐藏由工具箱登记的窗口，不影响同一 HyperMesh 进程中的其他 Tcl 窗口。
 
@@ -20,7 +20,7 @@
 File > Run > Tcl/Tk Script > hw_toolkit.tcl
 ```
 
-运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的双栏布局：左侧按分类切换并选择工具，右侧显示所选工具的说明与操作按钮。模块归类为三部分显示：
+运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的扁平单层布局：所有工具按分类分组、一屏列出，点击工具名称直接运行。模块归类为三部分显示：
 
 ```text
 Geometry
@@ -28,9 +28,9 @@ Mesh
 Connection
 ```
 
-左侧的分类按钮切换 `Geometry` / `Mesh` / `Connection`，下方列表选择具体工具；右侧显示工具说明和 `运行` / `设置` / `快捷键` / `撤回` 操作。模块运行结束后会自动刷新 Model Browser 并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
+每个工具一行：名称（点击即运行，悬停高亮）＋ 一句话说明 ＋ `设置` / `绑定快捷键` 两个按钮。模块运行结束后会自动刷新 Model Browser 并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
 
-主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理可见模块快捷键。选中工具后，其快捷键显示在右侧详情区；未设置时显示 `未绑定 / Unbound`。点击该区域会打开快捷键管理器并选中对应模块。
+主面板底部的 `快捷键管理 / Shortcuts` 用于统一管理全部模块快捷键。每个工具行的 `绑定快捷键` 按钮会直接打开快捷键管理器并选中对应模块；按钮上同时显示当前绑定状态。
 
 快捷键会直接调用模块的 `proc` 执行入口，不会打开 HMWorkFlow 主界面，也不会打开模块的 `more` 配置界面。
 
@@ -76,8 +76,7 @@ Connection
 ### 2.1 准备项目配置
 
 1. 在 `BatchMesher 自动网格划分` 中配置 HyperMesh 2019 `hmbatch.exe` 及用户维护的 `.criteria` / `.param` 预设；washer 行为由 `.param` 文件控制。
-2. 检查 `config/casting_mesh_rules.txt`，确认铸件三角面网格、质量迭代和 TetraMesh 参数。
-3. 检查 `config/seam_rules.txt`、`config/geometry_cleanup_rules.txt`、`config/contact_rules.txt`，确认焊缝面、几何清理和接触默认参数。
+2. 检查 `config/seam_rules.txt`、`config/geometry_cleanup_rules.txt`、`config/contact_rules.txt`，确认焊缝面、几何清理和接触默认参数。
 
 这些配置文件都是 `|` 分隔文本，模块面板中修改参数后，部分模块会把最新 UI 状态保存到 `config/*_state.txt`。
 
@@ -112,10 +111,9 @@ AUTO_CONTACT_*
 实体件和铸件建议按下面顺序执行：
 
 1. `Geometry Cleanup: Chamfer/Recess`：按需要清理小特征、倒角或沉台。
-2. `Casting TetraMesh`：对铸件执行 surface 清理、三角面网格质量迭代和 TetraMesh。
-3. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
-4. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
-5. `Contact Setup`：为实体/壳或实体/实体的相对面建立接触。
+2. `Solid Through-Hole RBE2`：对实体网格圆柱贯通孔创建 RBE2。
+3. `RBE2 Bolt Connector`：在上下层或多层 RBE2 中心节点之间生成螺栓连接。
+4. `Contact Setup`：为实体/壳或实体/实体的相对面建立接触。
 
 ### 2.5 中断、返回和刷新
 
@@ -136,7 +134,6 @@ AUTO_CONTACT_*
 |   |-- washer_rules.txt
 |   |-- seam_rules.txt
 |   |-- geometry_cleanup_rules.txt
-|   |-- casting_mesh_rules.txt
 |   `-- contact_rules.txt
 `-- modules/
     |-- workflow_common.tcl
@@ -146,7 +143,6 @@ AUTO_CONTACT_*
     |-- seam_surface.tcl
     |-- batch_mesher.tcl
     |-- batch_mesher/
-    |-- casting_tetramesh.tcl
     |-- local_mesh_optimizer.tcl
     |-- local_mesh_optimizer/
     |   |-- python/
@@ -187,7 +183,6 @@ workflow:
 | `washer_rules.txt` | 孔径与 washer 规则。 |
 | `seam_rules.txt` | Seam Surface Creation 默认参数。 |
 | `geometry_cleanup_rules.txt` | Geometry Cleanup 默认参数。 |
-| `casting_mesh_rules.txt` | Casting TetraMesh 默认参数。 |
 | `contact_rules.txt` | Contact Setup 默认参数。 |
 | `*_state.txt` | 模块 UI 状态缓存，由脚本自动生成。 |
 
@@ -300,29 +295,7 @@ SEAM_T2.0
 - 每个任务记录状态、耗时、Surface IDs、Tcl 错误和独立日志。
 - washer 继续由用户 `.param` 文件控制，工具不传入覆盖参数。
 
-### 6.5 Casting TetraMesh
-
-入口：`::CastingTetMesh::run`
-
-功能：执行铸件 surface 清理、三角面网格质量迭代和 TetraMesh 体网格填充。
-
-用法：
-
-1. 在主面板运行 `Casting TetraMesh`。
-2. 点击 `选择/重选组件`，选择铸件几何 component。
-3. 检查删除 solid、surface 清理、三角面网格、2D 质量迭代和 TetraMesh 选项。
-4. 检查 criteria、cleanup 参数、`tet_string` 和 `pars_string`。
-5. 点击开始执行。
-
-输出：
-
-- 可删除 solid 并保留边界 surface。
-- 可清理小孔、小圆角、短边等微小特征。
-- 创建三角面网格并进行 2D 质量迭代。
-- 质量通过后执行 TetraMesh 体网格填充。
-- 可将失败壳单元组织到 `AUTO_CASTING_FAILED_2D`。
-
-### 6.6 Shell Washer-Hole RBE2
+### 6.5 Shell Washer-Hole RBE2
 
 入口：`::RB2W::run`
 
@@ -345,7 +318,7 @@ SEAM_T2.0
 - RBE2 只移动到输出 component，不移动源节点。
 - 模块会检查已有 RBE2，避免重复创建。
 
-### 6.7 Solid Through-Hole RBE2
+### 6.6 Solid Through-Hole RBE2
 
 入口：`::AutoHoleRBE2::run`
 
@@ -366,7 +339,7 @@ SEAM_T2.0
 - 输出到指定结果 component。
 - 运行结束后可自动删除临时自由面 component。
 
-### 6.8 RBE2 Bolt Connector
+### 6.7 RBE2 Bolt Connector
 
 入口：`::RB2Bolt::run`
 
@@ -392,7 +365,7 @@ SEAM_T2.0
 - 输出属性按孔径和属性卡命名，例如 `BOLT_D12_PBEAM`，避免 CBEAM/CBAR 只有几何线而没有求解刚度。
 - 只组织新建的一维连接单元，不移动源节点。
 
-### 6.9 Contact Setup
+### 6.8 Contact Setup
 
 入口：`::ContactSetup::run`
 
@@ -420,7 +393,7 @@ SEAM_T2.0
 - 实体 component 会先生成自由面临时组件；壳 component 直接使用壳单元。
 - 修改模式只会从当前 contact surface 中移除所选单元，不删除源 component 原始网格。
 
-### 6.10 Solid Seam Connector
+### 6.9 Solid Seam Connector
 
 入口：`::SolidSeam::run`
 
@@ -438,7 +411,7 @@ SEAM_T2.0
 
 完整识别验证可运行 `examples/SolidSeam_Validation/generate_fem.py`，并导入生成的单一组合模型 `SolidSeam_Combined_Validation.fem`。对应 manifest 给出了每组应选组件、参数和预期结果。
 
-### 6.11 网格焊缝完整性检查
+### 6.10 网格焊缝完整性检查
 
 入口：`::WeldIntegrityCheck::runAction`
 

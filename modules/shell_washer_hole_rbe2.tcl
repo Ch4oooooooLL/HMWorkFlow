@@ -327,7 +327,7 @@ proc ::RB2W::showPanel {{settingsOnly 0}} {
     set sh [winfo screenheight $w]
     set ww [winfo reqwidth $w]
     set wh [winfo reqheight $w]
-    wm geometry $w +[expr {($sw-$ww)/2}]+[expr {($sh-$wh)/2}]
+    ::HWFlow::centerWindow $w
 
     tkwait window $w
     return $ui(ok)
@@ -1578,7 +1578,6 @@ proc ::RB2W::refreshBrowsersAndGraphics {{force 0}} {
         catch {::HWFlow::refreshBrowser}
         return
     }
-    catch {hmbr_signals buffer stop}
     catch {hwbrowsermanager view flush true}
     catch {hm_redraw}
     catch {update idletasks}
