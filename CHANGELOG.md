@@ -2,6 +2,8 @@
 
 ## Unreleased - platform stabilization
 
+- 提交 2026-08-08 跨模块原生指令审计的探针脚本：`tools/audit_*.tcl`（103 个，每模块一组，见 `docs/module_command_audit_2026-08-08.md` §7 证据清单）、`tools/fix_probe_bolt_*.tcl`（修复探针）、`tools/fix_probe_geometry_cleanup22.tcl` 及实机探针 `tools/probe_*.tcl`（rbe2/bolt/adhesive/solid_seam/quadratic 等），可复用于修复验证。`.gitignore` 同步覆盖探针运行产物：`runtime/` 下的导出模型与 KEY=VALUE 日志（`*.fem/*.hm/*.inp/*.txt/*.tcl` 及 `audit_batch_mesher_work_*/`）不入库；一次性调试文件 `tools/diag_*.tcl` 与根目录临时探针（`_probe_asm*`、`command1.tcl`、求解器 .msg）按约定忽略；`/.zcode/` 本地记忆目录忽略。
+
 - 新增验证模型生成体系：`doc/validation_model_generation_conventions.md` 定义全项目验证模型统一约定（FEM 格式、manifest schema、自检要求、正常+失败双覆盖）；`examples/` 下新增 13 个验证目录（GeometryCleanup / Midsurface+BOM / SeamSurface / SolidSeam_Extended / MeshSeamWeld / FemAutoSeam / WasherHoleRBE2 / SolidHoleRBE2 / BoltConnector / LocalMeshOptimizer / WeldIntegrityCheck / AdhesiveConnector / ContactSetup）。全部为确定性生成器（网格纯 stdlib 便携 python38；几何 cadquery 开发期工具），内嵌拓扑自检，产物 .fem/.step/_manifest.json/.criteria 遵循 gitignore 约定不入库，仅提交生成器与中文 README。
 
 - 实体焊缝节点源改为显式的第一组件：选择流程拆为“节点来源组件”和“几何/连接目标组件”两次单选；Shell 按平行边界或最近边线取节点，Solid 按距第二组件最近外表面的边线取节点，并阻止组件 ID 排序颠倒两者角色。

@@ -6,6 +6,7 @@
 AGENTS.md
 /.agents/
 /.codex/
+/.zcode/
 
 # Local test, build, log, and solver output
 /.pytest_cache/
@@ -13,7 +14,10 @@ AGENTS.md
 /logs/
 /temp/
 /command.tcl
+/command1.tcl
 /optistruct.msg
+/abaqus.msg
+/nastran.msg
 
 # Generated documentation captures and task workspaces
 /doc/command.tcl
@@ -26,6 +30,14 @@ AGENTS.md
 /runtime/hm_source_modules.ok
 /runtime/hm2019_matrix_report.json
 /runtime/hm_hybrid_export_smoke.ok
+# Headless audit/probe runtime outputs: exported models, sessions and logs
+# (probe scripts live in tools/, their KEY=VALUE results belong to runtime/).
+/runtime/*.fem
+/runtime/*.hm
+/runtime/*.inp
+/runtime/*.txt
+/runtime/*.tcl
+/runtime/audit_batch_mesher_work_*/
 *.h3d
 *.op2
 *.odb
@@ -49,6 +61,15 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.pyo
+
+# Ad-hoc root-level probe fixtures (HyperMesh command recordings, solver
+# messages and throwaway FE probes; not repository source).
+/_probe_asm*.fem
+/_probe_asm*.tcl
+
+# One-off headless diagnostics (docs/module_command_audit_2026-08-08.md §8:
+# tools/diag_*.tcl are leftover debug files unrelated to the audit).
+/tools/diag_*.tcl
 
 # User-confirmed final reports are model data, not repository source.
 LocalMeshOptimizer_Report_*/
