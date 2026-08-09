@@ -6,7 +6,9 @@ proc ::SolidSeam::runDetection {} {
         set ui(status) [::SolidSeam::txt "正在选择组件..." "Selecting components..."]; update idletasks
         set componentIds [::SolidSeam::selectComponents]
         if {[llength $componentIds] == 0} { error "__SOLID_SEAM_CANCEL__" }
-        set primaryIds [lsort -integer -unique [::SolidSeam::selectedComponentsForDetection]]
+        # Preserve the explicit first/second panel order. Sorting here used to
+        # silently turn the lower component id into the weld-node source.
+        set primaryIds [::SolidSeam::selectedComponentsForDetection]
         set ui(status) [::SolidSeam::txt "正在自动识别焊缝位置与类型..." "Auto-detecting seam locations and types..."]; update idletasks
         ::SolidSeam::autoDetectAndCreate $primaryIds
         set ui(status) [::SolidSeam::txt "创建批次完成：$::SolidSeam::lastResultSummary" "Creation batch complete: $::SolidSeam::lastResultSummary"]

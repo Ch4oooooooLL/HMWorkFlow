@@ -158,6 +158,15 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
     catch {*clearmark comps 2}
     eval *createmark comps 2 $sourceComponentId $targetComponentId
 
+    # The connector entity is assigned to the CURRENT COLLECTOR component at
+    # creation time.  The weld nodes come from the FIRST component, so the
+    # connector must be marked on it too - never on the second component.
+    # (Verified on 2019.0.0.70: ce_comp follows *currentcollector components.)
+    catch {set sourceComponentName [hm_getvalue comps id=$sourceComponentId dataname=name]}
+    if {$sourceComponentName ne ""} {
+        catch {*currentcollector components $sourceComponentName}
+    }
+
     set executableDir [hm_info -appinfo EXECUTABLEDIR]
     set feConfigPath [file join $executableDir feconfig.cfg]
     if {![file isfile $feConfigPath]} { error "HM2019 connector configuration is missing: $feConfigPath" }

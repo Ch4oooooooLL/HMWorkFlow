@@ -71,44 +71,56 @@ proc ::SolidSeam::elementNodes {elementId} {
     return $nodes
 }
 
-# Is the component made of solid (3D) elements?  Config ids: 105 tetra4,
-# 106 hex8, 107 penta6, 108 pyramid5, 205 tetra10, 206 penta15, 207 hex20,
-# 208 hex8 (Nastran template numbering).
+# Is the component made of solid (3D) elements?  Config ids verified on the
+# real machine (HM2019 / HM2022 OptiStruct template, hm_getvalue dataname=config):
+#   204 tetra4, 205 pyramid5, 206 penta6, 208 hex8,
+#   210 tetra10, 213 pyra13, 215 penta15, 220 hex20
+# Shells (never solids): 103 tria3, 104 quad4, 106 tria6, 108 quad8.
 proc ::SolidSeam::componentIsSolid {componentId} {
     foreach elementId [::SolidSeam::componentElementIds $componentId] {
-        if {[::SolidSeam::elementConfig $elementId] in {105 106 107 108 205 206 207 208}} {
+        if {[::SolidSeam::elementConfig $elementId] in {204 205 206 208 210 213 215 220}} {
             return 1
         }
     }
     return 0
 }
 
-# Face node sets of an element: shells contribute their single face, solids
-# contribute each boundary face (hex8: 6 quads, penta6: 2 tri + 3 quad,
-# tetra4: 4 tri, pyramid5: 1 quad + 4 tri).  Order follows the element
-# node numbering so faces are canonical (sorted key) and counted.
+# Face node sets of an element: shells contribute their single face (the node
+# ring, corners then edge mids), solids contribute each boundary face with
+# the ring in edge order (corner, mid, corner, ...) so consecutive pairs are
+# the real element edges.  The quadratic layouts were verified on the real
+# machine with *findfaces: hex20 keeps the Nastran edge-mid numbering for the
+# bottom face (9-12) but stores the TOP face mids as 17-20 and the vertical
+# edge mids as 13-16 (opposite of Nastran).
 proc ::SolidSeam::elementFaces {elementId} {
     set nodes [::SolidSeam::elementNodes $elementId]
     set config [::SolidSeam::elementConfig $elementId]
     set faces {}
     switch -- $config {
-        103 - 104 { ;# tri3 / quad4 shell: single face from the node ring
+        103 - 104 - 106 - 108 { ;# tri3 / quad4 / tria6 / quad8 shell
             lappend faces $nodes
         }
-        108 { ;# pyramid5: base quad nodes 1-4 + 4 tri side faces (apex node 5)
+        204 { ;# tetra4: 4 triangular faces
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 2]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 3]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 2] [lindex $nodes 3]]
+            lappend faces [list [lindex $nodes 1] [lindex $nodes 2] [lindex $nodes 3]]
+        }
+        205 { ;# pyramid5: base quad nodes 1-4 + 4 tri side faces (apex node 5)
             lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 2] [lindex $nodes 3]]
             lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 4]]
             lappend faces [list [lindex $nodes 1] [lindex $nodes 2] [lindex $nodes 4]]
             lappend faces [list [lindex $nodes 2] [lindex $nodes 3] [lindex $nodes 4]]
             lappend faces [list [lindex $nodes 3] [lindex $nodes 0] [lindex $nodes 4]]
         }
-        105 { ;# tetra4: 4 triangular faces
+        206 { ;# penta6: 2 tri + 3 quad
             lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 2]]
-            lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 3]]
-            lappend faces [list [lindex $nodes 0] [lindex $nodes 2] [lindex $nodes 3]]
-            lappend faces [list [lindex $nodes 1] [lindex $nodes 2] [lindex $nodes 3]]
+            lappend faces [list [lindex $nodes 3] [lindex $nodes 4] [lindex $nodes 5]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 4] [lindex $nodes 3]]
+            lappend faces [list [lindex $nodes 1] [lindex $nodes 2] [lindex $nodes 5] [lindex $nodes 4]]
+            lappend faces [list [lindex $nodes 2] [lindex $nodes 0] [lindex $nodes 3] [lindex $nodes 5]]
         }
-        106 - 208 { ;# hex8: 6 quad faces (208 = Nastran hex8 numbering)
+        208 { ;# hex8: 6 quad faces
             lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 2] [lindex $nodes 3]]
             lappend faces [list [lindex $nodes 4] [lindex $nodes 5] [lindex $nodes 6] [lindex $nodes 7]]
             lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 5] [lindex $nodes 4]]
@@ -116,12 +128,37 @@ proc ::SolidSeam::elementFaces {elementId} {
             lappend faces [list [lindex $nodes 2] [lindex $nodes 3] [lindex $nodes 7] [lindex $nodes 6]]
             lappend faces [list [lindex $nodes 3] [lindex $nodes 0] [lindex $nodes 4] [lindex $nodes 7]]
         }
-        107 { ;# penta6: 2 tri + 3 quad
-            lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 2]]
-            lappend faces [list [lindex $nodes 3] [lindex $nodes 4] [lindex $nodes 5]]
-            lappend faces [list [lindex $nodes 0] [lindex $nodes 1] [lindex $nodes 4] [lindex $nodes 3]]
-            lappend faces [list [lindex $nodes 1] [lindex $nodes 2] [lindex $nodes 5] [lindex $nodes 4]]
-            lappend faces [list [lindex $nodes 2] [lindex $nodes 0] [lindex $nodes 3] [lindex $nodes 5]]
+        210 { ;# tetra10: 4 tri faces, mids 5-7 on face 1 then 8-10 on edges
+            ;# to the opposite corner (5=12, 6=23, 7=31, 8=14, 9=24, 10=34)
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 4] [lindex $nodes 1] [lindex $nodes 5] [lindex $nodes 2] [lindex $nodes 6]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 7] [lindex $nodes 3] [lindex $nodes 8] [lindex $nodes 1] [lindex $nodes 4]]
+            lappend faces [list [lindex $nodes 1] [lindex $nodes 8] [lindex $nodes 3] [lindex $nodes 9] [lindex $nodes 2] [lindex $nodes 5]]
+            lappend faces [list [lindex $nodes 2] [lindex $nodes 9] [lindex $nodes 3] [lindex $nodes 7] [lindex $nodes 0] [lindex $nodes 6]]
+        }
+        213 { ;# pyra13: base quad 1-4 + mids 6-9, apex 5 + edge mids 10-13
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 5] [lindex $nodes 1] [lindex $nodes 6] [lindex $nodes 2] [lindex $nodes 7] [lindex $nodes 3] [lindex $nodes 8]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 9] [lindex $nodes 4] [lindex $nodes 10] [lindex $nodes 1] [lindex $nodes 5]]
+            lappend faces [list [lindex $nodes 1] [lindex $nodes 10] [lindex $nodes 4] [lindex $nodes 11] [lindex $nodes 2] [lindex $nodes 6]]
+            lappend faces [list [lindex $nodes 2] [lindex $nodes 11] [lindex $nodes 4] [lindex $nodes 12] [lindex $nodes 3] [lindex $nodes 7]]
+            lappend faces [list [lindex $nodes 3] [lindex $nodes 12] [lindex $nodes 4] [lindex $nodes 9] [lindex $nodes 0] [lindex $nodes 8]]
+        }
+        215 { ;# penta15: 2 tri + 3 quad with mids (7-9 bottom, 10-12 vertical,
+            ;# 13-15 top: 7=12, 8=23, 9=31, 10=14, 11=25, 12=36, 13=45, 14=56,
+            ;# 15=64)
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 6] [lindex $nodes 1] [lindex $nodes 7] [lindex $nodes 2] [lindex $nodes 8]]
+            lappend faces [list [lindex $nodes 3] [lindex $nodes 12] [lindex $nodes 4] [lindex $nodes 13] [lindex $nodes 5] [lindex $nodes 14]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 9] [lindex $nodes 3] [lindex $nodes 12] [lindex $nodes 4] [lindex $nodes 10] [lindex $nodes 1] [lindex $nodes 6]]
+            lappend faces [list [lindex $nodes 1] [lindex $nodes 10] [lindex $nodes 4] [lindex $nodes 13] [lindex $nodes 5] [lindex $nodes 11] [lindex $nodes 2] [lindex $nodes 7]]
+            lappend faces [list [lindex $nodes 2] [lindex $nodes 11] [lindex $nodes 5] [lindex $nodes 14] [lindex $nodes 3] [lindex $nodes 9] [lindex $nodes 0] [lindex $nodes 8]]
+        }
+        220 { ;# hex20: 6 quad faces, 8 nodes each; bottom mids 9-12 on face 6,
+            ;# vertical mids 13-16, top mids 17-20 (machine-verified layout)
+            lappend faces [list [lindex $nodes 3] [lindex $nodes 15] [lindex $nodes 7] [lindex $nodes 19] [lindex $nodes 4] [lindex $nodes 12] [lindex $nodes 0] [lindex $nodes 11]]
+            lappend faces [list [lindex $nodes 2] [lindex $nodes 14] [lindex $nodes 6] [lindex $nodes 18] [lindex $nodes 7] [lindex $nodes 15] [lindex $nodes 3] [lindex $nodes 10]]
+            lappend faces [list [lindex $nodes 1] [lindex $nodes 13] [lindex $nodes 5] [lindex $nodes 17] [lindex $nodes 6] [lindex $nodes 14] [lindex $nodes 2] [lindex $nodes 9]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 12] [lindex $nodes 4] [lindex $nodes 16] [lindex $nodes 5] [lindex $nodes 13] [lindex $nodes 1] [lindex $nodes 8]]
+            lappend faces [list [lindex $nodes 4] [lindex $nodes 16] [lindex $nodes 5] [lindex $nodes 17] [lindex $nodes 6] [lindex $nodes 18] [lindex $nodes 7] [lindex $nodes 19]]
+            lappend faces [list [lindex $nodes 0] [lindex $nodes 8] [lindex $nodes 1] [lindex $nodes 9] [lindex $nodes 2] [lindex $nodes 10] [lindex $nodes 3] [lindex $nodes 11]]
         }
         default {
             ;# unsupported config: fall back to the node list as a single face
@@ -171,10 +208,25 @@ proc ::SolidSeam::boundaryNodesOfComponent {componentId} {
         }
     }
     set boundary {}
-    set limit [expr {$solid ? 2 : 1}]
-    foreach key [array names edgeCount] {
-        if {$edgeCount($key) == $limit} {
-            foreach nodeId [split $key ,] { lappend boundary $nodeId }
+    # Shell: a free edge is used by exactly one element (limit 1).
+    # Solid: each owning element contributes two faces per edge, so a surface
+    # edge is used by 2 faces (single element) or 4 faces (two elements
+    # meeting along the edge, e.g. a tetra plate's perimeter edge owned by
+    # the bottom and side tets).  Interior edges are used by 6+ faces
+    # (3+ elements).  "<= 4" keeps every surface node while excluding the
+    # interior; for hexa/penta/pyra meshes surface edges are 2 and interior
+    # are 8+, so the bound is exact there too.
+    if {$solid} {
+        foreach key [array names edgeCount] {
+            if {$edgeCount($key) <= 4} {
+                foreach nodeId [split $key ,] { lappend boundary $nodeId }
+            }
+        }
+    } else {
+        foreach key [array names edgeCount] {
+            if {$edgeCount($key) == 1} {
+                foreach nodeId [split $key ,] { lappend boundary $nodeId }
+            }
         }
     }
     return [lsort -integer -unique $boundary]
@@ -371,21 +423,26 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId} {
 
 # ---------------------------------------------------------------------------
 # Junction detection: nodes of compA that lie within searchDistance of a node
-# of compB, with the closest partner recorded.  The node list always comes
-# from the FIRST component (compA = source); a mutual-nearest filter then
-# keeps only the junction layer: for a thick solid the far face is also
-# within the search distance, so a node is kept only when it is also the
-# nearest compA node of its matched compB node (within 1.5x, tolerating
-# different mesh densities).  Without this the far face nodes produce
-# twisted chains and wrong weld locations.
+# of compB, with the closest partner recorded.
+#
+# Weld node rules (user contract):
+#   1. the node list always comes from the FIRST component's boundary;
+#   2. a shell parallel to the target keeps ALL its free-edge nodes;
+#   3. a shell at an angle to the target keeps only the nodes of the free
+#      edge(s) closest to the target;
+#   4. a solid keeps the boundary of the outer face closest to the target;
+#   5. nodes never belong to the second component - guaranteed structurally,
+#      every candidate below is built from the source's own elements only,
+#      so a target-exclusive node can never appear in the list.
 # ---------------------------------------------------------------------------
 proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searchDistance} {
     # Only boundary nodes of the FIRST component are weld candidates: shells
     # use their free-edge nodes; solids use the boundary of the outer face
     # that faces the target component.  Interior nodes can never be weld
     # locations and would only distort the chain.
+    set sourceSolid [::SolidSeam::componentIsSolid $sourceComponentId]
     set sourceNodes [::SolidSeam::boundaryNodesOfComponent $sourceComponentId]
-    if {[::SolidSeam::componentIsSolid $sourceComponentId]} {
+    if {$sourceSolid} {
         set facingNodes [::SolidSeam::solidFacingBoundaryNodes $sourceComponentId $targetComponentId]
         if {[llength $facingNodes] > 0} {
             set sourceNodes $facingNodes
@@ -420,38 +477,25 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     }
     if {[llength $pairs] == 0} { return {} }
 
-    # nearest compA distance of every matched compB node (computed once).
-    # A compB node may itself be a compA node (identical ids across comps),
-    # so exclude self-distance: use the pair distance as the reference and
-    # keep the pair only if it is not much farther than the closest other
-    # compA node of the compB partner.
-    set result {}
-    foreach pair $pairs {
-        set s [lindex $pair 0]
-        set t [lindex $pair 1]
-        set d [lindex $pair 2]
-        set bestOther 1.0e12
-        foreach sourceNode $sourceNodes {
-            if {$sourceNode == $s} { continue }
-            set dd [::SolidSeam::nodeDistance $sourceXYZ($sourceNode) $targetXYZ($t)]
-            if {$dd < $bestOther} { set bestOther $dd }
-        }
-        set reference [expr {$d < $bestOther ? $d : $bestOther}]
-        if {$d <= 1.5 * $reference + 0.01} {
-            lappend result $pair
-        }
-    }
+    # A shell parallel to the target keeps ALL its boundary nodes within the
+    # search distance (rule 2): the whole outline is the weld line, so no
+    # closest-layer cut applies.
+    set sourceParallel [expr {!$sourceSolid && [::SolidSeam::normalsParallel \
+        [::SolidSeam::componentAverageNormal $sourceComponentId] \
+        [::SolidSeam::componentAverageNormal $targetComponentId]]}]
+    if {$sourceParallel} { return $pairs }
 
-    # closest-layer filter: keep only the edge(s) at the minimum gap.  The
-    # search distance may cover several parallel edges of the source face
-    # (e.g. a plate edge plus an inner row); the weld belongs on the row that
-    # is actually closest to the target, like the user's manual node list.
-    # A curved seam's gap to the target varies along the arc (3.0-5.3 mm on
-    # the F03 case) while the next row is a full mesh pitch away (13 mm), so
-    # split by the largest distance gap: keep the near side of the biggest
-    # jump.  A fallback 1.5x floor guards against a single outlier creating
-    # a tiny gap.
-    set sortedPairs [lsort -real -index 2 $result]
+    # closest-layer filter: keep only the edge(s) at the minimum gap.  This
+    # is rule 3 for angled shells (the free edge closest to the target) and
+    # the final refinement of rule 4 for solids (the contact band of the
+    # closest face).  The search distance may cover several parallel edges of
+    # the source face (e.g. a plate edge plus an inner row); the weld belongs
+    # on the row that is actually closest to the target.  A curved seam's gap
+    # to the target varies along the arc (3.0-5.3 mm on the F03 case) while
+    # the next row is a full mesh pitch away (13 mm), so split by the largest
+    # distance gap: keep the near side of the biggest jump.  A fallback 1.5x
+    # floor guards against a single outlier creating a tiny gap.
+    set sortedPairs [lsort -real -index 2 $pairs]
     set firstDistance [lindex [lindex $sortedPairs 0] 2]
     set splitDistance [expr {$firstDistance * 1.5 + 0.5}]
     set biggestGap 0.0
@@ -466,16 +510,28 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     # The seam's own gap variation along a curved edge is smaller than that
     # (F03: 3.0-5.3 mm within one layer, 13 mm to the next row), so when the
     # biggest gap is sub-pitch the whole set is one layer and nothing is cut.
-    set meshPitch [::SolidSeam::median [::SolidSeam::chainSpacings [::SolidSeam::pairSourceIds $result]]]
+    set meshPitch [::SolidSeam::median [::SolidSeam::chainSpacings [::SolidSeam::pairSourceIds $pairs]]]
     if {$meshPitch <= 0.0} { set meshPitch 10.0 }
     if {$biggestGap < 0.5 * $meshPitch} {
         set splitDistance 1.0e12
     }
     set closest {}
-    foreach pair $result {
+    foreach pair $pairs {
         if {[lindex $pair 2] <= $splitDistance} { lappend closest $pair }
     }
     return $closest
+}
+
+# Are two component normals parallel (closest angle within 20 deg, same
+# tolerance as classifyJoint)?  A zero/undefined normal is not parallel: the
+# closest-edge rule then applies, which is the safe default for closed shell
+# boxes and cylindrical shells.
+proc ::SolidSeam::normalsParallel {a b} {
+    if {[llength $a] != 3 || [llength $b] != 3} { return 0 }
+    if {$a eq {0 0 0} || $b eq {0 0 0}} { return 0 }
+    set rawAngle [::SolidSeam::angleDeg $a $b]
+    set closest [expr {$rawAngle <= 90.0 ? $rawAngle : 180.0 - $rawAngle}]
+    return [expr {$closest <= 20.0}]
 }
 
 # Median spacing between consecutive nodes of a chain (used by the layer
