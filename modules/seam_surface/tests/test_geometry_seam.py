@@ -64,7 +64,7 @@ class GeometrySeamTclTests(unittest.TestCase):
         path = self.tcl.eval("::hmtoolkit::seam::config::path")
         self.assertTrue(path.replace("\\", "/").endswith("/seam_rules.txt"))
         values = self.tcl.eval("::hmtoolkit::seam::config::load")
-        self.assertIn("distance_tolerance", values)
+        self.assertIn("projected_path_merge_tolerance", values)
         self.assertEqual(self.tcl.eval("llength [info commands ::hmtoolkit::seam::config::file]"), "0")
         self.assertGreater(float(self.tcl.eval("::hmtoolkit::seam::config::get stitch_tolerance")), 0.0)
 
@@ -571,9 +571,14 @@ class GeometrySeamTclTests(unittest.TestCase):
             rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
             rename ::hmtoolkit::seam::validation::created_surfaces_for_component ::hmtoolkit::seam::validation::created_surfaces_for_component_real
             rename ::hmtoolkit::seam::native::ensure_current_component ::hmtoolkit::seam::native::ensure_current_component_real
+            rename ::hmtoolkit::seam::executor::surfaces_from_lines ::hmtoolkit::seam::executor::surfaces_from_lines_real
+            rename ::hmtoolkit::seam::executor::merge_ruled_surfaces ::hmtoolkit::seam::executor::merge_ruled_surfaces_real
+            rename ::hmtoolkit::seam::executor::equivalence_created_surfaces ::hmtoolkit::seam::executor::equivalence_created_surfaces_real
+            rename ::hmtoolkit::seam::executor::require_minimum_line_length ::hmtoolkit::seam::executor::require_minimum_line_length_real
             set ::tl_events {}
             set ::tl_line_snapshots 0
             proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {return [dict get $data $key]}
+            proc ::hmtoolkit::seam::executor::require_minimum_line_length {args} {return 10.0}
             proc ::hmtoolkit::seam::candidate::path_topology {args} {
                 return [dict create kind PATH branch_nodes 0]
             }
@@ -581,7 +586,7 @@ class GeometrySeamTclTests(unittest.TestCase):
                 set ::tl_projected_candidates $created
                 return {200 201}
             }
-            proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second} {
+            proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second args} {
                 return [dict create first_lines $first second_lines $second]
             }
             proc ::hmtoolkit::seam::naming::thickness_from_data {data} {return 8.0}
@@ -600,6 +605,17 @@ class GeometrySeamTclTests(unittest.TestCase):
             }
             proc ::hmtoolkit::seam::native::ensure_current_component {args} {}
             proc ::hmtoolkit::seam::validation::created_surfaces_for_component {args} {return {300}}
+            proc ::hmtoolkit::seam::executor::surfaces_from_lines {lines} {
+                if {$lines eq "200 201"} {return {20 21}}
+                return {10}
+            }
+            proc ::hmtoolkit::seam::executor::merge_ruled_surfaces {surfaces} {
+                lappend ::tl_events [list merge $surfaces]
+            }
+            proc ::hmtoolkit::seam::executor::equivalence_created_surfaces {created source target component before} {
+                lappend ::tl_events [list equivalence $created $source $target]
+                return $created
+            }
             proc *surfacemarksplitwithlines {args} {lappend ::tl_events [linsert $args 0 trim]}
             proc *surfacemode {mode} {lappend ::tl_events [list surfacemode $mode]}
             proc *createlist {entityType listId args} {lappend ::tl_events [list list $entityType $listId $args]}
@@ -616,6 +632,8 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertIn("trim 1 2 0 13 0", events)
         self.assertIn("surfacemode 4", events)
         self.assertIn("ruled 1 1 2 2 1", events)
+        self.assertIn("merge 300", events)
+        self.assertIn("equivalence 300 10 {20 21}", events)
         self.assertLess(events.index("trim 1 2 0 13 0"), events.index("ruled 1 1 2 2 1"))
         self.assertEqual(self.tcl.eval("set ::tl_projected_candidates"), "200 201")
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} created_surfs"), "300")
@@ -652,6 +670,42 @@ class GeometrySeamTclTests(unittest.TestCase):
             self.tcl.eval("::hmtoolkit::seam::candidate::select_projected_trim_path {1} {10 11 20}"),
             "10 11",
         )
+
+    def test_projected_trim_path_is_extracted_from_branched_fragment_boundaries(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::candidate::line_points ::hmtoolkit::seam::candidate::line_points_real
+            rename ::hmtoolkit::seam::candidate::line_length ::hmtoolkit::seam::candidate::line_length_real
+            proc ::hmtoolkit::seam::candidate::line_points {lineId} {
+                switch -- $lineId {
+                    1  {return {{5 0 0} {5 5 0} {5 10 0}}}
+                    21 {return {{5 0 0} {5 5 0} {5 10 0}}}
+                    22 {return {{5 10 0} {1.5 10 0} {-2 10 0}}}
+                    23 {return {{-2 10 0} {-2 5 0} {-2 0 0}}}
+                    24 {return {{-2 0 0} {1.5 0 0} {5 0 0}}}
+                    25 {return {{8 0 0} {8 5 0} {8 10 0}}}
+                    26 {return {{8 10 0} {6.5 10 0} {5 10 0}}}
+                    27 {return {{5 0 0} {6.5 0 0} {8 0 0}}}
+                }
+            }
+            proc ::hmtoolkit::seam::candidate::line_length {lineId} {
+                switch -- $lineId {21 {return 10.0} 22 - 24 - 26 - 27 {return 7.0} default {return 10.0}}
+            }
+            proc hm_findclosestpointonline {x y z lineId} {
+                set best 1.0e30
+                foreach point [::hmtoolkit::seam::candidate::line_points $lineId] {
+                    set d [::hmtoolkit::seam::candidate::distance [list $x $y $z] $point]
+                    if {$d < $best} {set best $d}
+                }
+                return [list 0 0 0 $best]
+            }
+            """
+        )
+        selected = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::select_projected_trim_path "
+            "{1} {21 22 23 24 25 26 27}"
+        )
+        self.assertEqual(selected, "21")
 
     def test_project_keeps_successful_in_place_splits_when_no_surface_id_is_added(self):
         self.tcl.eval(
@@ -767,6 +821,43 @@ class GeometrySeamTclTests(unittest.TestCase):
             "{{TMP_A 91} {TMP_B 92}} {900}"
         )
         self.assertEqual(result, "501 502 503")
+
+    def test_l_surface_filters_far_offset_construction_faces(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::executor::existing_surfaces ::hmtoolkit::seam::executor::existing_surfaces_real
+            rename ::hmtoolkit::seam::executor::surface_set_bbox ::hmtoolkit::seam::executor::surface_set_bbox_real
+            proc ::hmtoolkit::seam::executor::existing_surfaces {ids} {return $ids}
+            proc ::hmtoolkit::seam::executor::surface_set_bbox {ids} {
+                switch -- [lindex $ids 0] {
+                    501 {return {2 0 -2 4 10 0}}
+                    502 {return {2 0 0 4 10 48}}
+                    503 {return {1.6 0 -2 4.4 10 0}}
+                }
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::filter_lap_result_surfaces "
+            "{501 502 503} {2 0 -2 4 10 0}"
+        )
+        self.assertEqual(result, "501 503")
+
+    def test_t_surface_prompts_for_thickness_when_imported_cad_has_none(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::naming::thickness_from_data ::hmtoolkit::seam::naming::thickness_from_data_real
+            rename ::hmtoolkit::seam::selector::prompt_thickness ::hmtoolkit::seam::selector::prompt_thickness_real
+            proc ::hmtoolkit::seam::naming::thickness_from_data {data} {error "no property thickness"}
+            proc ::hmtoolkit::seam::selector::prompt_thickness {} {return 2.5}
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::selector::ensure_execution_data T_PATH "
+            "[dict create source_surfs {10} target_surfs {20}]"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} valid"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} data thickness"), "2.5")
 
     def test_l_surface_tracks_solids_that_native_boolean_and_trim_modify_in_place(self):
         self.tcl.eval(
@@ -1128,7 +1219,13 @@ class GeometrySeamTclTests(unittest.TestCase):
         )
         self.assertEqual(
             self.tcl.eval("lindex $::connect_calls 0"),
-            "1 1 3 2 0 15 30 1 0 2 30 3 0",
+            self.tcl.eval(
+                "list 1 1 3 [::hmtoolkit::seam::config::get extend_connect_trim_mode] "
+                "[::hmtoolkit::seam::config::get extend_connect_distance] "
+                "[::hmtoolkit::seam::config::get connect_min_angle_to_target] "
+                "[::hmtoolkit::seam::config::get connect_max_angle_edge_to_surf] "
+                "1 0 2 [::hmtoolkit::seam::config::get connect_guide_angle] 3 0"
+            ),
         )
         # Source and offset guides share mark 1; the target is marked in
         # mark 2 for the duplicate/offset stage.
@@ -1139,42 +1236,44 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertEqual(self.tcl.eval("lindex $::duplicate_calls 0"), "surfs 2 1")
         self.assertEqual(self.tcl.eval("lindex $::move_calls 0"), "surfs 1 SOURCE_SEAM")
 
-    def test_parameters_panel_covers_only_baseline_configurable_items(self):
+    def test_parameters_panel_covers_all_runtime_adjustable_items(self):
         ui = (MODULE_DIR / "ui.tcl").read_text(encoding="utf-8")
         config = (MODULE_DIR / "config.tcl").read_text(encoding="utf-8")
         for key in (
             "endpoint_merge_tolerance",
-            "distance_tolerance",
             "stitch_tolerance",
             "cleanup_tolerance",
+            "projected_path_merge_tolerance",
+            "projected_path_ambiguity_tolerance",
             "area_tolerance",
             "volume_tolerance",
             "min_seam_length",
             "point_spacing",
             "geometry_offset_distance",
             "extend_offset_distance",
+            "extend_connect_distance",
             "connect_extend_distance",
             "connect_min_angle_to_target",
             "connect_max_angle_edge_to_surf",
             "connect_guide_angle",
             "lap_connect_distance",
+            "lap_result_envelope_tolerance",
+            "replace_point_projection_distance",
             "thickness_override",
         ):
             self.assertIn(key, config)
             self.assertIn(key, ui)
-        # The 2022.3-only knobs must not be offered on the 2019/2022.2 panel.
+        # Removed recognition-era and unsupported query switches stay hidden.
         for removed in (
             "connect_extend_distance_auto",
             "connect_extend_distance_factor",
-            "replace_point_projection_distance",
-            "extend_offset_type",
-            "extend_connect_trim_mode",
             "use_public_query_apis",
         ):
             self.assertNotIn(removed, ui)
-        for key in ("lap_boolean_opcode", "diagnostic_preserve_failed_geometry",
+        for key in ("lap_boolean_opcode", "extend_offset_type",
+                    "extend_connect_trim_mode", "diagnostic_preserve_failed_geometry",
                     "t_surface_trim_mode", "topology_connection_required",
-                    "private_history_api"):
+                    "private_history_api", "internal_mark_slot"):
             self.assertIn(key, config)
             self.assertIn(key, ui)
         self.assertIn("8=union", ui.lower())
@@ -1184,8 +1283,8 @@ class GeometrySeamTclTests(unittest.TestCase):
         executor = (MODULE_DIR / "executor.tcl").read_text(encoding="utf-8")
         # EXTEND keeps the dual-version mode-3 route, while the T action uses
         # the separately probed surface-to-surface extend route.
-        self.assertIn("*offset_surfaces_and_modify surfaces 2 0 1 2", executor)
-        self.assertIn("*connect_surfaces_11 1 1 3 2", executor)
+        self.assertIn("*offset_surfaces_and_modify surfaces 2 0 1 $offsetType", executor)
+        self.assertIn("*connect_surfaces_11 1 1 3 $trimMode $distance", executor)
         self.assertIn("*connect_surfaces_11 1 2 1 $trimMode $distance", executor)
         self.assertNotIn("_create_t_list_project_ruled", executor)
         self.assertIn("_create_t_list_ruled", executor)

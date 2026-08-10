@@ -21,7 +21,7 @@ Outputs (next to this script):
 Deterministic: no random sources, fixed coordinates, pitch 400 mm along X.
 
 Scenario matrix (covers all 12 seam_surface operations):
-    C01  T路径        T_PATH            L 形路径 + 底板（带翻边/孔）
+    C01  T曲面        T_PATH            L 形筋板曲面组 + 底板目标面
     C02  T列表        T_LIST            2 根筋（1 直 1 折弯）同一底板
     C03  搭接面       L_SURF            两块平行重叠板（间隙 1.0 mm）
     C04  搭接边       L_LIST            上层板台阶形搭接边 -> 下层板顶面
@@ -31,10 +31,10 @@ Scenario matrix (covers all 12 seam_surface operations):
     C08A 合并         COMBINE           两块共面相邻顶面（共享边）合并
     C08B 拆分         SPLIT             独立折线投影切分目标板
     C08C 替换点       REPLACE_POINT     自由点投影到边线
-    C09  失败：大角度斜交（45°，分类拒绝）
-    C10  失败：超距（间隙 8 mm > distance_tolerance 1.0）
-    C11  失败：短焊缝（边 4 mm < min_seam_length 5.0，边界探测）
-    C12  边界：斜 T 型（法向夹角 70°，介于平行/垂直分类之间）
+    C09  边界：大角度斜交（45°，连接角度探测）
+    C10  边界：间隙 8 mm（connect_extend_distance 探测）
+    C11  失败：T 列表短路径（边 4 mm < min_seam_length 5.0）
+    C12  边界：斜 T 型（法向夹角 70°，连接角度探测）
     C13  分布点       DISTRIBUTE_POINTS 260 mm 边按 7 mm 分布点
     C14  删除         DELETE           搭接边创建焊缝后再删除
 """
@@ -57,7 +57,6 @@ from cadquery import importers
 MODULE_PARAMS = {
     "angle_parallel_max": 15.0,          # documented parallel classification
     "angle_perpendicular_min": 75.0,     # documented perpendicular classification
-    "distance_tolerance": 1.0,           # candidate edge-to-surface distance
     "endpoint_merge_tolerance": 0.1,     # line-graph endpoint merge
     "min_seam_length": 5.0,              # documented minimum seam length
     "point_spacing": 7.0,                # distributed-point target spacing
@@ -210,7 +209,7 @@ CASES = []
 
 
 def build_c01():
-    """T路径: L 形筋板 + 带翻边/孔的底板."""
+    """T曲面: L 形筋板曲面组 + 带翻边/孔的底板目标面."""
     x0, x1 = 0.0, 260.0
     # 底板：截面（y,z）带 8 mm 下翻边，沿 X 挤出 260 mm
     profile = [(0.0, -8.0), (0.0, 0.0), (150.0, 0.0), (150.0, 2.0), (2.0, 2.0), (2.0, -8.0)]
@@ -221,14 +220,14 @@ def build_c01():
     e1a, e1b = (60.0, 30.0, 3.0), (60.0, 90.0, 3.0)
     e2a, e2b = (60.0, 90.0, 3.0), (100.0, 90.0, 3.0)
     case = Case(
-        "C01", "T 路径", "T_PATH", x0, x1,
+        "C01", "T 曲面", "T_PATH", x0, x1,
         shapes=[base, rib_a, rib_b],
         selection=[
             sel_edge("筋板 A 底部自由边（竖直段）", e1a, e1b),
             sel_edge("筋板 B 底部自由边（水平段）", e2a, e2b),
             sel_face("底板顶面（含 2 孔，目标面）", (130.0, 75.0, 2.0)),
         ],
-        expected="沿 L 形路径创建 T 焊缝条带，连接筋板底边与底板顶面；"
+        expected="第一组选择两张筋板曲面，第二组选择底板顶面；创建 T 延伸曲面，"
                  "条带归入 SEAM_Txx_Surf 组件并与底板顶面共享边线。",
         settings={"thickness": "2.0（组件名无厚度时提示输入，或设 thickness_override=2.0）"},
         notes="筋板底部距底板顶面 1.0 mm（>0 间隙，避免全闭合接头无缝可填）。",
@@ -259,8 +258,8 @@ def build_c02():
             sel_edge("筋 2 底部自由边（竖直段）", (x0 + 210.0, 120.0, 3.0), (x0 + 210.0, 90.0, 3.0)),
             sel_face("底板顶面（含 1 孔，目标面）", (x0 + 130.0, 75.0, 2.0)),
         ],
-        expected="一次选择 3 条筋底边（2 段连通路径 + 1 条独立路径，拓扑归类 LIST），"
-                 "对同一目标面创建多条 T 焊缝条带。",
+        expected="分两次执行：先选筋 1 的单条路径，再选筋 2 的两段连续路径；"
+                 "每次对同一目标面创建一条 T 焊缝，不能一次提交互不连通的两根筋。",
         settings={"thickness": "2.0"},
         notes="筋 2 为折弯筋（两竖直面共享边），底边构成 L 形；与筋 1 底边不连通。",
         min_faces=8,
@@ -473,7 +472,7 @@ def build_c08c():
 
 
 def build_c09():
-    """失败: 大角度斜交（45°），既不平行也不垂直."""
+    """边界: 大角度斜交（45°），用于连接角度探测."""
     x0, x1 = 3200.0, 3460.0
     base, _ = plate_shell_xy(
         [(x0, 0.0), (x0 + 260.0, 0.0), (x0 + 260.0, 150.0), (x0, 150.0)], 2.0,
@@ -485,23 +484,22 @@ def build_c09():
                      (p1[0] + v[0], p1[1], p1[2] + v[2]),
                      (p0[0] + v[0], p0[1], p0[2] + v[2])])
     case = Case(
-        "C09", "失败：大角度斜交（45°）", "T_PATH", x0, x1,
+        "C09", "边界：大角度斜交（45°）", "T_PATH", x0, x1,
         shapes=[base, rib],
         selection=[
             sel_edge("45° 斜筋底边（z=3）", p0, p1),
             sel_face("底板顶面（目标面）", (x0 + 130.0, 75.0, 2.0)),
         ],
-        expected="拒绝/无焊缝：筋面法向与底板法向夹角 45°，不在平行（≤15°）也不在"
-                 "垂直（≥75°）分类区间，原生命令不创建焊缝。",
+        expected="使用 T 曲面复核连接角度参数；记录默认值下原生命令是否接受，并确认两版本一致。",
         settings={},
-        notes="分类边界探测：45° 处于 angle_parallel_max 15° 与 angle_perpendicular_min 75° 之间。",
+        notes="不再使用旧自动分类阈值；由 connect_* 角度参数和原生命令决定。",
         min_faces=5,
     )
     CASES.append(case)
 
 
 def build_c10():
-    """失败: 超距（间隙 8 mm > distance_tolerance 1.0）."""
+    """边界: 8 mm 间隙，用于 connect_extend_distance 探测."""
     x0, x1 = 3600.0, 3860.0
     base, _ = plate_shell_xy(
         [(x0, 0.0), (x0 + 260.0, 0.0), (x0 + 260.0, 150.0), (x0, 150.0)], 2.0,
@@ -509,23 +507,22 @@ def build_c10():
     p0, p1 = (x0 + 100.0, 40.0, 10.0), (x0 + 180.0, 40.0, 10.0)
     rib = quad_face([p0, p1, (p1[0], p1[1], 60.0), (p0[0], p0[1], 60.0)])
     case = Case(
-        "C10", "失败：超距（8 mm）", "T_PATH", x0, x1,
+        "C10", "边界：延伸距离（8 mm）", "T_PATH", x0, x1,
         shapes=[base, rib],
         selection=[
             sel_edge("筋板底边（z=10，离底板顶面 8 mm）", p0, p1),
             sel_face("底板顶面（目标面）", (x0 + 130.0, 75.0, 2.0)),
         ],
-        expected="无焊缝：筋板底边距目标面 8 mm，超出 distance_tolerance 1.0，"
-                 "原生命令无法桥接，报『The native extension created no seam surface』。",
-        settings={},
-        notes="间隙 8.0 mm 超过 distance_tolerance（1.0）。",
+        expected="connect_extend_distance=5 时明确失败并回滚；改为 12 或默认 50 时应可延伸。",
+        settings={"connect_extend_distance": "5（失败）/12 或 50（成功）"},
+        notes="旧 distance_tolerance 已删除；T 曲面的真实距离参数是 connect_extend_distance。",
         min_faces=5,
     )
     CASES.append(case)
 
 
 def build_c11():
-    """失败: 短焊缝（边 4 mm < min_seam_length 5.0，边界探测）."""
+    """失败: T 列表短路径（边 4 mm < min_seam_length 5.0）."""
     x0, x1 = 4000.0, 4260.0
     base, _ = plate_shell_xy(
         [(x0, 0.0), (x0 + 260.0, 0.0), (x0 + 260.0, 150.0), (x0, 150.0)], 2.0,
@@ -533,15 +530,14 @@ def build_c11():
     p0, p1 = (x0 + 100.0, 70.0, 3.0), (x0 + 104.0, 70.0, 3.0)
     rib = quad_face([p0, p1, (p1[0], p1[1], 23.0), (p0[0], p0[1], 23.0)])
     case = Case(
-        "C11", "失败：短焊缝（4 mm 边）", "T_PATH", x0, x1,
+        "C11", "失败：T 列表短路径（4 mm 边）", "T_LIST", x0, x1,
         shapes=[base, rib],
         selection=[
             sel_edge("4 mm 短边（z=3）", p0, p1),
             sel_face("底板顶面（目标面）", (x0 + 130.0, 75.0, 2.0)),
         ],
-        expected="边界探测：模块源码中 min_seam_length 未在手动执行流中强制生效，"
-                 "操作会照常执行——可能创建微小焊缝或原生失败；请记录观测结果。",
-        settings={"min_seam_length": "5.0（文档值，executor 未引用）"},
+        expected="默认 min_seam_length=5 时在原生命令前明确拒绝并保持模型不变；改为 3 后可继续。",
+        settings={"min_seam_length": "5.0（失败）/3.0（继续）"},
         notes="边长 4.0 mm < min_seam_length 5.0。",
         min_faces=5,
     )
@@ -549,7 +545,7 @@ def build_c11():
 
 
 def build_c12():
-    """边界: 斜 T 型（法向夹角 70°，接近但低于 perpendicular_min 75°）."""
+    """边界: 斜 T 型（法向夹角 70°），用于连接角度探测."""
     x0, x1 = 4400.0, 4660.0
     base, _ = plate_shell_xy(
         [(x0, 0.0), (x0 + 260.0, 0.0), (x0 + 260.0, 150.0), (x0, 150.0)], 2.0,
@@ -567,10 +563,9 @@ def build_c12():
             sel_edge("70° 斜筋底边（z=3）", p0, p1),
             sel_face("底板顶面（目标面）", (x0 + 130.0, 75.0, 2.0)),
         ],
-        expected="边界探测：法向夹角 70°，在垂直分类（≥75°）之下但接近；"
-                 "观察原生命令是否接受——预期按分类逻辑拒绝，记录实际行为。",
+        expected="使用 T 曲面复核连接角度参数；记录默认值下原生命令是否接受，并确认两版本一致。",
         settings={},
-        notes="70° 介于 angle_parallel_max 15° 与 angle_perpendicular_min 75° 之间。",
+        notes="不再使用旧自动分类阈值；由 connect_* 角度参数和原生命令决定。",
         min_faces=5,
     )
     CASES.append(case)

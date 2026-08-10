@@ -58,10 +58,10 @@ proc ::hmtoolkit::seam::selector::ensure_execution_data {strategy data} {
         dict set data thickness $thickness
         return [dict create valid 1 data $data]
     }
-    if {$strategy eq "T_PATH"} {
-        return [dict create valid 0 cancelled 0 message \
-            "Unable to obtain the minimum thickness from the selected components. No seam surface was created."]
-    }
+    # Imported CAD usually has neither a Property thickness nor an _Txx
+    # component suffix. T Surface must follow the same explicit thickness
+    # prompt as the other creation routes instead of silently stopping before
+    # the executor is reached.
     set thickness [::hmtoolkit::seam::selector::prompt_thickness]
     if {$thickness eq ""} { return [dict create valid 0 cancelled 1 message "Thickness input cancelled."] }
     dict set data thickness $thickness
@@ -184,9 +184,11 @@ proc ::hmtoolkit::seam::selector::select_strategy_input {strategy} {
                 target_components [::hmtoolkit::seam::selector::components_for_surfaces [dict get $targets ids]]]
         }
         L_SURF {
-            set source [::hmtoolkit::seam::selector::mark_panel surfs 1 "Select one base surface" 1]
+            set source [::hmtoolkit::seam::selector::mark_panel surfs 1 \
+                "Select one base lap surface (parallel/overlapping pair)" 1]
             if {![dict get $source valid]} { return $source }
-            set target [::hmtoolkit::seam::selector::mark_panel surfs 2 "Select one target surface" 1]
+            set target [::hmtoolkit::seam::selector::mark_panel surfs 2 \
+                "Select the other parallel, overlapping lap surface" 1]
             if {![dict get $target valid]} { return $target }
             return [dict create valid 1 source_surfs [dict get $source ids] target_surfs [dict get $target ids] \
                 source_components [::hmtoolkit::seam::selector::components_for_surfaces [dict get $source ids]] \

@@ -32,6 +32,27 @@ proc log_result {label r} {
     if {![string equal $success 1]} {
         set err [expr {[dict exists $r error_code] ? [dict get $r error_code] : ""}]
         log [format "%-16s FAILURE code=%s detail: %s" $label $err $message]
+    } elseif {[dict exists $r created_surfs] && [llength [dict get $r created_surfs]] > 0} {
+        foreach surfId [dict get $r created_surfs] {
+            set owners {}
+            foreach lineId [::hmtoolkit::seam::entity::surface_lines [list $surfId]] {
+                lappend owners [list $lineId [::hmtoolkit::seam::executor::line_owner_surfaces $lineId]]
+            }
+            set area ""
+            catch {set area [hm_getareaofsurface surfs $surfId]}
+            set bbox ""
+            catch {
+                ::hmtoolkit::seam::entity::mark surfs 1 [list $surfId]
+                set bbox [hm_getboundingbox surfs 1]
+            }
+            log [format "%-16s topology: surface=%s area=%s bbox={%s} edges/owners={%s}" \
+                $label $surfId $area $bbox $owners]
+        }
+        if {$label eq "T_LIST"} {
+            foreach modelSurf [::hmtoolkit::seam::entity::snapshot_ids surfs] {
+                log "T_LIST_DEBUG model_surface=$modelSurf component=[::hmtoolkit::seam::entity::surface_component $modelSurf] lines=[::hmtoolkit::seam::entity::surface_lines [list $modelSurf]]"
+            }
+        }
     }
 }
 
@@ -54,6 +75,33 @@ foreach f {config.tcl log.tcl entity.tcl native_compat.tcl temp.tcl state.tcl va
     ::HWFlow::sourceUtf8 [file join $seamDir $f]
 }
 catch {::hmtoolkit::seam::config::load}
+
+# Preserve enough trim topology evidence to diagnose a T_LIST failure without
+# changing the production algorithm or relying on the GUI.
+rename ::hmtoolkit::seam::candidate::select_projected_trim_path \
+    ::hmtoolkit::seam::candidate::select_projected_trim_path_impl
+proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLines} {
+    log "T_LIST_DEBUG source_lines=$sourceLines new_lines=$newLines"
+    foreach lineId $newLines {
+        if {[catch {set points [::hmtoolkit::seam::candidate::line_points $lineId]} err]} {
+            log "T_LIST_DEBUG line=$lineId points_error={$err}"
+        } else {
+            log "T_LIST_DEBUG line=$lineId points={$points}"
+        }
+    }
+    set groups [::hmtoolkit::seam::candidate::connected_line_groups \
+        $newLines ::hmtoolkit::seam::candidate::line_points]
+    foreach group $groups {
+        if {[catch {set topology [::hmtoolkit::seam::candidate::path_topology \
+                $group ::hmtoolkit::seam::candidate::line_points]} err]} {
+            log "T_LIST_DEBUG group={$group} topology_error={$err}"
+        } else {
+            log "T_LIST_DEBUG group={$group} topology={$topology}"
+        }
+    }
+    return [::hmtoolkit::seam::candidate::select_projected_trim_path_impl \
+        $sourceLines $newLines]
+}
 log "extend_offset_distance=[::hmtoolkit::seam::config::get extend_offset_distance] point_spacing=[::hmtoolkit::seam::config::get point_spacing]"
 
 log "--- command existence ---"

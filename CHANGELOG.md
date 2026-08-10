@@ -2,6 +2,12 @@
 
 ## Unreleased - platform stabilization
 
+- 根据第二轮 HM2019 手工日志澄清搭接曲面的输入边界：C03 与 C04 均已成功；两次所谓“部分失败”都来自把 C06 投影/切分几何送入搭接曲面，候选面未同时连接两侧，严格拓扑门禁正确回滚。按钮、原生选择提示和错误信息现在明确要求“两张近似平行且投影区域重叠的面”，并引导边到面改用“搭接边线”、投影几何改用“投影切分”，不通过放宽门禁保留游离曲面。
+
+- 根据 HM2019 验证模型的首轮手工反馈修复几何焊缝 T 曲面与搭接曲面：导入 CAD 无 Property/`_Txx` 厚度时，T 曲面不再在 selector 层静默停止，而是与其他创建功能一致弹出厚度输入；搭接曲面不再把 50 mm 实体偏置产生的远端构造盖板/侧壁全部移入 `SEAM_T*_Surf`，新增原始两面包络过滤（可调 `lap_result_envelope_tolerance`），本机两版本均由原 9 张混杂面收敛为间隙内 4 张真实连接面。成功后统一显式显示并同步输出 component，避免“日志成功但图形/Browser 看不到”。T 曲面、搭接曲面、T 列表在 HM2019.0.0.70/HW2022.0.0.33 重新通过。
+
+- 重新按本机 HyperMesh 2019.0.0.70 与 HyperWorks 2022.0.0.33 逐策略验证“几何焊缝”：修复非交互执行器对 UI selector 的错误依赖；T 列表不再把切分后完整目标面边界形成的分支图整体拒绝，而是枚举无分支路径、按源路径几何覆盖评分选出真实投影边，并在 ruled 创建后执行 merge/equivalence，验证焊缝边同时归属源面与目标面，杜绝游离曲面假成功。EXTEND 改用帮助文档规定的 trim mode 1，并将 offset type、偏置/搜索距离、投影距离等真实可调参数接入设置；设置面板补齐投影路径、拓扑、质量、T/搭接、延伸、点编辑、厚度、兼容与诊断参数，配置文件保存时保留参数说明。两版本各 12/12 策略独立 hmbatch 通过，模块离线测试 44 passed + 16 subtests。
+
 - 在几何板块新增独立的 `预处理` 面板：支持将当前显示组件按全局 X +90°、全局 Z -90° 转为车辆坐标系；按所选 component 的基础名称归档本体及 `.数字` 重名族；以及归档名称中包含 `SKELL` 的骨架组件。归档统一进入 `USELESS` Assembly 并隐藏，不删除模型实体。
 
 - 提交 2026-08-08 跨模块原生指令审计的探针脚本：`tools/audit_*.tcl`（103 个，每模块一组，见 `docs/module_command_audit_2026-08-08.md` §7 证据清单）、`tools/fix_probe_bolt_*.tcl`（修复探针）、`tools/fix_probe_geometry_cleanup22.tcl` 及实机探针 `tools/probe_*.tcl`（rbe2/bolt/adhesive/solid_seam/quadratic 等），可复用于修复验证。`.gitignore` 同步覆盖探针运行产物：`runtime/` 下的导出模型与 KEY=VALUE 日志（`*.fem/*.hm/*.inp/*.txt/*.tcl` 及 `audit_batch_mesher_work_*/`）不入库；一次性调试文件 `tools/diag_*.tcl` 与根目录临时探针（`_probe_asm*`、`command1.tcl`、求解器 .msg）按约定忽略；`/.zcode/` 本地记忆目录忽略。

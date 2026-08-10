@@ -339,30 +339,35 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - 失败时撤销本次几何修改，不影响继续处理下一个区域。
 - 清理完成后刷新 Model Browser 和图形窗口。
 
-### 6.3 Seam Surface Creation
++### 6.3 几何焊缝（Geometry Seam）
 
-入口：`::SeamSurf::run`
+入口：`::SeamSurf::run`；主面板行尾“设置”入口为 `::SeamSurf::runSettings`。
 
-功能：通过线-面或线-线方式创建 `SEAM_Tx` 焊缝面，并对焊缝面及两侧接触面执行 equivalence。
+功能：提供 12 个经过 HM2019/HW2022 双版本 hmbatch 验证的精确操作。创建类结果统一进入 `SEAM_T<厚度>_Surf`，需要连接的焊缝面会与两侧接触面执行拓扑等价检查；严格模式下游离曲面会回滚，不再把“命令未报错”当作成功。
 
 用法：
 
-1. 在主面板运行 `Seam Surface Creation`。
-2. 选择模式：
-   - `Line-Surface`：先选择源线，再选择投影目标面。
-   - `Line-Line`：依次选择两条焊缝边界线。
-3. 检查特征转角、基础采样分段数和 equivalence 容差。
-4. 点击 `进入连续创建`。
-5. 每次创建完成后继续选择下一条线或下一组线；在选择面板按 `ESC` 退出。
+1. 在主面板运行“几何焊缝”，按任务选择操作：
+   - `T 曲面`：先选待延伸曲面组，再选目标曲面组。
+   - `T 列表`：先选一条连续、无分支的源边线路径，再选一个或多个目标曲面；工具执行法向投影、切分、投影路径识别、ruled 曲面创建和两侧拓扑连接。
+   - `搭接曲面` / `搭接边线`：创建 L 型搭接焊缝。
+   - `连接边线`、`投影切分`、`延伸`、`合并`、`拆分`、`替换点`、`分布点`、`删除`：执行对应的几何编辑。
+2. 连续创建类操作完成一次后可继续选择；在原生选择面板取消即可退出并回到结果面板。
+3. 厚度优先读取 Property，其次读取 component 名称中的 `_Txx`；仍不可用时，除 T 曲面外会提示输入。也可用 `thickness_override` 固定本次规则厚度。
+4. 通过主面板行尾“设置”调整参数并保存。距离/容差使用当前模型单位；本机双版本基线为：
+   - 路径与质量：`endpoint_merge_tolerance`、`projected_path_merge_tolerance`、`projected_path_ambiguity_tolerance`、`min_seam_length`、`area_tolerance`、`volume_tolerance`。
+   - 拓扑：`stitch_tolerance`、`cleanup_tolerance`、`topology_connection_required`。
+   - T/搭接：`connect_extend_distance`、`connect_min_angle_to_target`、`connect_max_angle_edge_to_surf`、`connect_guide_angle`、`t_surface_trim_mode`、`geometry_offset_distance`、`lap_connect_distance`、`lap_result_envelope_tolerance`、`lap_boolean_opcode`。
+   - 延伸/点编辑：`extend_offset_distance`、`extend_offset_type`、`extend_connect_trim_mode`、`extend_connect_distance`、`point_spacing`、`replace_point_projection_distance`。
+   - 兼容/诊断：`internal_mark_slot`、`private_history_api`、`diagnostic_preserve_failed_geometry`。
+5. 建议保留默认值开始调试；`extend_offset_type=2`、`extend_connect_trim_mode=1`、`internal_mark_slot=0`（自动回退到槽位 3）和 `replace_point_projection_distance=-1` 是本机 HM2019.0.0.70/HW2022.0.0.33 已验证组合。
 
-输出：
+输出与失败处理：
 
-- 生成 `SEAM_Tx` component。
-- `x` 优先取相邻 component 名称中较薄的 `_T` 厚度。
-- 若厚度无法读取，会提示手动输入。
-- Line-Surface 模式会投影源线、trim 目标面，再以原始线和投影线创建 ruled 焊缝。
-- Line-Line 模式会按两侧特征点对应关系切分曲线段，并逐段创建 ruled 焊缝。
-- 单次失败时撤销本次几何修改并等待下一次选择。
+- 创建、编辑、删除均位于统一撤销事务中；失败默认恢复几何和显示状态。
+- `T 列表` 会从切分后的完整边界图中提取与源路径最匹配的投影路径，拒绝等分歧义，并检查最终焊缝边是否同时属于源面和目标面。
+- `合并` 在输入已经等价时返回明确的 no-op 警告；`删除` 返回被删除曲面清单；`分布点` 返回真实新建点 ID。
+- 诊断保留几何和放宽拓扑门禁只用于定位问题，不是推荐生产设置。
 
 ### 6.4 BatchMesher 自动网格划分
 

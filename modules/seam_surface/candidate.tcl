@@ -388,22 +388,115 @@ proc ::hmtoolkit::seam::candidate::line_group_match_score {sourceLines candidate
     return [expr {$total/max(1,$count) + $lengthPenalty}]
 }
 
+# Enumerate unbranched routes through a split-surface edge graph.  A trim
+# creates complete fragment boundaries, so the real projected edge can sit
+# inside one connected graph with degree-3 junctions.  Treating the entire
+# graph as one candidate rejects every valid T_LIST trim.  Enumerating simple
+# routes between terminal/branch nodes lets geometric coverage scoring select
+# the projected route without trusting entity IDs or boundary ordering.
+proc ::hmtoolkit::seam::candidate::_collect_simple_routes {current goal adjacencyName edgeNodesName visitedName path limit outputName} {
+    upvar 1 $adjacencyName adjacency $edgeNodesName edgeNodes $visitedName visited $outputName output
+    if {[llength $output] >= $limit} { return }
+    if {$current == $goal} {
+        if {[llength $path] > 0} { lappend output $path }
+        return
+    }
+    set visited($current) 1
+    foreach lineId $adjacency($current) {
+        lassign $edgeNodes($lineId) a b
+        set next [expr {$a == $current ? $b : $a}]
+        if {[info exists visited($next)]} { continue }
+        ::hmtoolkit::seam::candidate::_collect_simple_routes $next $goal \
+            adjacency edgeNodes visited [concat $path [list $lineId]] $limit output
+        if {[llength $output] >= $limit} { break }
+    }
+    unset visited($current)
+}
+
+proc ::hmtoolkit::seam::candidate::simple_paths_from_lines {lineIds endpointProvider {tolerance ""} {limit 256}} {
+    if {$tolerance eq ""} { set tolerance [::hmtoolkit::seam::config::get projected_path_merge_tolerance] }
+    set nodes {}
+    array set edgeNodes {}
+    array set adjacency {}
+    array set degree {}
+    foreach lineId [lsort -integer -unique $lineIds] {
+        set points [uplevel #0 [list $endpointProvider $lineId]]
+        if {[llength $points] < 2} { continue }
+        set pair {}
+        foreach point [list [lindex $points 0] [lindex $points end]] {
+            set nodeId [::hmtoolkit::seam::candidate::node_for_point $point $nodes $tolerance]
+            if {$nodeId < 0} { lappend nodes $point; set nodeId [expr {[llength $nodes]-1}] }
+            lappend pair $nodeId
+        }
+        lassign $pair a b
+        set edgeNodes($lineId) [list $a $b]
+        foreach nodeId [list $a $b] {
+            if {![info exists adjacency($nodeId)]} { set adjacency($nodeId) {}; set degree($nodeId) 0 }
+            lappend adjacency($nodeId) $lineId
+            incr degree($nodeId)
+        }
+    }
+    set critical {}
+    foreach nodeId [array names degree] {
+        if {$degree($nodeId) != 2} { lappend critical $nodeId }
+    }
+    if {[llength $critical] < 2} {
+        set topology [::hmtoolkit::seam::candidate::path_topology $lineIds $endpointProvider $tolerance]
+        if {[dict get $topology kind] eq "PATH" && [dict get $topology branch_nodes] == 0} {
+            return [list [lsort -integer -unique $lineIds]]
+        }
+        return {}
+    }
+    set routes {}
+    for {set i 0} {$i < [llength $critical]} {incr i} {
+        for {set j [expr {$i+1}]} {$j < [llength $critical]} {incr j} {
+            array set visited {}
+            ::hmtoolkit::seam::candidate::_collect_simple_routes \
+                [lindex $critical $i] [lindex $critical $j] adjacency edgeNodes visited {} $limit routes
+            if {[llength $routes] >= $limit} { break }
+        }
+        if {[llength $routes] >= $limit} { break }
+    }
+    set unique {}
+    array set seen {}
+    foreach route $routes {
+        set key [join [lsort -integer -unique $route] ,]
+        if {$key eq "" || [info exists seen($key)]} { continue }
+        set seen($key) 1
+        lappend unique $route
+    }
+    return $unique
+}
+
 # Select the unbranched new line component whose sampled geometry best covers
 # the selected source path. Ambiguous equal-score matches are rejected rather
 # than allowing a ruled surface to attach to a split perimeter fragment.
 proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLines} {
     set ranked {}
+    set mergeTolerance [::hmtoolkit::seam::config::get projected_path_merge_tolerance]
+    array set seen {}
     foreach group [::hmtoolkit::seam::candidate::connected_line_groups \
-        $newLines ::hmtoolkit::seam::candidate::line_points] {
+        $newLines ::hmtoolkit::seam::candidate::line_points $mergeTolerance] {
         set topology [::hmtoolkit::seam::candidate::path_topology \
-            $group ::hmtoolkit::seam::candidate::line_points]
-        if {[dict get $topology kind] ne "PATH" || [dict get $topology branch_nodes] > 0} { continue }
-        if {[catch {set score [::hmtoolkit::seam::candidate::line_group_match_score $sourceLines $group]}]} { continue }
-        lappend ranked [list $score $group]
+            $group ::hmtoolkit::seam::candidate::line_points $mergeTolerance]
+        if {[dict get $topology kind] eq "PATH" && [dict get $topology branch_nodes] == 0} {
+            set candidates [list $group]
+        } else {
+            set candidates [::hmtoolkit::seam::candidate::simple_paths_from_lines \
+                $group ::hmtoolkit::seam::candidate::line_points $mergeTolerance]
+        }
+        foreach candidate $candidates {
+            set key [join [lsort -integer -unique $candidate] ,]
+            if {$key eq "" || [info exists seen($key)]} { continue }
+            set seen($key) 1
+            if {[catch {set score [::hmtoolkit::seam::candidate::line_group_match_score $sourceLines $candidate]}]} { continue }
+            lappend ranked [list $score $candidate]
+        }
     }
     if {[llength $ranked] == 0} { error "No unbranched projected trim path was found" }
     set ranked [lsort -real -index 0 $ranked]
-    if {[llength $ranked] > 1 && abs([lindex [lindex $ranked 1] 0]-[lindex [lindex $ranked 0] 0]) <= 1.0e-9} {
+    set ambiguityTolerance [::hmtoolkit::seam::config::get projected_path_ambiguity_tolerance]
+    if {[llength $ranked] > 1 && abs([lindex [lindex $ranked 1] 0]-[lindex [lindex $ranked 0] 0]) <= $ambiguityTolerance} {
         error "Projected trim path is ambiguous"
     }
     return [lindex [lindex $ranked 0] 1]

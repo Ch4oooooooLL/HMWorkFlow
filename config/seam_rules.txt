@@ -1,18 +1,32 @@
-# Geometry seam defaults (HyperMesh 2019).
+# Geometry seam defaults for local HyperMesh 2019.0.0.70 / 2022.0.0.33.
+# Distance, area and volume values follow the current model unit system.
+# Values marked baseline are the combinations verified by the dual-version harness.
 key|value|note
-angle_parallel_max|15.0|maximum normal angle for parallel/lap classification
-angle_perpendicular_min|75.0|minimum normal angle for perpendicular classification
-distance_tolerance|1.0|candidate edge-to-surface distance tolerance
-endpoint_merge_tolerance|0.1|line graph endpoint merge tolerance
-min_seam_length|5.0|minimum candidate seam length
-point_spacing|7.0|distributed point target spacing
-area_tolerance|1.0e-6|minimum created surface area
-volume_tolerance|1.0e-6|minimum temporary solid volume
-geometry_offset_distance|50.0|lap intersection construction offset
-extend_offset_distance|12.0|surface extension construction offset
-auto_accept_confidence|0.85|automatic recommendation threshold
-review_confidence|0.60|manual review threshold
-auto_create_enabled|0|v1 always requires confirmation
-thickness_override|0.0|positive value overrides component-name thickness; zero prompts when needed
-shortcut_selector_mode|PANEL|PANEL lets the shortcut selector switch scope; CONFIG uses shortcut_scope directly
-shortcut_scope|COMPONENT_PAIR|COMPONENT_PAIR or SURFACE_GROUPS for CONFIG shortcut mode
+area_tolerance|1.0e-6|minimum accepted seam-surface area
+cleanup_tolerance|0.2|temporary cleanup tolerance used by topology merge
+connect_extend_distance|50.0|T Surface extension distance
+connect_guide_angle|30.0|guide-edge angle for surface extension
+connect_max_angle_edge_to_surf|30.0|maximum edge-to-surface angle for extension
+connect_min_angle_to_target|15.0|minimum source-to-target surface angle
+diagnostic_preserve_failed_geometry|0|1 keeps failed transaction geometry for diagnosis
+endpoint_merge_tolerance|0.1|endpoint equality tolerance for selected line paths
+extend_connect_distance|0.0|distance field for EXTEND mode 3; baseline is 0
+extend_connect_trim_mode|1|trim EXTEND result; documented values 0 or 1
+extend_offset_distance|12.0|temporary target offset used by EXTEND
+extend_offset_type|2|documented offset mode; baseline 2 is disjoint with degeneration removal
+geometry_offset_distance|50.0|temporary solid offset used by Lap Surface
+internal_mark_slot|0|0 auto-detects; local dual-version fallback is mark 3
+lap_boolean_opcode|8|8 union baseline; 14 intersection is an advanced alternative
+lap_connect_distance|5.0|Lap Surface connection distance
+lap_result_envelope_tolerance|0.5|allowed bbox expansion when filtering Lap Surface results
+min_seam_length|5.0|minimum accepted selected edge-path length
+point_spacing|7.0|target spacing for distributed geometry points
+private_history_api|1|1 enables optional hm_private_frwk history integration
+projected_path_ambiguity_tolerance|1.0e-6|score difference treated as ambiguous in T List matching
+projected_path_merge_tolerance|0.5|near-endpoint tolerance for T List projected paths
+replace_point_projection_distance|-1.0|-1 selects nearest edge; positive value limits distance
+stitch_tolerance|0.2|surface topology equivalence/stitch tolerance
+t_surface_trim_mode|1|trim T Surface extension; documented values 0 or 1
+thickness_override|0.0|positive value overrides detected thickness; 0 uses property/name/prompt
+topology_connection_required|1|1 rolls back geometrically detached seam surfaces
+volume_tolerance|1.0e-6|minimum temporary solid volume in Lap Surface

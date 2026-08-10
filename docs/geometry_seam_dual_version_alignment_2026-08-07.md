@@ -1,6 +1,51 @@
 # Geometry seam dual-version alignment (2019.0.0.70 / 2022.0.0.33)
 
-Date: 2026-08-07
+Date: 2026-08-07; current-tree rerun and correction: 2026-08-11
+
+## 2026-08-11 current-tree correction
+
+The 2026-08-07 `12/12 PASS` statement was no longer true on the current
+tree. A clean rerun of every strategy in a fresh hmbatch process reproduced
+the same two failures on both installed builds:
+
+- `T_PATH`: the non-interactive executor called
+  `::hmtoolkit::seam::selector::duplicate_ids`, although the hmbatch executor
+  harness intentionally does not load the interactive selector.
+- `T_LIST`: trimming created the complete boundaries of two target fragments.
+  The seven new lines formed one graph with two degree-3 junctions, so the old
+  selector rejected the entire graph as branched instead of extracting the
+  internal projected edge. If the selection gate was bypassed, the ruled
+  surface was free-standing: all four of its edge lines had only the seam
+  surface as owner.
+
+The current implementation removes the executor-to-selector dependency,
+enumerates simple routes through branched fragment-boundary graphs, ranks
+them against the selected source path, and rejects score ambiguity. After
+ruled creation it merges/stitches under the configured cleanup and topology
+tolerances and verifies the real edge owners. On the shared fixture, the
+final T_LIST seam has one edge owned by source+seam and one edge owned by both
+target fragments+seam. Both installed builds now pass all 12 strategies in
+separate fresh processes with identical result IDs.
+
+The settings surface was aligned with the parameters actually consumed by
+the executor. It now includes projected-path matching, documented EXTEND
+offset/trim/distance controls, replace-point projection distance, all
+topology/quality tolerances, thickness override, and the local mark-slot and
+diagnostic switches. Obsolete recognition-era `distance_tolerance` was
+removed. `config/seam_rules.txt` records the same defaults and preserves
+descriptive notes when the panel saves it.
+
+The first HM2019 GUI pass on the generated STEP then exposed two gaps that a
+pre-supplied-thickness hmbatch fixture could not show. T Surface stopped in
+the selector when imported CAD had no readable thickness; it now prompts for
+one. Lap Surface reported success but moved all nine surviving solid-offset
+faces into the result, including construction faces extending 48-50 mm away
+from the selected plates. The executor now filters results against the
+original two-surface bounding envelope (`lap_result_envelope_tolerance`,
+default 0.5), leaving the four faces that bridge the selected plates. The
+output component is explicitly shown and synchronized after a successful
+transaction. T Surface, Lap Surface, and T List were rerun successfully on
+both installed builds after these corrections.
 
 ## Scope
 
@@ -57,7 +102,7 @@ command.
    `*offset_surfaces_and_modify surfaces 2 0 1 2 -<distance>`; the previous
    layout silently ignored the configured `extend_offset_distance` and
    hard-coded a +2 offset on both builds.
-4. `modules/seam_surface/executor.tcl` - T_PATH/T_LIST/L_LIST adapt to the
+4. `modules/seam_surface/executor.tcl` - T_PATH/L_LIST adapt to the
    kernel's source-replacement behaviour: after `*connect_surfaces_11` the
    seam strips are identified by shared target edge lines, re-homed into the
    seam component, and the rebuilt source becomes the source-side topology
@@ -66,6 +111,13 @@ command.
    (0 = auto-detect).
 6. `modules/seam_surface/tests/test_geometry_seam.py` updated for the
    documented offset layout and the internal-slot detection.
+7. `modules/seam_surface/candidate.tcl` and `executor.tcl` now extract the
+   projected T_LIST route from split-fragment boundary graphs and require the
+   ruled surface to share topology with both contacting sides.
+8. EXTEND now uses the documented `trim_mode` domain (baseline 1 instead of
+   the former undocumented 2) and reads its offset type, offset distance,
+   trim mode, distance and angle controls from settings. Both local builds
+   pass the resulting baseline call.
 
 ## Full-function harness results
 
@@ -76,7 +128,7 @@ All 12 strategies pass on both builds with identical created-entity ids:
 
 | Strategy | 2019.0.0.70 | 2022.0.0.33 |
 | --- | --- | --- |
-| T_PATH / T_LIST / L_LIST | PASS (seam strips; source renumber warning) | PASS (same) |
+| T_PATH / T_LIST / L_LIST | PASS (T_LIST owner topology verified; L_LIST source renumber warning) | PASS (same) |
 | L_SURF | PASS | PASS |
 | CONNECT | PASS | PASS |
 | PROJECT / SPLIT | PASS | PASS |
@@ -86,7 +138,7 @@ All 12 strategies pass on both builds with identical created-entity ids:
 | REPLACE_POINT | PASS | PASS |
 | DELETE | PASS | PASS |
 
-Offline suite: `python -m pytest modules/seam_surface/tests -q` - 40 passed,
+Offline suite: `python -m pytest modules/seam_surface/tests -q` - 44 passed,
 16 subtests passed.
 
 ## Reproducing

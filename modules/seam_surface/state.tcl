@@ -57,6 +57,18 @@ proc ::hmtoolkit::seam::state::restore {state} {
     return $warnings
 }
 
+proc ::hmtoolkit::seam::state::reveal_result {result} {
+    if {![dict exists $result success] || ![dict get $result success]} { return }
+    if {[dict exists $result created_components]} {
+        foreach compName [dict get $result created_components] {
+            if {$compName eq ""} { continue }
+            catch {::HWFlow::activateAndShowComponent $compName 0}
+            catch {::HWFlow::syncComponentInBrowser $compName}
+        }
+    }
+    catch {hm_redraw}
+}
+
 proc ::hmtoolkit::seam::transaction::run {label scriptBody} {
     variable ::hmtoolkit::seam::runtime
     set state [::hmtoolkit::seam::state::capture]
@@ -93,6 +105,7 @@ proc ::hmtoolkit::seam::transaction::run {label scriptBody} {
     } else {
         dict set value warnings $restoreWarnings
     }
+    ::hmtoolkit::seam::state::reveal_result $value
     ::hmtoolkit::seam::log::result $value
     return $value
 }
