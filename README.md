@@ -151,6 +151,8 @@ HyperMesh 2019 会在读取 `hmcustom.tcl` 时直接恢复快捷键；HyperMesh 
 
 抽中面前只需保证源组件名称保留 `Vxx_件号`，例如 `V01_BRACKET`；抽中面会根据名称和几何结果生成厚度字段。中面完成后，`读取 BOM 表` 模块当前会扫描 `MIDSURFED` Assembly 并统一设置 Q355，真实 BOM 文件读取将在后续版本实现。
 
+几何导入后可先打开 `预处理` 面板：`转为车辆坐标系` 对当前显示组件依次执行绕全局 X 轴 +90°、绕全局 Z 轴 -90°；`清理无关部件` 选择一个 component 后，会把同名本体及 `.数字` 重名组件统一归入 `USELESS` Assembly 并隐藏；`移除骨架` 会对名称中包含 `SKELL`（不区分大小写）的组件执行相同归档。两项清理都不删除组件。
+
 ### 2.3 处理钣金件
 
 钣金件建议按下面顺序执行：
@@ -208,6 +210,7 @@ AUTO_CONTACT_*
     |-- workflow_common.tcl
     |-- shortcut_manager.tcl
     |-- midsurf.tcl
+    |-- geometry_preprocess.tcl
     |-- geometry_cleanup.tcl
     |-- seam_surface.tcl
     |-- batch_mesher.tcl

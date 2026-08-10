@@ -306,3 +306,105 @@ proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second {e
     return [dict create first_lines [dict get $firstPath lines] second_lines [dict get $secondPath lines]]
 }
 
+# Partition lines by coincident endpoints. The trim command can create extra
+# boundary fragments as well as the projected path; connected components let
+# the ruled workflow evaluate those results without trusting new-id order.
+proc ::hmtoolkit::seam::candidate::connected_line_groups {lineIds endpointProvider {tolerance ""}} {
+    if {$tolerance eq ""} { set tolerance [::hmtoolkit::seam::config::get endpoint_merge_tolerance] }
+    set nodes {}
+    array set nodeLines {}
+    array set lineNodes {}
+    foreach lineId [lsort -integer -unique $lineIds] {
+        set samples [uplevel #0 [list $endpointProvider $lineId]]
+        if {[llength $samples] < 2} { continue }
+        foreach point [list [lindex $samples 0] [lindex $samples end]] {
+            set nodeId [::hmtoolkit::seam::candidate::node_for_point $point $nodes $tolerance]
+            if {$nodeId < 0} { lappend nodes $point; set nodeId [expr {[llength $nodes]-1}] }
+            lappend lineNodes($lineId) $nodeId
+            lappend nodeLines($nodeId) $lineId
+        }
+    }
+    set groups {}
+    array set visited {}
+    foreach seed [lsort -integer [array names lineNodes]] {
+        if {[info exists visited($seed)]} { continue }
+        set queue [list $seed]
+        set group {}
+        while {[llength $queue] > 0} {
+            set lineId [lindex $queue 0]
+            set queue [lrange $queue 1 end]
+            if {[info exists visited($lineId)]} { continue }
+            set visited($lineId) 1
+            lappend group $lineId
+            foreach nodeId $lineNodes($lineId) {
+                foreach neighbour $nodeLines($nodeId) {
+                    if {![info exists visited($neighbour)]} { lappend queue $neighbour }
+                }
+            }
+        }
+        lappend groups [lsort -integer -unique $group]
+    }
+    return $groups
+}
+
+proc ::hmtoolkit::seam::candidate::point_to_line_group_distance {point lineIds} {
+    foreach {x y z} $point {}
+    set best ""
+    foreach lineId $lineIds {
+        if {![catch {set value [hm_findclosestpointonline $x $y $z $lineId]}] &&
+            [llength $value] >= 4 && [string is double -strict [lindex $value 3]]} {
+            set distance [expr {double([lindex $value 3])}]
+        } else {
+            set samples [::hmtoolkit::seam::candidate::line_points $lineId]
+            set distance ""
+            foreach sample $samples {
+                set current [::hmtoolkit::seam::candidate::distance $point $sample]
+                if {$distance eq "" || $current < $distance} { set distance $current }
+            }
+        }
+        if {$distance ne "" && ($best eq "" || $distance < $best)} { set best $distance }
+    }
+    if {$best eq ""} { error "Unable to measure distance to candidate line group" }
+    return $best
+}
+
+proc ::hmtoolkit::seam::candidate::line_group_match_score {sourceLines candidateLines} {
+    set total 0.0
+    set count 0
+    foreach pair [list [list $sourceLines $candidateLines] [list $candidateLines $sourceLines]] {
+        foreach lineId [lindex $pair 0] {
+            foreach point [::hmtoolkit::seam::candidate::line_points $lineId] {
+                set total [expr {$total + [::hmtoolkit::seam::candidate::point_to_line_group_distance \
+                    $point [lindex $pair 1]]}]
+                incr count
+            }
+        }
+    }
+    set sourceLength 0.0
+    foreach lineId $sourceLines { set sourceLength [expr {$sourceLength + [::hmtoolkit::seam::candidate::line_length $lineId]}] }
+    set candidateLength 0.0
+    foreach lineId $candidateLines { set candidateLength [expr {$candidateLength + [::hmtoolkit::seam::candidate::line_length $lineId]}] }
+    set lengthPenalty [expr {abs($sourceLength-$candidateLength) / max(1.0,$sourceLength) * max(1.0,$sourceLength*0.1)}]
+    return [expr {$total/max(1,$count) + $lengthPenalty}]
+}
+
+# Select the unbranched new line component whose sampled geometry best covers
+# the selected source path. Ambiguous equal-score matches are rejected rather
+# than allowing a ruled surface to attach to a split perimeter fragment.
+proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLines} {
+    set ranked {}
+    foreach group [::hmtoolkit::seam::candidate::connected_line_groups \
+        $newLines ::hmtoolkit::seam::candidate::line_points] {
+        set topology [::hmtoolkit::seam::candidate::path_topology \
+            $group ::hmtoolkit::seam::candidate::line_points]
+        if {[dict get $topology kind] ne "PATH" || [dict get $topology branch_nodes] > 0} { continue }
+        if {[catch {set score [::hmtoolkit::seam::candidate::line_group_match_score $sourceLines $group]}]} { continue }
+        lappend ranked [list $score $group]
+    }
+    if {[llength $ranked] == 0} { error "No unbranched projected trim path was found" }
+    set ranked [lsort -real -index 0 $ranked]
+    if {[llength $ranked] > 1 && abs([lindex [lindex $ranked 1] 0]-[lindex [lindex $ranked 0] 0]) <= 1.0e-9} {
+        error "Projected trim path is ambiguous"
+    }
+    return [lindex [lindex $ranked 0] 1]
+}

@@ -14,6 +14,7 @@
     "adhesive_connector": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": false, "verified": ["hm2019", "hm2022"]},
     "seam_surface": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true},
     "batch_property_assignment": {"status": "production", "runtime": "Tcl", "model_write": true},
-    "bom_material_assignment": {"status": "controlled", "runtime": "Tcl", "model_write": true, "bom_reader": "reserved"}
+    "bom_material_assignment": {"status": "controlled", "runtime": "Tcl", "model_write": true, "bom_reader": "reserved"},
+    "geometry_preprocess": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true}
   }
 }

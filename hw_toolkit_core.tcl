@@ -33,6 +33,14 @@ namespace eval ::HWToolkit {
             desc_en  "Scan every component in the MIDSURFED assembly; the current version creates/reuses the Q355 material, assigns it, and appends the _Q355 suffix to component names.\nA real BOM reader interface is reserved until the BOM format and matching rules are defined.\nRun this after midsurface extraction and review the assigned material pointers and names."
             proc     "::BomMaterialAssignment::runAction"
         }
+        geometry_preprocess {
+            group    "Geometry"
+            label_zh "预处理"
+            label_en "Preprocess"
+            desc_zh  "打开独立预处理面板：可将当前显示组件按标准两步旋转转换到车辆坐标系；按所选组件名称归档同名及 .数字 后缀组件；或归档名称中包含 SKELL 的骨架组件。\n归档结果统一移动到 USELESS Assembly 并隐藏，不删除任何组件。\n坐标转换作用于当前显示组件，请在执行前确认显示范围与模型初始坐标系。"
+            desc_en  "Open a dedicated preprocessing panel: rotate all displayed components in two steps into the vehicle coordinate system; archive the selected component name family (the base name and .number duplicates); or archive skeleton components whose names contain SKELL.\nArchived components are moved into the USELESS assembly and hidden; nothing is deleted.\nThe coordinate conversion affects all displayed components, so verify the display set and starting coordinate system first."
+            proc     "::GeometryPreprocess::runAction"
+        }
         geometry_cleanup {
             group    "Geometry"
             label_zh "几何清理"
@@ -371,6 +379,7 @@ proc ::HWToolkit::clearExistingWindows {} {
         .geometry_seam_shortcut_selector
         .geometry_seam_thickness
         .geometry_cleanup
+        .geometry_preprocess
         .contact_setup
         .adhesive_connector
         .batch_mesher

@@ -58,6 +58,10 @@ proc ::hmtoolkit::seam::selector::ensure_execution_data {strategy data} {
         dict set data thickness $thickness
         return [dict create valid 1 data $data]
     }
+    if {$strategy eq "T_PATH"} {
+        return [dict create valid 0 cancelled 0 message \
+            "Unable to obtain the minimum thickness from the selected components. No seam surface was created."]
+    }
     set thickness [::hmtoolkit::seam::selector::prompt_thickness]
     if {$thickness eq ""} { return [dict create valid 0 cancelled 1 message "Thickness input cancelled."] }
     dict set data thickness $thickness
@@ -141,19 +145,29 @@ proc ::hmtoolkit::seam::selector::selection_error {selection} {
 }
 
 proc ::hmtoolkit::seam::selector::select_strategy_input {strategy} {
+    # T_PATH is retained as the compatibility key for the two-group T Surface
+    # workflow (surfaces to extend, then target surfaces).
     switch -- $strategy {
-        # "T路径" flow (HM2019 baseline): seam lines + target surfaces. This
-        # is the line-based route that produced results on 2019.0.0.70; the
-        # two-surface-group variant was only verified on HM2022.3.
         T_PATH {
-            set lines [::hmtoolkit::seam::selector::list_panel PATH 1 "Select seam lines"]
-            if {![dict get $lines valid]} { return $lines }
-            set targets [::hmtoolkit::seam::selector::mark_panel surfs 2 "Select target surfaces"]
-            if {![dict get $targets valid]} { return $targets }
-            set source [::hmtoolkit::seam::selector::surfaces_for_lines [dict get $lines ids]]
-            return [dict create valid 1 seam_lines [dict get $lines ids] source_surfs $source target_surfs [dict get $targets ids] \
-                source_components [::hmtoolkit::seam::selector::components_for_surfaces $source] \
-                target_components [::hmtoolkit::seam::selector::components_for_surfaces [dict get $targets ids]]]
+            set source [::hmtoolkit::seam::selector::mark_panel surfs 1 \
+                "Select surfaces to extend for the T seam (first group)"]
+            if {![dict get $source valid]} { return $source }
+            set targets [::hmtoolkit::seam::selector::mark_panel surfs 2 \
+                "Select one or more target surfaces (second group)"]
+            if {![dict get $targets valid]} {
+                return [dict create valid 0 cancelled 0 message \
+                    "No target surface was selected. Please select at least one target surface."]
+            }
+            set sourceIds [dict get $source ids]
+            set targetIds [dict get $targets ids]
+            set duplicates [::hmtoolkit::seam::selector::duplicate_ids $sourceIds $targetIds]
+            if {[llength $duplicates] > 0} {
+                return [dict create valid 0 cancelled 0 message \
+                    "Surface(s) [join $duplicates {, }] were selected in both groups. Please reselect the two surface groups."]
+            }
+            return [dict create valid 1 source_surfs $sourceIds target_surfs $targetIds \
+                source_components [::hmtoolkit::seam::selector::components_for_surfaces $sourceIds] \
+                target_components [::hmtoolkit::seam::selector::components_for_surfaces $targetIds]]
         }
         T_LIST - L_LIST {
             set lines [::hmtoolkit::seam::selector::list_panel PATH 1 "Select seam lines"]

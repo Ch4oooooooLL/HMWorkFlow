@@ -34,7 +34,7 @@ proc ::hmtoolkit::seam::ui::show {{settingsOnly 0} {initialContext {}}} {
     labelframe $window.body.precise -text [::HWFlow::txt "精确创建 / 编辑 / 删除" "Precise Creation / Edit / Delete"] -padx 8 -pady 6
     pack $window.body.precise -fill x -pady 8
     set actions {
-        {T_PATH "T路径" "T Path"} {T_LIST "T列表" "T List"} {L_SURF "搭接曲面" "Lap Surface"}
+        {T_PATH "T曲面" "T Surface"} {T_LIST "T列表" "T List"} {L_SURF "搭接曲面" "Lap Surface"}
         {L_LIST "搭接边线" "Lap Edges"} {CONNECT "连接边线" "Connect Edges"} {PROJECT "投影切分" "Project/Split"}
         {EXTEND "延伸" "Extend"} {COMBINE "合并" "Combine"} {SPLIT "拆分" "Split"}
         {REPLACE_POINT "替换点" "Replace Point"} {DISTRIBUTE_POINTS "分布点" "Distribute Points"} {DELETE "删除" "Delete"}
@@ -63,6 +63,7 @@ proc ::hmtoolkit::seam::ui::show {{settingsOnly 0} {initialContext {}}} {
         {point_spacing "分布点间距" "Point spacing"}
         {geometry_offset_distance "搭接厚化距离" "Lap offset distance"}
         {extend_offset_distance "延伸偏置距离" "Extend offset distance"}
+        {connect_extend_distance "T曲面延伸距离" "T Surface extend distance"}
         {connect_min_angle_to_target "目标面最小夹角" "Min angle to target"}
         {connect_max_angle_edge_to_surf "边-面最大夹角" "Max edge-surface angle"}
         {connect_guide_angle "引导判定角度" "Guide angle"}
@@ -122,7 +123,7 @@ proc ::hmtoolkit::seam::ui::save_settings {} {
     variable ::hmtoolkit::seam::config
     foreach key {endpoint_merge_tolerance distance_tolerance stitch_tolerance cleanup_tolerance \
             area_tolerance volume_tolerance min_seam_length point_spacing \
-            geometry_offset_distance extend_offset_distance connect_min_angle_to_target \
+            geometry_offset_distance extend_offset_distance connect_extend_distance connect_min_angle_to_target \
             connect_max_angle_edge_to_surf connect_guide_angle lap_connect_distance} {
         if {![string is double -strict $config($key)] || $config($key) <= 0.0} {
             ::hmtoolkit::seam::ui::set_status "$key must be a positive number."

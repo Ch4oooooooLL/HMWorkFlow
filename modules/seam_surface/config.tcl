@@ -14,6 +14,7 @@ namespace eval ::hmtoolkit::seam {
         geometry_offset_distance  50.0
         extend_offset_distance    12.0
         t_surface_trim_mode       1
+        connect_extend_distance   50.0
         connect_min_angle_to_target 15.0
         connect_max_angle_edge_to_surf 30.0
         connect_guide_angle       30.0
@@ -51,8 +52,8 @@ proc ::hmtoolkit::seam::config::default_text {} {
         "# lap_boolean_opcode: 8=Union, 14=Intersection. Union is the reviewed" \
         "# default matching the legacy L_SURF behavior; 14 is untested on the" \
         "# project baseline." \
-        "# t_surface_trim_mode: legal values 0/1; 1 matches the legacy T Path /" \
-        "# T List flow on the project baseline." \
+        "# t_surface_trim_mode: legal values 0/1; 1 trims the extended T Surface." \
+        "# connect_extend_distance is the T Surface extend/search distance." \
         "# topology_connection_required=0 downgrades equivalence failures to" \
         "# warnings and keeps the created geometry (diagnostic mode)." \
         "# private_history_api=0 disables the private hm_private_frwk call." \

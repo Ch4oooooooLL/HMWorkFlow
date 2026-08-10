@@ -6,7 +6,7 @@
 # docs/geometry_seam_dual_version_alignment_2026-08-07.md).
 #
 # Usage (PowerShell, from an isolated empty workdir):
-#   $env:HM_PROBE_TEST = 'marks'   # version|marks|connect_tlist|connect_extend2|
+#   $env:HM_PROBE_TEST = 'marks'   # version|marks|connect_tsurface|connect_tlist|connect_extend2|
 #                                  # connect_extend1|offset_docs_cont|offset_docs_disjoint|
 #                                  # offset_repo|project_repo|project_alt|ruled|splitlines|
 #                                  # merge|vertices|readonly|coords_probe|offset_repo_coords|
@@ -59,6 +59,26 @@ log "===== TEST=$test [clock format [clock seconds] -format %Y-%m-%d_%H:%M:%S] =
 catch {log "VERSION [hm_info -appinfo VERSION] DISPLAY [hm_info -appinfo DISPLAYVERSION]"}
 
 switch $test {
+    connect_tsurface {
+        # Surface-to-surface extend route used by the T Surface action. The
+        # fixture is intentionally gapped so a seam strip has room to form.
+        foreach {x y z} {
+            0 0 2  10 0 2  10 0 12  0 0 12
+            0 -5 0  10 -5 0  10 5 0  0 5 0
+        } { catch {*createpoint $x $y $z 0} }
+        *createmark points 1 1 2 3 4
+        *surfaceprimitivefrompoints points 1 1 0 0
+        *createmark points 1 5 6 7 8
+        *surfaceprimitivefrompoints points 1 1 0 0
+        *createmark surfs 1 all
+        set surfs [hm_getmark surfs 1]
+        set src [lindex $surfs 0]; set tgt [lindex $surfs 1]
+        *createmark surfs 1 $src
+        *createmark surfs 2 $tgt
+        trycmd "connect_surfaces_11 1 2 1 1 50 15 30 1 0 2 30 59 0" \
+            {*connect_surfaces_11 1 2 1 1 50 15 30 1 0 2 30 59 0}
+        model_state after_tsurface
+    }
     marks {
         fresh_model
         log "--- mark slot sweep (with entities) ---"

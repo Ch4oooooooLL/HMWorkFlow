@@ -1198,6 +1198,43 @@ list $path [llength [lsort -integer -unique $path]]
         self.assertTrue(all(len(interp.splitlist(elem)) in (3,4) for elem in elems))
         self.assertTrue(all(len(set(interp.splitlist(elem))) == len(interp.splitlist(elem)) for elem in elems))
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_rejected_direct_quad_falls_back_to_two_well_formed_triangles(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 0} 2 {2 0 0} 3 {2 1 0.2} 4 {0 1 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        interp.eval("proc *createlist {args} {set ::createList [lrange $args 2 end]}")
+        interp.eval("set ::createdConfigs {}; set ::createdTriangles {}")
+        interp.eval("proc *createelement {config args} {if {$config == 104} {return -code error 0}; lappend ::createdConfigs $config; lappend ::createdTriangles $::createList}")
+        interp.eval("proc ::HybridCore::log {args} {}")
+        self.assertEqual(
+            interp.eval("::MeshSeamWeld::createDirectShellPlan {1 2 3 4} {Direct weld strip element 2}"),
+            "2",
+        )
+        self.assertEqual(interp.eval("set ::createdConfigs"), "103 103")
+        triangles=interp.splitlist(interp.eval("set ::createdTriangles"))
+        self.assertEqual(len(triangles),2)
+        self.assertTrue(all(len(set(interp.splitlist(tria))) == 3 for tria in triangles))
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_direct_quad_fallback_rejects_both_degenerate_diagonals(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("array set ::xyz {1 {0 0 0} 2 {1 0 0} 3 {2 0 0} 4 {3 0 0}}")
+        interp.eval("proc ::MeshSeamWeld::nodeXYZ {node} {return $::xyz($node)}")
+        with self.assertRaises(tkinter.TclError):
+            interp.eval("::MeshSeamWeld::bestQuadTrianglePlans {1 2 3 4}")
+    def test_failed_direct_strip_is_cleaned_before_native_ruled_fallback(self):
+        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
+        direct=module.split("proc ::MeshSeamWeld::createDirectStructuredStrip",1)[1].split("proc ::MeshSeamWeld::createDirectSingleLayerStrip",1)[0]
+        self.assertIn("discardDirectStripAttempt",direct)
+        self.assertIn("fallback=native_ruled",direct)
+        self.assertIn("createNativeRuledMeshBetweenNodePaths",direct)
+        self.assertLess(direct.index("discardDirectStripAttempt"),direct.index("createNativeRuledMeshBetweenNodePaths"))
+        cleanup=module.split("proc ::MeshSeamWeld::discardDirectStripAttempt",1)[1].split("proc ::MeshSeamWeld::createDirectStructuredStrip",1)[0]
+        self.assertIn("partialElems",cleanup)
+        self.assertIn("intermediateNodes",cleanup)
+        self.assertIn("remainingElems",cleanup)
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_equal_target_path_repairs_local_native_list_slip_by_geometric_correspondence(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))

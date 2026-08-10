@@ -21,7 +21,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.51"
+    variable VERSION "0.53"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -4290,6 +4290,132 @@ proc ::MeshSeamWeld::normalizedCrossLayerCounts {crossDensity nodeCount} {
     return $counts
 }
 
+proc ::MeshSeamWeld::triangleAreaSquaredFromNodes {nodeIds} {
+    if {[llength $nodeIds] != 3} {
+        return 0.0
+    }
+    set a [::MeshSeamWeld::nodeXYZ [lindex $nodeIds 0]]
+    set b [::MeshSeamWeld::nodeXYZ [lindex $nodeIds 1]]
+    set c [::MeshSeamWeld::nodeXYZ [lindex $nodeIds 2]]
+    set ab {}
+    set ac {}
+    for {set axis 0} {$axis < 3} {incr axis} {
+        lappend ab [expr {[lindex $b $axis] - [lindex $a $axis]}]
+        lappend ac [expr {[lindex $c $axis] - [lindex $a $axis]}]
+    }
+    foreach {abx aby abz} $ab break
+    foreach {acx acy acz} $ac break
+    set cx [expr {$aby*$acz - $abz*$acy}]
+    set cy [expr {$abz*$acx - $abx*$acz}]
+    set cz [expr {$abx*$acy - $aby*$acx}]
+    return [expr {0.25 * ($cx*$cx + $cy*$cy + $cz*$cz)}]
+}
+
+proc ::MeshSeamWeld::bestQuadTrianglePlans {quadNodes} {
+    if {[llength $quadNodes] != 4 ||
+        [llength [lsort -integer -unique $quadNodes]] != 4} {
+        error "A weld-strip quad must contain four unique nodes."
+    }
+    foreach {a b c d} $quadNodes break
+    set diagonalAC [list [list $a $b $c] [list $a $c $d]]
+    set diagonalBD [list [list $a $b $d] [list $b $c $d]]
+    set scoreAC [expr {min(
+        [::MeshSeamWeld::triangleAreaSquaredFromNodes [lindex $diagonalAC 0]],
+        [::MeshSeamWeld::triangleAreaSquaredFromNodes [lindex $diagonalAC 1]])}]
+    set scoreBD [expr {min(
+        [::MeshSeamWeld::triangleAreaSquaredFromNodes [lindex $diagonalBD 0]],
+        [::MeshSeamWeld::triangleAreaSquaredFromNodes [lindex $diagonalBD 1]])}]
+    if {$scoreAC <= 1.0e-20 && $scoreBD <= 1.0e-20} {
+        error "Both diagonals of weld-strip quad nodes [join $quadNodes ,] are geometrically degenerate."
+    }
+    if {$scoreBD > $scoreAC} {
+        return $diagonalBD
+    }
+    return $diagonalAC
+}
+
+proc ::MeshSeamWeld::createDirectShellPlan {elementNodes context} {
+    set nodeCount [llength $elementNodes]
+    if {$nodeCount != 3 && $nodeCount != 4} {
+        error "$context contains $nodeCount nodes; only TRIA3 and QUAD4 are supported."
+    }
+    set config [expr {$nodeCount == 3 ? 103 : 104}]
+    set createCode [catch {
+        eval *createlist nodes 1 $elementNodes
+        *createelement $config 1 1 1
+    } createErr]
+    if {!$createCode} {
+        return 1
+    }
+    if {$nodeCount == 3} {
+        error "$context TRIA3 creation failed for nodes [join $elementNodes ,]: $createErr"
+    }
+
+    # HyperMesh 2019 can reject a locally warped QUAD4 with the opaque Tcl
+    # error result "0" even though both boundary paths are continuous.  In
+    # mixed-element mode the safe representation of the same patch is two
+    # TRIA3 elements.  Pick the diagonal that maximizes the smaller triangle
+    # area, so the fallback does not introduce an avoidable sliver.
+    set trianglePlans [::MeshSeamWeld::bestQuadTrianglePlans $elementNodes]
+    set triangleIndex 0
+    foreach triangleNodes $trianglePlans {
+        incr triangleIndex
+        if {[catch {
+            eval *createlist nodes 1 $triangleNodes
+            *createelement 103 1 1 1
+        } triangleErr]} {
+            error "$context QUAD4 creation failed for nodes [join $elementNodes ,]: $createErr; triangle fallback $triangleIndex failed for nodes [join $triangleNodes ,]: $triangleErr"
+        }
+    }
+    ::HybridCore::log WARN \
+        "$context creation_mode=quad_to_tria_fallback nodes=[join $elementNodes ,] quad_error=[string map [list \"\r\" \"\" \"\n\" \" | \" ] $createErr]"
+    return 2
+}
+
+proc ::MeshSeamWeld::deleteMarkedEntityIds {entityTypes entityIds markId} {
+    set entityIds [::MeshSeamWeld::uniq $entityIds]
+    if {[llength $entityIds] == 0} {
+        return 1
+    }
+    set lastErr "could not mark the requested IDs"
+    foreach entityType $entityTypes {
+        catch {*clearmark $entityType $markId}
+        if {[catch {eval *createmark $entityType $markId $entityIds} markErr]} {
+            set lastErr $markErr
+            continue
+        }
+        set marked {}
+        catch {set marked [hm_getmark $entityType $markId]}
+        if {[llength $marked] == 0} {
+            # The entities may already have been removed as a consequence of
+            # deleting their dependent elements.
+            catch {*clearmark $entityType $markId}
+            return 1
+        }
+        if {[catch {*deletemark $entityType $markId} deleteErr]} {
+            set lastErr $deleteErr
+            continue
+        }
+        catch {*clearmark $entityType $markId}
+        return 1
+    }
+    error "Could not discard partial [lindex $entityTypes 0] from direct weld creation: $lastErr"
+}
+
+proc ::MeshSeamWeld::discardDirectStripAttempt {outputCompId beforeOutputElems intermediateNodes} {
+    set partialElems [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
+        [::MeshSeamWeld::componentElementIds $outputCompId]]
+    ::MeshSeamWeld::deleteMarkedEntityIds {elements elems} $partialElems 1
+    ::MeshSeamWeld::deleteMarkedEntityIds {nodes} $intermediateNodes 1
+
+    set remainingElems [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
+        [::MeshSeamWeld::componentElementIds $outputCompId]]
+    if {[llength $remainingElems] > 0} {
+        error "Partial direct weld elements remain after cleanup: [join $remainingElems ,]"
+    }
+    return [llength $partialElems]
+}
+
 proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossDensity outputCompName outputCompId beforeOutputElems {closedLoop 0}} {
     if {[llength $sourceNodes] != [llength $targetNodes]} {
         error "Source and target node counts do not match for direct structured strip creation."
@@ -4301,6 +4427,7 @@ proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossD
 
     set crossChains {}
     set intermediateNodeCount 0
+    set intermediateNodes {}
     set sourcePairCount 0
     for {set index 0} {$index < [llength $sourceNodes]} {incr index} {
         set sourceNode [lindex $sourceNodes $index]
@@ -4317,7 +4444,9 @@ proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossD
                 set targetValue [lindex $targetXYZ $axis]
                 lappend xyz [expr {$sourceValue + $ratio * ($targetValue - $sourceValue)}]
             }
-            lappend chain [::MeshSeamWeld::createTrackedNodeAtXYZ $xyz]
+            set intermediateNode [::MeshSeamWeld::createTrackedNodeAtXYZ $xyz]
+            lappend chain $intermediateNode
+            lappend intermediateNodes $intermediateNode
             incr intermediateNodeCount
             ::MeshSeamWeld::responsiveCheckpoint $intermediateNodeCount 64
         }
@@ -4330,23 +4459,33 @@ proc ::MeshSeamWeld::createDirectStructuredStrip {sourceNodes targetNodes crossD
     set elementPlans [::MeshSeamWeld::adaptiveStructuredStripElementNodeLists \
         $crossChains $closedLoop]
     set segmentIndex 0
-    foreach elementNodes $elementPlans {
-        incr segmentIndex
-        set config [expr {[llength $elementNodes] == 3 ? 103 : 104}]
-        if {[catch {
-            eval *createlist nodes 1 $elementNodes
-            *createelement $config 1 1 1
-        } createErr]} {
-            error "Failed to create direct weld strip element $segmentIndex: $createErr"
+    set createdPlanCount 0
+    set directCode [catch {
+        foreach elementNodes $elementPlans {
+            incr segmentIndex
+            incr createdPlanCount [::MeshSeamWeld::createDirectShellPlan \
+                $elementNodes "Direct weld strip element $segmentIndex"]
+            ::MeshSeamWeld::responsiveCheckpoint $segmentIndex 64
         }
-        ::MeshSeamWeld::responsiveCheckpoint $segmentIndex 64
+    } directErr]
+    if {$directCode} {
+        if {[catch {
+            set discardedElemCount [::MeshSeamWeld::discardDirectStripAttempt \
+                $outputCompId $beforeOutputElems $intermediateNodes]
+        } cleanupErr]} {
+            error "$directErr; direct-strip cleanup also failed: $cleanupErr"
+        }
+        ::HybridCore::log WARN \
+            "weld_mesh direct_creation_failed fallback=native_ruled failed_segment=$segmentIndex discarded_elements=$discardedElemCount discarded_intermediate_nodes=[llength $intermediateNodes] error=[string map [list \"\r\" \"\" \"\n\" \" | \" ] $directErr]"
+        return [::MeshSeamWeld::createNativeRuledMeshBetweenNodePaths \
+            $sourceNodes $targetNodes $outputCompName $closedLoop]
     }
     set elemIds [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
         [::MeshSeamWeld::componentElementIds $outputCompId]]
     if {[llength $elemIds] == 0} {
         error "Direct structured weld strip creation did not add any elements."
     }
-    set expectedElemCount [llength $elementPlans]
+    set expectedElemCount $createdPlanCount
     if {[llength $elemIds] != $expectedElemCount} {
         error "Direct structured weld strip created [llength $elemIds]/$expectedElemCount expected elements."
     }

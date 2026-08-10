@@ -366,16 +366,130 @@ proc ::hmtoolkit::seam::executor::_create_t {data strategy} {
     return [::hmtoolkit::seam::executor::success $strategy $created [list $componentName] $warnings "Seam surfaces created successfully."]
 }
 
+# T Surface creation (the public compatibility key remains T_PATH). This is
+# the surface-to-surface extend route recorded as
+#   *connect_surfaces_11 1 2 1 <trim> <distance> ... 59 0
+# Both selected surface groups are passed in one native call, matching the
+# command's source-mark/target-mark contract.
+proc ::hmtoolkit::seam::executor::_create_t_surface {data} {
+    set sourceSurfs [::hmtoolkit::seam::validation::require_ids $data source_surfs surfs]
+    set targetSurfs [::hmtoolkit::seam::validation::require_ids $data target_surfs surfs]
+    set duplicates [::hmtoolkit::seam::selector::duplicate_ids $sourceSurfs $targetSurfs]
+    if {[llength $duplicates] > 0} {
+        error "Surface(s) [join $duplicates {, }] were selected in both groups. Please reselect the two surface groups."
+    }
+
+    set thickness ""
+    if {[catch {set thickness [::hmtoolkit::seam::naming::thickness_from_data $data]} thicknessErr]} {
+        error "\[T Surface\] Unable to obtain the minimum thickness: $thicknessErr"
+    }
+    if {![string is double -strict $thickness] || $thickness <= 0.0} {
+        error "\[T Surface\] Unable to obtain the minimum thickness."
+    }
+    set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
+    set componentName [lindex $component 0]
+    set componentId [lindex $component 1]
+    ::hmtoolkit::seam::native::ensure_current_component $componentName $componentId
+    set beforeComponent [::hmtoolkit::seam::entity::component_surfaces $componentId]
+    set beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]
+    set distance [::hmtoolkit::seam::config::get connect_extend_distance]
+    set trimMode [::hmtoolkit::seam::config::get t_surface_trim_mode]
+    set minAngle [::hmtoolkit::seam::config::get connect_min_angle_to_target]
+    set maxAngle [::hmtoolkit::seam::config::get connect_max_angle_edge_to_surf]
+    set guideAngle [::hmtoolkit::seam::config::get connect_guide_angle]
+    if {![string is double -strict $distance] || $distance <= 0.0} {
+        error "\[T Surface\] connect_extend_distance must be positive."
+    }
+
+    foreach type {surfs lines} {
+        foreach markId {1 2} { catch {*clearmark $type $markId} }
+    }
+    ::hmtoolkit::seam::entity::mark surfs 1 $sourceSurfs
+    ::hmtoolkit::seam::entity::mark surfs 2 $targetSurfs
+    ::hmtoolkit::seam::log::write INFO \
+        "T Surface native args: *connect_surfaces_11 1 2 1 $trimMode $distance $minAngle $maxAngle 1 0 2 $guideAngle 59 0; source=$sourceSurfs; targets=$targetSurfs"
+    if {[catch {
+        *connect_surfaces_11 1 2 1 $trimMode $distance $minAngle $maxAngle 1 0 2 $guideAngle 59 0
+    } connectErr]} {
+        catch {*clearmark surfs 1}; catch {*clearmark surfs 2}
+        error "\[T Surface\] Native surface extension failed: $connectErr"
+    }
+    # advanced_options=59 asks HyperMesh to create new extended surfaces in
+    # the current component. The result is a copied/extended surface, not a
+    # separate bridge strip, so the strip-oriented equivalence gate used by
+    # mode 3 is not applicable and previously rolled valid results back.
+    set created [::hmtoolkit::seam::validation::created_surfaces_for_component \
+        $beforeComponent $beforeAll $componentId]
+    catch {*clearmark surfs 1}; catch {*clearmark surfs 2}
+    return [::hmtoolkit::seam::executor::success T_PATH $created [list $componentName] {} \
+        "\[T Surface\] Extended surface(s) created successfully."]
+}
+
 proc ::hmtoolkit::seam::executor::create_t_path {data} {
-    # Project baseline (HM2019 / 2022.2): the line-based T path flow
-    # (`*connect_surfaces_11 1 2 3 ... 59 0`) is the T-type creation route.
-    return [::hmtoolkit::seam::transaction::run "Create T Path Seam" [list ::hmtoolkit::seam::executor::_create_t $data T_PATH]]
+    return [::hmtoolkit::seam::transaction::run "Create T Surface Seam" [list ::hmtoolkit::seam::executor::_create_t_surface $data]]
+}
+
+proc ::hmtoolkit::seam::executor::_create_t_list_ruled {data} {
+    set sourceLines [::hmtoolkit::seam::validation::require_ids $data seam_lines lines]
+    set targetSurfs [::hmtoolkit::seam::validation::require_ids $data target_surfs surfs]
+    set sourceTopology [::hmtoolkit::seam::candidate::path_topology \
+        $sourceLines ::hmtoolkit::seam::candidate::line_points]
+    if {[dict get $sourceTopology kind] ne "PATH" || [dict get $sourceTopology branch_nodes] > 0} {
+        error "T List requires one connected, unbranched source-line path"
+    }
+
+    set thickness [::hmtoolkit::seam::naming::thickness_from_data $data]
+    set beforeLines [::hmtoolkit::seam::entity::snapshot_ids lines]
+
+    # Surface Edit > Trim With Lines: vector 0 plus trim flag 13 means normal
+    # projection, sweep through the entire surface, and retain line endpoints.
+    ::hmtoolkit::seam::entity::mark surfs 1 $targetSurfs
+    ::hmtoolkit::seam::entity::mark lines 2 $sourceLines
+    ::hmtoolkit::seam::log::write INFO \
+        "T List trim args: *surfacemarksplitwithlines 1 2 0 13 0; lines=$sourceLines; targets=$targetSurfs"
+    if {[catch {*surfacemarksplitwithlines 1 2 0 13 0} trimErr]} {
+        error "\[T List\] Trim with lines failed: $trimErr"
+    }
+    set newLines [::hmtoolkit::seam::entity::diff_ids \
+        $beforeLines [::hmtoolkit::seam::entity::snapshot_ids lines]]
+    if {[llength $newLines] == 0} {
+        error "\[T List\] Trim completed but created no projected edge lines"
+    }
+    set projectedLines [::hmtoolkit::seam::candidate::select_projected_trim_path \
+        $sourceLines $newLines]
+    set organized [::hmtoolkit::seam::candidate::organize_ruled_surface_lines \
+        $sourceLines $projectedLines]
+    set firstLines [dict get $organized first_lines]
+    set secondLines [dict get $organized second_lines]
+
+    # Geometry > Ruled: surface-only mode, two required line lists, and two
+    # required (empty) endpoint-node lists. reverse=1 protects against bow tie.
+    # Create/select the seam component only after trimming so target fragments
+    # remain in their original components regardless of current-collector
+    # behavior in the running HyperMesh release.
+    set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
+    set componentName [lindex $component 0]
+    set componentId [lindex $component 1]
+    ::hmtoolkit::seam::native::ensure_current_component $componentName $componentId
+    set beforeComponent [::hmtoolkit::seam::entity::component_surfaces $componentId]
+    set beforeSurfs [::hmtoolkit::seam::entity::snapshot_ids surfs]
+    *surfacemode 4
+    ::hmtoolkit::seam::executor::prepare_ruled_surface_lists $firstLines $secondLines
+    ::hmtoolkit::seam::log::write INFO \
+        "T List ruled args: *linearsurfacebetweenlines 1 1 2 2 1; source=$firstLines; projected=$secondLines"
+    if {[catch {*linearsurfacebetweenlines 1 1 2 2 1} ruledErr]} {
+        error "\[T List\] Ruled surface creation failed: $ruledErr"
+    }
+    set created [::hmtoolkit::seam::validation::created_surfaces_for_component \
+        $beforeComponent $beforeSurfs $componentId]
+    set result [::hmtoolkit::seam::executor::success T_LIST $created [list $componentName] {} \
+        "\[T List\] Trimmed projection and ruled seam surface created successfully."]
+    dict set result projected_lines $projectedLines
+    return $result
 }
 
 proc ::hmtoolkit::seam::executor::create_t_list {data} {
-    # Project baseline (HM2019 / 2022.2): same line-based route as the
-    # legacy T list flow.
-    return [::hmtoolkit::seam::transaction::run "Create T List Seam" [list ::hmtoolkit::seam::executor::_create_t $data T_LIST]]
+    return [::hmtoolkit::seam::transaction::run "Create T List Seam" [list ::hmtoolkit::seam::executor::_create_t_list_ruled $data]]
 }
 
 proc ::hmtoolkit::seam::executor::_create_l_surface {data} {
