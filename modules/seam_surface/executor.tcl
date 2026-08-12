@@ -271,6 +271,120 @@ proc ::hmtoolkit::seam::executor::prepare_ruled_surface_lists {first second} {
     *createlist nodes 2
 }
 
+# Shared implementation for Connect Edges and T List.  Normal Connect Edges
+# input is organized here.  T List passes already-validated lists so its ruled
+# order is not recomputed between the trim and connection transactions.
+proc ::hmtoolkit::seam::executor::connect_line_groups {data first second {stitchInputs 1} {firstTolerance ""} {secondTolerance ""} {alreadyOrdered 0}} {
+    ::hmtoolkit::seam::executor::require_minimum_line_length $first "First edge group"
+    ::hmtoolkit::seam::executor::require_minimum_line_length $second "Second edge group"
+    if {[llength [lsort -integer -unique [concat $first $second]]] != [expr {[llength $first]+[llength $second]}]} {
+        error "Edge groups must not overlap"
+    }
+    if {!$alreadyOrdered} {
+        set organized [::hmtoolkit::seam::candidate::organize_ruled_surface_lines \
+            $first $second ::hmtoolkit::seam::candidate::line_points \
+            $firstTolerance $secondTolerance]
+        set first [dict get $organized first_lines]
+        set second [dict get $organized second_lines]
+    }
+    ::hmtoolkit::seam::log::write INFO \
+        "Connect Edges final ruled order: list1=$first; list2=$second"
+    # Capture owners before ruled creation.  The new seam can reuse input edge
+    # IDs, which makes a post-creation owner query ambiguous.
+    set firstSurfs [::hmtoolkit::seam::executor::surfaces_from_lines $first]
+    set secondSurfs [::hmtoolkit::seam::executor::surfaces_from_lines $second]
+    set thickness [::hmtoolkit::seam::naming::thickness_from_data $data]
+    set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
+    set before [::hmtoolkit::seam::entity::component_surfaces [lindex $component 1]]
+    set beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]
+    # The interactive Ruled panel sets "surface only" before creation.  Tcl
+    # execution must do the same explicitly; otherwise the command inherits a
+    # previous automesh/surfaceless mode and can return with no Surface,
+    # especially when the second line list spans several source surfaces.
+    *surfacemode 4
+    ::hmtoolkit::seam::executor::prepare_ruled_surface_lists $first $second
+    *linearsurfacebetweenlines 1 1 2 2 1
+    set preliminary [::hmtoolkit::seam::validation::created_surfaces_for_component \
+        $before $beforeAll [lindex $component 1]]
+    ::hmtoolkit::seam::executor::merge_ruled_surfaces $preliminary
+    set created [::hmtoolkit::seam::validation::created_surfaces_for_component \
+        $before $beforeAll [lindex $component 1]]
+    if {$stitchInputs} {
+        set created [::hmtoolkit::seam::executor::equivalence_created_surfaces \
+            $created $firstSurfs $secondSurfs [lindex $component 1] $before]
+    }
+    set result [::hmtoolkit::seam::executor::success CONNECT $created [list [lindex $component 0]]]
+    dict set result first_lines $first
+    dict set result second_lines $second
+    return $result
+}
+
+# Existing Project/Split implementation shared verbatim with T List so the
+# combined workflow does not introduce a second projection behavior.
+proc ::hmtoolkit::seam::executor::project_split_line_groups {lines surfaces} {
+    set beforeEdges [::hmtoolkit::seam::entity::surface_lines $surfaces]
+    set created {}
+    set trimLines {}
+    foreach surfaceId $surfaces {
+        set beforeTargetEdges [::hmtoolkit::seam::entity::surface_lines [list $surfaceId]]
+        set before [::hmtoolkit::seam::entity::snapshot_ids surfs]
+        set beforeLines [::hmtoolkit::seam::entity::snapshot_ids lines]
+        set recorderOn 0
+        if {[llength [info commands ::hm_entityrecorder]] > 0 && \
+            ![catch {hm_entityrecorder lines on}]} {
+            set recorderOn 1
+        }
+        ::hmtoolkit::seam::entity::mark lines 2 $lines
+        ::hmtoolkit::seam::entity::mark surfs 1 [list $surfaceId]
+        set splitCode [catch {*surfacemarksplitwithlines 1 2 0 13 0} splitError splitOptions]
+        set recorded {}
+        if {$recorderOn} {
+            catch {hm_entityrecorder lines off}
+            catch {set recorded [hm_entityrecorder lines ids]}
+        }
+        if {$splitCode} { return -options $splitOptions $splitError }
+        set targetCreated [::hmtoolkit::seam::entity::diff_ids \
+            $before [::hmtoolkit::seam::entity::snapshot_ids surfs]]
+        set created [concat $created $targetCreated]
+        if {!$recorderOn} {
+            set recorded [::hmtoolkit::seam::entity::diff_ids \
+                $beforeLines [::hmtoolkit::seam::entity::snapshot_ids lines]]
+        }
+
+        # Restrict this trim call's recorded lines to edges that actually
+        # belong to this target's post-split surfaces. Rebuilt/free lines from
+        # elsewhere must never enter T List's second Connect Edges input.
+        set resultSurfs [lsort -integer -unique [concat \
+            [::hmtoolkit::seam::executor::existing_surfaces [list $surfaceId]] \
+            $targetCreated]]
+        set targetEdges [::hmtoolkit::seam::entity::surface_lines $resultSurfs]
+        array set isTargetEdge {}
+        foreach lineId $targetEdges { set isTargetEdge($lineId) 1 }
+        set targetTrimLines {}
+        foreach lineId $recorded {
+            if {[info exists isTargetEdge($lineId)]} { lappend targetTrimLines $lineId }
+        }
+        # A split may reuse an existing global line ID. Such a line will not be
+        # reported as newly created, but it is still identifiable because it
+        # became attached to this target during this exact trim call.
+        set newlyAttached [::hmtoolkit::seam::entity::diff_ids \
+            $beforeTargetEdges $targetEdges]
+        set targetTrimLines [concat $targetTrimLines $newlyAttached]
+        set targetTrimLines [lsort -integer -unique $targetTrimLines]
+        set trimLines [concat $trimLines $targetTrimLines]
+        ::hmtoolkit::seam::log::write INFO \
+            "Project/Split target=$surfaceId recorded_lines=$recorded newly_attached=$newlyAttached target_trim_lines=$targetTrimLines"
+    }
+    set created [lsort -integer -unique $created]
+    set trimLines [lsort -integer -unique $trimLines]
+    set afterEdges [::hmtoolkit::seam::entity::surface_lines \
+        [::hmtoolkit::seam::executor::existing_surfaces $surfaces]]
+    return [dict create created_surfs $created new_lines $trimLines \
+        modified_surfs [lsort -integer -unique $surfaces] \
+        topology_readable [expr {$beforeEdges ne ""}] \
+        topology_changed [expr {$beforeEdges ne "" && $beforeEdges ne $afterEdges}]]
+}
+
 proc ::hmtoolkit::seam::executor::surface_set_bbox {surfaceIds} {
     set surfaceIds [::hmtoolkit::seam::executor::existing_surfaces $surfaceIds]
     if {[llength $surfaceIds] == 0} { return {} }
@@ -502,7 +616,18 @@ proc ::hmtoolkit::seam::executor::create_t_path {data} {
     return [::hmtoolkit::seam::transaction::run "Create T Surface Seam" [list ::hmtoolkit::seam::executor::_create_t_surface $data]]
 }
 
-proc ::hmtoolkit::seam::executor::_create_t_list_ruled {data} {
+proc ::hmtoolkit::seam::executor::t_list_trim_retained_result {targetSurfs trimLines reason} {
+    set result [::hmtoolkit::seam::executor::success T_LIST {} {} [list $reason] \
+        "\[T List\] Project/Split changes and trim lines were retained; Connect Edges was not completed."]
+    dict set result partial_success 1
+    dict set result trim_retained 1
+    dict set result ready_to_connect 0
+    dict set result modified_surfs [lsort -integer -unique $targetSurfs]
+    dict set result projected_lines [lsort -integer -unique $trimLines]
+    return $result
+}
+
+proc ::hmtoolkit::seam::executor::_prepare_t_list_connection {data} {
     set sourceLines [::hmtoolkit::seam::validation::require_ids $data seam_lines lines]
     ::hmtoolkit::seam::executor::require_minimum_line_length $sourceLines "T List source path"
     set targetSurfs [::hmtoolkit::seam::validation::require_ids $data target_surfs surfs]
@@ -511,76 +636,176 @@ proc ::hmtoolkit::seam::executor::_create_t_list_ruled {data} {
     if {[dict get $sourceTopology kind] ne "PATH" || [dict get $sourceTopology branch_nodes] > 0} {
         error "T List requires one connected, unbranched source-line path"
     }
+    set projectedReference [::hmtoolkit::seam::candidate::project_line_samples_to_surfaces \
+        $sourceLines $targetSurfs]
+    set referenceError ""
+    set referenceCode [catch {
+        ::hmtoolkit::seam::candidate::validated_projection_reference $projectedReference
+    } referenceValue]
+    if {$referenceCode} {
+        set referenceError $referenceValue
+        # Project/Split must still run: the user explicitly requires every
+        # trim result to remain even when safe line identification is not
+        # possible.  The guard below prevents an unsafe ruled connection.
+        set projectedReference {}
+    } else {
+        set projectedReference $referenceValue
+    }
+    set beforeTrimLines [::hmtoolkit::seam::entity::snapshot_ids lines]
 
-    set thickness [::hmtoolkit::seam::naming::thickness_from_data $data]
-    set beforeLines [::hmtoolkit::seam::entity::snapshot_ids lines]
-
-    # Surface Edit > Trim With Lines: vector 0 plus trim flag 13 means normal
-    # projection, sweep through the entire surface, and retain line endpoints.
-    ::hmtoolkit::seam::entity::mark surfs 1 $targetSurfs
-    ::hmtoolkit::seam::entity::mark lines 2 $sourceLines
     ::hmtoolkit::seam::log::write INFO \
-        "T List trim args: *surfacemarksplitwithlines 1 2 0 13 0; lines=$sourceLines; targets=$targetSurfs"
-    if {[catch {*surfacemarksplitwithlines 1 2 0 13 0} trimErr]} {
-        error "\[T List\] Trim with lines failed: $trimErr"
+        "T List projection uses Project/Split on original targets: lines=$sourceLines; targets=$targetSurfs"
+    if {[catch {
+        # Call the existing Project/Split implementation, including its native
+        # success/no-op checks, rather than a T List-specific projection path.
+        set splitResult [::hmtoolkit::seam::executor::_split_surface $data PROJECT]
+    } trimErr]} {
+        set retained [::hmtoolkit::seam::entity::diff_ids \
+            $beforeTrimLines [::hmtoolkit::seam::entity::snapshot_ids lines]]
+        return [::hmtoolkit::seam::executor::t_list_trim_retained_result \
+            $targetSurfs $retained "Project/Split reported an error after trim began: $trimErr"]
     }
-    set newLines [::hmtoolkit::seam::entity::diff_ids \
-        $beforeLines [::hmtoolkit::seam::entity::snapshot_ids lines]]
-    if {[llength $newLines] == 0} {
-        error "\[T List\] Trim completed but created no projected edge lines"
+    # From this point onward Project/Split has modified the original geometry.
+    # Catch every filtering/ordering/result-shaping failure so this first
+    # history action is committed and the trim can never be rolled back by a
+    # later T List preparation error.
+    set newLines {}
+    set preparationCode [catch {
+        if {![dict exists $splitResult projected_lines]} {
+            error "Project/Split did not report its trim-line candidates"
+        }
+        set newLines [dict get $splitResult projected_lines]
+        ::hmtoolkit::seam::log::write INFO \
+            "T List Project/Split created line candidates: $newLines"
+        if {[llength $newLines] == 0} {
+            error "Project/Split produced no eligible trim-line candidates for Connect Edges."
+        }
+        set candidateLines {}
+        foreach lineId $newLines {
+            if {[lsearch -exact $sourceLines $lineId] < 0} { lappend candidateLines $lineId }
+        }
+        set candidateLines [lsort -integer -unique $candidateLines]
+        if {[llength $candidateLines] == 0} {
+            error "All recorded trim lines overlap the source line IDs"
+        }
+        set exactTolerance [::hmtoolkit::seam::config::get endpoint_merge_tolerance]
+        set relaxedTolerance [::hmtoolkit::seam::config::get projected_path_merge_tolerance]
+        set attempts {}
+        if {$referenceError eq ""} {
+            lappend attempts [list STRICT $exactTolerance $projectedReference]
+            if {$relaxedTolerance != $exactTolerance} {
+                lappend attempts [list STRICT $relaxedTolerance $projectedReference]
+            }
+            if {![dict get $sourceTopology closed]} {
+                lappend attempts [list FRAGMENTS reference $projectedReference]
+            }
+        }
+        # Manual Connect Edges has no projection-reference gate. Reproduce
+        # that permissiveness only inside the exact line set captured from
+        # this trim call, first at the normal Connect Edges endpoint tolerance.
+        lappend attempts [list BEST $exactTolerance $projectedReference]
+        if {$relaxedTolerance != $exactTolerance} {
+            lappend attempts [list BEST $relaxedTolerance $projectedReference]
+        }
+        set organized ""
+        set attemptErrors {}
+        set usedMode ""
+        foreach attempt $attempts {
+            lassign $attempt mode tolerance reference
+            if {$mode eq "FRAGMENTS"} {
+                set attemptCode [catch {
+                    set projectedLines [::hmtoolkit::seam::candidate::order_trim_fragments_along_reference \
+                        $candidateLines $reference]
+                    set sourcePath [::hmtoolkit::seam::candidate::ordered_line_path \
+                        $sourceLines ::hmtoolkit::seam::candidate::line_points $exactTolerance]
+                    set candidateOrder [dict create \
+                        first_lines [dict get $sourcePath lines] second_lines $projectedLines]
+                } attemptError]
+            } else {
+                set attemptCode [catch {
+                    set projectedLines [::hmtoolkit::seam::candidate::select_projected_trim_path \
+                        $sourceLines $candidateLines $reference $mode $tolerance]
+                    set candidateOrder [::hmtoolkit::seam::candidate::organize_ruled_surface_lines \
+                        $sourceLines $projectedLines ::hmtoolkit::seam::candidate::line_points \
+                        $exactTolerance $tolerance]
+                } attemptError]
+            }
+            if {$attemptCode} {
+                lappend attemptErrors "$mode/$tolerance: $attemptError"
+                continue
+            }
+            set organized $candidateOrder
+            set usedMode "$mode/$tolerance"
+            break
+        }
+        if {$organized eq ""} {
+            if {$referenceError ne ""} {
+                lappend attemptErrors "projection reference: $referenceError"
+            }
+            error "No recorded trim-line path could be prepared for Connect Edges ([join $attemptErrors {; }])"
+        }
+        ::hmtoolkit::seam::log::write INFO \
+            "T List line preparation mode=$usedMode; list1=[dict get $organized first_lines]; list2=[dict get $organized second_lines]"
+        set preparationWarnings {}
+        if {![string match "STRICT/*" $usedMode]} {
+            lappend preparationWarnings \
+                "Strict trim matching was unavailable; the best ruled-compatible path from this trim was used ($usedMode)."
+        }
+        set result [::hmtoolkit::seam::executor::success T_LIST {} {} $preparationWarnings \
+            "\[T List\] Project/Split completed; ordered lines are ready for Connect Edges."]
+        dict set result ready_to_connect 1
+        dict set result trim_retained 1
+        dict set result modified_surfs [dict get $splitResult modified_surfs]
+        dict set result trim_lines $newLines
+        dict set result first_lines [dict get $organized first_lines]
+        dict set result second_lines [dict get $organized second_lines]
+        dict set result projected_lines [dict get $organized second_lines]
+    } preparationValue]
+    if {$preparationCode} {
+        return [::hmtoolkit::seam::executor::t_list_trim_retained_result \
+            $targetSurfs $newLines "Trim-line filtering or ordering stopped: $preparationValue"]
     }
-    set projectedLines [::hmtoolkit::seam::candidate::select_projected_trim_path \
-        $sourceLines $newLines]
-    set organized [::hmtoolkit::seam::candidate::organize_ruled_surface_lines \
-        $sourceLines $projectedLines ::hmtoolkit::seam::candidate::line_points \
-        [::hmtoolkit::seam::config::get projected_path_merge_tolerance]]
-    set firstLines [dict get $organized first_lines]
-    set secondLines [dict get $organized second_lines]
-    # Resolve topology partners after trimming.  The target surface can be
-    # split into several fragments (and can be renumbered), while the newly
-    # projected edge is shared by every contacting target fragment.
-    set sourcePartners [::hmtoolkit::seam::executor::surfaces_from_lines $sourceLines]
-    if {[llength $sourcePartners] == 0 && [dict exists $data source_surfs]} {
-        set sourcePartners [::hmtoolkit::seam::executor::existing_surfaces [dict get $data source_surfs]]
-    }
-    set targetPartners [::hmtoolkit::seam::executor::surfaces_from_lines $projectedLines]
-    if {[llength $targetPartners] == 0} {
-        set targetPartners [::hmtoolkit::seam::executor::existing_surfaces $targetSurfs]
-    }
+    return $preparationValue
+}
 
-    # Geometry > Ruled: surface-only mode, two required line lists, and two
-    # required (empty) endpoint-node lists. reverse=1 protects against bow tie.
-    # Create/select the seam component only after trimming so target fragments
-    # remain in their original components regardless of current-collector
-    # behavior in the running HyperMesh release.
-    set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
-    set componentName [lindex $component 0]
-    set componentId [lindex $component 1]
-    ::hmtoolkit::seam::native::ensure_current_component $componentName $componentId
-    set beforeComponent [::hmtoolkit::seam::entity::component_surfaces $componentId]
-    set beforeSurfs [::hmtoolkit::seam::entity::snapshot_ids surfs]
-    *surfacemode 4
-    ::hmtoolkit::seam::executor::prepare_ruled_surface_lists $firstLines $secondLines
+proc ::hmtoolkit::seam::executor::_connect_prepared_t_list {data firstLines secondLines} {
     ::hmtoolkit::seam::log::write INFO \
-        "T List ruled args: *linearsurfacebetweenlines 1 1 2 2 1; source=$firstLines; projected=$secondLines"
-    if {[catch {*linearsurfacebetweenlines 1 1 2 2 1} ruledErr]} {
-        error "\[T List\] Ruled surface creation failed: $ruledErr"
-    }
-    set preliminary [::hmtoolkit::seam::validation::created_surfaces_for_component \
-        $beforeComponent $beforeSurfs $componentId]
-    ::hmtoolkit::seam::executor::merge_ruled_surfaces $preliminary
-    set created [::hmtoolkit::seam::validation::created_surfaces_for_component \
-        $beforeComponent $beforeSurfs $componentId]
-    set created [::hmtoolkit::seam::executor::equivalence_created_surfaces \
-        $created $sourcePartners $targetPartners $componentId $beforeComponent]
-    set result [::hmtoolkit::seam::executor::success T_LIST $created [list $componentName] {} \
-        "\[T List\] Trimmed projection and ruled seam surface created successfully."]
-    dict set result projected_lines $projectedLines
+        "T List connection uses prepared Connect Edges order: first=$firstLines; second=$secondLines"
+    set result [::hmtoolkit::seam::executor::connect_line_groups $data \
+        $firstLines $secondLines 1 \
+        [::hmtoolkit::seam::config::get endpoint_merge_tolerance] \
+        [::hmtoolkit::seam::config::get projected_path_merge_tolerance] 1]
+    dict set result strategy T_LIST
+    dict set result message \
+        "\[T List\] Project/Split and ordered Connect Edges completed on the original geometry."
+    dict set result trim_retained 1
+    dict set result projected_lines [dict get $result second_lines]
     return $result
 }
 
 proc ::hmtoolkit::seam::executor::create_t_list {data} {
-    return [::hmtoolkit::seam::transaction::run "Create T List Seam" [list ::hmtoolkit::seam::executor::_create_t_list_ruled $data]]
+    set projection [::hmtoolkit::seam::transaction::run "T List - Project/Split" \
+        [list ::hmtoolkit::seam::executor::_prepare_t_list_connection $data]]
+    if {![dict exists $projection success] || ![dict get $projection success] || \
+        ![dict exists $projection ready_to_connect] || ![dict get $projection ready_to_connect]} {
+        return $projection
+    }
+    set connection [::hmtoolkit::seam::transaction::run "T List - Connect Edges" \
+        [list ::hmtoolkit::seam::executor::_connect_prepared_t_list $data \
+            [dict get $projection first_lines] [dict get $projection second_lines]]]
+    if {![dict exists $connection success] || ![dict get $connection success]} {
+        set reason [expr {[dict exists $connection message] ? [dict get $connection message] : "unknown Connect Edges error"}]
+        set retained [::hmtoolkit::seam::executor::t_list_trim_retained_result \
+            [dict get $data target_surfs] [dict get $projection trim_lines] \
+            "Connect Edges failed and its own transaction was rolled back: $reason"]
+        dict set retained first_lines [dict get $projection first_lines]
+        dict set retained second_lines [dict get $projection second_lines]
+        return $retained
+    }
+    if {[dict exists $projection warnings] && [dict exists $connection warnings]} {
+        dict set connection warnings [concat [dict get $projection warnings] [dict get $connection warnings]]
+    }
+    return $connection
 }
 
 proc ::hmtoolkit::seam::executor::_create_l_surface {data} {
@@ -708,28 +933,7 @@ proc ::hmtoolkit::seam::executor::create_l_list {data} {
 proc ::hmtoolkit::seam::executor::_connect_edges {data} {
     set first [::hmtoolkit::seam::validation::require_ids $data first_lines lines]
     set second [::hmtoolkit::seam::validation::require_ids $data second_lines lines]
-    ::hmtoolkit::seam::executor::require_minimum_line_length $first "First edge group"
-    ::hmtoolkit::seam::executor::require_minimum_line_length $second "Second edge group"
-    if {[llength [lsort -integer -unique [concat $first $second]]] != [expr {[llength $first]+[llength $second]}]} { error "Edge groups must not overlap" }
-    set organized [::hmtoolkit::seam::candidate::organize_ruled_surface_lines $first $second]
-    set first [dict get $organized first_lines]
-    set second [dict get $organized second_lines]
-    set thickness [::hmtoolkit::seam::naming::thickness_from_data $data]
-    set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
-    set before [::hmtoolkit::seam::entity::component_surfaces [lindex $component 1]]
-    set beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]
-    set firstSurfs [::hmtoolkit::seam::executor::surfaces_from_lines $first]
-    set secondSurfs [::hmtoolkit::seam::executor::surfaces_from_lines $second]
-    ::hmtoolkit::seam::executor::prepare_ruled_surface_lists $first $second
-    *linearsurfacebetweenlines 1 1 2 2 1
-    set preliminary [::hmtoolkit::seam::validation::created_surfaces_for_component $before $beforeAll [lindex $component 1]]
-    # *multi_surfs_lines_merge consumes the global cleanup tolerance; the
-    # shared helper pins it for this call and restores the session value.
-    ::hmtoolkit::seam::executor::merge_ruled_surfaces $preliminary
-    set created [::hmtoolkit::seam::validation::created_surfaces_for_component $before $beforeAll [lindex $component 1]]
-    set created [::hmtoolkit::seam::executor::equivalence_created_surfaces \
-        $created $firstSurfs $secondSurfs [lindex $component 1] $before]
-    return [::hmtoolkit::seam::executor::success CONNECT $created [list [lindex $component 0]]]
+    return [::hmtoolkit::seam::executor::connect_line_groups $data $first $second 1]
 }
 
 proc ::hmtoolkit::seam::executor::connect_edges {data} {
@@ -739,29 +943,19 @@ proc ::hmtoolkit::seam::executor::connect_edges {data} {
 proc ::hmtoolkit::seam::executor::_split_surface {data strategy} {
     set lines [::hmtoolkit::seam::validation::require_ids $data seam_lines lines]
     set surfaces [::hmtoolkit::seam::validation::require_ids $data target_surfs surfs]
-    set beforeEdges [::hmtoolkit::seam::entity::surface_lines $surfaces]
-    set created {}
-    foreach surfaceId $surfaces {
-        set before [::hmtoolkit::seam::entity::snapshot_ids surfs]
-        ::hmtoolkit::seam::entity::mark lines 2 $lines
-        ::hmtoolkit::seam::entity::mark surfs 1 [list $surfaceId]
-        *surfacemarksplitwithlines 1 2 0 13 0
-        set targetCreated [::hmtoolkit::seam::entity::diff_ids \
-            $before [::hmtoolkit::seam::entity::snapshot_ids surfs]]
-        set created [concat $created $targetCreated]
-    }
-    set created [lsort -integer -unique $created]
+    set splitResult [::hmtoolkit::seam::executor::project_split_line_groups $lines $surfaces]
+    set created [dict get $splitResult created_surfs]
     # Surface splitting can update the selected surface in place. A successful
     # native command therefore remains valid even when no new surface ID is
     # allocated; rolling it back here made Project appear to do nothing.
-    set afterEdges [::hmtoolkit::seam::entity::surface_lines \
-        [::hmtoolkit::seam::executor::existing_surfaces $surfaces]]
-    if {[llength $created] == 0 && $beforeEdges ne "" && $beforeEdges eq $afterEdges} {
+    if {[llength $created] == 0 && [dict get $splitResult topology_readable] && \
+        ![dict get $splitResult topology_changed]} {
         error "The surface split created no new surface and did not change the selected surfaces; check the projection direction and line-to-surface distance"
     }
     set result [::hmtoolkit::seam::executor::success \
         $strategy $created {} {} "Target surfaces split successfully."]
-    dict set result modified_surfs [lsort -integer -unique $surfaces]
+    dict set result modified_surfs [dict get $splitResult modified_surfs]
+    dict set result projected_lines [dict get $splitResult new_lines]
     return $result
 }
 

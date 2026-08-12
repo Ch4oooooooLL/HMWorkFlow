@@ -254,6 +254,29 @@ proc ::FemAutoSeam::validateAutoBatchResult {plans protectedNodeIds allowedCompo
     return [dict create checked $afterCount failed [llength $failed]]
 }
 
+proc ::FemAutoSeam::assignAutoRemeshProperties {elementIds expectedProperties} {
+    dict for {componentId propertyId} $expectedProperties {
+        set propertyName ""
+        foreach entityType {props properties} {
+            if {![catch {set propertyName [hm_getvalue $entityType id=$propertyId dataname=name]}] && $propertyName ne ""} { break }
+        }
+        if {$propertyName eq ""} { error "remesh property $propertyId is missing for component $componentId" }
+        set owned {}
+        foreach elementId $elementIds {
+            if {[::FemAutoSeam::autoElementComponentId $elementId] == $componentId} { lappend owned $elementId }
+        }
+        if {![llength $owned]} { continue }
+        catch {*clearmark elems 1}; eval *createmark elems 1 $owned
+        if {[catch {*propertyupdate elems 1 $propertyName} propertyError]} {
+            catch {*clearmark elements 1}; eval *createmark elements 1 $owned
+            if {[catch {*propertyupdate elements 1 $propertyName} propertyError]} {
+                error "could not restore property $propertyId on remeshed component $componentId: $propertyError"
+            }
+        }
+        catch {*clearmark elems 1}; catch {*clearmark elements 1}
+    }
+}
+
 proc ::FemAutoSeam::executeAutoPlans {taskDir plans resultFem {backupSnapshot ""} {progressStart 70.0} {progressEnd 93.0}} {
     variable cfg
     set taskStarted [clock milliseconds]
@@ -316,6 +339,7 @@ proc ::FemAutoSeam::executeAutoPlans {taskDir plans resultFem {backupSnapshot ""
         }
         set afterSeeds [::FemAutoSeam::autoElementsForNodes $protectedNodeIds $allowedComponents]
         set afterIds [::FemAutoSeam::autoExpandElementPatch $afterSeeds $allowedComponents $cfg(remesh_expand_layers)]
+        ::FemAutoSeam::assignAutoRemeshProperties $afterIds $expectedProperties
         set quality [::FemAutoSeam::validateAutoBatchResult $readyPlans $protectedNodeIds $allowedComponents $baselineIds $baselineFailed $afterIds $expectedProperties]
     } error options]
     if {$code} {

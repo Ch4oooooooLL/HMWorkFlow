@@ -80,7 +80,7 @@ catch {::hmtoolkit::seam::config::load}
 # changing the production algorithm or relying on the GUI.
 rename ::hmtoolkit::seam::candidate::select_projected_trim_path \
     ::hmtoolkit::seam::candidate::select_projected_trim_path_impl
-proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLines} {
+proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLines args} {
     log "T_LIST_DEBUG source_lines=$sourceLines new_lines=$newLines"
     foreach lineId $newLines {
         if {[catch {set points [::hmtoolkit::seam::candidate::line_points $lineId]} err]} {
@@ -100,7 +100,7 @@ proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLi
         }
     }
     return [::hmtoolkit::seam::candidate::select_projected_trim_path_impl \
-        $sourceLines $newLines]
+        $sourceLines $newLines {*}$args]
 }
 log "extend_offset_distance=[::hmtoolkit::seam::config::get extend_offset_distance] point_spacing=[::hmtoolkit::seam::config::get point_spacing]"
 

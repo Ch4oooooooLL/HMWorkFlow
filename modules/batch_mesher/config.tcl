@@ -69,6 +69,90 @@ proc ::BatchMesher::defaultPreset {} {
     return [dict create name Default criteria_path "" param_path "" criteria_mtime "" param_mtime ""]
 }
 
+proc ::BatchMesher::defaultStandardsForHmbatch {executable} {
+    if {$executable eq "" || ![file isfile $executable]} { return {} }
+    # hmbatch.exe lives below <hm>/bin/win64 in both the classic 2019 layout
+    # and the newer hwdesktop/hm layout. Use Altair's shipped general-purpose
+    # 8 mm pair when the user has not selected a custom standard.
+    set hmRoot [file normalize [file join [file dirname $executable] .. ..]]
+    set criteria [file join $hmRoot batchmesh general_8mm.criteria]
+    set param [file join $hmRoot batchmesh general_8mm.param]
+    if {![file isfile $criteria] || ![file readable $criteria] ||
+        ![file isfile $param] || ![file readable $param]} { return {} }
+    return [dict create criteria [file normalize $criteria] param [file normalize $param]]
+}
+
+proc ::BatchMesher::discoverInstalledHmbatch {} {
+    set roots {}
+    foreach name {ALTAIR_HOME ALTAIR_ROOT} {
+        if {[info exists ::env($name)] && [string trim $::env($name)] ne ""} {
+            lappend roots [string trim $::env($name)]
+        }
+    }
+    foreach root {{C:/Program Files/Altair} {D:/Program Files/Altair}} {
+        lappend roots $root
+    }
+    set candidates {}
+    foreach root $roots {
+        foreach pattern [list \
+            [file join $root hm bin win64 hmbatch.exe] \
+            [file join $root hwdesktop hm bin win64 hmbatch.exe] \
+            [file join $root 20* hm bin win64 hmbatch.exe] \
+            [file join $root 20* hwdesktop hm bin win64 hmbatch.exe]] {
+            foreach path [glob -nocomplain -types f -- $pattern] {
+                set normalized [file normalize $path]
+                if {[lsearch -exact $candidates $normalized] < 0 &&
+                    [dict size [::BatchMesher::defaultStandardsForHmbatch $normalized]] > 0} {
+                    lappend candidates $normalized
+                }
+            }
+        }
+    }
+    if {[llength $candidates] == 0} { return "" }
+    # Do not infer the release from the parent folder: some managed installs
+    # put HyperMesh 2022 below Altair/2020. The startup preflight validates
+    # the real product version; discovery only prefers the hwdesktop layout.
+    foreach path $candidates {
+        if {[regexp -nocase {[\\/]hwdesktop[\\/]hm[\\/]} $path]} { return $path }
+    }
+    return [lindex $candidates 0]
+}
+
+proc ::BatchMesher::applyInstalledDefaults {{executable ""}} {
+    variable ui
+    if {$executable eq ""} { set executable [::BatchMesher::discoverInstalledHmbatch] }
+    if {$executable eq ""} { return 0 }
+    set currentPath [string trim $ui(HMBATCH_PATH)]
+    set currentStandards [::BatchMesher::defaultStandardsForHmbatch $currentPath]
+    set autoManaged [expr {
+        $ui(ACTIVE_PRESET) eq "Default" &&
+        ([dict size $currentStandards] == 0 ||
+         ([file normalize $ui(CRITERIA_PATH)] eq [dict get $currentStandards criteria] &&
+          [file normalize $ui(PARAM_PATH)] eq [dict get $currentStandards param]))
+    }]
+    if {$currentPath eq "" || ![file isfile $currentPath] || $autoManaged} {
+        set ui(HMBATCH_PATH) [file normalize $executable]
+    }
+    set standards [::BatchMesher::defaultStandardsForHmbatch $ui(HMBATCH_PATH)]
+    if {[dict size $standards] == 0} { return 0 }
+    if {$autoManaged || [string trim $ui(CRITERIA_PATH)] eq "" || ![file isfile $ui(CRITERIA_PATH)] ||
+        [string trim $ui(PARAM_PATH)] eq "" || ![file isfile $ui(PARAM_PATH)]} {
+        set ui(CRITERIA_PATH) [dict get $standards criteria]
+        set ui(PARAM_PATH) [dict get $standards param]
+        set index [::BatchMesher::findPresetIndex $ui(ACTIVE_PRESET)]
+        set preset [dict create name $ui(ACTIVE_PRESET) \
+            criteria_path $ui(CRITERIA_PATH) param_path $ui(PARAM_PATH) \
+            criteria_mtime [file mtime $ui(CRITERIA_PATH)] \
+            param_mtime [file mtime $ui(PARAM_PATH)]]
+        if {$index < 0} {
+            lappend ui(PRESETS) $preset
+        } else {
+            set ui(PRESETS) [lreplace $ui(PRESETS) $index $index $preset]
+        }
+    }
+    return 1
+}
+
 proc ::BatchMesher::setDefaults {} {
     variable ui
     array set ui {
@@ -110,6 +194,7 @@ proc ::BatchMesher::loadState {} {
         set ui(DEFAULT_PRESET) Default
         ::BatchMesher::selectPreset Default 0
     }
+    ::BatchMesher::applyInstalledDefaults
 }
 
 proc ::BatchMesher::saveState {} {
@@ -210,6 +295,7 @@ proc ::BatchMesher::setDefaultPreset {} {
 proc ::BatchMesher::restoreDefaults {} {
     variable ui
     ::BatchMesher::setDefaults
+    ::BatchMesher::applyInstalledDefaults
     ::BatchMesher::saveState
     catch {::BatchMesher::refreshPresetWidget}
 }
@@ -264,7 +350,7 @@ proc ::BatchMesher::validateRunConfig {} {
 
 proc ::BatchMesher::batchMeshElementSize {paramPath} {
     if {[catch {set text [::HWFlow::readTextFile $paramPath]}]} { return "" }
-    if {[regexp -line {^[ \t]*element_size[ \t]+([0-9]+(?:[.][0-9]*)?(?:[eE][+-]?[0-9]+)?)} $text -> value] &&
+    if {[regexp -nocase -line {^[ \t]*element_size(?:[ \t]+|[ \t]*=[ \t]*)([0-9]+(?:[.][0-9]*)?(?:[eE][+-]?[0-9]+)?)} $text -> value] &&
         [string is double -strict $value] && $value > 0} {
         return [expr {double($value)}]
     }

@@ -80,15 +80,71 @@ def _mark_duplicates(candidates, model, existing, maximum):
     return candidates
 
 
-def calculate(request, model, existing, performance=None):
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                return digest.hexdigest()
+            digest.update(block)
+
+
+def _mesh_bundle_fingerprint(manifest_path):
+    manifest_path = Path(manifest_path)
+    fingerprints = {"manifest": _sha256_file(manifest_path)}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        fem_path = manifest_path.parent / str(manifest.get("fem_path", ""))
+        if fem_path.is_file():
+            fingerprints["fem"] = _sha256_file(fem_path)
+    except (OSError, ValueError, TypeError):
+        pass
+    return fingerprints
+
+
+def _candidate_cache_key(request, mesh_path, existing_path):
+    """Identify the detection inputs shared by the detect and plan passes."""
+    settings = dict(request["settings"])
+    settings.pop("mode", None)
+    payload = {
+        "run_id": str(request["run_id"]),
+        "selected_component_ids": [int(value) for value in request.get("selected_component_ids", [])],
+        "settings": settings,
+        "mesh": _mesh_bundle_fingerprint(mesh_path),
+        "existing_sha256": _sha256_file(existing_path),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_candidate_cache(path, cache_key):
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if payload.get("cache_version") != 1 or payload.get("cache_key") != cache_key:
+        return None
+    candidates = payload.get("candidates")
+    return candidates if isinstance(candidates, list) else None
+
+
+def calculate(request, model, existing, performance=None, detected_candidates=None):
     performance = performance if performance is not None else {}
     settings = request["settings"]
-    stage_started = time.perf_counter()
-    candidates = detect_candidates(model, _backend_settings(settings, request))
-    performance["detection_seconds"] = round(time.perf_counter() - stage_started, 6)
-    stage_started = time.perf_counter()
-    candidates = _mark_duplicates(candidates, model, existing.get("seams", []), settings["existing_weld_search_distance"])
-    performance["duplicate_check_seconds"] = round(time.perf_counter() - stage_started, 6)
+    if detected_candidates is None:
+        stage_started = time.perf_counter()
+        candidates = detect_candidates(model, _backend_settings(settings, request))
+        performance["detection_seconds"] = round(time.perf_counter() - stage_started, 6)
+        stage_started = time.perf_counter()
+        candidates = _mark_duplicates(candidates, model, existing.get("seams", []), settings["existing_weld_search_distance"])
+        performance["duplicate_check_seconds"] = round(time.perf_counter() - stage_started, 6)
+        performance["candidate_cache_hit"] = False
+    else:
+        candidates = [dict(row) for row in detected_candidates]
+        performance["detection_seconds"] = 0.0
+        performance["duplicate_check_seconds"] = 0.0
+        performance["candidate_cache_hit"] = True
     if settings["mode"] == "detect":
         performance["planning_seconds"] = 0.0
         return {"candidates": candidates}
@@ -162,13 +218,23 @@ def main(argv=None):
         stage_started = time.perf_counter()
         existing = load_json(args.existing)
         performance["existing_read_seconds"] = round(time.perf_counter() - stage_started, 6)
-        calculated = calculate(request, model, existing, performance)
+        cache_path = args.output.parent / "candidates.json"
+        cache_key = _candidate_cache_key(request, args.mesh, args.existing)
+        cached_candidates = None
+        if request["settings"]["mode"] == "plan":
+            cached_candidates = _load_candidate_cache(cache_path, cache_key)
+        calculated = calculate(request, model, existing, performance, cached_candidates)
         result = new_result("fem_auto_seam", request["run_id"])
         artifact_started = time.perf_counter()
         if request["settings"]["mode"] == "detect":
             result["candidates"] = calculated["candidates"]
             result["summary"] = {"mode": "detect", "candidate_count": len(result["candidates"])}
-            (args.output.parent / "candidates.json").write_text(json.dumps(calculated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            cache_payload = {
+                "cache_version": 1,
+                "cache_key": cache_key,
+                "candidates": calculated["candidates"],
+            }
+            cache_path.write_text(json.dumps(cache_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         else:
             plans = calculated["plans"]
             ready = [row for row in plans if row["status"] == "READY"]

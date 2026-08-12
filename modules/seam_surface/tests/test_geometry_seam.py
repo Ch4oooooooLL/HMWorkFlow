@@ -244,6 +244,26 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} first_lines"), "10")
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} second_lines"), "30 20")
 
+    def test_connect_uses_whole_path_when_endpoint_pairing_is_ambiguous(self):
+        self.tcl.eval(
+            """
+            proc test_curved_connect_points {id} {
+                switch -- $id {
+                    10 {return {{-1 0 0} {-1 5 0} {0 10 0}}}
+                    11 {return {{0 10 0} {1 5 0} {1 0 0}}}
+                    20 {return {{0 1 1} {-1 5 1} {0 10 1}}}
+                    21 {return {{0 10 1} {1 5 1} {0 -1 1}}}
+                }
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::organize_ruled_surface_lines "
+            "{11 10} {21 20} test_curved_connect_points 0.01"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} first_lines"), "10 11")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} second_lines"), "20 21")
+
     def test_connect_line_paths_reject_disconnected_or_branched_input(self):
         self.tcl.eval(
             """
@@ -293,12 +313,75 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} second_lines"), "23 22 21 20")
 
     def test_connect_captures_input_surface_owners_before_creating_the_seam(self):
-        body = self.tcl.eval("info body ::hmtoolkit::seam::executor::_connect_edges")
+        body = self.tcl.eval("info body ::hmtoolkit::seam::executor::connect_line_groups")
         first_owner = body.index("set firstSurfs")
         second_owner = body.index("set secondSurfs")
+        surface_only = body.index("*surfacemode 4")
+        lists = body.index("prepare_ruled_surface_lists")
         creation = body.index("*linearsurfacebetweenlines")
         self.assertLess(first_owner, creation)
         self.assertLess(second_owner, creation)
+        self.assertLess(surface_only, lists)
+        self.assertLess(lists, creation)
+
+    def test_connect_passes_both_geometry_ordered_line_groups_to_native_lists(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::candidate::line_points ::hmtoolkit::seam::candidate::line_points_real
+            rename ::hmtoolkit::seam::executor::require_minimum_line_length ::hmtoolkit::seam::executor::require_minimum_line_length_real
+            rename ::hmtoolkit::seam::executor::surfaces_from_lines ::hmtoolkit::seam::executor::surfaces_from_lines_real
+            rename ::hmtoolkit::seam::executor::prepare_ruled_surface_lists ::hmtoolkit::seam::executor::prepare_ruled_surface_lists_real
+            rename ::hmtoolkit::seam::executor::merge_ruled_surfaces ::hmtoolkit::seam::executor::merge_ruled_surfaces_real
+            rename ::hmtoolkit::seam::entity::component_surfaces ::hmtoolkit::seam::entity::component_surfaces_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::validation::created_surfaces_for_component ::hmtoolkit::seam::validation::created_surfaces_for_component_real
+            proc ::hmtoolkit::seam::candidate::line_points {id} {
+                switch -- $id {
+                    10 {return {{0 0 0} {1 0 0}}}
+                    20 {return {{2 0 0} {1 0 0}}}
+                    30 {return {{3 0 0} {2 0 0}}}
+                    40 {return {{0 1 0} {1 1 0}}}
+                    50 {return {{2 1 0} {1 1 0}}}
+                    60 {return {{3 1 0} {2 1 0}}}
+                }
+            }
+            proc ::hmtoolkit::seam::executor::require_minimum_line_length {args} {return 1.0}
+            proc ::hmtoolkit::seam::executor::surfaces_from_lines {lines} {return {10}}
+            proc ::hmtoolkit::seam::naming::thickness_from_data {data} {return 8.0}
+            proc ::hmtoolkit::seam::naming::get_or_create_component {thickness} {return {SEAM_T8_Surf 900}}
+            proc ::hmtoolkit::seam::entity::component_surfaces {id} {return {}}
+            proc ::hmtoolkit::seam::entity::snapshot_ids {type} {return {}}
+            proc ::hmtoolkit::seam::executor::prepare_ruled_surface_lists {first second} {
+                set ::ordered_native_lists [list $first $second]
+            }
+            proc ::hmtoolkit::seam::validation::created_surfaces_for_component {args} {return {300}}
+            proc ::hmtoolkit::seam::executor::merge_ruled_surfaces {surfaces} {}
+            proc *surfacemode {mode} {set ::ruled_surface_mode $mode}
+            proc *linearsurfacebetweenlines {args} {}
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::connect_line_groups "
+            "[dict create thickness 8.0] {30 10 20} {60 40 50} 0 0.01"
+        )
+        self.assertEqual(
+            self.tcl.eval("set ::ordered_native_lists"),
+            "{10 20 30} {40 50 60}",
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} first_lines"), "10 20 30")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} second_lines"), "40 50 60")
+        self.assertEqual(self.tcl.eval("set ::ruled_surface_mode"), "4")
+
+        prepared = self.tcl.eval(
+            "::hmtoolkit::seam::executor::connect_line_groups "
+            "[dict create thickness 8.0] {30 10 20} {60 40 50} 0 0.01 0.01 1"
+        )
+        self.assertEqual(
+            self.tcl.eval("set ::ordered_native_lists"),
+            "{30 10 20} {60 40 50}",
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{prepared}}} first_lines"), "30 10 20")
+        self.assertEqual(self.tcl.eval(f"dict get {{{prepared}}} second_lines"), "60 40 50")
 
     def test_list_based_creation_strategies_default_to_line_path(self):
         self.tcl.eval(
@@ -337,7 +420,7 @@ class GeometrySeamTclTests(unittest.TestCase):
                 self.assertEqual(self.tcl.eval(f"dict get {{{result}}} valid"), "1")
                 self.assertEqual(self.tcl.eval("set ::list_panel_calls"), calls)
 
-    def test_l_list_collects_multiple_target_surfaces_from_a_surface_list(self):
+    def test_list_seams_collect_multiple_target_surfaces_from_a_surface_list(self):
         self.tcl.eval(
             """
             rename ::hmtoolkit::seam::selector::list_panel ::hmtoolkit::seam::selector::list_panel_real
@@ -361,19 +444,22 @@ class GeometrySeamTclTests(unittest.TestCase):
             proc ::hmtoolkit::seam::selector::components_for_surfaces {surfIds} {return $surfIds}
             """
         )
-        result = self.tcl.eval(
-            "::hmtoolkit::seam::selector::select_strategy_input L_LIST"
-        )
-        self.assertEqual(self.tcl.eval("set ::surface_list_calls"), "1")
-        self.assertEqual(self.tcl.eval("set ::target_mark_calls"), "0")
-        self.assertEqual(
-            self.tcl.eval(f"dict get {{{result}}} target_surfs"),
-            "201 202 203",
-        )
-        self.assertEqual(
-            self.tcl.eval(f"dict get {{{result}}} target_components"),
-            "201 202 203",
-        )
+        for strategy in ("T_LIST", "L_LIST"):
+            with self.subTest(strategy=strategy):
+                self.tcl.eval("set ::surface_list_calls 0; set ::target_mark_calls 0")
+                result = self.tcl.eval(
+                    f"::hmtoolkit::seam::selector::select_strategy_input {strategy}"
+                )
+                self.assertEqual(self.tcl.eval("set ::surface_list_calls"), "1")
+                self.assertEqual(self.tcl.eval("set ::target_mark_calls"), "0")
+                self.assertEqual(
+                    self.tcl.eval(f"dict get {{{result}}} target_surfs"),
+                    "201 202 203",
+                )
+                self.assertEqual(
+                    self.tcl.eval(f"dict get {{{result}}} target_components"),
+                    "201 202 203",
+                )
 
     def test_t_surface_selects_two_surface_groups_and_rejects_overlap(self):
         self.tcl.eval(
@@ -427,7 +513,7 @@ class GeometrySeamTclTests(unittest.TestCase):
         )
         self.assertEqual(self.tcl.eval(f"dict get {{{cancelled}}} cancelled"), "1")
 
-    def test_project_collects_multiple_target_surfaces_and_executes_them_together(self):
+    def test_project_collects_multiple_targets_without_changing_split_flow(self):
         self.tcl.eval(
             """
             rename ::hmtoolkit::seam::selector::list_panel ::hmtoolkit::seam::selector::list_panel_real
@@ -466,7 +552,10 @@ class GeometrySeamTclTests(unittest.TestCase):
             proc ::hmtoolkit::seam::entity::mark {entityType markId ids} {
                 lappend ::project_marks [list $entityType $markId $ids]
             }
-            proc ::hmtoolkit::seam::entity::diff_ids {before after} {return [list [lindex $after end]]}
+            proc ::hmtoolkit::seam::entity::diff_ids {before after} {
+                if {[llength $after] == 0} {return {}}
+                return [list [lindex $after end]]
+            }
             proc *surfacemarksplitwithlines {args} {incr ::project_split_called}
             set ::project_split_called 0
             """
@@ -559,11 +648,12 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} created_surfs"), "60 61")
         self.assertIn("Extended surface(s)", self.tcl.eval(f"dict get {{{result}}} message"))
 
-    def test_t_list_runs_trim_then_surface_only_ruled_workflow(self):
+    def test_t_list_combines_project_split_with_ordered_connect_edges(self):
         self.tcl.eval(
             """
             rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
             rename ::hmtoolkit::seam::candidate::path_topology ::hmtoolkit::seam::candidate::path_topology_real
+            rename ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces_real
             rename ::hmtoolkit::seam::candidate::select_projected_trim_path ::hmtoolkit::seam::candidate::select_projected_trim_path_real
             rename ::hmtoolkit::seam::candidate::organize_ruled_surface_lines ::hmtoolkit::seam::candidate::organize_ruled_surface_lines_real
             rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
@@ -572,17 +662,27 @@ class GeometrySeamTclTests(unittest.TestCase):
             rename ::hmtoolkit::seam::validation::created_surfaces_for_component ::hmtoolkit::seam::validation::created_surfaces_for_component_real
             rename ::hmtoolkit::seam::native::ensure_current_component ::hmtoolkit::seam::native::ensure_current_component_real
             rename ::hmtoolkit::seam::executor::surfaces_from_lines ::hmtoolkit::seam::executor::surfaces_from_lines_real
+            rename ::hmtoolkit::seam::executor::project_split_line_groups ::hmtoolkit::seam::executor::project_split_line_groups_real
+            rename ::hmtoolkit::seam::executor::connect_line_groups ::hmtoolkit::seam::executor::connect_line_groups_real
             rename ::hmtoolkit::seam::executor::merge_ruled_surfaces ::hmtoolkit::seam::executor::merge_ruled_surfaces_real
             rename ::hmtoolkit::seam::executor::equivalence_created_surfaces ::hmtoolkit::seam::executor::equivalence_created_surfaces_real
             rename ::hmtoolkit::seam::executor::require_minimum_line_length ::hmtoolkit::seam::executor::require_minimum_line_length_real
+            rename ::hmtoolkit::seam::transaction::run ::hmtoolkit::seam::transaction::run_real
             set ::tl_events {}
             set ::tl_line_snapshots 0
+            proc ::hmtoolkit::seam::transaction::run {label body} {
+                lappend ::tl_events [list transaction $label]
+                return [uplevel #0 $body]
+            }
             proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {return [dict get $data $key]}
             proc ::hmtoolkit::seam::executor::require_minimum_line_length {args} {return 10.0}
             proc ::hmtoolkit::seam::candidate::path_topology {args} {
-                return [dict create kind PATH branch_nodes 0]
+                return [dict create kind PATH branch_nodes 0 closed 0]
             }
-            proc ::hmtoolkit::seam::candidate::select_projected_trim_path {source created} {
+            proc ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces {args} {
+                return {{0 0 0} {10 0 0}}
+            }
+            proc ::hmtoolkit::seam::candidate::select_projected_trim_path {source created args} {
                 set ::tl_projected_candidates $created
                 return {200 201}
             }
@@ -606,8 +706,18 @@ class GeometrySeamTclTests(unittest.TestCase):
             proc ::hmtoolkit::seam::native::ensure_current_component {args} {}
             proc ::hmtoolkit::seam::validation::created_surfaces_for_component {args} {return {300}}
             proc ::hmtoolkit::seam::executor::surfaces_from_lines {lines} {
-                if {$lines eq "200 201"} {return {20 21}}
                 return {10}
+            }
+            proc ::hmtoolkit::seam::executor::project_split_line_groups {lines surfaces} {
+                lappend ::tl_events [list project-split $lines $surfaces]
+                return [dict create created_surfs {130 131} new_lines {200 201} \
+                    modified_surfs $surfaces topology_readable 1 topology_changed 1]
+            }
+            proc ::hmtoolkit::seam::executor::connect_line_groups {data first second stitch firstTolerance secondTolerance alreadyOrdered} {
+                lappend ::tl_events [list connect-lines $first $second $stitch $firstTolerance $secondTolerance $alreadyOrdered]
+                return [dict create success 1 strategy CONNECT created_surfs {300} \
+                    created_components {SEAM_T8_Surf} warnings {} message {} \
+                    first_lines {100 101} second_lines {201 200}]
             }
             proc ::hmtoolkit::seam::executor::merge_ruled_surfaces {surfaces} {
                 lappend ::tl_events [list merge $surfaces]
@@ -624,19 +734,128 @@ class GeometrySeamTclTests(unittest.TestCase):
             """
         )
         result = self.tcl.eval(
-            "::hmtoolkit::seam::executor::_create_t_list_ruled "
+            "::hmtoolkit::seam::executor::create_t_list "
             "[dict create seam_lines {100 101} target_surfs {20 21} "
             "source_surfs {10} source_components {1} target_components {2}]"
         )
         events = self.tcl.eval("set ::tl_events")
-        self.assertIn("trim 1 2 0 13 0", events)
-        self.assertIn("surfacemode 4", events)
-        self.assertIn("ruled 1 1 2 2 1", events)
-        self.assertIn("merge 300", events)
-        self.assertIn("equivalence 300 10 {20 21}", events)
-        self.assertLess(events.index("trim 1 2 0 13 0"), events.index("ruled 1 1 2 2 1"))
+        self.assertIn("project-split {100 101} {20 21}", events)
+        self.assertIn("transaction {T List - Project/Split}", events)
+        self.assertIn("transaction {T List - Connect Edges}", events)
+        self.assertIn(
+            "connect-lines {100 101} {200 201} 1 "
+            + self.tcl.eval("::hmtoolkit::seam::config::get endpoint_merge_tolerance")
+            + " "
+            + self.tcl.eval("::hmtoolkit::seam::config::get projected_path_merge_tolerance")
+            + " 1",
+            events,
+        )
+        self.assertLess(events.index("project-split"), events.index("connect-lines"))
         self.assertEqual(self.tcl.eval("set ::tl_projected_candidates"), "200 201")
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} created_surfs"), "300")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} first_lines"), "100 101")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} projected_lines"), "201 200")
+
+    def test_t_list_keeps_trim_when_line_filtering_fails(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
+            rename ::hmtoolkit::seam::executor::require_minimum_line_length ::hmtoolkit::seam::executor::require_minimum_line_length_real
+            rename ::hmtoolkit::seam::candidate::path_topology ::hmtoolkit::seam::candidate::path_topology_real
+            rename ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces_real
+            rename ::hmtoolkit::seam::candidate::select_projected_trim_path ::hmtoolkit::seam::candidate::select_projected_trim_path_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::executor::_split_surface ::hmtoolkit::seam::executor::_split_surface_real
+            proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {return [dict get $data $key]}
+            proc ::hmtoolkit::seam::executor::require_minimum_line_length {args} {return 10.0}
+            proc ::hmtoolkit::seam::candidate::path_topology {args} {
+                return [dict create kind PATH branch_nodes 0 closed 0]
+            }
+            proc ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces {args} {
+                return {{0 0 0} {10 0 0}}
+            }
+            proc ::hmtoolkit::seam::candidate::select_projected_trim_path {args} {
+                error "no safe trim path"
+            }
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {100 200}}
+            proc ::hmtoolkit::seam::executor::_split_surface {data strategy} {
+                return [dict create success 1 projected_lines {200} modified_surfs {20}]
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::_prepare_t_list_connection "
+            "[dict create seam_lines {100} target_surfs {20}]"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} success"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} partial_success"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} trim_retained"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} projected_lines"), "200")
+
+    def test_t_list_uses_recorded_trim_fallback_when_projection_reference_is_unsafe(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
+            rename ::hmtoolkit::seam::executor::require_minimum_line_length ::hmtoolkit::seam::executor::require_minimum_line_length_real
+            rename ::hmtoolkit::seam::candidate::path_topology ::hmtoolkit::seam::candidate::path_topology_real
+            rename ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces_real
+            rename ::hmtoolkit::seam::candidate::select_projected_trim_path ::hmtoolkit::seam::candidate::select_projected_trim_path_real
+            rename ::hmtoolkit::seam::candidate::organize_ruled_surface_lines ::hmtoolkit::seam::candidate::organize_ruled_surface_lines_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::executor::_split_surface ::hmtoolkit::seam::executor::_split_surface_real
+            set ::unsafe_selection_called 0
+            proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {return [dict get $data $key]}
+            proc ::hmtoolkit::seam::executor::require_minimum_line_length {args} {return 10.0}
+            proc ::hmtoolkit::seam::candidate::path_topology {args} {
+                return [dict create kind PATH branch_nodes 0 closed 0]
+            }
+            proc ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces {args} {return {}}
+            proc ::hmtoolkit::seam::candidate::select_projected_trim_path {args} {
+                incr ::unsafe_selection_called
+                return {200}
+            }
+            proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second args} {
+                return [dict create first_lines $first second_lines $second]
+            }
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {100 200}}
+            proc ::hmtoolkit::seam::executor::_split_surface {data strategy} {
+                return [dict create success 1 projected_lines {200} modified_surfs {20}]
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::_prepare_t_list_connection "
+            "[dict create seam_lines {100} target_surfs {20}]"
+        )
+        self.assertEqual(self.tcl.eval("set ::unsafe_selection_called"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} success"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} ready_to_connect"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} trim_retained"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} projected_lines"), "200")
+
+    def test_t_list_keeps_committed_trim_when_connect_transaction_fails(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::transaction::run ::hmtoolkit::seam::transaction::run_real
+            set ::two_stage_calls 0
+            proc ::hmtoolkit::seam::transaction::run {label body} {
+                incr ::two_stage_calls
+                if {$::two_stage_calls == 1} {
+                    return [dict create success 1 ready_to_connect 1 trim_retained 1 \
+                        trim_lines {200 201} first_lines {100 101} second_lines {200 201} warnings {}]
+                }
+                return [dict create success 0 message "ruled failed" warnings {}]
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::create_t_list "
+            "[dict create seam_lines {100 101} target_surfs {20}]"
+        )
+        self.assertEqual(self.tcl.eval("set ::two_stage_calls"), "2")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} success"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} partial_success"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} trim_retained"), "1")
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} projected_lines"), "200 201")
 
     def test_projected_trim_path_selection_prefers_matching_connected_group(self):
@@ -669,6 +888,140 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertEqual(
             self.tcl.eval("::hmtoolkit::seam::candidate::select_projected_trim_path {1} {10 11 20}"),
             "10 11",
+        )
+
+    def test_t_list_projection_reference_rejects_a_nearer_unrelated_edge(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::candidate::line_points ::hmtoolkit::seam::candidate::line_points_real
+            rename ::hmtoolkit::seam::candidate::line_length ::hmtoolkit::seam::candidate::line_length_real
+            proc ::hmtoolkit::seam::candidate::line_points {lineId} {
+                switch -- $lineId {
+                    1  {return {{0 0 0} {5 0 0} {10 0 0}}}
+                    10 {return {{0 0 1} {5 0 1} {10 0 1}}}
+                    20 {return {{0 0 100} {5 0 100} {10 0 100}}}
+                }
+            }
+            proc ::hmtoolkit::seam::candidate::line_length {lineId} {return 10.0}
+            proc hm_findclosestpointonline {x y z lineId} {
+                set lineZ [expr {$lineId == 10 ? 1.0 : 100.0}]
+                return [list $x 0 $lineZ [expr {abs($z-$lineZ)}]]
+            }
+            """
+        )
+        selected = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::select_projected_trim_path "
+            "{1} {10 20} {{0 0 100} {5 0 100} {10 0 100}}"
+        )
+        self.assertEqual(selected, "20")
+        with self.assertRaisesRegex(tkinter.TclError, "No unbranched projected trim path"):
+            self.tcl.eval(
+                "::hmtoolkit::seam::candidate::select_projected_trim_path "
+                "{1} {10} {{0 0 100} {5 0 100} {10 0 100}}"
+            )
+
+    def test_best_trim_match_continues_when_strict_projection_gate_rejects_all_paths(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::candidate::line_points ::hmtoolkit::seam::candidate::line_points_real
+            rename ::hmtoolkit::seam::candidate::line_length ::hmtoolkit::seam::candidate::line_length_real
+            proc ::hmtoolkit::seam::candidate::line_points {lineId} {
+                switch -- $lineId {
+                    1  {return {{0 0 0} {5 0 0} {10 0 0}}}
+                    10 {return {{0 0 40} {5 0 40} {10 0 40}}}
+                    20 {return {{0 0 65} {5 0 65} {10 0 65}}}
+                }
+            }
+            proc ::hmtoolkit::seam::candidate::line_length {lineId} {return 10.0}
+            proc hm_findclosestpointonline {x y z lineId} {
+                set lineZ [expr {$lineId == 10 ? 40.0 : 65.0}]
+                return [list $x 0 $lineZ [expr {abs($z-$lineZ)}]]
+            }
+            """
+        )
+        reference = "{{0 0 50} {5 0 50} {10 0 50}}"
+        with self.assertRaisesRegex(tkinter.TclError, "No unbranched projected trim path"):
+            self.tcl.eval(
+                "::hmtoolkit::seam::candidate::select_projected_trim_path "
+                f"{{1}} {{10 20}} {reference} STRICT 0.1"
+            )
+        selected = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::select_projected_trim_path "
+            f"{{1}} {{10 20}} {reference} BEST 0.1"
+        )
+        self.assertEqual(selected, "10")
+
+    def test_trim_fragments_on_multiple_surfaces_follow_reference_order(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::candidate::line_points ::hmtoolkit::seam::candidate::line_points_real
+            rename ::hmtoolkit::seam::candidate::line_length ::hmtoolkit::seam::candidate::line_length_real
+            proc ::hmtoolkit::seam::candidate::line_points {lineId} {
+                switch -- $lineId {
+                    10 {return {{0 0 0} {5 0 0} {10 0 0}}}
+                    15 {return {{10 0 0} {15 0 0} {20 0 0}}}
+                    20 {return {{20 0 0} {25 0 0} {30 0 0}}}
+                    99 {return {{15 -5 0} {15 0 0} {15 5 0}}}
+                }
+            }
+            proc ::hmtoolkit::seam::candidate::line_length {lineId} {return 10.0}
+            """
+        )
+        ordered = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::order_trim_fragments_along_reference "
+            "{20 99 10 15} {{0 0 0} {10 0 0} {20 0 0} {30 0 0}}"
+        )
+        self.assertEqual(ordered, "10 15 20")
+
+    def test_t_list_prepares_all_disconnected_target_surface_fragments_before_best_group_fallback(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
+            rename ::hmtoolkit::seam::executor::require_minimum_line_length ::hmtoolkit::seam::executor::require_minimum_line_length_real
+            rename ::hmtoolkit::seam::candidate::line_points ::hmtoolkit::seam::candidate::line_points_real
+            rename ::hmtoolkit::seam::candidate::line_length ::hmtoolkit::seam::candidate::line_length_real
+            rename ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::executor::_split_surface ::hmtoolkit::seam::executor::_split_surface_real
+            proc ::hmtoolkit::seam::validation::require_ids {data key entityType args} {return [dict get $data $key]}
+            proc ::hmtoolkit::seam::executor::require_minimum_line_length {args} {return 30.0}
+            proc ::hmtoolkit::seam::candidate::line_points {lineId} {
+                switch -- $lineId {
+                    100 {return {{0 0 5} {15 0 5} {30 0 5}}}
+                    10  {return {{0 0 0} {4.5 0 0} {9 0 0}}}
+                    15  {return {{10 0 0} {14.5 0 0} {19 0 0}}}
+                    20  {return {{20 0 0} {25 0 0} {30 0 0}}}
+                    99  {return {{15 -5 0} {15 0 0} {15 5 0}}}
+                }
+            }
+            proc ::hmtoolkit::seam::candidate::line_length {lineId} {
+                if {$lineId == 100} {return 30.0}
+                return 10.0
+            }
+            proc ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces {args} {
+                return {{0 0 0} {10 0 0} {20 0 0} {30 0 0}}
+            }
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {return {10 15 20 99 100}}
+            proc ::hmtoolkit::seam::executor::_split_surface {data strategy} {
+                return [dict create success 1 projected_lines {20 99 10 15} modified_surfs {201 202 203}]
+            }
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::_prepare_t_list_connection "
+            "[dict create seam_lines {100} target_surfs {201 202 203}]"
+        )
+        fragment_order = self.tcl.eval(
+            "::hmtoolkit::seam::candidate::order_trim_fragments_along_reference "
+            "{20 99 10 15} {{0 0 0} {10 0 0} {20 0 0} {30 0 0}}"
+        )
+        self.assertEqual(fragment_order, "10 15 20")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} ready_to_connect"), "1")
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} first_lines"), "100")
+        self.assertEqual(
+            self.tcl.eval(f"dict get {{{result}}} second_lines"),
+            "10 15 20",
+            self.tcl.eval(f"dict get {{{result}}} warnings"),
         )
 
     def test_projected_trim_path_is_extracted_from_branched_fragment_boundaries(self):
@@ -706,6 +1059,72 @@ class GeometrySeamTclTests(unittest.TestCase):
             "{1} {21 22 23 24 25 26 27}"
         )
         self.assertEqual(selected, "21")
+
+    def test_project_split_excludes_new_lines_not_owned_by_trim_target(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::entity::surface_lines ::hmtoolkit::seam::entity::surface_lines_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::executor::existing_surfaces ::hmtoolkit::seam::executor::existing_surfaces_real
+            set ::target_edge_reads 0
+            set ::line_snapshots 0
+            proc ::hmtoolkit::seam::entity::surface_lines {surfaces} {
+                incr ::target_edge_reads
+                if {$::target_edge_reads == 1} {return {10 11}}
+                return {10 11 200 201}
+            }
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {
+                if {$entityType eq "lines"} {
+                    incr ::line_snapshots
+                    if {$::line_snapshots == 1} {return {1 10 11}}
+                    return {1 10 11 200 201 999}
+                }
+                return {20}
+            }
+            proc ::hmtoolkit::seam::entity::mark {args} {}
+            proc ::hmtoolkit::seam::executor::existing_surfaces {ids} {return $ids}
+            proc *surfacemarksplitwithlines {args} {}
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::project_split_line_groups {1} {20}"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} new_lines"), "200 201")
+
+    def test_project_split_records_each_trim_call_before_filtering_target_edges(self):
+        self.tcl.eval(
+            """
+            rename ::hmtoolkit::seam::entity::surface_lines ::hmtoolkit::seam::entity::surface_lines_real
+            rename ::hmtoolkit::seam::entity::snapshot_ids ::hmtoolkit::seam::entity::snapshot_ids_real
+            rename ::hmtoolkit::seam::entity::mark ::hmtoolkit::seam::entity::mark_real
+            rename ::hmtoolkit::seam::executor::existing_surfaces ::hmtoolkit::seam::executor::existing_surfaces_real
+            set ::recorder_events {}
+            proc hm_entityrecorder {entityType option} {
+                lappend ::recorder_events [list $entityType $option]
+                if {$option eq "ids"} {return {200 201 999}}
+                return {}
+            }
+            proc ::hmtoolkit::seam::entity::surface_lines {surfaces} {
+                return {10 11 200 201}
+            }
+            proc ::hmtoolkit::seam::entity::snapshot_ids {entityType} {
+                if {$entityType eq "lines"} {return {1 10 11}}
+                return {20}
+            }
+            proc ::hmtoolkit::seam::entity::mark {args} {}
+            proc ::hmtoolkit::seam::executor::existing_surfaces {ids} {return $ids}
+            proc *surfacemarksplitwithlines {args} {}
+            """
+        )
+        result = self.tcl.eval(
+            "::hmtoolkit::seam::executor::project_split_line_groups {1} {20}"
+        )
+        self.assertEqual(self.tcl.eval(f"dict get {{{result}}} new_lines"), "200 201")
+        self.assertEqual(
+            self.tcl.eval("set ::recorder_events"),
+            "{lines on} {lines off} {lines ids}",
+        )
 
     def test_project_keeps_successful_in_place_splits_when_no_surface_id_is_added(self):
         self.tcl.eval(
@@ -1108,9 +1527,30 @@ class GeometrySeamTclTests(unittest.TestCase):
     def test_history_is_centralized_and_paired(self):
         executor = (MODULE_DIR / "executor.tcl").read_text(encoding="utf-8")
         state = (MODULE_DIR / "state.tcl").read_text(encoding="utf-8")
+        native = (MODULE_DIR / "native_compat.tcl").read_text(encoding="utf-8")
         self.assertNotIn("*startnotehistorystate", executor)
         self.assertEqual(state.count("*startnotehistorystate"), 1)
         self.assertEqual(state.count("*endnotehistorystate"), 1)
+        self.assertIn("*sethistoryrecord 1", native)
+
+        body = self.tcl.eval("info body ::hmtoolkit::seam::transaction::run")
+        self.assertLess(body.index("state::restore"), body.index("*endnotehistorystate"))
+        self.assertLess(body.index("state::reveal_result"), body.index("*endnotehistorystate"))
+
+    def test_native_undo_is_publicly_enabled_and_zero_limit_is_repaired(self):
+        self.tcl.eval(
+            """
+            set ::native_undo_events {}
+            proc hm_gethistorylimit {} {return 0}
+            proc *sethistorylimit {value} {lappend ::native_undo_events [list limit $value]}
+            proc *sethistoryrecord {value} {lappend ::native_undo_events [list record $value]}
+            """
+        )
+        warnings = self.tcl.eval("::hmtoolkit::seam::native::enable_native_undo")
+        events = self.tcl.eval("set ::native_undo_events")
+        self.assertIn("limit 100", events)
+        self.assertIn("record 1", events)
+        self.assertIn("action limit was set to 100", warnings)
 
     def test_every_mutating_strategy_uses_the_shared_undo_transaction(self):
         self.tcl.eval(
@@ -1287,7 +1727,8 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertIn("*connect_surfaces_11 1 1 3 $trimMode $distance", executor)
         self.assertIn("*connect_surfaces_11 1 2 1 $trimMode $distance", executor)
         self.assertNotIn("_create_t_list_project_ruled", executor)
-        self.assertIn("_create_t_list_ruled", executor)
+        self.assertIn("_prepare_t_list_connection", executor)
+        self.assertIn("_connect_prepared_t_list", executor)
         self.assertIn("_create_t_surface", executor)
 
     def test_diagnose_module_is_loaded_and_has_a_report_entry(self):

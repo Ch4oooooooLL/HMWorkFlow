@@ -5,7 +5,7 @@ Ten isolated scenarios (separated along global X) cover every candidate
 classification of the FEM-level automatic seam detector:
 
   F01 straight T seam      F06 patch with a small internal hole (review)
-  F02 angled T seam (45d)  F07 nearby free edges (review)
+  F02 angled T seam (30d)  F07 nearby free edges (review)
   F03 curved T seam        F08 multi-target web (3 targets)
   F04 partial-overlap T    F09 negative control: far apart
   F05 parallel patch seam  F10 negative control: shared-node single mesh
@@ -119,65 +119,63 @@ class Builder:
 
 
 def straight_t(b: Builder, x: float) -> None:
-    b.grid("F01_BASE_T2", (x - 15, -30, 0), (90, 0, 0), (0, 60, 0), 30, 20, 2.0)
-    b.ruled("F01_WEB_T1", b.line_points(x, x + 60, 2.5, 0, GAP), b.line_points(x, x + 60, 2.5, 0, GAP + 20.0), 1.0)
+    b.grid("F01_BASE_T2", (x - 10, -20, 0), (80, 0, 0), (0, 40, 0), 8, 4, 2.0)
+    b.ruled("F01_WEB_T1", b.line_points(x, x + 60, 10.0, 0, GAP), b.line_points(x, x + 60, 10.0, 0, GAP + 20.0), 1.0)
 
 
 def angled_t(b: Builder, x: float) -> None:
-    b.grid("F02_BASE_T2", (x - 15, -30, 0), (90, 0, 0), (0, 60, 0), 30, 20, 2.0)
-    slant = 20.0  # 45 deg lean in +y
-    bottom = b.line_points(x, x + 60, 2.5, 0, GAP)
-    b.ruled("F02_ANGLED_WEB_T1", bottom, [(px, py + slant, GAP + 20.0) for px, py, pz in bottom], 1.0)
+    b.grid("F02_BASE_T2", (x - 10, -30, 0), (80, 0, 0), (0, 60, 0), 8, 6, 2.0)
+    bottom = b.line_points(x, x + 60, 10.0, 0, GAP)
+    b.ruled("F02_ANGLED_WEB_T1", bottom, [(px, py + 10.0, GAP + 17.3205080757) for px, py, pz in bottom], 1.0)
 
 
 def curved_t(b: Builder, x: float) -> None:
-    b.grid("F03_BASE_T2", (x - 55, -30, 0), (110, 0, 0), (0, 60, 0), 36, 20, 2.0)
+    b.grid("F03_BASE_T2", (x - 50, -20, 0), (100, 0, 0), (0, 70, 0), 10, 7, 2.0)
     bottom = []
-    for index in range(25):
-        px = x - 30.0 + index * 2.5
-        py = 8.0 * math.sin(math.pi * index / 24.0)
+    for index in range(9):
+        px = x - 40.0 + index * 10.0
+        py = 10.0 + 8.0 * math.sin(math.pi * index / 8.0)
         bottom.append((px, py, GAP))
     b.ruled("F03_CURVED_WEB_T1", bottom, [(px, py, GAP + 20.0) for px, py, pz in bottom], 1.0)
 
 
 def partial_overlap_t(b: Builder, x: float) -> None:
     # The 100 mm web only overlaps the 34 mm base interval [x+23, x+57].
-    b.grid("F04_BASE_T2", (x + 23, -20, 0), (34, 0, 0), (0, 40, 0), 11, 13, 2.0)
-    b.ruled("F04_LONG_WEB_T1", b.line_points(x, x + 100, 2.5, 0, GAP), b.line_points(x, x + 100, 2.5, 0, GAP + 20.0), 1.0)
+    b.grid("F04_BASE_T2", (x + 23, -17, 0), (34, 0, 0), (0, 40, 0), 4, 4, 2.0)
+    b.ruled("F04_LONG_WEB_T1", b.line_points(x, x + 80, 10.0, 0, GAP), b.line_points(x, x + 80, 10.0, 0, GAP + 20.0), 1.0)
 
 
 def patch(b: Builder, x: float) -> None:
-    b.grid("F05_PATCH_TARGET_T2", (x, 0, 0), (80, 0, 0), (0, 60, 0), 26, 20, 2.0)
-    b.grid("F05_SMALL_PATCH_T1", (x + 15, 15, GAP), (50, 0, 0), (0, 30, 0), 16, 10, 1.0)
+    b.grid("F05_PATCH_TARGET_T2", (x, 0, 0), (80, 0, 0), (0, 60, 0), 8, 6, 2.0)
+    b.grid("F05_SMALL_PATCH_T1", (x + 15, 15, GAP), (40, 0, 0), (0, 20, 0), 4, 2, 1.0)
 
 
 def patch_small_hole(b: Builder, x: float) -> None:
     # 60 x 40 patch with a ~20 mm internal hole (2x2 omitted cells at 5 mm).
     # The hole is below the 30 mm review threshold, so the patch is review-only.
-    b.grid("F06_PATCH_TARGET_T2", (x, 0, 0), (80, 0, 0), (0, 60, 0), 26, 20, 2.0)
-    b.grid("F06_PATCH_HOLE_T1", (x + 10, 10, GAP), (60, 0, 0), (0, 40, 0), 20, 13, 1.0,
-           omit={(8, 4), (9, 4), (10, 4), (11, 4), (8, 5), (9, 5), (10, 5), (11, 5),
-                 (8, 6), (9, 6), (10, 6), (11, 6), (8, 7), (9, 7), (10, 7), (11, 7)})
+    b.grid("F06_PATCH_TARGET_T2", (x, 0, 0), (80, 0, 0), (0, 60, 0), 8, 6, 2.0)
+    b.grid("F06_PATCH_HOLE_T1", (x + 10, 10, GAP), (60, 0, 0), (0, 40, 0), 6, 4, 1.0,
+           omit={(2, 1), (3, 1), (2, 2), (3, 2)})
 
 
 def near_free_edges(b: Builder, x: float) -> None:
     # Two plates separated by a 2 mm gap but offset in y so the tangent
     # projection coverage stays below the acceptance threshold.
-    b.grid("F07_EDGE_PLATE_A_T1", (x, 0, 0), (40, 0, 0), (0, 30, 0), 13, 10, 1.0)
-    b.grid("F07_EDGE_PLATE_B_T1", (x + 42, 12, 0), (40, 0, 0), (0, 30, 0), 13, 10, 1.0)
+    b.grid("F07_EDGE_PLATE_A_T1", (x, 0, 0), (40, 0, 0), (0, 30, 0), 4, 3, 1.0)
+    b.grid("F07_EDGE_PLATE_B_T1", (x + 45, 0, 0), (40, 0, 0), (0, 30, 0), 4, 3, 1.0)
 
 
 def multi_target(b: Builder, x: float) -> None:
     # One 140 mm web crossing three 40 mm base plates with 10 mm gaps.
     for index in range(3):
         x0 = x + index * 50.0
-        b.grid("F08_BASE{}_T2".format(index + 1), (x0, -20, 0), (40, 0, 0), (0, 40, 0), 13, 13, 2.0)
-    b.ruled("F08_CENTER_WEB_T1", b.line_points(x, x + 140, 2.5, 0, GAP), b.line_points(x, x + 140, 2.5, 0, GAP + 20.0), 1.0)
+        b.grid("F08_BASE{}_T2".format(index + 1), (x0, -20, 0), (40, 0, 0), (0, 40, 0), 4, 4, 2.0)
+    b.ruled("F08_CENTER_WEB_T1", b.line_points(x, x + 140, 10.0, 0, GAP), b.line_points(x, x + 140, 10.0, 0, GAP + 20.0), 1.0)
 
 
 def negative_far_apart(b: Builder, x: float) -> None:
-    b.grid("F09_PLATE_A_T1", (x, 0, 0), (40, 0, 0), (0, 30, 0), 13, 10, 1.0)
-    b.grid("F09_PLATE_B_T1", (x + 100, 0, 0), (40, 0, 0), (0, 30, 0), 13, 10, 1.0)
+    b.grid("F09_PLATE_A_T1", (x, 0, 0), (30, 0, 0), (0, 30, 0), 3, 3, 1.0)
+    b.grid("F09_PLATE_B_T1", (x + 200, 0, 0), (30, 0, 0), (0, 30, 0), 3, 3, 1.0)
 
 
 def negative_shared_nodes(b: Builder, x: float) -> None:
@@ -202,7 +200,7 @@ def negative_shared_nodes(b: Builder, x: float) -> None:
             b.quad(web_cid, web_pid, (web_grid[(i, k)], web_grid[(i + 1, k)], web_grid[(i + 1, k + 1)], web_grid[(i, k + 1)]))
 
 
-def build_scenarios() -> Builder:
+def build_scenarios(copies: int = 1) -> Builder:
     b = Builder()
     scenarios = [
         ("F01", straight_t), ("F02", angled_t), ("F03", curved_t),
@@ -210,8 +208,9 @@ def build_scenarios() -> Builder:
         ("F07", near_free_edges), ("F08", multi_target),
         ("F09", negative_far_apart), ("F10", negative_shared_nodes),
     ]
-    for index, (case_id, factory) in enumerate(scenarios):
-        factory(b, index * CASE_PITCH)
+    for copy_index in range(copies):
+        for index, (case_id, factory) in enumerate(scenarios):
+            factory(b, (copy_index * len(scenarios) + index) * CASE_PITCH)
     return b
 
 
@@ -247,7 +246,9 @@ def free_edge_lengths(b: Builder) -> Dict[int, float]:
 
 def validate(b: Builder) -> Dict[str, int]:
     errors = []
+    component_counts: Dict[int, int] = {}
     for element_id, (component_id, card, node_ids) in b.elements.items():
+        component_counts[component_id] = component_counts.get(component_id, 0) + 1
         if card != "CQUAD4" or len(node_ids) != 4:
             errors.append("malformed element {}".format(element_id))
         if component_id not in b.components:
@@ -255,7 +256,7 @@ def validate(b: Builder) -> Dict[str, int]:
         if any(node not in b.nodes for node in node_ids):
             errors.append("element {} references missing nodes".format(element_id))
     for component_id, (name, thickness) in b.components.items():
-        count = sum(1 for (cid, card, node_ids) in b.elements.values() if cid == component_id)
+        count = component_counts.get(component_id, 0)
         if count < 4:
             errors.append("component {} {} has too few elements".format(component_id, name))
         if thickness <= 0.0:
@@ -317,24 +318,30 @@ def validate_written_fem(output: Path, stats: Dict[str, int]) -> None:
         raise ValueError("free-format card exceeds nine fields at line {}".format(oversized[0][0]))
 
 
-def manifest(b: Builder, stats: Dict[str, int]) -> Dict[str, object]:
+def manifest(b: Builder, stats: Dict[str, int], fem_path: Path, copies: int) -> Dict[str, object]:
+    grouped: Dict[int, List[int]] = {}
+    for element_id, (component_id, card, node_ids) in b.elements.items():
+        grouped.setdefault(component_id, []).append(element_id)
     components = []
     for component_id in sorted(b.components):
         name, thickness = b.components[component_id]
-        element_ids = [eid for eid, (cid, card, n) in b.elements.items() if cid == component_id]
-        components.append({"component_id": component_id, "name": name, "thickness": thickness, "element_count": len(element_ids), "element_ids": element_ids})
+        element_ids = grouped.get(component_id, [])
+        components.append({"component_id": component_id, "component_name": name, "role": "selected", "thickness": thickness, "element_count": len(element_ids), "element_ids": element_ids})
     return {
         "schema_version": "1.0",
+        "format": "hm_selected_components_fem",
+        "run_id": "FEM_AUTO_SEAM_LARGE_VALIDATION",
+        "fem_path": fem_path.name,
         "purpose": "FEM Automatic Seam candidate classification validation",
         "generator": "examples/FemAutoSeam_Validation/generate_fem.py",
-        "fem": "FemAutoSeam_Combined_Validation.fem",
-        "parameters": {"case_pitch": CASE_PITCH, "gap": GAP, "search_distance": SEARCH_DISTANCE, "min_seam_length": MIN_SEAM_LENGTH},
+        "fem": fem_path.name,
+        "parameters": {"copies": copies, "case_pitch": CASE_PITCH, "gap": GAP, "search_distance": SEARCH_DISTANCE, "min_seam_length": MIN_SEAM_LENGTH},
         "statistics": stats,
         "cases": [
             {"case_id": case_id, "title": title, "expected": expected, "expected_results": EXPECTED_RESULTS[case_id]}
             for case_id, title, expected in (
                 ("F01", "straight T seam (base 90x60, web 60x20, gap 3)", "one high-confidence T candidate, auto"),
-                ("F02", "angled T seam (web leaned 45 deg in +y)", "one T candidate, auto"),
+                ("F02", "angled T seam (web leaned 30 deg in +y)", "one T candidate, auto"),
                 ("F03", "curved T seam (sinusoidal web)", "one T candidate, auto"),
                 ("F04", "partial-overlap T (100 mm web, 34 mm base interval)", "only the 34 mm common interval creates a weld; review"),
                 ("F05", "parallel patch (50x30 patch fully inside 80x60 target)", "one patch candidate, auto"),
@@ -355,17 +362,24 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=directory / "FemAutoSeam_Combined_Validation.fem")
     parser.add_argument("--manifest", type=Path, default=directory / "FemAutoSeam_Combined_Validation_manifest.json")
+    parser.add_argument("--copies", type=int, default=100, help="repeat the isolated 10-case matrix (default: 100, about 40k shell elements)")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    b = build_scenarios()
+    if args.copies < 1:
+        raise ValueError("--copies must be at least 1")
+    b = build_scenarios(args.copies)
     stats = validate(b)
-    write_fem(b, args.output.resolve())
-    validate_written_fem(args.output.resolve(), stats)
-    args.manifest.resolve().write_text(json.dumps(manifest(b, stats), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"fem": str(args.output.resolve()), "manifest": str(args.manifest.resolve()), **stats}, ensure_ascii=False))
+    output = args.output.resolve()
+    manifest_path = args.manifest.resolve()
+    if output.parent != manifest_path.parent:
+        raise ValueError("--output and --manifest must share a directory so the FEM bundle stays portable")
+    write_fem(b, output)
+    validate_written_fem(output, stats)
+    manifest_path.write_text(json.dumps(manifest(b, stats, output, args.copies), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"fem": str(output), "manifest": str(manifest_path), "copies": args.copies, **stats}, ensure_ascii=False))
     return 0
 
 

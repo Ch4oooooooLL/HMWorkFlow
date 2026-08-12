@@ -11,6 +11,141 @@
 namespace eval ::SolidSeam {}
 
 # ---------------------------------------------------------------------------
+# Native surface/boundary extraction
+# ---------------------------------------------------------------------------
+# HyperMesh can materialize just the free edges/free faces of a component in
+# the temporary ^edges/^faces collectors.  Prefer that indexed native path to
+# rebuilding topology by reading every source element in Tcl.  The helpers are
+# deliberately best-effort: unsupported profiles and command failures return
+# an empty dict and the callers retain the topology fallback below.
+proc ::SolidSeam::nativeComponentIdByName {name} {
+    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
+        if {![catch {set componentId [::HWFlow::componentIdByName $name]}]} {
+            return $componentId
+        }
+    }
+    return ""
+}
+
+proc ::SolidSeam::nativeRenameComponent {componentId newName} {
+    set oldName [hm_getvalue comps id=$componentId dataname=name]
+    if {$oldName eq $newName} { return }
+    set lastError ""
+    foreach entityType {component components comps} {
+        if {![catch {*renamecollector $entityType $oldName $newName} renameError]} { return }
+        set lastError $renameError
+    }
+    error "could not rename temporary component $oldName: $lastError"
+}
+
+proc ::SolidSeam::nativeDeleteComponent {componentId} {
+    if {$componentId eq ""} { return }
+    set lastError ""
+    foreach entityType {components comps} {
+        catch {*clearmark $entityType 2}
+        if {[catch {*createmark $entityType 2 $componentId} markError]} {
+            set lastError $markError
+            continue
+        }
+        set marked {}
+        catch {set marked [hm_getmark $entityType 2]}
+        if {[lsearch -exact $marked $componentId] >= 0} {
+            if {[catch {*deletemark $entityType 2} deleteError]} {
+                set lastError $deleteError
+                continue
+            }
+            catch {*clearmark $entityType 2}
+            return
+        }
+    }
+    error "could not delete temporary component $componentId: $lastError"
+}
+
+proc ::SolidSeam::nativeBoundaryData {componentId kind} {
+    if {$kind eq "edges"} {
+        set commandName *findedges
+        set collectorName ^edges
+    } elseif {$kind eq "faces"} {
+        set commandName *findfaces
+        set collectorName ^faces
+    } else {
+        return {}
+    }
+    if {[llength [info commands $commandName]] == 0 ||
+        [llength [info commands ::HWFlow::componentIdByName]] == 0} {
+        return {}
+    }
+
+    set existingId [::SolidSeam::nativeComponentIdByName $collectorName]
+    set keepName ""
+    set temporaryId ""
+    set result {}
+    set code [catch {
+        if {$existingId ne ""} {
+            set keepName "${collectorName}_SOLID_SEAM_KEEP_[expr {abs([clock clicks])}]"
+            ::SolidSeam::nativeRenameComponent $existingId $keepName
+        }
+        catch {*clearmark comps 1}
+        *createmark comps 1 $componentId
+        if {$kind eq "edges"} {
+            *findedges comps 1 0
+        } else {
+            *findfaces components 1
+        }
+        set temporaryId [::SolidSeam::nativeComponentIdByName $collectorName]
+        if {$temporaryId eq "" || $temporaryId eq $existingId} {
+            error "HyperMesh did not create $collectorName"
+        }
+        catch {*clearmark nodes 2}
+        *createmark nodes 2 "by comp id" $temporaryId
+        set nodeIds [lsort -integer -unique [hm_getmark nodes 2]]
+        set faces {}
+        if {$kind eq "faces"} {
+            catch {*clearmark elems 2}
+            *createmark elems 2 "by comp id" $temporaryId
+            foreach elementId [hm_getmark elems 2] {
+                set ring [::SolidSeam::elementNodes $elementId]
+                if {[llength $ring] >= 3} { lappend faces $ring }
+            }
+        }
+        if {[llength $nodeIds] == 0} { error "$collectorName contains no nodes" }
+        set result [dict create node_ids $nodeIds faces $faces]
+    } nativeError]
+
+    catch {*clearmark comps 1}
+    catch {*clearmark nodes 2}
+    catch {*clearmark elems 2}
+    if {$temporaryId ne "" && $temporaryId ne $existingId} {
+        catch {::SolidSeam::nativeDeleteComponent $temporaryId}
+    }
+    set strandedId [::SolidSeam::nativeComponentIdByName $collectorName]
+    if {$strandedId ne "" && $strandedId ne $existingId} {
+        catch {::SolidSeam::nativeDeleteComponent $strandedId}
+    }
+    if {$keepName ne ""} {
+        if {[catch {::SolidSeam::nativeRenameComponent $existingId $collectorName} restoreError]} {
+            set code 1
+            append nativeError "; failed to restore existing $collectorName: $restoreError"
+        }
+    }
+    if {$code} {
+        if {[llength [info commands ::SolidSeam::log]] > 0} {
+            catch {::SolidSeam::log WARN "native $kind extraction fallback component=$componentId error=$nativeError"}
+        }
+        return {}
+    }
+    return $result
+}
+
+proc ::SolidSeam::surfaceNodeIdsOfComponent {componentId isSolid} {
+    if {$isSolid} {
+        set native [::SolidSeam::nativeBoundaryData $componentId faces]
+        if {$native ne ""} { return [dict get $native node_ids] }
+    }
+    return [::SolidSeam::componentNodeIds $componentId]
+}
+
+# ---------------------------------------------------------------------------
 # Node helpers
 # ---------------------------------------------------------------------------
 proc ::SolidSeam::componentNodeIds {componentId} {
@@ -180,8 +315,12 @@ proc ::SolidSeam::faceKey {face} {
 #   faces, so free edges of the body are counted exactly twice while interior
 #   edges are counted by two elements (four face incidences).
 proc ::SolidSeam::boundaryNodesOfComponent {componentId} {
-    set elementIds [::SolidSeam::componentElementIds $componentId]
     set solid [::SolidSeam::componentIsSolid $componentId]
+    if {!$solid} {
+        set native [::SolidSeam::nativeBoundaryData $componentId edges]
+        if {$native ne ""} { return [dict get $native node_ids] }
+    }
+    set elementIds [::SolidSeam::componentElementIds $componentId]
     array set edgeCount {}
     foreach elementId $elementIds {
         set nodes [::SolidSeam::elementNodes $elementId]
@@ -238,34 +377,59 @@ proc ::SolidSeam::boundaryNodesOfComponent {componentId} {
 # centroid is within a small multiple of the closest gap are collected, and
 # their shared outline (edges used by exactly one of these faces) forms the
 # weld boundary.
-proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId} {
-    set targetNodes [::SolidSeam::componentNodeIds $targetComponentId]
+proc ::SolidSeam::faceUnitNormal {face} {
+    # Newell's method also works for the alternating corner/midside rings of
+    # quadratic faces.  Sign is intentionally ignored by the facing test.
+    set nx 0.0; set ny 0.0; set nz 0.0
+    set count [llength $face]
+    for {set i 0} {$i < $count} {incr i} {
+        set p [::SolidSeam::nodeXYZ [lindex $face $i]]
+        set q [::SolidSeam::nodeXYZ [lindex $face [expr {($i + 1) % $count}]]]
+        set nx [expr {$nx + ([lindex $p 1] - [lindex $q 1]) * ([lindex $p 2] + [lindex $q 2])}]
+        set ny [expr {$ny + ([lindex $p 2] - [lindex $q 2]) * ([lindex $p 0] + [lindex $q 0])}]
+        set nz [expr {$nz + ([lindex $p 0] - [lindex $q 0]) * ([lindex $p 1] + [lindex $q 1])}]
+    }
+    set length [expr {sqrt($nx*$nx + $ny*$ny + $nz*$nz)}]
+    if {$length <= 1.0e-12} { return {0.0 0.0 0.0} }
+    return [list [expr {$nx/$length}] [expr {$ny/$length}] [expr {$nz/$length}]]
+}
+
+proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targetNodes ""}} {
+    if {$targetNodes eq ""} {
+        set targetSolid [::SolidSeam::componentIsSolid $targetComponentId]
+        set targetNodes [::SolidSeam::surfaceNodeIdsOfComponent $targetComponentId $targetSolid]
+    }
     array set targetXYZ {}
     foreach nodeId $targetNodes {
         set targetXYZ($nodeId) [::SolidSeam::nodeXYZ $nodeId]
     }
-    set elementIds [::SolidSeam::componentElementIds $componentId]
+    set elementIds {}
+    set nativeFaces [::SolidSeam::nativeBoundaryData $componentId faces]
+    set nativeSurface [expr {$nativeFaces ne "" && [llength [dict get $nativeFaces faces]] > 0}]
     # count face usage to find the outer surface (used exactly once).  Keep
     # the first ring order seen for each face key: the outline and edge
     # lengths below use the real element edges, while the sorted key alone
     # would turn quad diagonals into pseudo edges and leak interior rows
     # into the outline.
-    array set faceCount {}
-    array set faceRing {}
-    array set faceOwner {}
-    foreach elementId $elementIds {
-        foreach face [::SolidSeam::elementFaces $elementId] {
-            set key [::SolidSeam::faceKey $face]
-            incr faceCount($key)
-            if {![info exists faceRing($key)]} {
-                set faceRing($key) $face
-                set faceOwner($key) $elementId
+    array set faceCount {}; array set faceRing {}; array set faceOwner {}
+    if {$nativeSurface} {
+        set outerFaces [dict get $nativeFaces faces]
+    } else {
+        set elementIds [::SolidSeam::componentElementIds $componentId]
+        foreach elementId $elementIds {
+            foreach face [::SolidSeam::elementFaces $elementId] {
+                set key [::SolidSeam::faceKey $face]
+                incr faceCount($key)
+                if {![info exists faceRing($key)]} {
+                    set faceRing($key) $face
+                    set faceOwner($key) $elementId
+                }
             }
         }
-    }
-    set outerFaces {}
-    foreach key [array names faceCount] {
-        if {$faceCount($key) == 1} { lappend outerFaces $faceRing($key) }
+        set outerFaces {}
+        foreach key [array names faceCount] {
+            if {$faceCount($key) == 1} { lappend outerFaces $faceRing($key) }
+        }
     }
     if {[llength $outerFaces] == 0} { return {} }
     # element centroids: the outward direction of a face is face-centroid
@@ -338,16 +502,20 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId} {
         } else {
             set dx 0.0; set dy 0.0; set dz 0.0
         }
-        set owner [expr {$faceOwner([::SolidSeam::faceKey $face])}]
-        set ec $elementCentroid($owner)
-        set ox [expr {[lindex $centroid 0] - [lindex $ec 0]}]
-        set oy [expr {[lindex $centroid 1] - [lindex $ec 1]}]
-        set oz [expr {[lindex $centroid 2] - [lindex $ec 2]}]
-        set olen [expr {sqrt($ox * $ox + $oy * $oy + $oz * $oz)}]
-        if {$olen > 1.0e-12} {
-            set ox [expr {$ox / $olen}]; set oy [expr {$oy / $olen}]; set oz [expr {$oz / $olen}]
+        if {$nativeSurface} {
+            lassign [::SolidSeam::faceUnitNormal $face] ox oy oz
         } else {
-            set ox 0.0; set oy 0.0; set oz 0.0
+            set owner [expr {$faceOwner([::SolidSeam::faceKey $face])}]
+            set ec $elementCentroid($owner)
+            set ox [expr {[lindex $centroid 0] - [lindex $ec 0]}]
+            set oy [expr {[lindex $centroid 1] - [lindex $ec 1]}]
+            set oz [expr {[lindex $centroid 2] - [lindex $ec 2]}]
+            set olen [expr {sqrt($ox * $ox + $oy * $oy + $oz * $oz)}]
+            if {$olen > 1.0e-12} {
+                set ox [expr {$ox / $olen}]; set oy [expr {$oy / $olen}]; set oz [expr {$oz / $olen}]
+            } else {
+                set ox 0.0; set oy 0.0; set oz 0.0
+            }
         }
         lappend faceDistances [list $nearest $face $dx $dy $dz $ox $oy $oz]
     }
@@ -370,6 +538,7 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId} {
         if {$dist > $minDistance + $faceBand} { break }
         set face [lindex $item 1]
         set dot [expr {[lindex $item 2] * [lindex $item 5] + [lindex $item 3] * [lindex $item 6] + [lindex $item 4] * [lindex $item 7]}]
+        if {$nativeSurface} { set dot [expr {abs($dot)}] }
         if {$dot > 0.25} { lappend facingFaces $face }
     }
     if {[llength $facingFaces] == 0} { return {} }
@@ -441,14 +610,19 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     # that faces the target component.  Interior nodes can never be weld
     # locations and would only distort the chain.
     set sourceSolid [::SolidSeam::componentIsSolid $sourceComponentId]
-    set sourceNodes [::SolidSeam::boundaryNodesOfComponent $sourceComponentId]
+    set targetSolid [::SolidSeam::componentIsSolid $targetComponentId]
+    set targetNodes [::SolidSeam::surfaceNodeIdsOfComponent $targetComponentId $targetSolid]
     if {$sourceSolid} {
-        set facingNodes [::SolidSeam::solidFacingBoundaryNodes $sourceComponentId $targetComponentId]
-        if {[llength $facingNodes] > 0} {
-            set sourceNodes $facingNodes
+        # Do not first rebuild the entire solid boundary: the native free-face
+        # path normally returns the exact facing outline directly.
+        set sourceNodes [::SolidSeam::solidFacingBoundaryNodes \
+            $sourceComponentId $targetComponentId $targetNodes]
+        if {[llength $sourceNodes] == 0} {
+            set sourceNodes [::SolidSeam::boundaryNodesOfComponent $sourceComponentId]
         }
+    } else {
+        set sourceNodes [::SolidSeam::boundaryNodesOfComponent $sourceComponentId]
     }
-    set targetNodes [::SolidSeam::componentNodeIds $targetComponentId]
     array set sourceXYZ {}
     foreach nodeId $sourceNodes {
         set sourceXYZ($nodeId) [::SolidSeam::nodeXYZ $nodeId]

@@ -8,7 +8,12 @@ proc ::hmtoolkit::seam::candidate::distance {a b} {
 }
 
 proc ::hmtoolkit::seam::candidate::line_points {lineId} {
-    if {![catch {set values [hm_getcoordinatesofpointsonline $lineId {0.0 0.5 1.0}]}] && [llength $values] == 3} {
+    # Ruled correspondence must follow the complete curve, not just its ends
+    # and midpoint.  The denser samples also make the pre-trim projection
+    # reference discriminate between nearby curved boundary fragments.
+    set parameters {0.0 0.125 0.25 0.375 0.5 0.625 0.75 0.875 1.0}
+    if {![catch {set values [hm_getcoordinatesofpointsonline $lineId $parameters]}] && \
+        [llength $values] == [llength $parameters]} {
         set result {}
         foreach value $values { lappend result [lrange $value 0 2] }
         return $result
@@ -31,6 +36,69 @@ proc ::hmtoolkit::seam::candidate::line_length {lineId} {
     if {![catch {set value [hm_linelength $lineId]}] && [string is double -strict $value]} { return [expr {double($value)}] }
     set p [::hmtoolkit::seam::candidate::line_points $lineId]
     return [::hmtoolkit::seam::candidate::distance [lindex $p 0] [lindex $p end]]
+}
+
+proc ::hmtoolkit::seam::candidate::point_to_segment_distance {point a b} {
+    set vx [expr {[lindex $b 0]-[lindex $a 0]}]
+    set vy [expr {[lindex $b 1]-[lindex $a 1]}]
+    set vz [expr {[lindex $b 2]-[lindex $a 2]}]
+    set wx [expr {[lindex $point 0]-[lindex $a 0]}]
+    set wy [expr {[lindex $point 1]-[lindex $a 1]}]
+    set wz [expr {[lindex $point 2]-[lindex $a 2]}]
+    set denominator [expr {$vx*$vx+$vy*$vy+$vz*$vz}]
+    set fraction [expr {$denominator <= 1.0e-24 ? 0.0 : \
+        max(0.0,min(1.0,($wx*$vx+$wy*$vy+$wz*$vz)/double($denominator)))}]
+    set closest [list \
+        [expr {[lindex $a 0]+$fraction*$vx}] \
+        [expr {[lindex $a 1]+$fraction*$vy}] \
+        [expr {[lindex $a 2]+$fraction*$vz}]]
+    return [::hmtoolkit::seam::candidate::distance $point $closest]
+}
+
+proc ::hmtoolkit::seam::candidate::point_to_polyline_distance {point polyline} {
+    if {[llength $polyline] < 2} { error "A reference polyline needs at least two points" }
+    set best ""
+    for {set index 1} {$index < [llength $polyline]} {incr index} {
+        set distance [::hmtoolkit::seam::candidate::point_to_segment_distance \
+            $point [lindex $polyline [expr {$index-1}]] [lindex $polyline $index]]
+        if {$best eq "" || $distance < $best} { set best $distance }
+    }
+    return $best
+}
+
+# Return the closest distance and arc-length position of a point on a sampled
+# reference polyline. The position lets disconnected trim fragments from
+# several target surfaces be put into the same order as the source path.
+proc ::hmtoolkit::seam::candidate::point_to_polyline_position {point polyline} {
+    if {[llength $polyline] < 2} { error "A reference polyline needs at least two points" }
+    set bestDistance ""
+    set bestPosition 0.0
+    set traversed 0.0
+    for {set index 1} {$index < [llength $polyline]} {incr index} {
+        set a [lindex $polyline [expr {$index-1}]]
+        set b [lindex $polyline $index]
+        set vx [expr {[lindex $b 0]-[lindex $a 0]}]
+        set vy [expr {[lindex $b 1]-[lindex $a 1]}]
+        set vz [expr {[lindex $b 2]-[lindex $a 2]}]
+        set wx [expr {[lindex $point 0]-[lindex $a 0]}]
+        set wy [expr {[lindex $point 1]-[lindex $a 1]}]
+        set wz [expr {[lindex $point 2]-[lindex $a 2]}]
+        set lengthSquared [expr {$vx*$vx+$vy*$vy+$vz*$vz}]
+        set segmentLength [expr {sqrt($lengthSquared)}]
+        set fraction [expr {$lengthSquared <= 1.0e-24 ? 0.0 : \
+            max(0.0,min(1.0,($wx*$vx+$wy*$vy+$wz*$vz)/double($lengthSquared)))}]
+        set closest [list \
+            [expr {[lindex $a 0]+$fraction*$vx}] \
+            [expr {[lindex $a 1]+$fraction*$vy}] \
+            [expr {[lindex $a 2]+$fraction*$vz}]]
+        set currentDistance [::hmtoolkit::seam::candidate::distance $point $closest]
+        if {$bestDistance eq "" || $currentDistance < $bestDistance} {
+            set bestDistance $currentDistance
+            set bestPosition [expr {$traversed+$fraction*$segmentLength}]
+        }
+        set traversed [expr {$traversed+$segmentLength}]
+    }
+    return [list $bestDistance $bestPosition]
 }
 
 proc ::hmtoolkit::seam::candidate::node_for_point {point nodes tolerance} {
@@ -238,49 +306,99 @@ proc ::hmtoolkit::seam::candidate::closed_line_path_variant {path start reverse}
     return [dict create lines $lines points $points closed 1]
 }
 
-proc ::hmtoolkit::seam::candidate::closed_path_alignment_score {firstPath secondPath} {
-    set firstPoints [lrange [dict get $firstPath points] 0 end-1]
-    set secondPoints [lrange [dict get $secondPath points] 0 end-1]
-    set firstCount [llength $firstPoints]
-    set secondCount [llength $secondPoints]
-    if {$firstCount == $secondCount} {
-        set score 0.0
-        for {set index 0} {$index < $firstCount} {incr index} {
-            set score [expr {$score+[::hmtoolkit::seam::candidate::distance \
-                [lindex $firstPoints $index] [lindex $secondPoints $index]]}]
+proc ::hmtoolkit::seam::candidate::detailed_path_points {path endpointProvider} {
+    set result {}
+    set pathPoints [dict get $path points]
+    set index 0
+    foreach lineId [dict get $path lines] {
+        set samples [uplevel #0 [list $endpointProvider $lineId]]
+        if {[llength $samples] < 2} { error "Line $lineId has no readable samples" }
+        set expectedStart [lindex $pathPoints $index]
+        if {[::hmtoolkit::seam::candidate::distance [lindex $samples end] $expectedStart] < \
+            [::hmtoolkit::seam::candidate::distance [lindex $samples 0] $expectedStart]} {
+            set samples [lreverse $samples]
         }
-        return $score
+        if {[llength $result] > 0} { set samples [lrange $samples 1 end] }
+        set result [concat $result $samples]
+        incr index
     }
-    # With different segmentation counts, align the seam break and both local
-    # directions.  HyperMesh can interpolate the remaining unequal segments.
-    return [expr {
-        [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 0] [lindex $secondPoints 0]] +
-        [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 1] [lindex $secondPoints 1]] +
-        [::hmtoolkit::seam::candidate::distance [lindex $firstPoints end] [lindex $secondPoints end]]}]
+    return $result
+}
+
+proc ::hmtoolkit::seam::candidate::resample_polyline {points count} {
+    if {[llength $points] < 2} { error "A path needs at least two sample points" }
+    set clean [list [lindex $points 0]]
+    foreach point [lrange $points 1 end] {
+        if {[::hmtoolkit::seam::candidate::distance [lindex $clean end] $point] > 1.0e-12} {
+            lappend clean $point
+        }
+    }
+    if {[llength $clean] < 2} { error "A path has zero sampled length" }
+    set cumulative {0.0}
+    set total 0.0
+    for {set index 1} {$index < [llength $clean]} {incr index} {
+        set total [expr {$total+[::hmtoolkit::seam::candidate::distance \
+            [lindex $clean [expr {$index-1}]] [lindex $clean $index]]}]
+        lappend cumulative $total
+    }
+    set output {}
+    set segment 0
+    for {set sample 0} {$sample < $count} {incr sample} {
+        set target [expr {$total*$sample/double($count-1)}]
+        while {$segment < [expr {[llength $clean]-2}] && \
+            [lindex $cumulative [expr {$segment+1}]] < $target} { incr segment }
+        set startDistance [lindex $cumulative $segment]
+        set endDistance [lindex $cumulative [expr {$segment+1}]]
+        set fraction [expr {($target-$startDistance)/max(1.0e-12,$endDistance-$startDistance)}]
+        set a [lindex $clean $segment]
+        set b [lindex $clean [expr {$segment+1}]]
+        lappend output [list \
+            [expr {[lindex $a 0]+$fraction*([lindex $b 0]-[lindex $a 0])}] \
+            [expr {[lindex $a 1]+$fraction*([lindex $b 1]-[lindex $a 1])}] \
+            [expr {[lindex $a 2]+$fraction*([lindex $b 2]-[lindex $a 2])}]]
+    }
+    return $output
+}
+
+proc ::hmtoolkit::seam::candidate::path_alignment_score {firstPath secondPath endpointProvider} {
+    set count [expr {max(9,2*max([llength [dict get $firstPath lines]], \
+        [llength [dict get $secondPath lines]])+1)}]
+    set firstSamples [::hmtoolkit::seam::candidate::resample_polyline \
+        [::hmtoolkit::seam::candidate::detailed_path_points $firstPath $endpointProvider] $count]
+    set secondSamples [::hmtoolkit::seam::candidate::resample_polyline \
+        [::hmtoolkit::seam::candidate::detailed_path_points $secondPath $endpointProvider] $count]
+    set total 0.0
+    set maximum 0.0
+    for {set index 0} {$index < $count} {incr index} {
+        set distance [::hmtoolkit::seam::candidate::distance \
+            [lindex $firstSamples $index] [lindex $secondSamples $index]]
+        set total [expr {$total+$distance}]
+        if {$distance > $maximum} { set maximum $distance }
+    }
+    return [expr {$total/double($count)+$maximum}]
 }
 
 # Order both paths and make their start/end correspondence agree.  This is the
 # final preparation step before *linearsurfacebetweenlines.
-proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second {endpointProvider ::hmtoolkit::seam::candidate::line_points} {tolerance ""}} {
-    set firstPath [::hmtoolkit::seam::candidate::ordered_line_path $first $endpointProvider $tolerance]
-    set secondPath [::hmtoolkit::seam::candidate::ordered_line_path $second $endpointProvider $tolerance]
+proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second {endpointProvider ::hmtoolkit::seam::candidate::line_points} {firstTolerance ""} {secondTolerance ""}} {
+    if {$secondTolerance eq ""} { set secondTolerance $firstTolerance }
+    set firstPath [::hmtoolkit::seam::candidate::ordered_line_path $first $endpointProvider $firstTolerance]
+    set secondPath [::hmtoolkit::seam::candidate::ordered_line_path $second $endpointProvider $secondTolerance]
     if {[dict get $firstPath closed] != [dict get $secondPath closed]} {
         error "Both edge groups must either be open paths or closed paths"
     }
 
-    # Open paths have an unambiguous pairing: choose the orientation with the
-    # shorter pair of cross-path end connections.
+    # Compare correspondence along the complete path, not only at its ends.
+    # End-only matching is ambiguous for curved or differently segmented paths
+    # and can select a direction that creates a twisted ruled surface.
     if {![dict get $firstPath closed]} {
-        set firstPoints [dict get $firstPath points]
-        set secondPoints [dict get $secondPath points]
-        set same [expr {
-            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 0] [lindex $secondPoints 0]] +
-            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints end] [lindex $secondPoints end]]}]
-        set reversed [expr {
-            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints 0] [lindex $secondPoints end]] +
-            [::hmtoolkit::seam::candidate::distance [lindex $firstPoints end] [lindex $secondPoints 0]]}]
+        set same [::hmtoolkit::seam::candidate::path_alignment_score \
+            $firstPath $secondPath $endpointProvider]
+        set reversedPath [::hmtoolkit::seam::candidate::reverse_line_path $secondPath]
+        set reversed [::hmtoolkit::seam::candidate::path_alignment_score \
+            $firstPath $reversedPath $endpointProvider]
         if {$reversed < $same} {
-            set secondPath [::hmtoolkit::seam::candidate::reverse_line_path $secondPath]
+            set secondPath $reversedPath
         }
     } else {
         # A closed path has neither a natural start nor a natural direction.
@@ -293,8 +411,8 @@ proc ::hmtoolkit::seam::candidate::organize_ruled_surface_lines {first second {e
             foreach reverse {0 1} {
                 set variant [::hmtoolkit::seam::candidate::closed_line_path_variant \
                     $secondPath $start $reverse]
-                set score [::hmtoolkit::seam::candidate::closed_path_alignment_score \
-                    $firstPath $variant]
+                set score [::hmtoolkit::seam::candidate::path_alignment_score \
+                    $firstPath $variant $endpointProvider]
                 if {$bestScore eq "" || $score < $bestScore} {
                     set bestScore $score
                     set bestPath $variant
@@ -388,6 +506,160 @@ proc ::hmtoolkit::seam::candidate::line_group_match_score {sourceLines candidate
     return [expr {$total/max(1,$count) + $lengthPenalty}]
 }
 
+# Capture where the selected source path is expected to land on the selected
+# target surfaces before Project/Split changes their topology. This reference
+# is used only by T List to identify the second Connect Edges input; it does not
+# change the existing projection operation.
+proc ::hmtoolkit::seam::candidate::project_line_samples_to_surfaces {sourceLines targetSurfs} {
+    set projected {}
+    if {[catch {
+        set sourcePath [::hmtoolkit::seam::candidate::ordered_line_path \
+            $sourceLines ::hmtoolkit::seam::candidate::line_points]
+        set samples [::hmtoolkit::seam::candidate::detailed_path_points \
+            $sourcePath ::hmtoolkit::seam::candidate::line_points]
+    }]} { return {} }
+    foreach point $samples {
+            lassign $point x y z
+            set best ""
+            if {![catch {
+                set value [hm_getcoordinatesfromnearestsurface $x $y $z $targetSurfs]
+            }] && [llength $value] >= 3} {
+                set best [lrange $value 0 2]
+            } else {
+                set bestDistance ""
+                foreach surfId $targetSurfs {
+                    if {[catch {set value [hm_findclosestpointonsurface $x $y $z $surfId]}] || \
+                        [llength $value] < 4} { continue }
+                    set distance [expr {double([lindex $value 3])}]
+                    if {$bestDistance eq "" || $distance < $bestDistance} {
+                        set bestDistance $distance
+                        set best [lrange $value 0 2]
+                    }
+                }
+            }
+            if {$best ne ""} { lappend projected $best }
+    }
+    return $projected
+}
+
+# A missing or collapsed reference cannot safely distinguish the new trim
+# path from another edge in the same split-surface boundary graph.  Keep the
+# original sequence (including the closing point of a loop), remove only
+# consecutive duplicates, and reject unreadable/collapsed references.
+proc ::hmtoolkit::seam::candidate::validated_projection_reference {points} {
+    set clean {}
+    foreach point $points {
+        if {[llength $point] < 3} { error "A projected reference point is incomplete" }
+        set xyz [lrange $point 0 2]
+        foreach value $xyz {
+            if {![string is double -strict $value]} {
+                error "A projected reference point is not numeric"
+            }
+        }
+        if {[llength $clean] == 0 || \
+            [::hmtoolkit::seam::candidate::distance [lindex $clean end] $xyz] > 1.0e-9} {
+            lappend clean $xyz
+        }
+    }
+    if {[llength $clean] < 2} {
+        error "Fewer than two distinct target-surface projection points were captured"
+    }
+    return $clean
+}
+
+# HyperMesh can accept an ordered list whose projected pieces lie on several
+# adjacent target surfaces even when those pieces do not share topology. This
+# mirrors manual Connect Edges selection: retain only lines that travel along
+# the projected reference, then sort them by their arc-length position.
+proc ::hmtoolkit::seam::candidate::order_trim_fragments_along_reference {lineIds referencePoints} {
+    set referencePoints [::hmtoolkit::seam::candidate::validated_projection_reference $referencePoints]
+    set rows {}
+    set bestScore ""
+    foreach lineId [lsort -integer -unique $lineIds] {
+        set samples [::hmtoolkit::seam::candidate::line_points $lineId]
+        set totalDistance 0.0
+        set maximumDistance 0.0
+        set minimumPosition ""
+        set maximumPosition ""
+        foreach point $samples {
+            lassign [::hmtoolkit::seam::candidate::point_to_polyline_position \
+                $point $referencePoints] currentDistance currentPosition
+            set totalDistance [expr {$totalDistance+$currentDistance}]
+            if {$currentDistance > $maximumDistance} { set maximumDistance $currentDistance }
+            if {$minimumPosition eq "" || $currentPosition < $minimumPosition} {
+                set minimumPosition $currentPosition
+            }
+            if {$maximumPosition eq "" || $currentPosition > $maximumPosition} {
+                set maximumPosition $currentPosition
+            }
+        }
+        set lineLength [::hmtoolkit::seam::candidate::line_length $lineId]
+        set span [expr {$maximumPosition-$minimumPosition}]
+        set coverage [expr {$span/max(1.0e-9,$lineLength)}]
+        # Boundary fragments that merely cross the projected path have almost
+        # no travel along it and must not enter the ruled list.
+        if {$coverage < 0.2} { continue }
+        set score [expr {$totalDistance/max(1,[llength $samples])+$maximumDistance}]
+        set center [expr {0.5*($minimumPosition+$maximumPosition)}]
+        lappend rows [list $center $score $lineId]
+        if {$bestScore eq "" || $score < $bestScore} { set bestScore $score }
+    }
+    if {[llength $rows] == 0} {
+        error "No trim fragments travel along the projected source path"
+    }
+    set allowed [expr {2.0*[::hmtoolkit::seam::config::get projected_path_merge_tolerance]}]
+    set ordered {}
+    foreach row [lsort -real -index 0 $rows] {
+        if {[lindex $row 1] <= $bestScore+$allowed} {
+            lappend ordered [lindex $row 2]
+        }
+    }
+    if {[llength $ordered] == 0} { error "No projected trim fragments passed geometric filtering" }
+    return $ordered
+}
+
+proc ::hmtoolkit::seam::candidate::projected_reference_match_score {sourceLines referencePoints candidateLines {enforceCoverage 1} {mergeTolerance ""}} {
+    if {$mergeTolerance eq ""} {
+        set mergeTolerance [::hmtoolkit::seam::config::get projected_path_merge_tolerance]
+    }
+    set total 0.0
+    set maximum 0.0
+    foreach point $referencePoints {
+        set distance [::hmtoolkit::seam::candidate::point_to_line_group_distance \
+            $point $candidateLines]
+        set total [expr {$total+$distance}]
+        if {$distance > $maximum} { set maximum $distance }
+    }
+    set allowed [expr {2.0*[::hmtoolkit::seam::config::get projected_path_merge_tolerance]}]
+    if {$enforceCoverage && $maximum > $allowed} {
+        error "Candidate path misses an expected target-surface projection point by $maximum (allowed $allowed)"
+    }
+    set candidatePath [::hmtoolkit::seam::candidate::ordered_line_path \
+        $candidateLines ::hmtoolkit::seam::candidate::line_points \
+        $mergeTolerance]
+    set candidateSamples [::hmtoolkit::seam::candidate::detailed_path_points \
+        $candidatePath ::hmtoolkit::seam::candidate::line_points]
+    set reverseMaximum 0.0
+    foreach point $candidateSamples {
+        set distance [::hmtoolkit::seam::candidate::point_to_polyline_distance \
+            $point $referencePoints]
+        if {$distance > $reverseMaximum} { set reverseMaximum $distance }
+    }
+    if {$enforceCoverage && $reverseMaximum > $allowed} {
+        error "Candidate path contains a non-projected segment $reverseMaximum away from the expected trim path (allowed $allowed)"
+    }
+    set sourceLength 0.0
+    foreach lineId $sourceLines {
+        set sourceLength [expr {$sourceLength+[::hmtoolkit::seam::candidate::line_length $lineId]}]
+    }
+    set candidateLength 0.0
+    foreach lineId $candidateLines {
+        set candidateLength [expr {$candidateLength+[::hmtoolkit::seam::candidate::line_length $lineId]}]
+    }
+    set lengthPenalty [expr {0.1*abs($sourceLength-$candidateLength)}]
+    return [expr {$total/max(1,[llength $referencePoints])+$maximum+$reverseMaximum+$lengthPenalty}]
+}
+
 # Enumerate unbranched routes through a split-surface edge graph.  A trim
 # creates complete fragment boundaries, so the real projected edge can sit
 # inside one connected graph with degree-3 junctions.  Treating the entire
@@ -471,9 +743,13 @@ proc ::hmtoolkit::seam::candidate::simple_paths_from_lines {lineIds endpointProv
 # Select the unbranched new line component whose sampled geometry best covers
 # the selected source path. Ambiguous equal-score matches are rejected rather
 # than allowing a ruled surface to attach to a split perimeter fragment.
-proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLines} {
+proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLines {referencePoints {}} {selectionMode STRICT} {mergeTolerance ""}} {
     set ranked {}
-    set mergeTolerance [::hmtoolkit::seam::config::get projected_path_merge_tolerance]
+    set selectionMode [string toupper $selectionMode]
+    if {$selectionMode ni {STRICT BEST}} { error "Unknown trim-path selection mode $selectionMode" }
+    if {$mergeTolerance eq ""} {
+        set mergeTolerance [::hmtoolkit::seam::config::get projected_path_merge_tolerance]
+    }
     array set seen {}
     foreach group [::hmtoolkit::seam::candidate::connected_line_groups \
         $newLines ::hmtoolkit::seam::candidate::line_points $mergeTolerance] {
@@ -489,14 +765,30 @@ proc ::hmtoolkit::seam::candidate::select_projected_trim_path {sourceLines newLi
             set key [join [lsort -integer -unique $candidate] ,]
             if {$key eq "" || [info exists seen($key)]} { continue }
             set seen($key) 1
-            if {[catch {set score [::hmtoolkit::seam::candidate::line_group_match_score $sourceLines $candidate]}]} { continue }
+            if {[llength $referencePoints] > 0} {
+                if {[catch {set score [::hmtoolkit::seam::candidate::projected_reference_match_score \
+                    $sourceLines $referencePoints $candidate \
+                    [expr {$selectionMode eq "STRICT"}] $mergeTolerance]}]} { continue }
+            } else {
+                if {[catch {set score [::hmtoolkit::seam::candidate::line_group_match_score \
+                    $sourceLines $candidate]}]} { continue }
+            }
+            # Do not rank a geometrically close path that cannot be supplied
+            # to ruled with the source path. This is especially important for
+            # a closed split boundary next to an open source path.
+            if {[catch {
+                ::hmtoolkit::seam::candidate::organize_ruled_surface_lines \
+                    $sourceLines $candidate ::hmtoolkit::seam::candidate::line_points \
+                    [::hmtoolkit::seam::config::get endpoint_merge_tolerance] $mergeTolerance
+            }]} { continue }
             lappend ranked [list $score $candidate]
         }
     }
     if {[llength $ranked] == 0} { error "No unbranched projected trim path was found" }
     set ranked [lsort -real -index 0 $ranked]
     set ambiguityTolerance [::hmtoolkit::seam::config::get projected_path_ambiguity_tolerance]
-    if {[llength $ranked] > 1 && abs([lindex [lindex $ranked 1] 0]-[lindex [lindex $ranked 0] 0]) <= $ambiguityTolerance} {
+    if {$selectionMode eq "STRICT" && [llength $ranked] > 1 && \
+        abs([lindex [lindex $ranked 1] 0]-[lindex [lindex $ranked 0] 0]) <= $ambiguityTolerance} {
         error "Projected trim path is ambiguous"
     }
     return [lindex [lindex $ranked 0] 1]

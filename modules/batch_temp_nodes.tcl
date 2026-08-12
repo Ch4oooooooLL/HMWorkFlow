@@ -10,13 +10,36 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::BatchTempNodes {
-    variable VERSION "1.0"
+    variable VERSION "1.3"
     variable WINDOW ".batch_temp_nodes"
     variable LAST_CREATED_NODE_IDS {}
+    variable CREATE_BUSY 0
     variable ui
     array set ui {
         status ""
     }
+}
+
+proc ::BatchTempNodes::createOneNode {x y z} {
+    # Both supported HyperMesh kernels return the created node ID from
+    # *createnode.  Use that value directly.  In the 2022 new interface an
+    # immediate hm_latestentityid query can synchronously enter the updated
+    # browser/model context while this Tk button callback is still active.
+    set nodeId [*createnode $x $y $z 0 0 0]
+    if {[string is integer -strict $nodeId] && $nodeId > 0} {
+        return $nodeId
+    }
+
+    # Retain a compatibility fallback for kernels that execute the command but
+    # return an empty string.  This is deliberately queried only when needed.
+    set nodeId ""
+    catch {set nodeId [hm_latestentityid nodes]}
+    if {$nodeId eq "" || ![string is integer -strict $nodeId] || $nodeId <= 0} {
+        error [::HWFlow::txt \
+            "节点创建命令已执行，但无法取得新节点 ID。" \
+            "The node create command ran, but the new node ID could not be read."]
+    }
+    return $nodeId
 }
 
 proc ::BatchTempNodes::parseCoordinates {input} {
@@ -32,11 +55,14 @@ proc ::BatchTempNodes::parseCoordinates {input} {
             continue
         }
 
-        set fields [split $line ","]
+        # Commas and any run of whitespace are interchangeable separators.
+        # Replacing commas first also supports mixed input such as
+        # "1,  2 3" without producing empty fields.
+        set fields [regexp -all -inline {\S+} [string map [list "," " "] $line]]
         if {[llength $fields] != 3} {
             lappend errors [::HWFlow::txt \
-                "第 $lineNumber 行：需要恰好 3 个逗号分隔的坐标。" \
-                "Line $lineNumber: expected exactly 3 comma-separated coordinates."]
+                "第 $lineNumber 行：需要恰好 3 个以逗号或空格分隔的坐标。" \
+                "Line $lineNumber: expected exactly 3 coordinates separated by commas or whitespace."]
             continue
         }
 
@@ -95,9 +121,7 @@ proc ::BatchTempNodes::createNodes {points} {
 
     foreach point $points {
         lassign $point x y z
-        set previous ""
-        catch {set previous [hm_latestentityid nodes]}
-        if {[catch {*createnode $x $y $z 0 0 0} createError]} {
+        if {[catch {set nodeId [::BatchTempNodes::createOneNode $x $y $z]} createError]} {
             set rollbackCode [catch {::BatchTempNodes::deleteNodes $created} rollbackError]
             set LAST_CREATED_NODE_IDS $previousSuccessfulBatch
             set message [::HWFlow::txt \
@@ -110,33 +134,14 @@ proc ::BatchTempNodes::createNodes {points} {
             }
             error $message
         }
-        set nodeId ""
-        catch {set nodeId [hm_latestentityid nodes]}
-        if {$nodeId eq "" || $nodeId == 0 || $nodeId eq $previous} {
-            set rollbackCode [catch {::BatchTempNodes::deleteNodes $created} rollbackError]
-            set LAST_CREATED_NODE_IDS $previousSuccessfulBatch
-            set message [::HWFlow::txt \
-                "节点创建命令已执行，但无法取得新节点 ID；已回滚可识别的本批节点。" \
-                "The create command ran, but the new node ID could not be read; identifiable nodes from this batch were rolled back."]
-            if {$rollbackCode} {
-                append message "\n" [::HWFlow::txt \
-                    "警告：回滚也失败，请检查模型：$rollbackError" \
-                    "Warning: rollback also failed; inspect the model: $rollbackError"]
-            }
-            error $message
-        }
         lappend created $nodeId
     }
 
     set LAST_CREATED_NODE_IDS $created
-    if {[llength $created] > 0} {
-        catch {
-            eval [linsert $created 0 *createmark nodes 1 "by id only"]
-            *numbersmark nodes 1 1
-            *clearmark nodes 1
-        }
-        catch {hm_redraw}
-    }
+    # Do not call *numbersmark, hm_redraw, update or browser refresh from this
+    # success callback.  HyperMesh already invalidates the graphics after a
+    # model mutation; explicitly pumping the 2022 new-interface event loop here
+    # can leave an empty native window above the still-active Tk callback.
     return $created
 }
 
@@ -179,6 +184,11 @@ proc ::BatchTempNodes::showValidation {} {
 
 proc ::BatchTempNodes::createFromInput {} {
     variable ui
+    variable CREATE_BUSY
+    variable WINDOW
+    if {$CREATE_BUSY} {
+        return {}
+    }
     set parsed [::BatchTempNodes::parseCoordinates [::BatchTempNodes::inputText]]
     set errors [dict get $parsed errors]
     set points [dict get $parsed points]
@@ -192,7 +202,32 @@ proc ::BatchTempNodes::createFromInput {} {
         return {}
     }
 
-    if {[catch {set created [::BatchTempNodes::createNodes $points]} message]} {
+    # Let the Tk button/key binding unwind before entering HyperMesh's model
+    # mutation context.  This avoids re-entering the 2022 new-interface window
+    # dispatcher from inside Tk's button invoke implementation.
+    set CREATE_BUSY 1
+    catch {$WINDOW.buttons.create configure -state disabled}
+    catch {$WINDOW.buttons.undo configure -state disabled}
+    after idle [list ::BatchTempNodes::performCreate $points]
+    return {}
+}
+
+proc ::BatchTempNodes::performCreate {points} {
+    variable ui
+    variable CREATE_BUSY
+    variable WINDOW
+    if {![winfo exists $WINDOW]} {
+        set CREATE_BUSY 0
+        return {}
+    }
+
+    set createCode [catch {set created [::BatchTempNodes::createNodes $points]} message]
+    set CREATE_BUSY 0
+    if {[winfo exists $WINDOW]} {
+        catch {$WINDOW.buttons.create configure -state normal}
+        catch {$WINDOW.buttons.undo configure -state normal}
+    }
+    if {$createCode} {
         set ui(status) [::HWFlow::txt "创建失败，本批次已回滚。" "Creation failed; this batch was rolled back."]
         tk_messageBox -icon error -title [::HWFlow::txt "批量添加临时节点" "Batch Temporary Nodes"] -message $message
         return {}
@@ -228,6 +263,11 @@ proc ::BatchTempNodes::backToHome {} {
     }
 }
 
+proc ::BatchTempNodes::closeModule {} {
+    variable WINDOW
+    catch {destroy $WINDOW}
+}
+
 proc ::BatchTempNodes::runAction {} {
     variable VERSION
     variable WINDOW
@@ -245,8 +285,8 @@ proc ::BatchTempNodes::runAction {} {
     label $w.main.title -text [::HWFlow::txt "批量添加临时节点" "Batch Temporary Nodes"] -font [::HWFlow::uiFont title] -anchor w
     pack $w.main.title -fill x -pady {0 6}
     message $w.main.help -width 720 -anchor w -text [::HWFlow::txt \
-        "一行对应一个节点，按 X、Y、Z 顺序使用英文逗号分隔。支持小数、负数和科学计数法；创建到当前 component。" \
-        "One node per line, in X, Y, Z order separated by commas. Decimals, negatives, and scientific notation are supported; nodes are created in the current component."]
+        "一行对应一个节点，按 X、Y、Z 顺序输入；逗号或任意数量空格均可作为分隔符。支持小数、负数和科学计数法；创建到当前 component。" \
+        "One node per line in X, Y, Z order; commas or any amount of whitespace can be used as separators. Decimals, negatives, and scientific notation are supported; nodes are created in the current component."]
     pack $w.main.help -fill x -pady {0 8}
 
     frame $w.main.editor
@@ -276,9 +316,9 @@ proc ::BatchTempNodes::runAction {} {
     pack $w.buttons.clear $w.buttons.sample -side left -padx 4
     pack $w.buttons.create $w.buttons.validate $w.buttons.undo -side right -padx 4
 
-    bind $w <Escape> ::BatchTempNodes::backToHome
+    bind $w <Escape> ::BatchTempNodes::closeModule
     bind $w <Control-Return> ::BatchTempNodes::createFromInput
-    wm protocol $w WM_DELETE_WINDOW ::BatchTempNodes::backToHome
+    wm protocol $w WM_DELETE_WINDOW ::BatchTempNodes::closeModule
     update idletasks
     ::HWFlow::centerWindow $w
     focus $w.main.editor.text

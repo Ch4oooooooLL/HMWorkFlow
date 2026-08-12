@@ -252,3 +252,34 @@ proc ::hmtoolkit::seam::native::history_from_tcl {enabled} {
         catch {hm_private_frwk enablehistoryfromtcl $enabled}
     }
 }
+
+# Enable the public HyperMesh undo recorder before opening a named history
+# state.  *startnotehistorystate only groups commands; it cannot record them
+# when history recording or the history limit is disabled.
+proc ::hmtoolkit::seam::native::enable_native_undo {} {
+    set warnings {}
+    if {[llength [info commands ::hm_gethistorylimit]] > 0} {
+        set limit [hm_gethistorylimit]
+        if {$limit == 0} {
+            if {[llength [info commands ::*sethistorylimit]] == 0} {
+                error "HyperMesh native undo is disabled and *sethistorylimit is unavailable"
+            }
+            *sethistorylimit 100
+            lappend warnings "HyperMesh undo history was disabled; its action limit was set to 100."
+        }
+    }
+    if {[llength [info commands ::*sethistoryrecord]] == 0} {
+        error "HyperMesh command *sethistoryrecord is unavailable; native Ctrl+Z cannot be guaranteed"
+    }
+    *sethistoryrecord 1
+    # HM2019 needs the legacy bridge for Tcl-originated modifications.  Newer
+    # releases use the public recorder; the private call remains optional.
+    ::hmtoolkit::seam::native::history_from_tcl 1
+    return $warnings
+}
+
+proc ::hmtoolkit::seam::native::native_undo_actions {} {
+    if {[llength [info commands ::hm_getundoactions]] == 0} { return "" }
+    if {[catch {set actions [hm_getundoactions]}]} { return "" }
+    return $actions
+}

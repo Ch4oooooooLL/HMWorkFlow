@@ -172,11 +172,12 @@ proc ::hmtoolkit::seam::selector::select_strategy_input {strategy} {
         T_LIST - L_LIST {
             set lines [::hmtoolkit::seam::selector::list_panel PATH 1 "Select seam lines"]
             if {![dict get $lines valid]} { return $lines }
-            if {$strategy eq "L_LIST"} {
-                set targets [::hmtoolkit::seam::selector::surface_list_panel 2 "Select one or more target surfaces"]
-            } else {
-                set targets [::hmtoolkit::seam::selector::mark_panel surfs 2 "Select target surfaces"]
-            }
+            # Both list-based seam workflows accept a surface list here.  A
+            # regular mark panel happened to work for a single T_LIST target,
+            # but did not preserve a multi-surface second selection reliably
+            # across the supported HyperMesh releases.
+            set targets [::hmtoolkit::seam::selector::surface_list_panel 2 \
+                "Select one or more target surfaces"]
             if {![dict get $targets valid]} { return $targets }
             set source [::hmtoolkit::seam::selector::surfaces_for_lines [dict get $lines ids]]
             return [dict create valid 1 seam_lines [dict get $lines ids] source_surfs $source target_surfs [dict get $targets ids] \

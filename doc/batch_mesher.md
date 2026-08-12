@@ -39,6 +39,8 @@ SHOW_CMD_WINDOW 1
 
 `PARALLEL_WORKERS` 控制同时运行的独立 hmbatch 数量，范围 1–16。根据 2022 实机许可证并发验证默认设为 2；若出现 license denial，可降为 1。调度器采用固定容量滑动窗口：任一 worker 进入终态后立即释放槽位并拉取下一个 pending 任务，不等待同批其他任务结束；只要剩余任务数足够，活动 worker 数会保持为设置值。旧的 `FUTURE_PARALLEL_WORKERS` 只是未启用的占位设置，不会把历史默认值 1 迁移过来。并行单位严格为完整 Surface 拓扑连通域；同一个连通域不会为了增加并行度而拆开。
 
+首次打开面板或已保存路径失效时，模块会自动查找本机受支持的 Altair 2019/2022 `hmbatch.exe`，并选用该安装随附的 `hm/batchmesh/general_8mm.criteria` 与 `general_8mm.param` 作为 Default 规格。扫描同时支持经典 `<year>/hm` 和新版 `<year>/hwdesktop/hm` 布局；不依据父目录年份判断产品版本（例如本机 HyperMesh 2022.0.0.33 安装在 `Altair/2020/hwdesktop`），实际版本始终由 hmbatch 启动门禁确认。Default 预设会从旧安装的自动默认值迁移到新发现的 hwdesktop 安装；有效的自定义预设不会被覆盖。
+
 ## 连通域与执行
 
 选择结果立即复制为实际 Surface ID 列表，不保留临时 mark。每个种子写入独立 mark 后反复调用：

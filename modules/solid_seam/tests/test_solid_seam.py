@@ -37,6 +37,15 @@ def cube_mesh(shell=True):
 
 
 class SolidSeamTests(unittest.TestCase):
+    def test_tcl_detector_prefers_native_edges_and_faces_with_fallback(self):
+        source = (ROOT / "tcl" / "auto_detect.tcl").read_text(encoding="utf-8")
+        self.assertIn("*findedges comps 1 0", source)
+        self.assertIn("*findfaces components 1", source)
+        self.assertIn("nativeBoundaryData $componentId edges", source)
+        self.assertIn("nativeBoundaryData $componentId faces", source)
+        self.assertIn("surfaceNodeIdsOfComponent $targetComponentId $targetSolid", source)
+        self.assertIn("if {[llength $sourceNodes] == 0}", source)
+
     def write_mesh(self, payload):
         handle = tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False)
         json.dump(payload, handle)

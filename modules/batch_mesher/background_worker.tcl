@@ -38,6 +38,21 @@ proc ::BatchMesherWorker::appendLog {path level message} {
     close $channel
 }
 
+proc ::BatchMesherWorker::invokeFromFileDirectory {anchorPath command} {
+    # HM2019 resolves auxiliary files referenced by cleanup/holes tables from
+    # the process working directory.  A detached worker normally runs in its
+    # task directory, unlike an interactive/manual BatchMesher call.  Execute
+    # file-sensitive commands beside their source file and always restore cwd.
+    set previous [pwd]
+    set target [file dirname [file normalize $anchorPath]]
+    cd $target
+    set code [catch {uplevel #0 $command} result options]
+    set restoreCode [catch {cd $previous} restoreError]
+    if {$restoreCode && !$code} { error "Could not restore worker directory to $previous: $restoreError" }
+    if {$code} { return -options $options $result }
+    return $result
+}
+
 proc ::BatchMesherWorker::writeState {overall current message} {
     variable config
     variable records
@@ -76,10 +91,19 @@ proc ::BatchMesherWorker::optistructTemplate {} {
 
 proc ::BatchMesherWorker::initializeBatchMeshProfile {release} {
     variable config
-    if {$release ne "2022"} { return }
+    if {$release ni {2019 2022}} {
+        error "Unsupported HyperMesh release for BatchMesh profile initialization: $release"
+    }
+    # A standalone hmbatch process does not inherit the interactive session's
+    # solver profile or quality-criteria state.  Both HM2019 and HM2022 need
+    # these initialized before *hm_batchmesh2 parses the cleanup parameter
+    # file.  Skipping this for HM2019 makes valid parameter files abort in the
+    # holes-recognition section before any elements are created.
     set template [::BatchMesherWorker::optistructTemplate]
     *templatefileset [file nativename $template]
-    *readqualitycriteria [file nativename [dict get $config criteria]]
+    set criteria [dict get $config criteria]
+    ::BatchMesherWorker::invokeFromFileDirectory $criteria \
+        [list *readqualitycriteria [file nativename $criteria]]
 }
 
 proc ::BatchMesherWorker::verifyConfigurationFiles {} {
@@ -101,7 +125,7 @@ proc ::BatchMesherWorker::batchMeshElementSize {paramPath} {
     if {[catch {set channel [open $paramPath r]}]} { return "" }
     set text [read $channel]
     close $channel
-    if {[regexp -line {^[ \t]*element_size[ \t]+([0-9]+(?:[.][0-9]*)?(?:[eE][+-]?[0-9]+)?)} $text -> value] &&
+    if {[regexp -nocase -line {^[ \t]*element_size(?:[ \t]+|[ \t]*=[ \t]*)([0-9]+(?:[.][0-9]*)?(?:[eE][+-]?[0-9]+)?)} $text -> value] &&
         [string is double -strict $value] && $value > 0} {
         return [expr {double($value)}]
     }
@@ -208,6 +232,7 @@ proc ::BatchMesherWorker::runTask {index} {
     variable config
     variable records
     variable successfulElements
+    variable workerRelease
     set task [lindex $records $index]
     set taskId [dict get $task task_id]
     set groupId [dict get $task group_id]
@@ -235,8 +260,27 @@ proc ::BatchMesherWorker::runTask {index} {
         if {[llength $existing] != [llength [::BatchMesherWorker::uniqueIds $ids]]} {
             error "MODEL_STATE_STALE expected_surfaces=[llength $ids] existing_surfaces=[llength $existing] surface_ids=$ids"
         }
-        set command [list *hm_batchmesh2 surfs 1 1 0 [file nativename [dict get $config criteria]] [file nativename [dict get $config param]]]
-        uplevel #0 $command
+        set criteria [dict get $config criteria]
+        set param [dict get $config param]
+        if {$workerRelease eq "2019"} {
+            if {[llength [info commands *readbatchparamsfile]] == 0} {
+                error "HM2019 command *readbatchparamsfile is unavailable"
+            }
+            # Cleanup parameters used via "dummy" are consumed by one call,
+            # so reload both standards for every independently meshed group.
+            ::BatchMesherWorker::invokeFromFileDirectory $criteria \
+                [list *readqualitycriteria [file nativename $criteria]]
+            ::BatchMesherWorker::invokeFromFileDirectory $param \
+                [list *readbatchparamsfile [file nativename $param]]
+            ::BatchMesherWorker::appendLog $taskLog INFO \
+                "configuration_loaded mode=hm2019_preloaded criteria=$criteria param=$param"
+            ::BatchMesherWorker::invokeFromFileDirectory $param \
+                [list *hm_batchmesh2 surfs 1 1 0 dummy dummy]
+        } else {
+            set command [list *hm_batchmesh2 surfs 1 1 0 \
+                [file nativename $criteria] [file nativename $param]]
+            ::BatchMesherWorker::invokeFromFileDirectory $param $command
+        }
     } errorMessage errorOptions]
     catch {*clearmark surfs 1}
     set after [::BatchMesherWorker::allIds elems 2]

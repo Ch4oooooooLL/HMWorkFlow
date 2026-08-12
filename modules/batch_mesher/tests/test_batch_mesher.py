@@ -132,6 +132,74 @@ class BatchMesherTests(unittest.TestCase):
         )
         self.assertEqual(command[4], "C:\\work\\worker.tcl")
 
+    def test_installed_hmbatch_supplies_altair_default_standards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "hm" / "bin" / "win64" / "hmbatch.exe"
+            standards = root / "hm" / "batchmesh"
+            standards.mkdir(parents=True)
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"stub")
+            criteria = standards / "general_8mm.criteria"
+            param = standards / "general_8mm.param"
+            criteria.write_text("criteria\n", encoding="utf-8")
+            param.write_text("element_size 8\n", encoding="utf-8")
+            self.h.tcl.setvar("default_hmbatch", executable.as_posix())
+            self.h.eval("::BatchMesher::applyInstalledDefaults $default_hmbatch")
+            self.assertEqual(
+                Path(self.h.eval("set ::BatchMesher::ui(HMBATCH_PATH)")), executable
+            )
+            self.assertEqual(
+                Path(self.h.eval("set ::BatchMesher::ui(CRITERIA_PATH)")), criteria
+            )
+            self.assertEqual(
+                Path(self.h.eval("set ::BatchMesher::ui(PARAM_PATH)")), param
+            )
+            self.assertEqual(
+                self.h.eval(
+                    "dict get [lindex $::BatchMesher::ui(PRESETS) 0] criteria_path"
+                ).replace("\\", "/"),
+                criteria.as_posix(),
+            )
+
+    def test_default_preset_migrates_from_classic_to_hwdesktop_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            classic_exe = root / "2019" / "hm" / "bin" / "win64" / "hmbatch.exe"
+            classic_specs = root / "2019" / "hm" / "batchmesh"
+            modern_exe = (
+                root / "2020" / "hwdesktop" / "hm" / "bin" / "win64" / "hmbatch.exe"
+            )
+            modern_specs = root / "2020" / "hwdesktop" / "hm" / "batchmesh"
+            for executable, specs in (
+                (classic_exe, classic_specs),
+                (modern_exe, modern_specs),
+            ):
+                executable.parent.mkdir(parents=True)
+                specs.mkdir(parents=True)
+                executable.write_bytes(b"stub")
+                (specs / "general_8mm.criteria").write_text(
+                    "criteria\n", encoding="utf-8"
+                )
+                (specs / "general_8mm.param").write_text(
+                    "element_size 8\n", encoding="utf-8"
+                )
+            self.h.tcl.setvar("classic_hmbatch", classic_exe.as_posix())
+            self.h.tcl.setvar("modern_hmbatch", modern_exe.as_posix())
+            self.h.eval("::BatchMesher::applyInstalledDefaults $classic_hmbatch")
+            self.h.eval("::BatchMesher::applyInstalledDefaults $modern_hmbatch")
+            self.assertEqual(
+                Path(self.h.eval("set ::BatchMesher::ui(HMBATCH_PATH)")), modern_exe
+            )
+            self.assertEqual(
+                Path(self.h.eval("set ::BatchMesher::ui(CRITERIA_PATH)")),
+                modern_specs / "general_8mm.criteria",
+            )
+            self.assertEqual(
+                Path(self.h.eval("set ::BatchMesher::ui(PARAM_PATH)")),
+                modern_specs / "general_8mm.param",
+            )
+
     def test_background_run_enforces_real_hmbatch_preflight(self):
         manager_source = (MODULE / "background.tcl").read_text(encoding="utf-8")
         start_source = manager_source[
@@ -261,7 +329,13 @@ class BatchMesherTests(unittest.TestCase):
             self.assertNotIn("merge_complete", log_text)
 
     def install_background_worker_model_mock(self, directory):
+        criteria = Path(directory) / "mock.criteria"
+        param = Path(directory) / "mock.param"
+        criteria.write_text("criteria\n", encoding="utf-8")
+        param.write_text("element_size 8.0\n", encoding="utf-8")
         self.h.tcl.setvar("worker_dir", Path(directory).as_posix())
+        self.h.tcl.setvar("worker_mock_criteria", criteria.as_posix())
+        self.h.tcl.setvar("worker_mock_param", param.as_posix())
         self.h.eval(
             r"""
             set ::workerElements {10}
@@ -276,7 +350,7 @@ class BatchMesherTests(unittest.TestCase):
             proc *deletemark {etype markId} {
                 set ::workerElements [::BatchMesherWorker::difference $::workerElements $::workerMarks($etype,$markId)]
             }
-            set ::BatchMesherWorker::config [dict create run_dir $worker_dir criteria C:/mesh/a.criteria param C:/mesh/a.param \
+            set ::BatchMesherWorker::config [dict create run_dir $worker_dir criteria $worker_mock_criteria param $worker_mock_param \
                 state_path [file join $worker_dir background.state] result_fem [file join $worker_dir result.fem]]
             set ::BatchMesherWorker::records [list [dict create task_id T001 group_id G001 surface_ids {1 2} \
                 surface_count 2 component_ids {10} component_names {FRAME_A} status pending elapsed_seconds {} started_at {} ended_at {} error_message {} log_path {}]]
@@ -311,6 +385,43 @@ class BatchMesherTests(unittest.TestCase):
             self.assertIn(
                 "native batch failure",
                 self.h.eval("dict get [lindex $::BatchMesherWorker::records 0] warning_message"),
+            )
+
+    def test_hm2019_worker_preloads_user_standards_and_calls_dummy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.install_background_worker_model_mock(directory)
+            criteria = Path(directory) / "mesh.criteria"
+            param = Path(directory) / "mesh.param"
+            criteria.write_text("criteria\n", encoding="utf-8")
+            param.write_text("element_size 8.0\n", encoding="utf-8")
+            self.h.tcl.setvar("worker_criteria", criteria.as_posix())
+            self.h.tcl.setvar("worker_param", param.as_posix())
+            self.h.eval(
+                r"""
+                dict set ::BatchMesherWorker::config criteria $worker_criteria
+                dict set ::BatchMesherWorker::config param $worker_param
+                set ::BatchMesherWorker::workerRelease 2019
+                set ::workerConfigCalls {}
+                proc *readqualitycriteria {path} {lappend ::workerConfigCalls [list criteria $path]}
+                proc *readbatchparamsfile {path} {lappend ::workerConfigCalls [list param $path]}
+                proc *hm_batchmesh2 {args} {
+                    set ::workerBatchArgs $args
+                    lappend ::workerElements 40
+                }
+                """
+            )
+            self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "0")
+            self.assertEqual(
+                self.h.eval("set ::workerBatchArgs"), "surfs 1 1 0 dummy dummy"
+            )
+            self.assertEqual(
+                self.h.eval("lindex [lindex $::workerConfigCalls 0] 0"), "criteria"
+            )
+            self.assertEqual(
+                self.h.eval("lindex [lindex $::workerConfigCalls 1] 0"), "param"
+            )
+            self.assertEqual(
+                self.h.eval("set ::BatchMesherWorker::successfulElements"), "40"
             )
 
     def test_worker_packaging_removes_only_preexisting_elements(self):
@@ -565,7 +676,7 @@ class BatchMesherTests(unittest.TestCase):
             "2022",
         )
 
-    def test_hm2022_worker_initializes_profile_from_worker_config(self):
+    def test_supported_workers_initialize_profile_from_worker_config(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             template = root / "optistruct"
@@ -587,15 +698,62 @@ class BatchMesherTests(unittest.TestCase):
                 }
                 """
             )
-            self.h.eval("::BatchMesherWorker::initializeBatchMeshProfile 2022")
-            self.assertEqual(
-                Path(self.h.eval("lindex [lindex $::hm2022ProfileCalls 0] 1")),
-                template,
+            for release in (2019, 2022):
+                with self.subTest(release=release):
+                    self.h.eval("set ::hm2022ProfileCalls {}")
+                    self.h.eval(
+                        f"::BatchMesherWorker::initializeBatchMeshProfile {release}"
+                    )
+                    self.assertEqual(
+                        Path(
+                            self.h.eval(
+                                "lindex [lindex $::hm2022ProfileCalls 0] 1"
+                            )
+                        ),
+                        template,
+                    )
+                    self.assertEqual(
+                        Path(
+                            self.h.eval(
+                                "lindex [lindex $::hm2022ProfileCalls 1] 1"
+                            )
+                        ),
+                        criteria,
+                    )
+
+    def test_worker_rejects_profile_initialization_for_unknown_release(self):
+        with self.assertRaisesRegex(
+            tkinter.TclError, "Unsupported HyperMesh release"
+        ):
+            self.h.eval("::BatchMesherWorker::initializeBatchMeshProfile 2024")
+
+    def test_worker_uses_hm2019_preloaded_configuration_contract(self):
+        worker_source = (MODULE / "background_worker.tcl").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("*readbatchparamsfile", worker_source)
+        self.assertIn("*hm_batchmesh2 surfs 1 1 0 dummy dummy", worker_source)
+        self.assertIn("mode=hm2019_preloaded", worker_source)
+        self.assertNotIn("params_generate_mode = shell", worker_source)
+
+    def test_file_sensitive_command_runs_beside_standard_and_restores_cwd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            standards = root / "standards"
+            standards.mkdir()
+            param = standards / "mesh.param"
+            param.write_text("element_size 8.0\n", encoding="utf-8")
+            self.h.tcl.setvar("cwd_root", root.as_posix())
+            self.h.tcl.setvar("cwd_param", param.as_posix())
+            self.h.eval("set ::cwd_test_original [pwd]; cd $cwd_root")
+            self.h.eval("proc captureConfigCwd {} {set ::capturedConfigCwd [pwd]}")
+            self.h.eval(
+                "::BatchMesherWorker::invokeFromFileDirectory "
+                "$cwd_param {captureConfigCwd}"
             )
-            self.assertEqual(
-                Path(self.h.eval("lindex [lindex $::hm2022ProfileCalls 1] 1")),
-                criteria,
-            )
+            self.assertEqual(Path(self.h.eval("set ::capturedConfigCwd")), standards)
+            self.assertEqual(Path(self.h.eval("pwd")), root)
+            self.h.eval("cd $::cwd_test_original")
 
     def test_scale_preflight_rejects_element_size_larger_than_model_span(self):
         with tempfile.TemporaryDirectory() as directory:

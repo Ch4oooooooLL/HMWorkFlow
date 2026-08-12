@@ -199,11 +199,13 @@ trycmd "SELFSTITCH_130" [list *selfstitchcombine 1 130 0.2 0.2]
 trycmd "SELFSTITCH_6" [list *selfstitchcombine 1 6 0.2 0.2]
 
 # ---------------- empty createlist (ruled-surface endpoints) ----------------
-# Kept BEFORE edgesmarkaddpoints: point insertion can renumber lines.
+# Point insertion above can renumber the fixture lines, so use one of the
+# live post-insertion IDs instead of the stale pre-insertion $line value.
 log "--- createlist ---"
+set liveLine [lindex $linesAfter 0]
 trycmd "CREATELIST_EMPTY_NODES" [list *createlist nodes 1]
 trycmd "CREATELIST_EMPTY_NODES2" [list *createlist nodes 2]
-trycmd "CREATELIST_LINE" [list *createlist lines 2 $line]
+trycmd "CREATELIST_LINE" [list *createlist lines 2 $liveLine]
 trycmd "GETLIST_LINES" [list hm_getlist lines 2]
 trycmd "GETLIST_NODES_EMPTY" [list hm_getlist nodes 1]
 

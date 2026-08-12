@@ -30,6 +30,14 @@ class BatchTempNodesTests(unittest.TestCase):
         self.assertEqual(tuple(map(float, self.tcl.splitlist(points[0]))), (1.0, 2.0, 3.0))
         self.assertEqual(tuple(map(float, self.tcl.splitlist(points[1]))), (-4.0, 5.5, 600.0))
 
+    def test_parses_arbitrary_whitespace_and_mixed_separators(self):
+        result = self.parse("1 2 3\n4     5.5    -6\n7,  8\t9\n10，11  12")
+        self.assertEqual(self.tcl.splitlist(self.tcl.call("dict", "get", result, "errors")), ())
+        points = self.tcl.splitlist(self.tcl.call("dict", "get", result, "points"))
+        self.assertEqual(len(points), 4)
+        self.assertEqual(tuple(map(float, self.tcl.splitlist(points[1]))), (4.0, 5.5, -6.0))
+        self.assertEqual(tuple(map(float, self.tcl.splitlist(points[2]))), (7.0, 8.0, 9.0))
+
     def test_reports_line_number_and_allows_valid_rows_to_be_inspected(self):
         result = self.parse("1,2,3\n4,nope,6\n7,8")
         points = self.tcl.splitlist(self.tcl.call("dict", "get", result, "points"))
@@ -51,10 +59,12 @@ class BatchTempNodesTests(unittest.TestCase):
             r"""
 set ::latest_node 10
 set ::commands {}
-proc hm_latestentityid {entity} {return $::latest_node}
+set ::numbersmark_calls 0
+set ::latest_query_calls 0
+proc hm_latestentityid {entity} {incr ::latest_query_calls; return $::latest_node}
 proc *createnode args {lappend ::commands [linsert $args 0 createnode]; incr ::latest_node}
 proc *createmark args {}
-proc *numbersmark args {}
+proc *numbersmark args {incr ::numbersmark_calls}
 proc *clearmark args {}
 proc *redraw args {}
 """
@@ -64,6 +74,20 @@ proc *redraw args {}
         self.assertEqual(self.tcl.splitlist(self.tcl.eval("set ::BatchTempNodes::LAST_CREATED_NODE_IDS")), ("11", "12"))
         commands = [self.tcl.splitlist(x) for x in self.tcl.splitlist(self.tcl.eval("set ::commands"))]
         self.assertEqual(commands[0], ("createnode", "1", "2", "3", "0", "0", "0"))
+        self.assertEqual(int(self.tcl.eval("set ::numbersmark_calls")), 0)
+        self.assertEqual(int(self.tcl.eval("set ::latest_query_calls")), 0)
+
+    def test_create_node_falls_back_to_latest_id_when_command_returns_empty(self):
+        self.tcl.eval(
+            r"""
+set ::latest_node 40
+set ::latest_query_calls 0
+proc hm_latestentityid {entity} {incr ::latest_query_calls; return $::latest_node}
+proc *createnode args {set ::latest_node 41; return {}}
+"""
+        )
+        self.assertEqual(int(self.tcl.call("::BatchTempNodes::createOneNode", 1, 2, 3)), 41)
+        self.assertEqual(int(self.tcl.eval("set ::latest_query_calls")), 1)
 
     def test_failure_rolls_back_nodes_already_created(self):
         self.tcl.eval(

@@ -18,12 +18,14 @@ proc ::FemAutoSeam::openAutoResultModel {resultFem} {
     if {![file isfile $resultFem] || [file size $resultFem] == 0} {
         error "modified result FEM is missing or empty: $resultFem"
     }
-    # File > Open semantics: read the FEM that Python wrote and replace the
-    # current model with it.  The task-level before.hm backup created by the
-    # caller is the single rollback point, so no import/merge machinery or
-    # second snapshot is needed.
+    # File > Open semantics for a solver deck require an empty model followed
+    # by the OptiStruct reader.  *readfile only accepts a HyperMesh database
+    # and reports a valid .fem as "not a HyperMesh database" in HM2019.
+    # The task-level before.hm backup created by the caller remains the single
+    # rollback point; clearing first prevents any import/merge behavior.
     catch {hm_answernext yes}
-    uplevel #0 [list *readfile [file nativename $resultFem] 0]
+    *deletemodel
+    ::HWFlow::runHyperMeshIo import [list *feinputwithdata2 "#optistruct/optistruct" [file nativename $resultFem] 0 0 0 0 0 1 2 1 0]
     catch {::HWFlow::refreshBrowser}
     return $resultFem
 }
@@ -32,6 +34,20 @@ proc ::FemAutoSeam::validateAutoModelContents {plans} {
     set verified 0
     foreach plan $plans {
         if {[dict get $plan status] ne "READY"} { continue }
+        # OptiStruct has no native component field on shell cards. HM2019 may
+        # initially collect newly imported seam shells by their reused source
+        # PID even though the FEM contains $HMCOMP markers. Reapply the plan's
+        # explicit ownership before verification and remeshing.
+        set weldIds {}
+        foreach element [dict get $plan weld_elements] { lappend weldIds [dict get $element element_id] }
+        if {[llength $weldIds]} {
+            set outputComponentId [dict get $plan output_component_id]
+            set outputComponentName [::HybridCore::componentName $outputComponentId]
+            if {$outputComponentName eq ""} {
+                error "opened result FEM is missing output component $outputComponentId for candidate=[dict get $plan candidate_id]"
+            }
+            ::HybridCore::moveIdsToComponent {elems elements} $weldIds $outputComponentName
+        }
         set expected {}
         foreach element [concat [dict get $plan replacement_elements] [dict get $plan weld_elements]] { lappend expected [dict get $element element_id] }
         set missingNodes {}

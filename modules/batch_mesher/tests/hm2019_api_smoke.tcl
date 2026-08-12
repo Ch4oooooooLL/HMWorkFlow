@@ -18,8 +18,8 @@ proc batchMesherSmokeReport {path status details} {
 
 proc runBatchMesherApiSmoke {} {
     set version [hm_info -appinfo VERSION]
-    if {![regexp {(^|[^0-9])2019([^0-9]|$)} $version]} { error "Expected HyperMesh 2019, got: $version" }
-    foreach command {*appendmark *hm_batchmesh2 *isolateentitybymark *setreviewbymark *window_entitymark} {
+    if {![regexp {(^|[^0-9])(2019|19)([.]|[^0-9]|$)} $version]} { error "Expected HyperMesh 2019, got: $version" }
+    foreach command {*appendmark *hm_batchmesh2 *readbatchparamsfile *readqualitycriteria *isolateentitybymark *setreviewbymark *window_entitymark} {
         if {[llength [info commands $command]] == 0} { error "Required HM2019 command is unavailable: $command" }
     }
     catch {*clearmark surfs 1}

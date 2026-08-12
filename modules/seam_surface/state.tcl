@@ -74,20 +74,42 @@ proc ::hmtoolkit::seam::transaction::run {label scriptBody} {
     set state [::hmtoolkit::seam::state::capture]
     set tempToken [::hmtoolkit::seam::temp::new_scope]
     set runtime(active_temp_token) $tempToken
-    set historyStarted 0
-    ::hmtoolkit::seam::native::history_from_tcl 1
-    if {![catch {*startnotehistorystate $label}]} { set historyStarted 1 }
+    set historyWarnings {}
+    if {[catch {
+        set historyWarnings [::hmtoolkit::seam::native::enable_native_undo]
+        set canVerifyUndo [expr {[llength [info commands ::hm_getundoactions]] > 0}]
+        set undoBefore [::hmtoolkit::seam::native::native_undo_actions]
+        *startnotehistorystate $label
+    } historyError]} {
+        ::hmtoolkit::seam::native::history_from_tcl 0
+        set runtime(active_temp_token) ""
+        return [dict create success 0 error_code UNDO_UNAVAILABLE \
+            message "Unable to start HyperMesh native Ctrl+Z history: $historyError" \
+            warnings {} error_info $::errorInfo]
+    }
     set code [catch {uplevel 1 $scriptBody} value options]
     set preserve [expr {[::hmtoolkit::seam::config::get diagnostic_preserve_failed_geometry] > 0}]
     if {!$code || !$preserve} {
         # Cleanup belongs to the same undo unit as the geometry operation.
         catch {::hmtoolkit::seam::temp::cleanup $tempToken}
     }
-    if {$historyStarted} { catch {*endnotehistorystate $label} }
-    ::hmtoolkit::seam::native::history_from_tcl 0
-    set runtime(active_temp_token) ""
-    if {$code && $historyStarted && !$preserve} { catch {*undohistorystate 1} }
+    # Every modifying restore/reveal command must remain inside the named
+    # history state.  Running them after the history state is closed can clear the
+    # action that Ctrl+Z needs, especially in HM2019/HM2022 Tcl workflows.
     set restoreWarnings [::hmtoolkit::seam::state::restore $state]
+    if {!$code} { ::hmtoolkit::seam::state::reveal_result $value }
+    set endCode [catch {*endnotehistorystate $label} endError]
+    set undoAfter [::hmtoolkit::seam::native::native_undo_actions]
+    set runtime(active_temp_token) ""
+    if {$endCode && !$code} {
+        set code 1
+        set value "Unable to finish HyperMesh native Ctrl+Z history: $endError"
+        set options [dict create -errorinfo $::errorInfo]
+    }
+    if {$code && !$endCode && !$preserve} {
+        catch {*undohistorystate 1}
+        ::hmtoolkit::seam::native::history_from_tcl 0
+    }
     if {$code && $preserve} {
         lappend restoreWarnings \
             "diagnostic_preserve_failed_geometry=1: rollback skipped, temp scope $tempToken was kept for inspection"
@@ -101,11 +123,14 @@ proc ::hmtoolkit::seam::transaction::run {label scriptBody} {
     }
     if {![dict exists $value success]} { set value [dict create success 1 value $value warnings {}] }
     if {[dict exists $value warnings]} {
-        dict set value warnings [concat [dict get $value warnings] $restoreWarnings]
+        dict set value warnings [concat [dict get $value warnings] $historyWarnings $restoreWarnings]
     } else {
-        dict set value warnings $restoreWarnings
+        dict set value warnings [concat $historyWarnings $restoreWarnings]
     }
-    ::hmtoolkit::seam::state::reveal_result $value
+    if {$canVerifyUndo && $undoBefore eq $undoAfter} {
+        dict lappend value warnings \
+            "HyperMesh did not expose a new undo action after '$label'; one of the native commands may not support history on this release."
+    }
     ::hmtoolkit::seam::log::result $value
     return $value
 }

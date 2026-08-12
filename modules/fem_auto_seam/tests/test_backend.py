@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "python"))
 
 from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, realize_candidates, write_fem_bundle
 from hmworkflow.fem_auto_seam.delta_writer import write_shell_weld_delta
-from hmworkflow.fem_auto_seam.main import _mark_duplicates
+from hmworkflow.fem_auto_seam.main import _candidate_cache_key, _load_candidate_cache, _mark_duplicates
 from hmworkflow.mesh_seam_weld.fem_mesh_reader import read_shell_fem
 from hmworkflow.mesh_seam_weld.weld_strip_planner import plan_zipper
 
@@ -37,6 +37,33 @@ PIPELINE = _load("auto_seam_stage2_pipeline", EXAMPLE_DIR / "prepare_stage2_pipe
 
 
 class OfflineBackendTests(unittest.TestCase):
+    def test_detection_cache_is_reused_only_for_identical_plan_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mesh = root / "mesh.json"
+            existing = root / "existing.json"
+            cache = root / "candidates.json"
+            mesh.write_text('{"mesh":"same"}', encoding="utf-8")
+            existing.write_text('{"seams":[]}', encoding="utf-8")
+            request = {
+                "run_id": "CACHE_TEST",
+                "selected_component_ids": [1, 2],
+                "settings": {"mode": "detect", "search_distance": 12.0},
+            }
+            detect_key = _candidate_cache_key(request, mesh, existing)
+            request["settings"]["mode"] = "plan"
+            plan_key = _candidate_cache_key(request, mesh, existing)
+            self.assertEqual(detect_key, plan_key)
+            cache.write_text(json.dumps({
+                "cache_version": 1,
+                "cache_key": detect_key,
+                "candidates": [{"candidate_id": "B000001"}],
+            }), encoding="utf-8")
+            self.assertEqual("B000001", _load_candidate_cache(cache, plan_key)[0]["candidate_id"])
+            mesh.write_text('{"mesh":"changed"}', encoding="utf-8")
+            changed_key = _candidate_cache_key(request, mesh, existing)
+            self.assertIsNone(_load_candidate_cache(cache, changed_key))
+
     def test_failed_local_plan_rolls_back_without_poisoning_next_candidate(self):
         model, _ = FIXTURES.partial_overlap_t()
         candidate = next(row for row in detect_candidates(model) if row.get("auto_eligible"))

@@ -2,6 +2,24 @@
 
 ## Unreleased - platform stabilization
 
+- 对齐新安装的 HyperMesh 2022.0.0.33：BatchMesher 安装发现不再假定目录名必须为 `2022`，支持实际存在的 `Altair/2020/hwdesktop/hm` 布局，并将 Default 自动规格迁移到该安装自带的 `general_8mm.criteria/.param`；2019 经典布局和自定义预设继续保留。
+
+- 按当前实机重新对齐几何焊缝的 HyperMesh 2019.0.0.70 与 2022.0.0.33：两版分别在 12 个独立 hmbatch 进程中跑完全部公开功能，创建 ID、面积、包围盒、边归属拓扑、消息、警告与最终 Surface 集合逐项一致；命令审计同时通过。修复 T_LIST 校准包装器未转发匹配模式/容差、以及 `*edgesmarkaddpoints` 重编号后审计仍使用旧 Line ID 导致 `*createlist` 假失败的问题。
+
+- 修复 BatchMesher 首次使用时因 `hmbatch.exe`、Criteria 和 Param 均为空而无法调用的问题：面板现在自动发现本机受支持的 HyperWorks 2019/2022，并使用安装自带的 `general_8mm.criteria` / `general_8mm.param` 默认规格；已有有效自定义规格保持不变。
+
+- 优化 FEM 自动焊缝的 Python 规划阶段：候选复核后的创建规划复用同一任务检测阶段已生成且按模型、现有焊缝、所选组件和检测参数校验的候选缓存，不再对完整 FEM 重复执行一次候选检测；缓存缺失或输入不一致时仍安全回退到完整检测。
+
+- 修复 T 列表/连接边线在跨 Surface line list 上执行 ruled 后无结果：共享 Connect Edges 执行器现在与 HyperMesh 手动 Ruled 面板一致，在创建 line list 和调用 `*linearsurfacebetweenlines` 前显式执行 `*surfacemode 4`（surface only），不再继承此前残留的 automesh/surfaceless 全局模式。
+
+- T 列表的 Project/Split 与 Connect Edges 现在使用两个独立的原生 history action：切分阶段一旦开始，无论后续候选筛选、排序或 ruled 连接成功与否，本次 trim 都会提交并保留；连接失败只回滚连接阶段。连接准备改为“严格匹配 → 多目标面 trim 片段沿投影轨迹排序 → 本次 trim 集合内最佳匹配”的分层链路；投影参考不可读时也会在本次 trim 集合内继续执行与手动 Connect Edges 相同的路径判断，不再直接停止。切分阶段确定的两组 line ID 顺序会原样写入 `*createlist lines 1/2`，连接阶段不再二次重排。
+
+- Project/Split 现在在每一次 `*surfacemarksplitwithlines` 内部单独开启 `hm_entityrecorder lines`，并记录该目标面切分前后的边线差集。T 列表的第二组候选只由“本次 trim 新建且属于该目标分片的 Lines”与“本次 trim 后新附着到该目标的 Lines”组成，不再使用整个模型的新 Line 差集。Ruled 前将最终 `list1/list2` 顺序写入日志便于核对。
+
+- 继续收紧 T 列表交给 Connect Edges 的两组 lines：严格阶段要求第二组候选覆盖投影前记录的目标面落点；若 HyperMesh 实际 trim 与最近点参考存在差异，则只在本次 trim 记录集内按全路径误差选取最佳 ruled 兼容路径。多目标面产生的非拓扑连续片段按投影弧长统一排序，并排除只在交点附近横穿投影轨迹的边界线。两组路径的方向/循环起点不再只用首尾判定，而是沿完整路径按弧长等比采样，比较正向、反向及闭合路径所有循环起点的全路径对应误差，再将最优 ID 顺序写入 line list 1/2。
+
+- T 列表仅组织现有 Project/Split 与 Connect Edges 两个流程，不改动两者的原生执行方式。T 列表通过现有 `_split_surface ... PROJECT` 执行完整切分和 no-op 判定；切分前记录源线在所选目标面上的预期投影点，切分后依据这些目标面落点识别第二组 lines，避免误选源线附近或远处的其他新边。在交给 Connect Edges 前，分别按端点连续关系重排两组 lines，并根据两组起点/终点的几何距离统一行进方向；重排结果按顺序写入 HyperMesh line list 1/2。投影仍直接修改原 Surface，整个 T 列表保留原生 history action 供 `Ctrl+Z` 撤销。
+
 - 根据第二轮 HM2019 手工日志澄清搭接曲面的输入边界：C03 与 C04 均已成功；两次所谓“部分失败”都来自把 C06 投影/切分几何送入搭接曲面，候选面未同时连接两侧，严格拓扑门禁正确回滚。按钮、原生选择提示和错误信息现在明确要求“两张近似平行且投影区域重叠的面”，并引导边到面改用“搭接边线”、投影几何改用“投影切分”，不通过放宽门禁保留游离曲面。
 
 - 根据 HM2019 验证模型的首轮手工反馈修复几何焊缝 T 曲面与搭接曲面：导入 CAD 无 Property/`_Txx` 厚度时，T 曲面不再在 selector 层静默停止，而是与其他创建功能一致弹出厚度输入；搭接曲面不再把 50 mm 实体偏置产生的远端构造盖板/侧壁全部移入 `SEAM_T*_Surf`，新增原始两面包络过滤（可调 `lap_result_envelope_tolerance`），本机两版本均由原 9 张混杂面收敛为间隙内 4 张真实连接面。成功后统一显式显示并同步输出 component，避免“日志成功但图形/Browser 看不到”。T 曲面、搭接曲面、T 列表在 HM2019.0.0.70/HW2022.0.0.33 重新通过。

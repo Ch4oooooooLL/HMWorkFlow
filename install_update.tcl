@@ -178,6 +178,19 @@ proc ::HWInstaller::verifyLoadedSession {} {
     if {[package vcompare $::BatchMesher::VERSION 2.6] < 0} {
         error "Stale BatchMesher version is still loaded: $::BatchMesher::VERSION (expected 2.6 or newer)"
     }
+    if {![namespace exists ::BatchTempNodes] ||
+        [llength [info commands ::BatchTempNodes::createOneNode]] == 0} {
+        error "Updated Batch Temporary Nodes module was not loaded."
+    }
+    if {[package vcompare $::BatchTempNodes::VERSION 1.3] < 0} {
+        error "Stale Batch Temporary Nodes version is still loaded: $::BatchTempNodes::VERSION (expected 1.3 or newer)"
+    }
+    set batchTempCreateBody [info body ::BatchTempNodes::createNodes]
+    if {[regexp -line {^[ \t]*\*numbersmark[ \t]} $batchTempCreateBody] ||
+        [regexp -line {^[ \t]*hm_redraw([ \t]|$)} $batchTempCreateBody] ||
+        [regexp -line {^[ \t]*update[ \t]+idletasks([ \t]|$)} $batchTempCreateBody]} {
+        error "Batch Temporary Nodes still contains the HyperMesh 2022 blocking completion path."
+    }
     if {![info exists ::BatchMesher::WORKER_STARTUP_TIMEOUT_MS] ||
         $::BatchMesher::WORKER_STARTUP_TIMEOUT_MS < 60000} {
         error "Updated BatchMesher startup-handshake timeout was not loaded."
@@ -211,6 +224,7 @@ proc ::HWInstaller::verifyLoadedSession {} {
         package_version [::HWInstaller::readPackageVersion] \
         project_root $expectedRoot \
         batch_mesher_version $::BatchMesher::VERSION \
+        batch_temp_nodes_version $::BatchTempNodes::VERSION \
         batch_module_dir $loadedModuleDir \
         startup_timeout_ms $::BatchMesher::WORKER_STARTUP_TIMEOUT_MS \
         hm_pid [pid]]
@@ -238,6 +252,7 @@ proc ::HWInstaller::writeUpdateReport {verification} {
         "package_version=[dict get $verification package_version]" \
         "project_root=[file nativename [dict get $verification project_root]]" \
         "batch_mesher_version=[dict get $verification batch_mesher_version]" \
+        "batch_temp_nodes_version=[dict get $verification batch_temp_nodes_version]" \
         "batch_module_dir=[file nativename [dict get $verification batch_module_dir]]" \
         "startup_timeout_ms=[dict get $verification startup_timeout_ms]" \
         "hm_pid=[dict get $verification hm_pid]"]

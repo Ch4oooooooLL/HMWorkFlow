@@ -2,6 +2,34 @@
 
 Date: 2026-08-07; current-tree rerun and correction: 2026-08-11
 
+## 2026-08-12 installed-machine recalibration
+
+The available installations were re-discovered instead of relying on the
+historical paths below. HyperMesh 2019.0.0.70 is installed at
+`D:\Program Files\Altair\2019\hm\bin\win64\hmbatch.exe`. HyperMesh
+2022.0.0.33 is installed under the vendor directory named `2020`, at
+`D:\Program Files\Altair\2020\hwdesktop\hm\bin\win64\hmbatch.exe`;
+`hm_info` is used as the authoritative version rather than that directory
+name.
+
+All 12 public geometry-seam strategies were rerun on both versions in
+separate clean hmbatch processes against the current repository tree. Every
+strategy passed on both versions, and the per-strategy success, created IDs,
+areas, bounding boxes, edge-owner topology, messages, warnings, and final
+surface sets were identical. The T_LIST result surface shared one edge with
+the source surface and one edge with both split target fragments, and L_SURF
+retained only the four faces in the selected overlap envelope.
+
+The rerun also repaired two calibration-harness defects.  The T_LIST logging
+wrapper now forwards the current optional matching-mode and tolerance
+arguments, so it exercises the strict production selector instead of causing
+an artificial fallback.  The command audit now creates a line list from a
+live post-`*edgesmarkaddpoints` line ID; HyperMesh renumbers that line during
+point insertion, so the old audit produced a false `*createlist` error.
+
+Offline suite: `python -m pytest modules/seam_surface/tests -q` - 58 passed,
+18 subtests passed.
+
 ## 2026-08-11 current-tree correction
 
 The 2026-08-07 `12/12 PASS` statement was no longer true on the current
@@ -54,8 +82,8 @@ against the two HyperMesh builds installed on the development machine:
 
 | Install | hmbatch path | version |
 | --- | --- | --- |
-| HyperMesh 2019 | C:\Program Files\Altair\2019\hm\bin\win64 | 2019.0.0.70 |
-| HyperMesh 2022 | D:\Program Files\Altair\hwdesktop\hm\bin\win64 | 2022.0.0.33 |
+| HyperMesh 2019 | D:\Program Files\Altair\2019\hm\bin\win64 | 2019.0.0.70 |
+| HyperMesh 2022 | D:\Program Files\Altair\2020\hwdesktop\hm\bin\win64 | 2022.0.0.33 |
 
 Every finding below was produced headless with
 `hmbatch -nocommand -nouserprofiledialog -tcl`, one hmbatch process per
