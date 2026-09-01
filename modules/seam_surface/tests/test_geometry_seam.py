@@ -570,7 +570,7 @@ class GeometrySeamTclTests(unittest.TestCase):
         self.assertIn("surfs 1 203", self.tcl.eval("set ::project_marks"))
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} success"), "1")
 
-    def test_t_surface_uses_grouped_targets_and_keeps_mode1_results(self):
+    def test_t_surface_processes_multiple_targets_individually_and_keeps_mode1_results(self):
         self.tcl.eval(
             """
             rename ::hmtoolkit::seam::validation::require_ids ::hmtoolkit::seam::validation::require_ids_real
@@ -609,7 +609,12 @@ class GeometrySeamTclTests(unittest.TestCase):
                 lappend ::ts_marks [list $entityType $markId $ids]
             }
             proc ::hmtoolkit::seam::validation::created_surfaces_for_component {before beforeAll componentId} {
-                return $::ts_seams
+                set created {}
+                foreach surfaceId $::ts_seams {
+                    if {[lsearch -exact $before $surfaceId] < 0} {lappend created $surfaceId}
+                }
+                if {[llength $created] == 0} {error "no new target result"}
+                return $created
             }
             proc ::hmtoolkit::seam::validation::created_surfaces_in_component {before componentId} {return $::ts_seams}
             proc ::hmtoolkit::seam::executor::equivalence_created_surfaces {created source target component before} {
@@ -619,8 +624,9 @@ class GeometrySeamTclTests(unittest.TestCase):
             proc *connect_surfaces_11 {args} {
                 lappend ::ts_connect_args $args
                 incr ::ts_calls
-                set ::ts_state {10 20 21 60 61}
-                set ::ts_seams {60 61}
+                set created [expr {59+$::ts_calls}]
+                lappend ::ts_state $created
+                lappend ::ts_seams $created
             }
             proc *clearmark {args} {}
             """
@@ -630,7 +636,7 @@ class GeometrySeamTclTests(unittest.TestCase):
             "[dict create source_surfs {10} target_surfs {20 21} "
             "source_components {1} target_components {2}]"
         )
-        self.assertEqual(self.tcl.eval("set ::ts_calls"), "1")
+        self.assertEqual(self.tcl.eval("set ::ts_calls"), "2")
         self.assertEqual(
             self.tcl.eval("lindex $::ts_connect_args 0"),
             self.tcl.eval(
@@ -641,9 +647,20 @@ class GeometrySeamTclTests(unittest.TestCase):
                 "1 0 2 [::hmtoolkit::seam::config::get connect_guide_angle] 59 0"
             ),
         )
+        self.assertEqual(
+            self.tcl.eval("lindex $::ts_connect_args 1"),
+            self.tcl.eval(
+                "list 1 2 1 [::hmtoolkit::seam::config::get t_surface_trim_mode] "
+                "[::hmtoolkit::seam::config::get connect_extend_distance] "
+                "[::hmtoolkit::seam::config::get connect_min_angle_to_target] "
+                "[::hmtoolkit::seam::config::get connect_max_angle_edge_to_surf] "
+                "1 0 2 [::hmtoolkit::seam::config::get connect_guide_angle] 59 0"
+            ),
+        )
         marks = self.tcl.eval("set ::ts_marks")
         self.assertIn("surfs 1 10", marks)
-        self.assertIn("surfs 2 {20 21}", marks)
+        self.assertIn("surfs 2 20", marks)
+        self.assertIn("surfs 2 21", marks)
         self.assertEqual(self.tcl.eval("set ::ts_equivalence_calls"), "0")
         self.assertEqual(self.tcl.eval(f"dict get {{{result}}} created_surfs"), "60 61")
         self.assertIn("Extended surface(s)", self.tcl.eval(f"dict get {{{result}}} message"))

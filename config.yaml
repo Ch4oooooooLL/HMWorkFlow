@@ -1,7 +1,7 @@
 # HyperMesh 前处理工作流全局配置 / HyperMesh Preprocess Workflow global configuration
 schema_version: 2.0
 workflow:
-  # 界面语言 / UI language: zh_CN or en_US
+  # 界面语言 / UI language: zh_CN or en_US (command-stream prompts stay English)
   language: zh_CN
 project:
   # Engineering values use this consistent system.

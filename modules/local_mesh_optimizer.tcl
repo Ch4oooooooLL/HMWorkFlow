@@ -116,6 +116,7 @@ namespace eval ::LocalMeshOptimizer {
 }
 
 proc ::LocalMeshOptimizer::txt {zh en} { return [::HWFlow::txt $zh $en] }
+proc ::LocalMeshOptimizer::ctxt {zh en} { return [::HWFlow::ctxt $zh $en] }
 
 proc ::LocalMeshOptimizer::setStatus {level message} {
     variable ui

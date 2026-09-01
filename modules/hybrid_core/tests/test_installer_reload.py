@@ -94,6 +94,11 @@ proc ::HWToolkit::sourceModules {} {
         return {-nocommand -nouserprofiledialog}
     }
     proc ::BatchMesher::probeHmbatchExecutable {args} {}
+    namespace eval ::BatchTempNodes {
+        variable VERSION 1.3
+    }
+    proc ::BatchTempNodes::createOneNode {x y z} { return 1 }
+    proc ::BatchTempNodes::createNodes {points} { return $points }
     namespace eval ::HWShortcut {}
     proc ::HWShortcut::initialize {} {}
     proc ::HWShortcut::installAutoLoader {} {}

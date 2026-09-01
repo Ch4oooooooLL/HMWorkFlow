@@ -124,7 +124,7 @@ proc ::FemAutoSeam::workflowProgressOpen {message} {
     set workflowProgressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         catch {set workflowProgressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "FEM 自动焊缝" "FEM Automatic Seam"] $message 1]}
+            [::HWFlow::ctxt "FEM 自动焊缝" "FEM Automatic Seam"] $message 1]}
     }
     return $workflowProgressOpened
 }
@@ -153,13 +153,13 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
         tk_messageBox -icon info -message [::HWFlow::txt "至少需要选择两个壳网格 Component。" "Select at least two shell components."]
         return
     }
-    ::FemAutoSeam::workflowProgressOpen [::HWFlow::txt "正在准备任务..." "Preparing the task..."]
-    ::FemAutoSeam::workflowProgressUpdate 2.0 [::HWFlow::txt "正在加载质量标准" "Loading quality criteria"]
+    ::FemAutoSeam::workflowProgressOpen [::HWFlow::ctxt "正在准备任务..." "Preparing the task..."]
+    ::FemAutoSeam::workflowProgressUpdate 2.0 [::HWFlow::ctxt "正在加载质量标准" "Loading quality criteria"]
     # Native quality is the final authority after the task-scoped batch remesh,
     # so criteria must be initialized before any topology is changed.
     set criteriaPath [::FemAutoSeam::effectiveSpecificationPath criteria_path]
     if {[catch {uplevel #0 [list *readqualitycriteria $criteriaPath]} error]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "质量标准加载失败" "Quality criteria loading failed"] 100.0
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "质量标准加载失败" "Quality criteria loading failed"] 100.0
         tk_messageBox -icon error -message [::HWFlow::txt "HyperMesh 读取 criteria 失败：$error" "HyperMesh could not read criteria: $error"]
         return
     }
@@ -167,43 +167,43 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
     set taskDir [dict get $workspace task_dir]; set runId [dict get $workspace run_id]
     foreach child {input output state} { file mkdir [file join $taskDir $child] }
     if {[catch {
-        ::FemAutoSeam::workflowProgressUpdate 6.0 [::HWFlow::txt "正在备份原始模型" "Backing up the original model"]
+        ::FemAutoSeam::workflowProgressUpdate 6.0 [::HWFlow::ctxt "正在备份原始模型" "Backing up the original model"]
         set originalBackup [::FemAutoSeam::createOriginalModelBackup $taskDir $runId $componentIds]
-        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::txt "正在导出完整模型 FEM" "Exporting the complete model FEM"]
+        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::ctxt "正在导出完整模型 FEM" "Exporting the complete model FEM"]
         set bundle [::FemAutoSeam::exportWholeModelFemBundle [file join $taskDir input] $runId model]
         set existing [::FemAutoSeam::writeExistingSeams [file join $taskDir input existing_seams.json]]
-        ::FemAutoSeam::workflowProgressUpdate 22.0 [::HWFlow::txt "Python 正在后台检测焊缝" "Python is detecting welds in the background"] [::HWFlow::txt "大型模型可能需要一些时间" "Large models may take some time"]
+        ::FemAutoSeam::workflowProgressUpdate 22.0 [::HWFlow::ctxt "Python 正在后台检测焊缝" "Python is detecting welds in the background"] [::HWFlow::ctxt "大型模型可能需要一些时间" "Large models may take some time"]
         set detected [::FemAutoSeam::runPython $taskDir $runId detect [dict get $bundle manifest] $existing $componentIds]
-        ::FemAutoSeam::workflowProgressUpdate 48.0 [::HWFlow::txt "正在载入候选结果" "Loading candidate results"]
+        ::FemAutoSeam::workflowProgressUpdate 48.0 [::HWFlow::ctxt "正在载入候选结果" "Loading candidate results"]
     } error]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "检测失败" "Detection failed"] 100.0
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "检测失败" "Detection failed"] 100.0
         catch {::HybridCore::finalizeTaskWorkspace $taskDir FAILED}
         tk_messageBox -icon error -message [::HWFlow::txt "FEM 自动焊缝检测失败：$error\n任务目录：$taskDir" "FEM automatic seam detection failed: $error\nTask: $taskDir"]
         return
     }
     set candidates [dict get $detected candidates]
     if {![llength $candidates]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "检测完成，未发现候选" "Detection finished; no candidates found"] 100.0
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "检测完成，未发现候选" "Detection finished; no candidates found"] 100.0
         catch {::HybridCore::finalizeTaskWorkspace $taskDir COMPLETE}
         tk_messageBox -icon info -message [::HWFlow::txt "未检测到焊缝候选。\n任务目录：$taskDir" "No seam candidates were detected.\nTask: $taskDir"]
         return
     }
-    ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "检测完成，进入候选复核" "Detection finished; opening candidate review"] 50.0
+    ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "检测完成，进入候选复核" "Detection finished; opening candidate review"] 50.0
     set review [::FemAutoSeam::showAutoReview $candidates]
     ::FemAutoSeam::writeReviewState $taskDir $review
     set accepted [dict get $review accepted_ids]
     if {![llength $accepted]} { catch {::HybridCore::finalizeTaskWorkspace $taskDir CANCELLED}; return }
-    ::FemAutoSeam::workflowProgressOpen [::HWFlow::txt "正在生成焊缝创建计划..." "Building weld creation plans..."]
-    ::FemAutoSeam::workflowProgressUpdate 54.0 [::HWFlow::txt "Python 正在后台生成拆分与连接计划" "Python is building split and connection plans"] [::HWFlow::txt "已接受 [llength $accepted] 个候选" "[llength $accepted] candidates accepted"]
+    ::FemAutoSeam::workflowProgressOpen [::HWFlow::ctxt "正在生成焊缝创建计划..." "Building weld creation plans..."]
+    ::FemAutoSeam::workflowProgressUpdate 54.0 [::HWFlow::ctxt "Python 正在后台生成拆分与连接计划" "Python is building split and connection plans"] [::HWFlow::ctxt "已接受 [llength $accepted] 个候选" "[llength $accepted] candidates accepted"]
     if {[catch {set planned [::FemAutoSeam::runPython $taskDir $runId plan [dict get $bundle manifest] $existing $componentIds $accepted]} error]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "创建计划生成失败" "Creation planning failed"] 100.0
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "创建计划生成失败" "Creation planning failed"] 100.0
         catch {::HybridCore::finalizeTaskWorkspace $taskDir FAILED}
         tk_messageBox -icon error -message [::HWFlow::txt "创建计划生成失败：$error\n任务目录：$taskDir" "Creation planning failed: $error\nTask: $taskDir"]
         return
     }
-    ::FemAutoSeam::workflowProgressUpdate 68.0 [::HWFlow::txt "正在校验后台 FEM" "Validating backend FEM artifacts"]
+    ::FemAutoSeam::workflowProgressUpdate 68.0 [::HWFlow::ctxt "正在校验后台 FEM" "Validating backend FEM artifacts"]
     if {[catch {::FemAutoSeam::validateBackendTransfer $taskDir $planned} error]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "后台 FEM 校验失败" "Backend FEM validation failed"] 100.0
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "后台 FEM 校验失败" "Backend FEM validation failed"] 100.0
         catch {::HybridCore::finalizeTaskWorkspace $taskDir FAILED}
         tk_messageBox -icon error -message [::HWFlow::txt "后台 FEM 传输校验失败：$error" "Backend FEM transfer validation failed: $error"]
         return
@@ -211,16 +211,16 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
     set plans [dict get $planned candidates]
     set ready 0; foreach plan $plans { if {[dict get $plan status] eq "READY"} { incr ready } }
     if {!$ready} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "没有可应用的候选" "No applicable candidates"] 100.0
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "没有可应用的候选" "No applicable candidates"] 100.0
         catch {::HybridCore::finalizeTaskWorkspace $taskDir COMPLETE}
         tk_messageBox -icon warning -message [::HWFlow::txt "没有可自动应用的候选，模型未修改。" "No candidate can be applied automatically; the model was not modified."]
         return
     }
-    if {[tk_messageBox -type yesno -icon question -message [::HWFlow::txt "应用 $ready 个 FEM 自动焊缝创建计划？" "Apply $ready FEM automatic seam plans?"]] ne "yes"} { ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "用户取消" "Cancelled by user"] 100.0; catch {::HybridCore::finalizeTaskWorkspace $taskDir CANCELLED}; return }
-    ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::txt "正在应用修改后的 FEM" "Applying the modified FEM"]
+    if {[tk_messageBox -type yesno -icon question -message [::HWFlow::txt "应用 $ready 个 FEM 自动焊缝创建计划？" "Apply $ready FEM automatic seam plans?"]] ne "yes"} { ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "用户取消" "Cancelled by user"] 100.0; catch {::HybridCore::finalizeTaskWorkspace $taskDir CANCELLED}; return }
+    ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::ctxt "正在应用修改后的 FEM" "Applying the modified FEM"]
     set backendResultFem [dict get [dict get $planned artifacts] backend_result_fem path]
     if {[catch {set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $backendResultFem $originalBackup 70.0 93.0]} error]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "应用失败并已回滚" "Application failed and was rolled back"] 100.0
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "应用失败并已回滚" "Application failed and was rolled back"] 100.0
         catch {::HybridCore::finalizeTaskWorkspace $taskDir FAILED}
         tk_messageBox -icon error -message [::HWFlow::txt "应用失败并已回滚：$error\n任务目录：$taskDir" "Application failed and was rolled back: $error\nTask: $taskDir"]
         return
@@ -229,7 +229,7 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
     set finalBundle ""
     if {$cfg(export_completed_fem) && [dict get $execution succeeded] > 0} {
         if {[catch {
-            ::FemAutoSeam::workflowProgressUpdate 96.0 [::HWFlow::txt "正在导出完成态 FEM" "Exporting the completed FEM"]
+            ::FemAutoSeam::workflowProgressUpdate 96.0 [::HWFlow::ctxt "正在导出完成态 FEM" "Exporting the completed FEM"]
             set finalBundle [::FemAutoSeam::exportWholeModelFemBundle [file join $taskDir output] $runId completed_model]
         } exportError]} {
             tk_messageBox -icon warning -message [::HWFlow::txt "焊缝已创建，但最终 FEM 导出失败：$exportError" "Welds were created, but final FEM export failed: $exportError"]
@@ -237,7 +237,7 @@ proc ::FemAutoSeam::runWorkflowLegacy {} {
     }
     set completion [::FemAutoSeam::writeCompletionManifest $taskDir $runId $originalBackup $bundle $planned $review $execution $finalBundle]
     ::HybridCore::finalizeTaskWorkspace $taskDir COMPLETE
-    ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "FEM 自动焊缝处理完成" "FEM Automatic Seam finished"] 100.0
+    ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "FEM 自动焊缝处理完成" "FEM Automatic Seam finished"] 100.0
     if {[dict get $execution succeeded] > 0} {
         ::FemAutoSeam::registerUndoSnapshot [dict get $execution snapshot] [::HWFlow::txt "最近一次 FEM 自动焊缝批次" "the latest FEM automatic seam batch"]
     }
@@ -331,11 +331,11 @@ proc ::FemAutoSeam::runWorkflow {} {
         tk_messageBox -icon info -message [::HWFlow::txt "至少需要选择两个壳网格 Component。" "Select at least two shell components."]
         return
     }
-    ::FemAutoSeam::workflowProgressOpen [::HWFlow::txt "正在准备任务..." "Preparing the task..."]
-    ::FemAutoSeam::workflowProgressUpdate 2.0 [::HWFlow::txt "正在加载质量标准" "Loading quality criteria"]
+    ::FemAutoSeam::workflowProgressOpen [::HWFlow::ctxt "正在准备任务..." "Preparing the task..."]
+    ::FemAutoSeam::workflowProgressUpdate 2.0 [::HWFlow::ctxt "正在加载质量标准" "Loading quality criteria"]
     set criteriaPath [::FemAutoSeam::effectiveSpecificationPath criteria_path]
     if {[catch {uplevel #0 [list *readqualitycriteria $criteriaPath]} error]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "质量标准加载失败" "Quality criteria loading failed"]
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "质量标准加载失败" "Quality criteria loading failed"]
         tk_messageBox -icon error -message [::HWFlow::txt "HyperMesh 读取 criteria 失败：$error" "HyperMesh could not read criteria: $error"]
         return
     }
@@ -346,15 +346,15 @@ proc ::FemAutoSeam::runWorkflow {} {
     foreach child {input output state} { file mkdir [file join $taskDir $child] }
     set originalBackup ""
     if {[catch {
-        ::FemAutoSeam::workflowProgressUpdate 6.0 [::HWFlow::txt "正在备份原始模型" "Backing up the original model"]
+        ::FemAutoSeam::workflowProgressUpdate 6.0 [::HWFlow::ctxt "正在备份原始模型" "Backing up the original model"]
         set originalBackup [::FemAutoSeam::createOriginalModelBackup $taskDir $runId $componentIds]
-        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::txt "正在导出完整模型 FEM" "Exporting the complete model FEM"]
+        ::FemAutoSeam::workflowProgressUpdate 13.0 [::HWFlow::ctxt "正在导出完整模型 FEM" "Exporting the complete model FEM"]
         set bundle [::FemAutoSeam::exportWholeModelFemBundle [file join $taskDir input] $runId model]
         set existing [::FemAutoSeam::writeExistingSeams [file join $taskDir input existing_seams.json]]
-        ::FemAutoSeam::workflowProgressUpdate 22.0 [::HWFlow::txt "Python 正在后台检测焊缝" "Python is detecting welds in the background"] [::HWFlow::txt "大型模型可能需要一些时间" "Large models may take some time"]
+        ::FemAutoSeam::workflowProgressUpdate 22.0 [::HWFlow::ctxt "Python 正在后台检测焊缝" "Python is detecting welds in the background"] [::HWFlow::ctxt "大型模型可能需要一些时间" "Large models may take some time"]
         set detected [::FemAutoSeam::runPython $taskDir $runId detect [dict get $bundle manifest] $existing $componentIds]
     } error]} {
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "检测失败" "Detection failed"]
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "检测失败" "Detection failed"]
         catch {::HybridCore::finalizeTaskWorkspace $taskDir FAILED}
         catch {::HybridCore::closeLog}
         tk_messageBox -icon error -message [::HWFlow::txt "FEM 自动焊缝检测失败：$error\n已保留完整诊断目录：$taskDir\n任务前备份：$originalBackup" "FEM automatic seam detection failed: $error\nFull diagnostic task retained: $taskDir\nPre-task backup: $originalBackup"]
@@ -366,16 +366,16 @@ proc ::FemAutoSeam::runWorkflow {} {
     set execution [::FemAutoSeam::emptyExecution $originalBackup]
     set plans {}
     if {[llength $automaticIds]} {
-        ::FemAutoSeam::workflowProgressUpdate 50.0 [::HWFlow::txt "Python 正在生成拆分与连接计划" "Python is planning splits and connections"] "[llength $automaticIds] automatic candidates"
+        ::FemAutoSeam::workflowProgressUpdate 50.0 [::HWFlow::ctxt "Python 正在生成拆分与连接计划" "Python is planning splits and connections"] "[llength $automaticIds] automatic candidates"
         if {[catch {
             set planned [::FemAutoSeam::runPython $taskDir $runId plan [dict get $bundle manifest] $existing $componentIds $automaticIds]
             ::FemAutoSeam::validateBackendTransfer $taskDir $planned
             set plans [dict get $planned candidates]
-            ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::txt "正在打开修改后的 FEM" "Opening the modified FEM"]
+            ::FemAutoSeam::workflowProgressUpdate 70.0 [::HWFlow::ctxt "正在打开修改后的 FEM" "Opening the modified FEM"]
             set backendResultFem [dict get [dict get $planned artifacts] backend_result_fem path]
             set execution [::FemAutoSeam::executeAutoPlans $taskDir $plans $backendResultFem $originalBackup 70.0 92.0]
         } error]} {
-            ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "自动创建失败并已回滚" "Automatic creation failed and was rolled back"]
+            ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "自动创建失败并已回滚" "Automatic creation failed and was rolled back"]
             # Python planning and transfer validation do not mutate HyperMesh.
             # executeAutoPlans owns the task transaction and restores exactly
             # once if a native mutation fails; reloading the whole vehicle here
@@ -388,11 +388,11 @@ proc ::FemAutoSeam::runWorkflow {} {
     }
 
     if {[catch {
-        ::FemAutoSeam::workflowProgressUpdate 95.0 [::HWFlow::txt "正在导出任务后结果 FEM" "Exporting the post-task result FEM"]
+        ::FemAutoSeam::workflowProgressUpdate 95.0 [::HWFlow::ctxt "正在导出任务后结果 FEM" "Exporting the post-task result FEM"]
         set resultFem [::FemAutoSeam::exportFinalResult $taskDir $runId {}]
     } error]} {
         catch {::FemAutoSeam::restoreAutoSnapshot $originalBackup}
-        ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "结果导出失败并已回滚" "Result export failed and was rolled back"]
+        ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "结果导出失败并已回滚" "Result export failed and was rolled back"]
         catch {::HybridCore::finalizeTaskWorkspace $taskDir FAILED}
         catch {::HybridCore::closeLog}
         tk_messageBox -icon error -message [::HWFlow::txt "结果 FEM 导出失败，模型已回滚：$error\n已保留完整诊断目录：$taskDir" "Result FEM export failed and the model was rolled back: $error\nFull diagnostic task retained: $taskDir"]
@@ -408,7 +408,7 @@ proc ::FemAutoSeam::runWorkflow {} {
         # task.meta here would itself recreate a third file after partial cleanup.
     }
 
-    ::FemAutoSeam::workflowProgressClose [::HWFlow::txt "FEM 自动焊缝处理完成" "FEM Automatic Seam finished"]
+    ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "FEM 自动焊缝处理完成" "FEM Automatic Seam finished"]
     if {[dict get $execution succeeded] > 0} {
         ::FemAutoSeam::registerUndoSnapshot $originalBackup [::HWFlow::txt "最近一次 FEM 自动焊缝批次" "the latest FEM automatic seam batch"]
     }

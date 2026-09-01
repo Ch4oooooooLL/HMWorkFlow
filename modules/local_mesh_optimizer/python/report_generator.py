@@ -28,13 +28,13 @@ REGION_FIELDS = [
 ]
 
 LABELS = {
-    "model_name": "模型", "criteria_file": "Criteria 文件", "scope_type": "检查范围",
-    "checked_elements": "检查单元", "failed_before": "优化前失败", "failed_after": "优化后失败",
-    "failure_rate_before": "优化前失败率", "failure_rate_after": "优化后失败率",
-    "optimizable_failed_before": "可自动优化失败", "washer_failed_excluded": "Washer 人工处理",
-    "regions_total": "区域总数", "regions_success": "成功区域", "regions_partial": "部分成功区域",
-    "regions_failed": "失败/回滚区域", "elapsed_seconds": "耗时（秒）", "cancelled": "是否取消",
-    "task_status": "任务状态", "output_model": "输出模型",
+    "model_name": "Model", "criteria_file": "Criteria file", "scope_type": "Scope type",
+    "checked_elements": "Checked elements", "failed_before": "Failed before", "failed_after": "Failed after",
+    "failure_rate_before": "Failure rate before", "failure_rate_after": "Failure rate after",
+    "optimizable_failed_before": "Optimizable failures before", "washer_failed_excluded": "Washer manual handling",
+    "regions_total": "Total regions", "regions_success": "Successful regions", "regions_partial": "Partially successful regions",
+    "regions_failed": "Failed/rolled-back regions", "elapsed_seconds": "Elapsed (seconds)", "cancelled": "Cancelled",
+    "task_status": "Task status", "output_model": "Output model",
 }
 
 
@@ -100,7 +100,7 @@ def _format_value(key: str, value: object) -> str:
     if key.startswith("failure_rate"):
         return "{:.2f}%".format(float(value))
     if isinstance(value, bool):
-        return "是" if value else "否"
+        return "Yes" if value else "No"
     return str(value)
 
 
@@ -154,9 +154,9 @@ def _artifact_rows(task_dir: Optional[Path], report_dir: Path) -> str:
         uri = _file_uri(path)
         name = _escape(path.name)
         link = '<a href="{}">{}</a>'.format(_escape(uri), name) if uri else name
-        category = "报告" if path.parent == report_dir else "任务产物"
+        category = "Report" if path.parent == report_dir else "Task artifact"
         rows.append("<tr><td>{}</td><td>{}</td><td>{}</td></tr>".format(link, category, size))
-    return "\n".join(rows) or '<tr><td colspan="3" class="muted">未发现可列出的任务文件。</td></tr>'
+    return "\n".join(rows) or '<tr><td colspan="3" class="muted">No task files found.</td></tr>'
 
 
 def _performance_rows(task_dir: Optional[Path], report_dir: Path) -> str:
@@ -170,7 +170,7 @@ def _performance_rows(task_dir: Optional[Path], report_dir: Path) -> str:
         if data:
             payload[path.stem] = data
     if not payload:
-        return '<p class="muted">本次任务没有可用的性能统计文件。</p>'
+        return '<p class="muted">No performance statistics file was produced for this task.</p>'
     return '<pre class="json">{}</pre>'.format(_escape(json.dumps(payload, ensure_ascii=False, indent=2)))
 
 
@@ -205,12 +205,12 @@ def generate_report(
             _escape(row["optimization_methods"]), row["manual_review_count"],
             _escape(row["status"]), _escape(row["status"]), _escape(row["message"]),
         ) for row in region_rows
-    ) or '<tr><td colspan="10" class="muted">本次任务没有生成优化区域。</td></tr>'
+    ) or '<tr><td colspan="10" class="muted">No optimization regions were generated for this task.</td></tr>'
     delta = int(summary["failed_before"]) - int(summary["failed_after"])
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     document = """<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>局部网格优化报告</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Local Mesh Optimizer Report</title>
 <style>
 :root{{--bg:#f4f7fb;--panel:#fff;--ink:#172033;--muted:#667085;--line:#dbe3ee;--brand:#245b96;--good:#157347;--warn:#9a6700;--bad:#b42318}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Arial,"Microsoft YaHei",sans-serif}}
@@ -223,24 +223,24 @@ h1{{margin:0 0 6px;font-size:28px}}h2{{margin:0 0 14px;color:var(--brand);font-s
 .json{{max-height:430px;overflow:auto;background:#111827;color:#d7e2f1;border-radius:8px;padding:14px;white-space:pre-wrap}}footer{{padding:8px;text-align:center;color:var(--muted)}}
 @media(max-width:900px){{.cards{{grid-template-columns:repeat(2,1fr)}}.two{{grid-template-columns:1fr}}.page{{padding:12px}}}}
 </style></head><body><main class="page">
-<header><h1>局部网格优化报告</h1><div class="sub">Local Mesh Optimizer · 生成时间 {generated_at}</div></header>
+<header><h1>Local Mesh Optimizer Report</h1><div class="sub">Generated {generated_at}</div></header>
 <section class="cards">
-<div class="card"><span>检查单元</span><b>{checked}</b></div><div class="card"><span>优化前失败</span><b>{before}</b></div>
-<div class="card"><span>优化后失败</span><b>{after}</b></div><div class="card"><span>失败减少</span><b>{delta}</b></div>
-<div class="card"><span>任务状态</span><b>{status}</b></div></section>
-<p class="note">最终质量集合由 HyperMesh 产生；本报告只组织任务产物和运行信息，不使用 Python 质量计算替代 HyperMesh 判定。</p>
-<section class="module"><h2>1. 任务摘要</h2><table>{summary_rows}</table></section>
-<div class="two"><section class="module"><h2>2. 运行设置</h2><table>{settings_rows}</table></section>
-<section class="module"><h2>3. 保护策略</h2><table>{protection_rows}</table></section></div>
-<section class="module"><h2>4. 优化区域</h2><table><thead><tr><th>区域</th><th>组件</th><th>初始失败</th><th>扩展单元</th><th>最终失败</th><th>轮次</th><th>优化方法</th><th>人工复核</th><th>状态</th><th>说明</th></tr></thead><tbody>{region_rows}</tbody></table></section>
-<section class="module"><h2>5. 性能与过程统计</h2>{performance}</section>
-<section class="module"><h2>6. 任务文件与报告产物</h2><table><thead><tr><th>文件</th><th>类型</th><th>大小</th></tr></thead><tbody>{artifacts}</tbody></table></section>
+<div class="card"><span>Checked elements</span><b>{checked}</b></div><div class="card"><span>Failed before</span><b>{before}</b></div>
+<div class="card"><span>Failed after</span><b>{after}</b></div><div class="card"><span>Reduction</span><b>{delta}</b></div>
+<div class="card"><span>Task status</span><b>{status}</b></div></section>
+<p class="note">The final quality verdict comes from HyperMesh; this report only organizes task artifacts and run information and never substitutes Python quality calculations for the HyperMesh judgement.</p>
+<section class="module"><h2>1. Task Summary</h2><table>{summary_rows}</table></section>
+<div class="two"><section class="module"><h2>2. Run Settings</h2><table>{settings_rows}</table></section>
+<section class="module"><h2>3. Protection Strategy</h2><table>{protection_rows}</table></section></div>
+<section class="module"><h2>4. Optimization Regions</h2><table><thead><tr><th>Region</th><th>Components</th><th>Initial Failed</th><th>Expanded Elements</th><th>Final Failed</th><th>Rounds</th><th>Methods</th><th>Manual Review</th><th>Status</th><th>Notes</th></tr></thead><tbody>{region_rows}</tbody></table></section>
+<section class="module"><h2>5. Performance &amp; Process Statistics</h2>{performance}</section>
+<section class="module"><h2>6. Task Files and Report Artifacts</h2><table><thead><tr><th>File</th><th>Type</th><th>Size</th></tr></thead><tbody>{artifacts}</tbody></table></section>
 <footer>Local Mesh Optimizer · Offline self-contained report</footer>
 </main></body></html>
 """.format(
         generated_at=_escape(generated_at), checked=summary["checked_elements"], before=summary["failed_before"],
         after=summary["failed_after"], delta=delta, status=_escape(summary["task_status"]), summary_rows=summary_rows,
-        settings_rows=_settings_rows(task), protection_rows=protection_rows or '<tr><td class="muted">未配置</td></tr>',
+        settings_rows=_settings_rows(task), protection_rows=protection_rows or '<tr><td class="muted">Not configured</td></tr>',
         region_rows=table_rows, performance=_performance_rows(task_dir, report_dir),
         artifacts=_artifact_rows(task_dir, report_dir),
     )

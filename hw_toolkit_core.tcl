@@ -21,17 +21,18 @@ namespace eval ::HWToolkit {
             group    "Geometry"
             label_zh "抽中面"
             label_en "Midsurface Extraction"
-            desc_zh  "批量抽取钣金中面：选择钣金几何组件后，按 Vxx_件号_T厚度[_材料] 规则命名并归入 MIDSURFED Assembly，源几何保留并隐藏。\n厚度优先读取组件名中的 _Tx 标记，其次取中面拓扑点厚度，最后按实体体积/中面面积测量；材料留待后续网格模块处理。\n抽取后请复核输出厚度、自由边、重叠面与组件命名。"
-            desc_en  "Extract sheet-metal midsurfaces in batch: pick geometry components, name them Vxx_part_Tx[_material], and collect them in the MIDSURFED assembly while the source geometry is kept and hidden.\nThickness comes first from the _Tx name tag, then from mid-surface topology points, then from volume/area measurement; materials are handled by later mesh modules.\nVerify the resulting thickness, free edges, overlaps, and component names."
+            desc_zh  "批量抽取钣金实体中面：同一组件中的不连续 solids 会逐实体抽取，生成的 surfaces 分别输出；多实体使用 件号.1、件号.2……命名，已有同名结果时版本递增，且统一归入 MIDSURFED Assembly。\n厚度优先读取组件名中的 _Tx 标记，其次取中面拓扑点厚度，最后按各 solid 体积/中面面积测量；仅无 solid 时使用 surface 兼容回退。\n抽取后请复核输出厚度、自由边、重叠面与组件命名。"
+            desc_en  "Extract sheet-metal solid bodies one at a time and write the resulting surfaces to separate part.1, part.2, ... components. Existing exact names advance V01/V02 and all results enter MIDSURFED.\nThickness comes from the _Tx tag, midsurface topology, or per-solid volume/area; surface input is fallback only when no solid exists.\nVerify thickness, free edges, overlaps, and names."
             proc     "::MidSurf::run"
         }
         bom_material_assignment {
             group    "Geometry"
             label_zh "读取 BOM 表"
             label_en "BOM Material Assignment"
-            desc_zh  "扫描 MIDSURFED Assembly 中的全部组件，当前版本统一创建/复用 Q355 材料并赋予组件，同时把组件名规范为 _Q355 后缀。\n真实 BOM 文件解析接口已预留，待 BOM 格式与部件匹配规则确定后接入。\n应在本模块之前先完成中面抽取；运行后请复核组件材料指针与命名。"
-            desc_en  "Scan every component in the MIDSURFED assembly; the current version creates/reuses the Q355 material, assigns it, and appends the _Q355 suffix to component names.\nA real BOM reader interface is reserved until the BOM format and matching rules are defined.\nRun this after midsurface extraction and review the assigned material pointers and names."
+            desc_zh  "按设置范围扫描组件（默认仅限 MIDSURFED Assembly，也可切换为当前模型全部组件），统一创建/复用 Q355 材料并赋予组件，同时把组件名规范为 _Q355 后缀。\n真实 BOM 文件解析接口已预留，待 BOM 格式与部件匹配规则确定后接入。\n运行后请复核组件材料指针与命名。"
+            desc_en  "Scan components in the configured scope (MIDSURFED only by default, or all model components), create/reuse Q355, assign it, and append the _Q355 suffix to component names.\nA real BOM reader interface is reserved until the BOM format and matching rules are defined.\nReview the assigned material pointers and names after running."
             proc     "::BomMaterialAssignment::runAction"
+            settings_proc "::BomMaterialAssignment::runSettings"
         }
         geometry_preprocess {
             group    "Geometry"
@@ -159,6 +160,14 @@ namespace eval ::HWToolkit {
             proc     "::BatchTempNodes::runAction"
             undo_proc "::BatchTempNodes::undoLast"
         }
+        batch_load_application {
+            group    "Connector"
+            label_zh "载荷批量施加"
+            label_en "Batch Load Application"
+            desc_zh  "选择由 CSV 转换的 TXT 载荷文件，以 case数字 行划分工况，从记录行尾识别坐标、点位中英文名及六分量载荷，并汇总展示完成状态、详情、定位与删除操作。\n定位确认后从 1001 起建立点位与 Node ID 映射；手动点击“创建所有工况”可为已完成点位按 case 创建同名 Load Collector、Force/Moment 和线性静力 Subcase。"
+            desc_en  "Select TXT load files converted from CSV. Case-number rows delimit cases, and the stable record suffix supplies coordinates, English/Chinese names, and six load components for aggregation, details, location, and deletion.\nConfirmed nodes are mapped from ID 1001. Create All Cases then creates a same-name Load Collector, Force/Moment loads, and a linear-static Subcase for each case using completed points."
+            proc     "::BatchLoadApplication::runAction"
+        }
         contact_setup {
             group    "Connector"
             label_zh "接触创建"
@@ -249,8 +258,6 @@ proc ::HWToolkit::sourceModules {} {
     variable COMMON_MODULES
     variable MODULES
     variable SOURCED_FILES
-    set SOURCED_FILES {}
-
     foreach key $COMMON_MODULES {
         if {![::HWToolkit::sourceOneModule $key]} {
             return 0
@@ -371,6 +378,7 @@ proc ::HWToolkit::clearExistingWindows {} {
         .hwflow_progress
         .midsurf_dlg
         .bom_material_assignment
+        .bom_material_assignment_settings
         .autoHoleRBE2
         .rb2w_panel
         .rb2bolt_dlg
@@ -496,6 +504,13 @@ proc ::HWToolkit::showPanelHome {} {
     pack $w.body -fill both -expand 1 -padx 12 -pady {2 6}
     set content $w.body.c.inner
 
+    # Building a row creates several children and therefore several
+    # <Configure> events.  Recomputing the canvas bbox after every child used
+    # to turn initial layout into dozens of full scroll-region passes.  The
+    # panel is still withdrawn here, so suspend that binding while the fixed
+    # home-page tree is assembled and perform one calculation afterwards.
+    bind $content <Configure> ""
+
     set groupIndex 0
     foreach group [::HWToolkit::moduleGroups] {
         ::HWFlow::groupHeader $content.g$groupIndex [::HWToolkit::groupText $group]
@@ -503,6 +518,7 @@ proc ::HWToolkit::showPanelHome {} {
         ::HWToolkit::buildHomeGroup $content $group $nameWidth
         incr groupIndex
     }
+    bind $content <Configure> [list ::HWFlow::scrollableInnerConfigure $w.body.c]
     # Let the canvas adopt the full content height so the window opens tall
     # enough to show every tool; the scrollbar only appears when the user
     # shrinks the window or the screen cannot fit the panel.
@@ -522,7 +538,7 @@ proc ::HWToolkit::showPanelHome {} {
     foreach {name text width command} [list \
         help [::HWFlow::txt "查看帮助" "View Help"] 12 ::HWToolkit::openGuide \
         diagnostics [::HWFlow::txt "复制诊断" "Copy Diagnostics"] 12 ::HWToolkit::copyDiagnostics \
-        shortcuts [::HWFlow::txt "快捷键管理" "Shortcuts"] 13 ::HWShortcut::showManager] {
+        shortcuts [::HWFlow::txt "工具箱设置" "Toolbox Settings"] 13 ::HWShortcut::showSettings] {
         ::HWFlow::uiWidget button $footer.$name -text $text -width $width -command $command -cursor hand2
         pack $footer.$name -side left -padx {0 6}
     }
@@ -905,8 +921,17 @@ proc ::HWToolkit::invokeModule {key {launchMode ui}} {
 proc ::HWToolkit::settingsModule {key} {
     variable MODULES
 
+    if {![dict exists $MODULES $key]} {
+        return
+    }
     set info [dict get $MODULES $key]
     if {![::HWToolkit::moduleVisible $info]} {
+        return
+    }
+    # The home panel intentionally does not source every large business
+    # module.  Load only the module whose settings the user requested.
+    if {![::HWToolkit::ensureCoreLoaded] ||
+        ![::HWToolkit::sourceOneModule $key $info]} {
         return
     }
     if {[dict exists $info settings_proc]} {
@@ -985,7 +1010,11 @@ proc ::HWToolkit::closeHelp {} {
 }
 
 proc ::HWToolkit::run {{refreshShortcuts 1}} {
-    if {![::HWToolkit::sourceModules]} {
+    # Drawing the home panel only needs the shared UI and shortcut layers.
+    # Business modules are sourced by invokeModule/settingsModule on first
+    # use; some are thousands of lines long, so loading all of them here made
+    # both host generations appear to paint the same small window slowly.
+    if {![::HWToolkit::ensureCoreLoaded]} {
         return
     }
     if {$refreshShortcuts && [llength [info commands ::HWShortcut::initialize]] > 0} {

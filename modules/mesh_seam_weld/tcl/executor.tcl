@@ -42,33 +42,28 @@ proc ::MeshSeamWeld::processWeldPathTcl {sourceNodes targetComps closedLoop {pro
             $sourceNodes "" 0]
         set targetMatchMode native_imprint_list
         set nativeContinuous 0
-        set currentTargetElems {}
         if {[llength $targetNodes] > 0} {
             set nativeContinuous [::MeshSeamWeld::targetPathIsContinuous \
                 $targetNodes $targetComps $closedLoop]
         }
-        if {[llength $targetNodes] == 0 ||
-            [llength $targetNodes] != [llength $sourceNodes] ||
-            !$nativeContinuous} {
-            # Rebuild the post-imprint element scope only when the native
-            # result is incomplete.  A complete continuous list is already
-            # authoritative and must not fail merely because every old local
-            # element ID was replaced by remeshing.
-            set currentTargetElems [::MeshSeamWeld::targetElementsAfterImprint \
-                $targetComps $targetElemIds $sourceNodes $closedLoop]
-            if {![catch {
-                set recoveredTargetNodes [::MeshSeamWeld::targetNodesFromPostImprintTopology \
-                    $sourceNodes $targetComps $currentTargetElems $closedLoop]
-            } recoveryErr]} {
-                set targetNodes $recoveredTargetNodes
-                set targetMatchMode post_imprint_topology
-            } else {
-                # A partial native list does not prove that the complete source
-                # path was imprinted.  Passing it to Ruled stretches the whole
-                # source boundary over the surviving fragment, which looks like
-                # an un-imprinted weld span and can create severely skewed cells.
-                error "The native imprint result was incomplete and the complete post-imprint target path could not be recovered: $recoveryErr"
-            }
+        # Even a complete, edge-continuous native list can be a neighboring
+        # target row rather than the row produced below the source path.  Always
+        # rebuild from the complete local post-imprint topology and use the
+        # source coordinates as the global matching objective.  The native list
+        # remains useful only as evidence/seeds for rebuilding that local scope.
+        set currentTargetElems [::MeshSeamWeld::targetElementsAfterImprint \
+            $targetComps $targetElemIds $sourceNodes $closedLoop]
+        if {![catch {
+            set recoveredTargetNodes [::MeshSeamWeld::targetNodesFromPostImprintTopology \
+                $sourceNodes $targetComps $currentTargetElems $closedLoop]
+        } recoveryErr]} {
+            set targetNodes $recoveredTargetNodes
+            set targetMatchMode post_imprint_topology
+        } else {
+            # Never stretch a full source path over a merely plausible native
+            # fragment.  This used to create trapezoidal/fan-shaped strips with
+            # a dense sliver at one end.
+            error "The complete projected target path could not be reconstructed from post-imprint topology (native_count=[llength $targetNodes], native_continuous=$nativeContinuous): $recoveryErr"
         }
     } targetErr]} {
         ::MeshSeamWeld::stageError TARGET_MATCH $targetErr

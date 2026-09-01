@@ -151,7 +151,7 @@ def build(task_path: Path) -> int:
     metrics = PerformanceMetrics()
     metrics.increment("python_starts")
     task = read_json(task_path)
-    _progress(task_dir, "validating", 5.0, "正在验证区域构建输入")
+    _progress(task_dir, "validating", 5.0, "Validating region-building input")
     criteria = Path(str(task.get("criteria_path", "")))
     if not criteria.is_absolute():
         criteria = (task_dir / criteria).resolve()
@@ -159,7 +159,7 @@ def build(task_path: Path) -> int:
         metadata = parse_criteria_metadata(criteria)
     atomic_write_json(task_dir / "criteria_metadata.json", metadata)
     if (task_dir / "cancel.flag").exists():
-        _progress(task_dir, "cancelled", 100.0, "用户已取消")
+        _progress(task_dir, "cancelled", 100.0, "Cancelled by the user")
         return EXIT_CANCELLED
     with metrics.measure("topology_read"):
         elements = read_connectivity(_path(task_dir, task, "connectivity_file", "element_connectivity.txt"))
@@ -173,9 +173,9 @@ def build(task_path: Path) -> int:
         )
         write_batch_artifacts(task_dir, [], [], [])
         atomic_write_json(task_dir / "python_performance_metrics.json", metrics.to_dict())
-        _progress(task_dir, "ready", 100.0, "没有失败单元")
+        _progress(task_dir, "ready", 100.0, "No failed elements")
         return EXIT_SUCCESS
-    _progress(task_dir, "building_regions", 35.0, "正在按共享边划分失败区域")
+    _progress(task_dir, "building_regions", 35.0, "Splitting failed elements into regions by shared edges")
     with metrics.measure("topology_read"):
         blocked_edges = read_blocked_edges(_path(task_dir, task, "protected_edges_file", "protected_edges.txt"))
         coordinates = read_node_coordinates(_path(task_dir, task, "node_coordinates_file", "node_coordinates.txt"))
@@ -212,7 +212,7 @@ def build(task_path: Path) -> int:
                 max_expanded_elements=int(task.get("macro_max_elements", 10000)),
             )
     metrics.increment("execution_regions", len(regions))
-    _progress(task_dir, "generating_candidates", 52.0, "正在生成局部优化候选")
+    _progress(task_dir, "generating_candidates", 52.0, "Generating local optimization candidates")
     with metrics.measure("candidate_generation"):
         quality_limits = metadata.get("quality_limits", {})
         planner_common = {
@@ -329,7 +329,7 @@ def build(task_path: Path) -> int:
     presimulation = bool(task.get("enable_presimulation", True))
     _progress(
         task_dir, "simulating_quality", 68.0,
-        "正在进行 Python 质量预模拟：0/{}".format(len(operations)),
+        "Python quality presimulation: 0/{}".format(len(operations)),
     )
     with metrics.measure("candidate_presimulation"):
         operation_groups = _presimulation_groups(operations)
@@ -379,15 +379,15 @@ def build(task_path: Path) -> int:
                 percent = 68.0 + 17.0 * processed_operations / max(1, len(operations))
                 _progress(
                     task_dir, "simulating_quality", percent,
-                    "正在进行 Python 质量预模拟：{}/{}".format(
+                    "Python quality presimulation: {}/{}".format(
                         processed_operations, len(operations)
                     ),
                 )
                 if (task_dir / "cancel.flag").exists():
-                    _progress(task_dir, "cancelled", 100.0, "用户已取消")
+                    _progress(task_dir, "cancelled", 100.0, "Cancelled by the user")
                     return EXIT_CANCELLED
     logging.info("Candidate quality simulation complete: operations=%d", len(operations))
-    _progress(task_dir, "batching_operations", 88.0, "正在分析动作冲突并生成批次")
+    _progress(task_dir, "batching_operations", 88.0, "Analyzing action conflicts and batching operations")
     with metrics.measure("conflict_analysis_and_batching"):
         batches, conflicts = plan_batches(
             operations,
@@ -405,7 +405,7 @@ def build(task_path: Path) -> int:
         operation.legacy_action for operation in operations
         if operation.validation.get("valid", False)
     ]
-    _progress(task_dir, "writing_plan", 94.0, "正在写入 Tcl 执行计划")
+    _progress(task_dir, "writing_plan", 94.0, "Writing the Tcl execution plan")
     for region in regions:
         region_actions = actions_by_region.get(str(region["region_id"]), [])
         region["planned_actions"] = region_actions
@@ -438,7 +438,7 @@ def build(task_path: Path) -> int:
         action_rows.append(",".join(str(action[field]) for field in action_fields))
     atomic_write_text(task_dir / "optimization_actions.txt", "\n".join(action_rows) + "\n")
     atomic_write_json(task_dir / "python_performance_metrics.json", metrics.to_dict())
-    _progress(task_dir, "ready", 100.0, "区域构建完成：{} 个".format(len(regions)))
+    _progress(task_dir, "ready", 100.0, "Region building finished: {} region(s)".format(len(regions)))
     logging.info("Built %d regions from %d failed elements", len(regions), len(failed))
     return EXIT_SUCCESS
 
@@ -487,7 +487,7 @@ def finalize(task_path: Path) -> int:
     report_dir = _path(task_dir, task, "report_dir", "report")
     _write_performance_report(task_dir, report_dir, task)
     generate_report(report_dir, task, result, regions, task_dir=task_dir)
-    _progress(task_dir, "reported", 100.0, "结果汇总和报告生成完成")
+    _progress(task_dir, "reported", 100.0, "Summary and report generation finished")
     return EXIT_CANCELLED if result.get("cancelled") else EXIT_SUCCESS
 
 
@@ -503,7 +503,7 @@ def report(task_path: Path) -> int:
     report_dir = _path(task_dir, task, "report_dir", "report")
     _write_performance_report(task_dir, report_dir, task)
     generate_report(report_dir, task, result, regions, task_dir=task_dir)
-    _progress(task_dir, "reported", 100.0, "报告生成完成")
+    _progress(task_dir, "reported", 100.0, "Report generation finished")
     return EXIT_CANCELLED if result.get("cancelled") else EXIT_SUCCESS
 
 

@@ -366,6 +366,12 @@ proc ::HWFlow::txt {zh en} {
     return $en
 }
 
+proc ::HWFlow::ctxt {zh en} {
+    # Command-stream (progress window) text is always shown in English,
+    # independent of the panel language selected by workflow.language.
+    return $en
+}
+
 proc ::HWFlow::firstAvailableFont {candidates fallback} {
     if {[llength [info commands font]] == 0} {
         return $fallback
@@ -1897,7 +1903,7 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         ::HWFlow::uiWidget label $w.main.detail -textvariable ::HWFlow::progressDetail -foreground $textSecondary -background $cardBg -anchor w -width 66 -wraplength 520 -justify left
         ::HWFlow::uiWidget progressbar $w.main.bar -mode determinate -value 0
         ::HWFlow::uiWidget label $w.main.percent -textvariable ::HWFlow::progressPercentText -width 7 -anchor e
-        ::HWFlow::uiWidget labelframe $w.main.stream -text [::HWFlow::txt "命令流" "Command Stream"]
+        ::HWFlow::uiWidget labelframe $w.main.stream -text [::HWFlow::ctxt "命令流" "Command Stream"]
         text $w.main.stream.text -width 78 -height 11 -wrap word -font [::HWFlow::uiFont fixedSmall] -state disabled -background [::HWFlow::uiColors inputBg] -foreground [::HWFlow::uiColors inputFg]
         ::HWFlow::uiWidget scrollbar $w.main.stream.scroll -orient vertical -command "$w.main.stream.text yview"
         $w.main.stream.text configure -yscrollcommand "$w.main.stream.scroll set"
@@ -1918,7 +1924,7 @@ proc ::HWFlow::progressOpen {title {message ""} {allowCancel 0}} {
         if {$allowCancel} {
             ::HWFlow::uiWidget frame $w.btn
             pack $w.btn -fill x -padx 14 -pady {0 12}
-            ::HWFlow::uiWidget button $w.btn.cancel -text [::HWFlow::txt "取消" "Cancel"] -width 10 -command ::HWFlow::progressRequestCancel
+            ::HWFlow::uiWidget button $w.btn.cancel -text [::HWFlow::ctxt "取消" "Cancel"] -width 10 -command ::HWFlow::progressRequestCancel
             pack $w.btn.cancel -side right
             wm protocol $w WM_DELETE_WINDOW ::HWFlow::progressRequestCancel
         } else {

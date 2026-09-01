@@ -295,14 +295,14 @@ proc ::FemAutoSeam::executeAutoPlans {taskDir plans resultFem {backupSnapshot ""
     set allowedComponents [lsort -integer -unique $allowedComponents]
     set results {}; set created 0
     set code [catch {
-        ::FemAutoSeam::workflowProgressUpdate $progressStart [::HWFlow::txt "正在打开修改后的 FEM 替换当前模型" "Opening the modified FEM as the new model"] "[llength $readyPlans] candidates"
+        ::FemAutoSeam::workflowProgressUpdate $progressStart [::HWFlow::ctxt "正在打开修改后的 FEM 替换当前模型" "Opening the modified FEM as the new model"] "[llength $readyPlans] candidates"
         if {[file exists [file join $taskDir state cancel.flag]]} { error "cancel requested before the model was replaced" }
         ::FemAutoSeam::openAutoResultModel $resultFem
         set created [::FemAutoSeam::validateAutoModelContents $readyPlans]
         foreach plan $readyPlans { lappend results [::FemAutoSeam::executionRecord $plan CREATED [expr {[llength [dict get $plan replacement_elements]] + [llength [dict get $plan weld_elements]]}]] }
         ::FemAutoSeam::workflowProgressUpdate [expr {$progressStart + ($progressEnd - $progressStart) * 0.15}] \
-            [::HWFlow::txt "正在校验新模型中的焊缝拓扑" "Verifying weld topology in the new model"] \
-            [::HWFlow::txt "已校验 [llength $readyPlans] 个候选" "[llength $readyPlans] candidates verified"]
+            [::HWFlow::ctxt "正在校验新模型中的焊缝拓扑" "Verifying weld topology in the new model"] \
+            [::HWFlow::ctxt "已校验 [llength $readyPlans] 个候选" "[llength $readyPlans] candidates verified"]
         set seedIds {}; set protectedNodeIds {}
         foreach plan $readyPlans {
             foreach element [dict get $plan replacement_elements] { lappend seedIds [dict get $element element_id] }
@@ -329,8 +329,8 @@ proc ::FemAutoSeam::executeAutoPlans {taskDir plans resultFem {backupSnapshot ""
             }
             set fraction [expr {0.55+0.35*($chunkIndex-1)/double(max(1,[llength $remeshChunks]))}]
             ::FemAutoSeam::workflowProgressUpdate [expr {$progressStart+($progressEnd-$progressStart)*$fraction}] \
-                [::HWFlow::txt "HyperMesh 正在分批重绘受影响网格" "HyperMesh is remeshing affected elements in bounded chunks"] \
-                [::HWFlow::txt "第 $chunkIndex/[llength $remeshChunks] 批，[llength $chunk] 个单元" "Chunk $chunkIndex/[llength $remeshChunks], [llength $chunk] elements"]
+                [::HWFlow::ctxt "HyperMesh 正在分批重绘受影响网格" "HyperMesh is remeshing affected elements in bounded chunks"] \
+                [::HWFlow::ctxt "第 $chunkIndex/[llength $remeshChunks] 批，[llength $chunk] 个单元" "Chunk $chunkIndex/[llength $remeshChunks], [llength $chunk] elements"]
             set chunkProtected [::FemAutoSeam::autoChunkProtectedNodes $chunk $protectedNodeIds]
             set chunkResult [::FemAutoSeam::runBatchElementAutomesh $chunk $chunkProtected $cfg(remesh_element_size) $cfg(remesh_feature_angle)]
             dict incr remeshResult input_elements [dict get $chunkResult input_elements]

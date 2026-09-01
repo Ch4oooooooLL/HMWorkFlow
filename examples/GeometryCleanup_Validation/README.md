@@ -110,7 +110,7 @@ python examples/GeometryCleanup_Validation/verify_geometry.py
 
 - 选择 `POCKET` 模式。
 - 种子面：沉台底面环形面 `(30, 0, -4)`（R=20..40，z=-4，双边界环）。
-- 预期：模块找到外壁（高 4）与内孔壁（高 8，满足 `outerScore < innerScore` 区分条件），
+- 预期：模块用两条边界的真实曲线周长识别外环与内环（外环 R=40、内环 R=20），
   复制内环/基准环构造线，删除沉台面与外壁面，将内环与基准环 `*surfacecreateruled` 连接，
   `*selfstitchcombine` 缝合（`stitch_tolerance=0.2`）。处理后面数减少，沉台被补平，
   中央仅剩一个通孔（R=20 贯穿顶面）。
@@ -123,8 +123,8 @@ python examples/GeometryCleanup_Validation/verify_geometry.py
   - A：`(321.5, 0, -4)`，R=45 深 4；
   - B：`(391, 55, -3)`，R=30 深 3；
   - C：`(447.5, -40, -2)`，R=45 深 2。
-- 预期：三个沉台各自独立完成补平，互不影响；深度 2/3/4 均小于板厚一半（6），
-  外壁高严格小于内孔壁高，可被 `classifyPocketLoops` 可靠区分。
+- 预期：三个沉台各自独立完成补平，互不影响；`classifyPocketLoops` 按真实边界周长识别
+  沉台外环和贯穿孔内环，不依赖沉台壁与剩余孔壁的高度关系。
 - 验证点：三个底面逐次消失，最终顶面仅剩三个通孔；完成计数为 3。
 
 ### C05 AUTO 模式：顶缘圆角链 + 中央沉台
@@ -154,7 +154,7 @@ python examples/GeometryCleanup_Validation/verify_geometry.py
 | 无候选圆角（平面种子，`chain_by_small_area=0`） | `removeChamfer` 报错“倒角/圆角清理失败：surfacefilletremove=...；fillet query=...”，不删面 |
 | 无候选圆角（平面种子，默认 `chain_by_small_area=1`） | 回退链为空或仅含平面种子，同上报错或空操作，不删面 |
 | 种子面边界环数 != 2（POCKET/AUTO 回退） | `removePocket` 报错“要求恰好一个外边和一个内边”，不删面 |
-| 沉台壁高无法区分（外壁≈内孔壁） | `classifyPocketLoops` 报错“无法可靠区分…已停止，避免误删其他平面” |
+| 两条边界周长相同或无法读取 | `classifyPocketLoops` 报错并停止，避免误删正常孔壁 |
 | 找不到壁面/基准边 | 报错“未找到…竖直连接面/基准边/孔壁/基准平面”，不删面 |
 | 连续清洗中单面失败 | 捕获错误，`failed` 计数 +1，继续等待下一次选面，不中断 |
 | 倒角清理成功后的实体重建 | `create_solid_from_chamfer_bounds=1` 时对封闭 surface 边界尝试 `*solids_create_from_surfaces` |
@@ -162,8 +162,8 @@ python examples/GeometryCleanup_Validation/verify_geometry.py
 ## 边界与注意事项
 
 - 本模型用于模块**识别与流程验证**，不是生产求解模型；几何尺寸为整数/半圆构造，便于坐标核对。
-- 沉台场景要求外壁高（沉孔深 d）< 板厚一半，且沉孔半径 > 通孔半径，以符合
-  `classifyPocketLoops` 的“外环短、内环长”区分逻辑；请勿改动尺寸比例。
+- 沉台场景要求沉台外边界周长大于贯穿孔边界周长。分类不再要求沉孔深度小于剩余孔深，
+  因而可覆盖正常孔壁比沉台壁更短的零件。
 - C07 的凸弧链截断验证依赖默认 `max_chain_depth=6`；修改该参数会改变 `target_surfs` 预期长度。
 - STEP 导出由 OCCT 写入元数据（非几何），多次生成文件字节可能不同，但几何签名（体积/面数/bbox）
   恒定（已验证确定性）。

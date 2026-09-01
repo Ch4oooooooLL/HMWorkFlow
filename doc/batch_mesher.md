@@ -53,22 +53,26 @@ SHOW_CMD_WINDOW 1
 
 执行前重新检查目标 ID 存在性以及全模型 Surface ID 集合签名；发现新增或删除 Surface 后阻止运行并要求重分析。仅改变拓扑但保持全部 Surface ID 不变的修改无法被可靠监听，因此用户在 trim、缝合、边释放、焊缝创建或 surface 替换后必须主动刷新分析。
 
-每个未排除连通域生成一个任务。每个任务在自己的完整模型快照进程中调用统一入口：
+每个未排除连通域生成一个任务。每个任务在自己的完整模型快照进程中按目标 hmbatch 版本调用对应入口：
 
 ```tcl
 *createmark surfs 1 {*}$surface_ids
+# HyperMesh 2019（与独立 BatchMesher 相同）
+*hm_batchmesh 1 $criteria_file $param_file
+
+# HyperMesh 2022
 *hm_batchmesh2 surfs 1 1 0 $criteria_file $param_file
 ```
 
-`number_of_strings=0`，不创建自动参数字符串，不传入 `elem_size`、`params_generate_mode`、`no_washer` 或任何 washer 覆盖项。criteria/param 原文件不被复制或修改。
+2022 分支的 `number_of_strings=0` 不创建自动参数字符串；两个版本均不传入 `elem_size`、`params_generate_mode`、`no_washer` 或任何 washer 覆盖项。criteria/param 原文件不被复制或修改。HM2019 的绝对路径转换为正斜杠形式，以匹配 Altair 官方脚本并兼容带空格目录。
 
-“启动后台划分”先使用与正式 worker 完全相同的 `hmbatch.exe -nocommand -nouserprofiledialog -tcl hmbatch_preflight.tcl` 命令执行真实门禁，确认 Tcl 被执行、版本属于 2019/2022 且 `*hm_batchmesh2` 存在；门禁失败时不会启动任何连通域任务。通过后保存只读输入快照，再为不同连通域启动相互隔离的 hmbatch，最多同时运行 `PARALLEL_WORKERS` 个。2022 worker 在读入模型后显式执行 `*templatefileset` 和 `*readqualitycriteria`，再调用实机验证过的 `*hm_batchmesh2`。主 HyperMesh 每 500ms 汇总各 worker 的原子状态文件，不会被原生命令阻塞。
+“验证”和“启动后台划分”先使用与正式 worker 完全相同的 `hmbatch.exe -nocommand -nouserprofiledialog -tcl hmbatch_preflight.tcl` 命令执行真实门禁：除确认 Tcl 被执行、版本属于 2019/2022 且对应 API 存在外，还会在目标 hmbatch 中创建临时曲面，用当前 criteria/param 和正式 worker 的同一接口完成真实试划分。holes table 等原生解析错误会连同 hmbatch 输出返回，门禁失败时不会启动任何连通域任务。门禁缓存绑定 hmbatch 和两个规格文件的规范路径、mtime、size；任一文件切换或修改都会重新验证。通过后保存只读输入快照，再为不同连通域启动相互隔离的 hmbatch，最多同时运行 `PARALLEL_WORKERS` 个。2019/2022 worker 均显式初始化模板和质量标准；2019 调用 `*hm_batchmesh`，2022 调用 `*hm_batchmesh2`。主 HyperMesh 每 500ms 汇总各 worker 的原子状态文件，不会被原生命令阻塞。
 
 Windows 默认勾选“显示 hmbatch 命令窗口”。整次运行只打开一个汇总 CMD：每两秒刷新当前阶段、所有活动 `hmopengl.exe` PID 和任务统计，网格与合并结束后三秒自动关闭，不再为每个 worker/merge 进程创建窗口。关闭该窗口不影响后台任务；取消任务仍会同时终止 launcher 与实际进程树。
 
 后台任务失败时记录原始 Tcl `errorInfo`、Surface IDs、Component 名称和独立日志，并删除该失败任务在后台快照中产生的不确定半成品单元。默认“失败后继续（推荐）”会继续后续连通域；关闭该选项才会把后续任务标为 skipped。用户可以终止整个后台进程树。
 
-`*hm_batchmesh2` 返回后以新增 Element 数量作为任务结果边界：只要产生单元，任务即为完成；质量目标未全部满足或迭代警告记录为 `warning_message`，不会删除已有网格。只有完全没有新增单元时才判定网格失败。网格状态与结果封装状态分别记录，后续 FEM/HM 保存失败不会反向把已完成网格改成失败。
+原生 BatchMesh 命令返回后以新增 Element 数量作为任务结果边界：只要产生单元，任务即为完成；质量目标未全部满足或迭代警告记录为 `warning_message`，不会删除已有网格。只有完全没有新增单元时才判定网格失败。网格状态与结果封装状态分别记录，后续 FEM/HM 保存失败不会反向把已完成网格改成失败。
 
 每个成功 worker 保存只移除了快照原有 Elements 的原生 `task_result.hm` 作为恢复文件，并把结果 Component 设为自定义输出范围，通过 `*feoutputwithdata` 输出 `task_result.fem`；这会让模板整体序列化 Component 内的新增 Elements 及依赖，避免旧的逐实体 mark 导出产生只有 GRID、没有 Element 卡的半有效文件。FEM 导出失败只会把“封装状态”标为失败，不会把已生成网格改判为失败。无论成功任务是一个还是多个，都统一进入合并 worker：空白模型逐个执行采用默认 OptiStruct 选项的 `*feinputwithdata2`，使用 `overwrite_flag=0` 自动偏移冲突实体 ID，随后保存干净的 FE-only `merged_result.hm` 并导出 `batchmesh_result.fem`。主会话优先以 `geom_merge=0, fe_merge=1` 导入合并 HM；跨版本原生 HM 不兼容时，自动回退到唯一的最终合并 FEM。
 
@@ -115,7 +119,7 @@ runtime/tasks/batch_mesher/<run-id>/
   batchmesh_result.fem        # 仅包含成功任务产生的网格
 ```
 
-失败日志包含 task/group、Surface 数量、criteria/param 路径、原始 Tcl errorInfo 和检查建议。即使 Altair launcher 没有产生 stdout/stderr，`launch.log` 也会保留实际命令、独立工作目录和 launcher PID；120 秒内未收到真实 worker 状态握手时，`manager_failure.log` 会记录状态文件及各日志是否存在和字节数。
+失败日志包含 task/group、Surface 数量、criteria/param 路径、原始 Tcl errorInfo 和检查建议。worker 在实机 BatchMesh 返回后会分别记录 `connectivity_status` 和 `quality_status`：质量不达标标记为 `needs_optimization`，保留失败单元数量并继续封装输出，供导入后反复执行局部网格优化；即使后续无法完全满足 criteria，原始网格仍然保留。只有已确认同一几何连通域被划分成多个节点不连通的 FE 区域时，才以 `BATCHMESH_CONNECTIVITY_INVALID` 判定网格结果失败；若旧补丁版本无法提供连通性查询，只记录警告并保留网格。即使 Altair launcher 没有产生 stdout/stderr，`launch.log` 也会保留实际命令、独立工作目录和 launcher PID；120 秒内未收到真实 worker 状态握手时，`manager_failure.log` 会记录状态文件及各日志是否存在和字节数。
 
 ## 测试
 
@@ -124,6 +128,14 @@ runtime/tasks/batch_mesher/<run-id>/
 ```powershell
 python modules\batch_mesher\tests\test_batch_mesher.py
 ```
+
+本机双版本 CLI 端到端验证（真实 hmbatch 驱动模块 worker 与 merge worker）：
+
+```powershell
+python tools\verify_batch_mesher_cli.py
+```
+
+驱动按 `::BatchMesher::writeBackgroundLauncher` 的方式生成 `background_launcher.tcl`，分别用本机 HyperMesh 2019 与 HyperWorks 2022 的 `hmbatch.exe` 执行：生成纯曲面模型快照 → 运行 `background_worker.tcl` 真实网格化（多任务、FEM 导出、原生 HM 隔离保存）→ 运行 `background_merge_worker.tcl` 聚合 worker FEM（`overwrite_flag=0` ID 偏移、合并 HM、最终 FEM）。两个版本均验证通过：2 个任务各生成 625 个 CQUAD4、`task_result.fem`/`task_result.hm` 有效、merge 后 `merged_result.hm` 与 `batchmesh_result.fem` 计数一致（1250 elements、2 components）。也验证了 2 个 worker 并行（模块默认 `PARALLEL_WORKERS=2`）在 2019/2022 上均能并发完成互不干扰。
 
 HM2019 命令可用性矩阵：
 
@@ -137,11 +149,12 @@ python tools\run_hm2019_matrix.py --hmbatch "C:\...\hmbatch.exe"
 
 ## 已知限制与尚未真机验证项
 
-- 当前开发机未安装 HyperMesh，无法在本机重新执行二进制测试；2022 的调用、两进程并发和 `*mergefile` 数据来自 2026-07-31 远端实机报告及其保留脚本。
-- `*hm_batchmesh2 surfs 1 1 0 criteria param` 的签名来自 Altair 官方文档（命令版本历史始于 14.0）及项目旧代码中的 HM2019 命令存在性证据，但仍需在目标公司的具体 2019 补丁版用真实模型验证 criteria/param 兼容性和返回错误文本。
-- `*appendmark ... "by attached"`、`*isolateentitybymark`、`*setreviewbymark`、`*window_entitymark` 已纳入 `hm2019_api_smoke.tcl`，本开发机因缺少 hmbatch 未运行。
-- 不同连通域现已使用多个隔离 hmbatch 并行执行；同一连通域仍是不可拆分的最小安全单元。单次 `*hm_batchmesh2` 内部没有稳定的脚本进度回调，因此进度粒度仍为连通域任务。
-- 实机完整车架日志证实：第一个完整 worker HM 可合并，但 HM2019 在第二个完整快照的 `*mergefile` 内直接退出，Tcl 无法捕获错误。因此 worker HM 只作恢复用途，最终聚合改用可独立打开的 worker FEM 和 `overwrite_flag=0` ID 偏移；仍需在目标实机复核最终 Property、Material、Component 归属。
+- 本机（开发机）已安装 HyperMesh 2019 与 HyperWorks 2022 并完成 2026-08-14 CLI 端到端验证：单 worker 多任务、双 worker 并行、结果合并均通过。尚未覆盖：跨版本主会话导入组合（2022 hmbatch 结果导入 2019 主会话，原生 `.hm` 方向性限制不变）、license 并发降级场景。
+- HM2019.0.0.70 安装目录内 7 组完整 criteria/param 配对（`crash_10mm`、`crash_5mm`、`durability_5mm`、`general_10mm`、`general_8mm`、`nvh_10mm`、`nvh_15mm`）均通过模块真实 worker 的双任务划分、HM/FEM 封装验证；破坏 holes table 的负例由规格预检在正式 worker 启动前拒绝。
+- HM2019 的 `*hm_batchmesh 1 criteria param` 来自安装目录 `hm/scripts/batchmesh/hmbm.tcl` 和独立 BatchMesher 的真实 `EventsLog.txt`；HM2022 使用 `*hm_batchmesh2 surfs 1 1 0 criteria param`。两个分支均已在真实模型上验证。
+- `*appendmark ... "by attached"`、`*isolateentitybymark`、`*setreviewbymark`、`*window_entitymark` 已纳入 `hm2019_api_smoke.tcl`，已在本机 HM2019 与 2022 实机运行通过。
+- 不同连通域现已使用多个隔离 hmbatch 并行执行；同一连通域仍是不可拆分的最小安全单元。原生 BatchMesh 调用内部没有稳定的脚本进度回调，因此进度粒度仍为连通域任务。
+- 实机完整车架日志证实：第一个完整 worker HM 可合并，但 HM2019 在第二个完整快照的 `*mergefile` 内直接退出，Tcl 无法捕获错误。因此 worker HM 只作恢复用途，最终聚合改用可独立打开的 worker FEM 和 `overwrite_flag=0` ID 偏移；2026-08-14 本机验证确认 FEM 聚合路径在 2019/2022 均可独立打开并逐包验证 Element 增量。
 - 原生 `.hm` 通常具有“新版本可读取旧版本”的方向性；如果使用 2022 hmbatch 生成原生结果并导入 2019 主会话，Altair 文件格式本身可能不向后兼容。工具不再预先禁止该组合，但会保留合并模型、最终 FEM 和明确导入错误；生产环境优先使用同版本，或使用不高于主会话版本的 hmbatch。
-- 如果一个连通域内部仅部分 Surface 成功、但 `*hm_batchmesh2` 没有抛出 Tcl 错误且创建了单元，当前 API 无法可靠给出逐 Surface 成败清单；仍需结合 hmbatch 日志和网格检查确认。
+- 如果一个连通域内部仅部分 Surface 成功、但原生命令没有抛出 Tcl 错误且创建了单元，当前 API 无法可靠给出逐 Surface 成败清单；仍需结合 hmbatch 日志和网格检查确认。
 - Surface ID 集合签名无法发现“ID 完全不变但拓扑已变化”的编辑事件。

@@ -2,6 +2,32 @@
 
 ## Unreleased - platform stabilization
 
+- 网格焊缝开放路径在 `imprint -> ruled` 的目标拓扑重建中，现将源路径首尾各自的最近投影节点作为硬约束：搜索只能从首端投影锚点出发并在末端投影锚点结束，方向判断也只由两组端点对应关系决定；内部节点的整体代价不再允许把任一端滑到相邻节点行，从而消除焊缝两端斜拉和扭曲。
+
+- BatchMesher 将原生质量失败与结果可用性解耦：对新增网格执行节点连通分量检查和质量检查，criteria 未满足时以 `needs_optimization` 完成并保留 FEM/HM 输出及待优化单元计数，供后续局部优化反复迭代；无法完全优化也不丢弃网格。只有确认同一几何连通域的新增网格跨边界不连通时才报 `BATCHMESH_CONNECTIVITY_INVALID`。
+
+- 网格焊缝失败路径仅在失败位置创建并选中临时自由节点，不再创建 `MESH_SEAM_WELD_FAILED_MARKERS` 专用 component；手动批次首次识别为连续 `node path` 后，本次批次的后续源节点选择会持续使用原生 node-path 面板，无需逐次切换。
+
+- 深度收紧网格焊缝 `imprint -> ruled` 后处理：即使原生 `list 2` 数量完整且拓扑连续，也会按全部源节点重新投影当前目标网格，并从该局部走廊全局重建目标路径，避免误取相邻节点行；缺少覆盖每个源节点的唯一、单调锚点时整条路径回滚，不再把完整源路径拉伸到部分目标节点形成梯形/扇形焊缝。横向分层由无条件向上取整改为带半层滞回的最近层数，并消除孤立中间/端部尖峰、限制相邻位置最多变化一层，避免无必要多层及窄端密集叠网格。
+
+- 网格焊缝投影后的局部 element 层扩展改为优先使用 HyperMesh 原生 `*appendmark ... "by adjacent"`：只在投影建种时确认 element 位于所选目标 components，随后两至三层 support halo 允许自然扩展到相邻未选组件或不同平面的共享节点壳单元；这些单元与目标 patch 一并进入 imprint，不再触发共享外部壳单元拒绝或跳过任务。预制 element ID 失效时同样按源路径重新投影并重建完整 halo，不会在刷新分支过滤掉外部 support。后续 ruled 仍保留目标路径连续性、方向/闭环起点对齐、等数量一一对应细化与不等数量弧长锚定；不支持该 selector 的版本自动回退到有界 Tcl 邻接遍历。目标准备保留 path、target mark、closest-node projection 与 patch 四级耗时日志。
+
+- 所有命令流提示统一为英文：默认/出厂语言切换为 `en_US`（`config.yaml` 的 `workflow.language`、代码默认与 `normalizeLanguage` 缺省均为英文），所有经 `::HWFlow::txt` 的双语文案一律显示英文；同时修复原本绕过双语机制的中文提示（BatchMesher 树形列头、批量赋予 Property 的进度/失败信息、Local Mesh Optimizer 的 Python 进度与 HTML 报告），并给网格焊缝失败报告补充 `reason_en/action_en` 字段。All command-stream prompts are now unified to English.
+
+- 修复 `auto_hole_rbe2` 在实际贯穿孔任务中必失败的两段链路：HyperMesh 2019/2022 的 OptiStruct exporter 会把内部 `^faces` 当作显示数据，只写 GRID 而静默省略 CTRIA3/CQUAD4；现在仅在导出事务内将该临时 component 改为唯一普通名称，完整写出自由面后无论成功失败都恢复 `^faces`。同时补回候选创建阶段缺失的 `hybridNodeExists`，避免识别成功后在 solver/internal node ID 校验处中断。默认开启内壁法向过滤，防止实体外圆柱面被当成孔。双版本实机环形 HEXA 贯穿孔端到端验证均得到 1 个候选并成功创建 1 个 RBE2。
+
+- 修复沉台清理将正常贯穿孔壁误判为沉台外壁并删除的问题：外环/内环不再按两侧壁高排序，而是使用 `hm_linelength` 计算真实边界周长（包括端点重合的完整圆边），将较大边界确定为沉台外环、较小边界确定为贯穿孔内环。删除集合仍只包含沉台底面与外壁，并新增孔壁分类重叠检查及删除后孔壁存活硬校验；一旦孔壁受损，会在 ruled 前中止并通过原生 history 回滚。
+
+- 几何清理的沉台/凹槽流程现在在修改模型前显式启用 HyperMesh 原生 history recorder，并在撤销容量被关闭时恢复容量；每次清理作为一个命名原生撤销项提交，因此可直接使用 `Ctrl+Z` 撤销。若当前 HyperMesh 无法建立或提交原生撤销项，流程会停止或回滚，不再产生“清理成功但不可撤销”的结果。新增 HM2019/HM2022 实机 `hmbatch` 冒烟验证，覆盖成功后的原生撤销及失败路径自动回滚。
+
+- BatchMesher 2.7 修复 HM2019 自定义孔识别规格在后台误报 `cleanup parameters file is not valid in the holes recognition section`：依据本机 HM2019.0.0.70 独立 BatchMesher 的 `EventsLog.txt` 与安装目录 `hmbm.tcl`，2019 改用其真实接口 `*hm_batchmesh 1 criteria param`，2022 保持 `*hm_batchmesh2`。HM2019 旧接口的带空格 Windows 路径同时转换为 Altair 官方脚本使用的正斜杠形式。配置“验证”和正式 worker 按目标 hmbatch 的实际版本选择同一接口；验证缓存绑定 hmbatch 与两个规格文件的路径、mtime、size。原生错误输出会写入失败信息，任务状态补齐实际 `created_elements`。实机 HM2019.0.0.70、HM2022.0.0.33 的预检、双任务、FEM/HM 输出与合并均通过。
+
+- 本机双版本 BatchMesher CLI 端到端验证：新增 `tools/verify_batch_mesher_cli.py`，用本机 HyperMesh 2019.0.0.70 与 HyperWorks 2022.0.0.33 的 `hmbatch.exe` 按模块真实启动方式运行 `background_worker.tcl`（2019 使用 `*hm_batchmesh`，2022 使用 `*hm_batchmesh2`）与 `background_merge_worker.tcl`。两版本的双任务、HM/FEM 输出与合并均通过；`PARALLEL_WORKERS=2` 双 worker 并发在两版本上也通过。`doc/batch_mesher.md` 相应更新。
+
+- BatchMesher worker 改为在各自私有 `run_dir` 中执行版本对应的原生 BatchMesh 命令（`invokeFromWorkerDirectory`）：BatchMesh 会相对进程工作目录写 `ModelBuild/`、`productBatchMesher.ico`、`hw_batchmesh.bat` 等临时产物，原实现把 cwd 切到共享的 criteria/param 目录（通常位于 Program Files 且被多 worker 共享），并行 worker 会互相覆盖，受限目录下还会直接失败。solver profile 初始化仍可从规格源目录读取 quality criteria；原生调用使用两个规格的绝对路径。
+
+- 修复 `hm_hybrid_export_smoke.tcl` 的过时调用：`mesh_seam_weld.tcl` 自 6dcb491 起将 Python/FEM bridge（`tcl/bridge.tcl`、`tcl/exporter.tcl`）改为按需 opt-in，冒烟测试仍直接调用 `runPythonPathStage`/`exportHybridInputs`，导致矩阵在 seam 阶段即失败；测试现在按模块设计显式 opt-in 加载这两个文件。注意：解除该遮蔽后暴露了 `auto_hole_rbe2` 既有的 `*findfaces` 自由面 GRID-only 导出问题（`*feoutput_select` 与 `*feoutputwithdata` 均只写出 8 个 GRID、无 CTRIA3/CQUAD4，2019/2022 复现一致），该模块的 `hm_hybrid_export_smoke` 阶段仍失败，需另行修复。
+
 - 对齐新安装的 HyperMesh 2022.0.0.33：BatchMesher 安装发现不再假定目录名必须为 `2022`，支持实际存在的 `Altair/2020/hwdesktop/hm` 布局，并将 Default 自动规格迁移到该安装自带的 `general_8mm.criteria/.param`；2019 经典布局和自定义预设继续保留。
 
 - 按当前实机重新对齐几何焊缝的 HyperMesh 2019.0.0.70 与 2022.0.0.33：两版分别在 12 个独立 hmbatch 进程中跑完全部公开功能，创建 ID、面积、包围盒、边归属拓扑、消息、警告与最终 Surface 集合逐项一致；命令审计同时通过。修复 T_LIST 校准包装器未转发匹配模式/容差、以及 `*edgesmarkaddpoints` 重编号后审计仍使用旧 Line ID 导致 `*createlist` 假失败的问题。

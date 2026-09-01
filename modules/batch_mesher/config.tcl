@@ -1,5 +1,5 @@
 namespace eval ::BatchMesher {
-    variable VERSION "2.6"
+    variable VERSION "2.7"
     variable CONFIG_KEY "batch_mesher"
     # hmbatch.exe can return before the real hmopengl process has finished
     # loading HyperMesh and sourcing the worker Tcl, especially when several
@@ -55,6 +55,12 @@ namespace eval ::BatchMesher {
         validated_hmbatch_mtime 0
         validated_hmbatch_version ""
         validated_hmbatch_executable ""
+        validated_criteria_path ""
+        validated_criteria_mtime 0
+        validated_criteria_size 0
+        validated_param_path ""
+        validated_param_mtime 0
+        validated_param_size 0
         background_monitor_status_path ""
         background_monitor_done_path ""
         result_fem_path ""
@@ -64,6 +70,7 @@ namespace eval ::BatchMesher {
 }
 
 proc ::BatchMesher::txt {zh en} { return [::HWFlow::txt $zh $en] }
+proc ::BatchMesher::ctxt {zh en} { return [::HWFlow::ctxt $zh $en] }
 
 proc ::BatchMesher::defaultPreset {} {
     return [dict create name Default criteria_path "" param_path "" criteria_mtime "" param_mtime ""]

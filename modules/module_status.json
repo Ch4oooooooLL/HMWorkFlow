@@ -11,6 +11,7 @@
     "weld_integrity_check": {"status": "review_only", "runtime": "HybridCore", "model_write": false},
     "contact_setup": {"status": "production", "runtime": "Tcl", "model_write": true},
     "batch_temp_nodes": {"status": "production", "runtime": "Tcl", "model_write": true},
+    "batch_load_application": {"status": "controlled", "runtime": "Tcl", "model_write": true, "parser": "case_tail_v1", "case_naming": "numbered_keyword_mapping_v1", "case_creation": "optistruct_static_v1", "requires_hm2019_smoke_test": true},
     "adhesive_connector": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": false, "verified": ["hm2019", "hm2022"]},
     "seam_surface": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true},
     "batch_property_assignment": {"status": "production", "runtime": "Tcl", "model_write": true},

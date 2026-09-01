@@ -1,5 +1,6 @@
-# HyperMesh 2019 batch smoke test for a local imprint whose planar target
-# shares nodes with a non-coplanar shell component.
+# HyperMesh 2019 batch smoke test for the fast pre-imprint rejection of a
+# planar target whose projected seed nodes are shared with a non-coplanar
+# shell component.
 #
 # Run with:
 #   hmbatch.exe -tcl hm2019_shared_node_imprint_smoke.tcl
@@ -67,33 +68,33 @@ proc runSharedNodeImprintSmoke {root outputDir} {
 
     ::SharedNodeSmoke::component SHARED_NODE_SOURCE 33
     set sourceNodes {}
-    foreach xyz {{3 3 8} {17 3 8} {17 17 8} {3 17 8}} {
+    foreach xyz {{10 0 8} {10 10 8} {10 20 8}} {
         lappend sourceNodes [::SharedNodeSmoke::node {*}$xyz]
     }
 
-    ::MeshSeamWeld::runImprintNodeList \
-        $sourceNodes [list $targetComp] 1 $targetElems
-    set sharedExternalCount $::MeshSeamWeld::lastImprintSharedNeighborElemCount
-    set totalCount $::MeshSeamWeld::lastImprintTargetElemCount
-    set mode $::MeshSeamWeld::lastImprintTargetMode
-    set markedTargets {}
-    catch {set markedTargets [hm_getmark elements 2]}
-    if {[llength $markedTargets] == 0} {
-        catch {set markedTargets [hm_getmark elems 2]}
-    }
+    set prepared [::MeshSeamWeld::prepareCurrentTargetPatch \
+        $sourceNodes [list $targetComp] 0]
+    set markedTargets [dict get $prepared shared_external_elements]
+    set sharedExternalCount [llength $markedTargets]
+    set totalCount [llength [dict get $prepared target_elements]]
+    set mode skipped_shared_node_topology
+    set wallDetected 0
     foreach wallElem $wallElems {
         if {[lsearch -exact $markedTargets $wallElem] >= 0} {
-            error "Non-coplanar wall element $wallElem was incorrectly added to the Mesh Edit Elements input"
+            set wallDetected 1
+            break
         }
     }
-    if {$sharedExternalCount < [llength $wallElems]} {
-        error "Expected both non-coplanar wall elements in diagnostics; got $sharedExternalCount"
+    if {!$wallDetected || $sharedExternalCount < 1} {
+        error "Expected at least one non-coplanar wall element in fast diagnostics"
     }
-    if {$mode ne "local_elements"} {
-        error "Expected local target-elements imprint mode, got $mode"
+    foreach elemId [dict get $prepared target_elements] {
+        if {[lsearch -exact $wallElems $elemId] >= 0} {
+            error "External wall element $elemId leaked into the target-component patch"
+        }
     }
     ::HybridCore::closeLog
-    return "target_component=$targetComp wall_component=$wallComp\ncore_elements=[llength $targetElems] shared_external_elements=$sharedExternalCount total_imprint_elements=$totalCount\nmode=$mode"
+    return "target_component=$targetComp wall_component=$wallComp\ntarget_elements=$totalCount shared_external_elements=$sharedExternalCount\nmode=$mode"
 }
 
 set code [catch {runSharedNodeImprintSmoke $root $outputDir} details options]

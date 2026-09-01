@@ -240,10 +240,12 @@ proc ::BatchMesher::startBackgroundRun {{taskIds {}}} {
     ::BatchMesher::saveCurrentPreset
     ::BatchMesher::createRunWorkspace
     set selectedHmbatch [dict get $runConfig hmbatch]
-    if {![::BatchMesher::hmbatchPreflightCurrent $selectedHmbatch]} {
+    set selectedCriteria [dict get $runConfig criteria]
+    set selectedParam [dict get $runConfig param]
+    if {![::BatchMesher::hmbatchPreflightCurrent $selectedHmbatch $selectedCriteria $selectedParam]} {
         set preflightDir [file join $runtime(run_dir) hmbatch_preflight]
         if {[catch {
-            ::BatchMesher::probeHmbatchExecutable $selectedHmbatch $preflightDir
+            ::BatchMesher::probeHmbatchExecutable $selectedHmbatch $preflightDir $selectedCriteria $selectedParam
         } preflightError preflightOptions]} {
             set runtime(run_error) $preflightError
             set runtime(run_finished_ms) [clock milliseconds]
@@ -323,8 +325,8 @@ proc ::BatchMesher::startBackgroundRun {{taskIds {}}} {
         }
     }
     ::BatchMesher::writeRunReport 0
-    ::HWFlow::progressOpen [::BatchMesher::txt "BatchMesher 后台网格划分" "BatchMesher background meshing"] \
-        [::BatchMesher::txt "独立连通域 hmbatch 已并行启动，当前 HyperMesh 可继续响应。" "Independent connectivity-group hmbatch workers are running in parallel; this HyperMesh session remains responsive."] 1
+    ::HWFlow::progressOpen [::BatchMesher::ctxt "BatchMesher 后台网格划分" "BatchMesher background meshing"] \
+        [::BatchMesher::ctxt "独立连通域 hmbatch 已并行启动，当前 HyperMesh 可继续响应。" "Independent connectivity-group hmbatch workers are running in parallel; this HyperMesh session remains responsive."] 1
     set ui(status_text) [::BatchMesher::txt "并行 hmbatch 正在运行，PID：$runtime(background_pid)" "Parallel hmbatch workers are running, PIDs: $runtime(background_pid)"]
     ::BatchMesher::refreshUi
     set runtime(background_after) [after $ui(BACKGROUND_POLL_MS) ::BatchMesher::pollBackgroundRunSafely]

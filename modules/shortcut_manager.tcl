@@ -18,6 +18,8 @@ namespace eval ::HWShortcut {
     variable KEY_MAP
     variable ENABLED_MAP
     variable ROW_MODULE
+    variable ROW_ACTION
+    variable ACTIONS [dict create]
     variable INITIALIZED 0
     variable CONFIG_LOADED 0
     variable SELECTED_MODULE ""
@@ -33,6 +35,46 @@ namespace eval ::HWShortcut {
     variable STARTUP_ATTEMPTS 0
     variable STARTUP_MAX_ATTEMPTS 240
     variable STARTUP_RETRY_MS 250
+}
+
+proc ::HWShortcut::registerAction {actionId metadata} {
+    variable ACTIONS
+    foreach required {label_zh label_en category_zh category_en callback} {
+        if {![dict exists $metadata $required]} {
+            error "Shortcut action $actionId is missing metadata: $required"
+        }
+    }
+    dict set ACTIONS $actionId $metadata
+    return $actionId
+}
+
+proc ::HWShortcut::ensureActionProviders {} {
+    variable SCRIPT_DIR
+    set provider [file join $SCRIPT_DIR quick_selector.tcl]
+    if {[file isfile $provider]} {
+        source -encoding utf-8 $provider
+    }
+    return 1
+}
+
+proc ::HWShortcut::actionKeys {} {
+    variable ACTIONS
+    return [lsort [dict keys $ACTIONS]]
+}
+
+proc ::HWShortcut::actionExists {actionId} {
+    variable ACTIONS
+    return [dict exists $ACTIONS $actionId]
+}
+
+proc ::HWShortcut::targetExists {targetId} {
+    return [expr {[::HWShortcut::moduleExistsVisible $targetId] || [::HWShortcut::actionExists $targetId]}]
+}
+
+proc ::HWShortcut::targetKind {targetId} {
+    if {[::HWShortcut::actionExists $targetId]} { return action }
+    if {[::HWShortcut::moduleExistsVisible $targetId]} { return module }
+    return unknown
 }
 
 proc ::HWShortcut::projectRoot {} {
@@ -247,12 +289,22 @@ proc ::HWShortcut::moduleExistsVisible {moduleKey} {
 }
 
 proc ::HWShortcut::moduleLabel {moduleKey} {
+    variable ACTIONS
+    if {[dict exists $ACTIONS $moduleKey]} {
+        set info [dict get $ACTIONS $moduleKey]
+        return [::HWFlow::txt [dict get $info label_zh] [dict get $info label_en]]
+    }
     variable ::HWToolkit::MODULES
     if {![dict exists $::HWToolkit::MODULES $moduleKey]} { return $moduleKey }
     return [::HWToolkit::moduleText [dict get $::HWToolkit::MODULES $moduleKey] label]
 }
 
 proc ::HWShortcut::moduleGroup {moduleKey} {
+    variable ACTIONS
+    if {[dict exists $ACTIONS $moduleKey]} {
+        set info [dict get $ACTIONS $moduleKey]
+        return [::HWFlow::txt [dict get $info category_zh] [dict get $info category_en]]
+    }
     variable ::HWToolkit::MODULES
     if {![dict exists $::HWToolkit::MODULES $moduleKey]} { return "" }
     set info [dict get $::HWToolkit::MODULES $moduleKey]
@@ -267,6 +319,10 @@ proc ::HWShortcut::moduleShortcut {moduleKey} {
         return $MODULE_MAP($moduleKey)
     }
     return ""
+}
+
+proc ::HWShortcut::targetShortcut {targetId} {
+    return [::HWShortcut::moduleShortcut $targetId]
 }
 
 proc ::HWShortcut::clearMemory {} {
@@ -385,6 +441,7 @@ proc ::HWShortcut::loadConfig {} {
     variable MAIN_SHORTCUT
     variable MAIN_ENABLED
     variable CONFIG_LOADED
+    ::HWShortcut::ensureActionProviders
     ::HWShortcut::clearMemory
     set MAIN_SHORTCUT ""
     set MAIN_ENABLED 0
@@ -423,8 +480,8 @@ proc ::HWShortcut::loadConfig {} {
             set MAIN_ENABLED [expr {$enabled ? 1 : 0}]
             continue
         }
-        if {![::HWShortcut::moduleExistsVisible $moduleKey]} {
-            ::HWShortcut::log "skip unknown or hidden module $moduleKey"
+        if {![::HWShortcut::targetExists $moduleKey]} {
+            ::HWShortcut::log "skip unknown shortcut target $moduleKey"
             continue
         }
         set valid [::HWShortcut::validateShortcut $shortcut $moduleKey]
@@ -579,9 +636,19 @@ proc ::HWShortcut::initialize {{mode manual}} {
 
 proc ::HWShortcut::dispatch {shortcut} {
     variable KEY_MAP
+    variable ACTIONS
     set shortcut [::HWShortcut::normalizeShortcut $shortcut]
     if {![info exists KEY_MAP($shortcut)]} { return }
-    ::HWToolkit::requestShortcutModule $KEY_MAP($shortcut)
+    set targetId $KEY_MAP($shortcut)
+    if {[dict exists $ACTIONS $targetId]} {
+        set callback [dict get $ACTIONS $targetId callback]
+        if {[catch {uplevel #0 [list $callback]} err]} {
+            ::HWShortcut::log "action $targetId failed: $err"
+            catch {hm_usermessage [::HWFlow::txt "工具箱功能执行失败。" "Toolbox action failed."]}
+        }
+        return
+    }
+    ::HWToolkit::requestShortcutModule $targetId
 }
 
 proc ::HWShortcut::mainShortcut {} {
@@ -640,8 +707,8 @@ proc ::HWShortcut::applyBinding {moduleKey shortcut} {
     variable KEY_MAP
     variable ENABLED_MAP
     set shortcut [::HWShortcut::normalizeShortcut $shortcut]
-    if {![::HWShortcut::moduleExistsVisible $moduleKey]} {
-        error [::HWFlow::txt "模块不可用。" "Module is not available."]
+    if {![::HWShortcut::targetExists $moduleKey]} {
+        error [::HWFlow::txt "快捷键目标不可用。" "Shortcut target is not available."]
     }
     set valid [::HWShortcut::validateShortcut $shortcut $moduleKey]
     if {![lindex $valid 0]} {
@@ -685,7 +752,7 @@ proc ::HWShortcut::applyBinding {moduleKey shortcut} {
             ::HWShortcut::log "autoloader install failed: $autoErr"
         }
     }
-    ::HWToolkit::refreshShortcutDisplays
+    catch {::HWToolkit::refreshShortcutDisplays}
     ::HWShortcut::refreshManager
     return 1
 }
@@ -703,7 +770,7 @@ proc ::HWShortcut::clearBinding {moduleKey} {
     }
     ::HWShortcut::saveConfig
     catch {hm_usermessage [::HWFlow::txt "自定义功能已立即停用。如果该快捷键覆盖了 HyperMesh 原有功能，请重启 HyperMesh 以恢复原功能。" "The custom action is disabled. Restart HyperMesh if the shortcut replaced a native HyperMesh command."]}
-    ::HWToolkit::refreshShortcutDisplays
+    catch {::HWToolkit::refreshShortcutDisplays}
     ::HWShortcut::refreshManager
 }
 
@@ -714,7 +781,7 @@ proc ::HWShortcut::clearAllBindings {} {
     }
     ::HWShortcut::clearMemory
     ::HWShortcut::saveConfig
-    ::HWToolkit::refreshShortcutDisplays
+    catch {::HWToolkit::refreshShortcutDisplays}
     ::HWShortcut::refreshManager
 }
 
@@ -953,17 +1020,33 @@ proc ::HWShortcut::managerSetMainShortcut {} {
     }
 }
 
-proc ::HWShortcut::selectedModule {} {
+proc ::HWShortcut::selectManagerTarget {kind} {
     variable ROW_MODULE
+    variable ROW_ACTION
     variable SELECTED_MODULE
     set w .hwshortcut_manager
-    set listbox $w.modules.listframe.list
-    if {[winfo exists $listbox]} {
-        set sel [$listbox curselection]
-        if {[llength $sel] > 0 && [info exists ROW_MODULE([lindex $sel 0])]} {
-            set SELECTED_MODULE $ROW_MODULE([lindex $sel 0])
-        }
+    if {$kind eq "action"} {
+        set listbox $w.features.listframe.list
+        set other $w.modules.listframe.list
+        set arrayName ROW_ACTION
+    } else {
+        set listbox $w.modules.listframe.list
+        set other $w.features.listframe.list
+        set arrayName ROW_MODULE
     }
+    if {![winfo exists $listbox]} { return $SELECTED_MODULE }
+    set sel [$listbox curselection]
+    if {[llength $sel] > 0} {
+        upvar 0 ::HWShortcut::$arrayName rowMap
+        set row [lindex $sel 0]
+        if {[info exists rowMap($row)]} { set SELECTED_MODULE $rowMap($row) }
+        if {[winfo exists $other]} { $other selection clear 0 end }
+    }
+    return $SELECTED_MODULE
+}
+
+proc ::HWShortcut::selectedModule {} {
+    variable SELECTED_MODULE
     return $SELECTED_MODULE
 }
 
@@ -987,8 +1070,40 @@ proc ::HWShortcut::managerModuleKeys {} {
     return $keys
 }
 
+proc ::HWShortcut::managerActionKeys {} {
+    return [::HWShortcut::actionKeys]
+}
+
+proc ::HWShortcut::refreshBindingList {listbox keys rowArrayName selectedId} {
+    if {![winfo exists $listbox]} { return }
+    upvar 0 ::HWShortcut::$rowArrayName rowMap
+    $listbox delete 0 end
+    catch {array unset rowMap}
+    set row 0
+    foreach targetId $keys {
+        set shortcut [::HWShortcut::targetShortcut $targetId]
+        if {$shortcut eq ""} {
+            set shortcut [::HWFlow::txt "未绑定" "Unbound"]
+            set status [::HWFlow::txt "未启用" "Disabled"]
+        } else {
+            set status [::HWFlow::txt "已启用" "Enabled"]
+        }
+        set groupCol [::HWFlow::padString [::HWShortcut::moduleGroup $targetId] 22]
+        set labelCol [::HWFlow::padString [::HWShortcut::moduleLabel $targetId] 28]
+        set shortcutCol [::HWFlow::padString $shortcut 20]
+        $listbox insert end "$groupCol  $labelCol  $shortcutCol  $status"
+        set rowMap($row) $targetId
+        if {$targetId eq $selectedId} {
+            $listbox selection set $row
+            $listbox see $row
+        }
+        incr row
+    }
+}
+
 proc ::HWShortcut::refreshManager {} {
     variable ROW_MODULE
+    variable ROW_ACTION
     variable SELECTED_MODULE
     set w .hwshortcut_manager
     if {![winfo exists $w]} { return }
@@ -1000,33 +1115,10 @@ proc ::HWShortcut::refreshManager {} {
     if {[winfo exists $w.native]} {
         $w.native configure -text [::HWFlow::txt "写入位置： [::HWShortcut::nativeLibraryStatus]" "Binding target: [::HWShortcut::nativeLibraryStatus]"]
     }
-    set listbox $w.modules.listframe.list
-    if {[winfo exists $listbox]} {
-        $listbox delete 0 end
-        catch {array unset ROW_MODULE}
-        set row 0
-        foreach moduleKey [::HWShortcut::managerModuleKeys] {
-            set shortcut [::HWShortcut::moduleShortcut $moduleKey]
-            if {$shortcut eq ""} {
-                set shortcut [::HWFlow::txt "未绑定" "Unbound"]
-                set status [::HWFlow::txt "未启用" "Disabled"]
-            } else {
-                set status [::HWFlow::txt "已启用" "Enabled"]
-            }
-            set groupCol [::HWFlow::padString [::HWShortcut::moduleGroup $moduleKey] 12]
-            set labelCol [::HWFlow::padString [::HWShortcut::moduleLabel $moduleKey] 24]
-            set shortcutCol [::HWFlow::padString $shortcut 20]
-            set line "$groupCol  $labelCol  $shortcutCol  $status"
-            $listbox insert end $line
-            set ROW_MODULE($row) $moduleKey
-            if {$moduleKey eq $SELECTED_MODULE} {
-                $listbox selection clear 0 end
-                $listbox selection set $row
-                $listbox see $row
-            }
-            incr row
-        }
-    }
+    ::HWShortcut::refreshBindingList $w.modules.listframe.list \
+        [::HWShortcut::managerModuleKeys] ROW_MODULE $SELECTED_MODULE
+    ::HWShortcut::refreshBindingList $w.features.listframe.list \
+        [::HWShortcut::managerActionKeys] ROW_ACTION $SELECTED_MODULE
     set info [::HWShortcut::getAutoLoaderInfo]
     catch {$w.status configure -text [::HWFlow::txt "安装状态：[::HWShortcut::getAutoLoaderStatus]\n启动验证：[::HWShortcut::getStartupHeartbeatStatus]\n用户配置路径：[::HWShortcut::getConfigFile]\n启动加载路径：[dict get $info path]" "Installed: [::HWShortcut::getAutoLoaderStatus]\nStartup verification: [::HWShortcut::getStartupHeartbeatStatus]\nUser config: [::HWShortcut::getConfigFile]\nBootstrap path: [dict get $info path]"]}
 }
@@ -1074,17 +1166,27 @@ proc ::HWShortcut::showForModule {moduleKey} {
     ::HWShortcut::showManager
 }
 
+proc ::HWShortcut::showForAction {actionId} {
+    variable SELECTED_MODULE
+    set SELECTED_MODULE $actionId
+    ::HWShortcut::showManager
+}
+
+proc ::HWShortcut::showSettings {} {
+    return [::HWShortcut::showManager]
+}
+
 proc ::HWShortcut::showManager {} {
     variable SELECTED_MODULE
     ::HWShortcut::initialize
     catch {destroy .hwshortcut_manager}
     set w .hwshortcut_manager
     ::HWFlow::createTopLevel $w
-    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "快捷键管理" "Shortcuts"] "Shortcuts"]
-    wm minsize $w 680 420
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "工具箱设置" "Toolbox Settings"] "Toolbox Settings"]
+    wm minsize $w 900 720
     wm resizable $w 1 1
 
-    label $w.title -text [::HWFlow::txt "快捷键管理" "Shortcuts"] -font [::HWFlow::uiFont header] -anchor w
+    label $w.title -text [::HWFlow::txt "工具箱设置" "Toolbox Settings"] -font [::HWFlow::uiFont header] -anchor w
     label $w.native -text "" -font [::HWFlow::uiFont small] -anchor w
     pack $w.title -fill x -padx 14 -pady {12 0}
     pack $w.native -fill x -padx 14 -pady {2 10}
@@ -1096,16 +1198,17 @@ proc ::HWShortcut::showManager {} {
     label $w.mainpanel.value -text "" -font [::HWFlow::uiFont fixed] -width 22 -anchor center -relief groove
     button $w.mainpanel.set -text [::HWFlow::txt "设置主面板快捷键" "Set Main Shortcut"] -width 18 -command ::HWShortcut::managerSetMainShortcut
     button $w.mainpanel.clear -text [::HWFlow::txt "清除" "Clear"] -width 8 -command ::HWShortcut::clearMainBinding
-    pack $w.mainpanel.caption -side left -fill x -expand 1
-    pack $w.mainpanel.clear -side right
-    pack $w.mainpanel.set -side right -padx {0 6}
-    pack $w.mainpanel.value -side right -padx {0 8}
+    grid $w.mainpanel.caption -row 0 -column 0 -sticky w
+    grid $w.mainpanel.value -row 0 -column 1 -sticky ew -padx 8
+    grid $w.mainpanel.set -row 0 -column 2 -padx {0 6}
+    grid $w.mainpanel.clear -row 0 -column 3
+    grid columnconfigure $w.mainpanel 0 -weight 1
 
     labelframe $w.modules -text [::HWFlow::txt "模块快捷键" "Module shortcuts"] -padx 8 -pady 8
     pack $w.modules -fill both -expand 1 -padx 14
 
-    set groupHeader [::HWFlow::padString [::HWFlow::txt "分组" "Group"] 12]
-    set labelHeader [::HWFlow::padString [::HWFlow::txt "模块名称" "Module"] 24]
+    set groupHeader [::HWFlow::padString [::HWFlow::txt "分组" "Group"] 22]
+    set labelHeader [::HWFlow::padString [::HWFlow::txt "模块名称" "Module"] 28]
     set shortcutHeader [::HWFlow::padString [::HWFlow::txt "当前快捷键" "Shortcut"] 20]
     set statusHeader [::HWFlow::txt "状态" "Status"]
     set headerText "$groupHeader  $labelHeader  $shortcutHeader  $statusHeader"
@@ -1114,12 +1217,44 @@ proc ::HWShortcut::showManager {} {
 
     frame $w.modules.listframe
     pack $w.modules.listframe -fill both -expand 1
-    listbox $w.modules.listframe.list -width 84 -height 10 -font [::HWFlow::uiFont fixed] -exportselection 0 -selectmode browse
+    listbox $w.modules.listframe.list -width 100 -height 7 -font [::HWFlow::uiFont fixed] -exportselection 0 -selectmode browse
     scrollbar $w.modules.listframe.scroll -orient vertical -command [list $w.modules.listframe.list yview]
     $w.modules.listframe.list configure -yscrollcommand [list $w.modules.listframe.scroll set]
     pack $w.modules.listframe.scroll -side right -fill y
     pack $w.modules.listframe.list -side left -fill both -expand 1
-    bind $w.modules.listframe.list <<ListboxSelect>> {::HWShortcut::selectedModule}
+    bind $w.modules.listframe.list <<ListboxSelect>> {::HWShortcut::selectManagerTarget module}
+
+    labelframe $w.features -text [::HWFlow::txt "功能快捷键（与模块快捷键独立）" "Feature shortcuts (separate from modules)"] -padx 8 -pady 8
+    pack $w.features -fill x -padx 14 -pady {8 0}
+    set featureCategoryHeader [::HWFlow::padString [::HWFlow::txt "分类" "Category"] 22]
+    set featureLabelHeader [::HWFlow::padString [::HWFlow::txt "功能名称" "Feature"] 28]
+    label $w.features.header -text "$featureCategoryHeader  $featureLabelHeader  $shortcutHeader  $statusHeader" \
+        -font [::HWFlow::uiFont fixed] -anchor w
+    pack $w.features.header -fill x -pady {0 4}
+    frame $w.features.listframe
+    pack $w.features.listframe -fill x
+    listbox $w.features.listframe.list -width 100 -height 3 -font [::HWFlow::uiFont fixed] -exportselection 0 -selectmode browse
+    scrollbar $w.features.listframe.scroll -orient vertical -command [list $w.features.listframe.list yview]
+    $w.features.listframe.list configure -yscrollcommand [list $w.features.listframe.scroll set]
+    pack $w.features.listframe.scroll -side right -fill y
+    pack $w.features.listframe.list -side left -fill x -expand 1
+    bind $w.features.listframe.list <<ListboxSelect>> {::HWShortcut::selectManagerTarget action}
+
+    labelframe $w.feature_settings -text [::HWFlow::txt "快速选择功能设置" "Quick Selector settings"] -padx 10 -pady 8
+    pack $w.feature_settings -fill x -padx 14 -pady {8 0}
+    checkbutton $w.feature_settings.enabled -text [::HWFlow::txt "启用原生快速选择功能" "Enable native Quick Selector actions"] \
+        -variable ::Toolbox::QuickSelector::SETTINGS(enabled) -anchor w
+    checkbutton $w.feature_settings.debug -text [::HWFlow::txt "记录调试日志" "Write debug log"] \
+        -variable ::Toolbox::QuickSelector::SETTINGS(debug) -anchor w
+    checkbutton $w.feature_settings.fallback -text [::HWFlow::txt "By Path 失败时允许打开 HyperMesh 原生 Path widget（默认关闭）" "Allow the native Path widget if in-place mode fails (off by default)"] \
+        -variable ::Toolbox::QuickSelector::SETTINGS(native_path_fallback) -anchor w
+    button $w.feature_settings.save -text [::HWFlow::txt "保存功能设置" "Save Feature Settings"] -width 16 \
+        -command ::Toolbox::QuickSelector::saveSettings
+    grid $w.feature_settings.enabled -row 0 -column 0 -sticky w
+    grid $w.feature_settings.debug -row 1 -column 0 -sticky w -pady {3 0}
+    grid $w.feature_settings.fallback -row 2 -column 0 -sticky w -pady {3 0}
+    grid $w.feature_settings.save -row 0 -column 1 -rowspan 3 -sticky e -padx {12 0}
+    grid columnconfigure $w.feature_settings 0 -weight 1
 
     label $w.pending -text [::HWFlow::txt "待应用快捷键：无" "Pending shortcut: none"] -anchor w -padx 14 -pady 7
     pack $w.pending -fill x
@@ -1130,7 +1265,7 @@ proc ::HWShortcut::showManager {} {
     button $w.actions.capture -text [::HWFlow::txt "录入快捷键" "Capture"] -width 12 -command ::HWShortcut::managerCapture
     button $w.actions.apply -text [::HWFlow::txt "应用绑定" "Apply"] -width 12 -command ::HWShortcut::managerApply
     button $w.actions.clear -text [::HWFlow::txt "清除绑定" "Clear"] -width 12 -command ::HWShortcut::managerClear
-    button $w.actions.clearall -text [::HWFlow::txt "清除全部" "Clear All"] -width 12 -command ::HWShortcut::clearAllBindings
+    button $w.actions.clearall -text [::HWFlow::txt "清除全部绑定" "Clear All Bindings"] -width 14 -command ::HWShortcut::clearAllBindings
     pack $w.actions.capture $w.actions.apply $w.actions.clear $w.actions.clearall -side left -padx {0 6}
     button $w.actions.close -text [::HWFlow::txt "关闭" "Close"] -width 10 -command [list destroy $w]
     pack $w.actions.close -side right

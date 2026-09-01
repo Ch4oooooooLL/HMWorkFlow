@@ -22,7 +22,7 @@ proc ::HWInstaller::recordAction {message} {
 
 proc ::HWInstaller::cancelHmWorkflowCallbacks {} {
     set prefixes {
-        ::HWToolkit ::HWFlow ::HWShortcut ::HybridCore ::BatchMesher
+        ::HWToolkit ::HWFlow ::HWShortcut ::Toolbox::QuickSelector ::HybridCore ::BatchMesher
         ::LocalMeshOptimizer ::SeamSurf ::MeshSeamWeld ::ContactSetup
         ::AdhesiveConnector ::SolidSeam ::WeldIntegrityCheck
     }
@@ -108,7 +108,7 @@ proc ::HWInstaller::prepareLiveSession {} {
         ::ContactSetup ::GeomCleanup ::LocalMeshOptimizer
         ::MeshSeamWeld ::MidSurf ::RB2Bolt ::RB2W ::SeamSurf
         ::BomMaterialAssignment ::SolidSeam ::SolidSeamCommandProfile ::WeldIntegrityCheck
-        ::HWShortcut ::HWFlow ::HWToolkit
+        ::Toolbox::QuickSelector ::HWShortcut ::HWFlow ::HWToolkit
     } {
         if {[namespace exists $namespaceName]} { catch {namespace delete $namespaceName} }
     }

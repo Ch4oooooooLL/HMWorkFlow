@@ -186,7 +186,8 @@ class ContactSetupTclTests(unittest.TestCase):
             "return [expr {[llength $::created_surfaces] + 100}]};"
             "proc ::ContactSetup::createGroup {name main secondary} {"
             "set ::created_group [list $main $secondary]; return 200};"
-            "proc ::ContactSetup::msg {text} {set ::last_message $text};"
+            "proc ::ContactSetup::msg {zh {en {}}} {"
+            "if {$en eq {}} {set en $zh}; set ::last_message $en};"
             "proc tk_messageBox args {set ::dialog_error $args}"
         )
 

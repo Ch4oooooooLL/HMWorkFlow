@@ -120,13 +120,15 @@ proc ::ContactSetup::savePanelState {} {
     catch {::ContactSetup::saveRules}
 }
 
-proc ::ContactSetup::msg {text} {
+proc ::ContactSetup::msg {zh {en ""}} {
     variable ui
+    if {$en eq ""} { set en $zh }
+    set text [::HWFlow::txt $zh $en]
     set ui(status) $text
     catch {hm_usermessage $text}
     catch {puts "ContactSetup: $text"}
     if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
-        catch {::HWFlow::progressAppend "ContactSetup: $text"}
+        catch {::HWFlow::progressAppend "ContactSetup: [::HWFlow::ctxt $zh $en]"}
     }
     catch {update idletasks}
 }
@@ -876,7 +878,7 @@ proc ::ContactSetup::selectNearestContactFaces {elemsA elemsB} {
         if {$i > 0 && [expr {$i % 2000}] == 0} {
             set pct [expr {30.0 + 12.0*$i/double(max($countA, 1))}]
             ::ContactSetup::progress $pct \
-                [::HWFlow::txt "正在匹配第一侧接触区域" "Matching first contact side"] \
+                [::HWFlow::ctxt "正在匹配第一侧接触区域" "Matching first contact side"] \
                 "$i/$countA"
         }
         set near [::ContactSetup::firstNearbyRecord \
@@ -896,7 +898,7 @@ proc ::ContactSetup::selectNearestContactFaces {elemsA elemsB} {
         if {$j > 0 && [expr {$j % 2000}] == 0} {
             set pct [expr {42.0 + 13.0*$j/double(max($countB, 1))}]
             ::ContactSetup::progress $pct \
-                [::HWFlow::txt "正在匹配第二侧接触区域" "Matching second contact side"] \
+                [::HWFlow::ctxt "正在匹配第二侧接触区域" "Matching second contact side"] \
                 "$j/$countB"
         }
         set near [::ContactSetup::firstNearbyRecord \
@@ -1444,8 +1446,8 @@ proc ::ContactSetup::createContact {} {
 
         if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
             catch {set progressOpened [::HWFlow::progressOpen \
-                [::HWFlow::txt "创建接触" "Creating contact"] \
-                [::HWFlow::txt "正在准备所选接触面..." "Preparing selected contact faces..."] 0]}
+                [::HWFlow::ctxt "创建接触" "Creating contact"] \
+                [::HWFlow::ctxt "正在准备所选接触面..." "Preparing selected contact faces..."] 0]}
         }
 
         array unset last
@@ -1457,14 +1459,14 @@ proc ::ContactSetup::createContact {} {
         set selectedA [::ContactSetup::uniq $ui(selectedElemsA)]
         set selectedB [::ContactSetup::uniq $ui(selectedElemsB)]
         ::ContactSetup::progress 8.0 \
-            [::HWFlow::txt "正在批量读取接触几何" "Reading contact geometry"] \
+            [::HWFlow::ctxt "正在批量读取接触几何" "Reading contact geometry"] \
             "A=[llength $selectedA], B=[llength $selectedB]" 1
         set stageStarted [clock milliseconds]
         ::ContactSetup::primeGeometryCache [concat $selectedA $selectedB]
         set cacheMs [expr {[clock milliseconds] - $stageStarted}]
         ::ContactSetup::progress 25.0 \
-            [::HWFlow::txt "正在建立空间索引" "Building spatial index"] \
-            [::HWFlow::txt "几何数据已读取" "Geometry data loaded"] 1
+            [::HWFlow::ctxt "正在建立空间索引" "Building spatial index"] \
+            [::HWFlow::ctxt "几何数据已读取" "Geometry data loaded"] 1
         set contactFaces [::ContactSetup::selectNearestContactFaces $selectedA $selectedB]
         set elemsA [dict get $contactFaces elemsA]
         set elemsB [dict get $contactFaces elemsB]
@@ -1488,13 +1490,13 @@ proc ::ContactSetup::createContact {} {
         set orientElemB [lindex $orientations 2]
         set reverseB [lindex $orientations 3]
         ::ContactSetup::progress 62.0 \
-            [::HWFlow::txt "正在创建第一侧 SURF" "Creating first SURF"] \
+            [::HWFlow::ctxt "正在创建第一侧 SURF" "Creating first SURF"] \
             "elements=[llength $elemsA]" 1
         set stageStarted [clock milliseconds]
         set surfAId [::ContactSetup::createContactSurf $surfA $elemsA 13 $orientElemA $reverseA]
         set surfaceAMs [expr {[clock milliseconds] - $stageStarted}]
         ::ContactSetup::progress 74.0 \
-            [::HWFlow::txt "正在创建第二侧 SURF" "Creating second SURF"] \
+            [::HWFlow::ctxt "正在创建第二侧 SURF" "Creating second SURF"] \
             "elements=[llength $elemsB]" 1
         set stageStarted [clock milliseconds]
         set surfBId [::ContactSetup::createContactSurf $surfB $elemsB 45 $orientElemB $reverseB]
@@ -1511,7 +1513,7 @@ proc ::ContactSetup::createContact {} {
             set secSurfId $surfAId
         }
         ::ContactSetup::progress 86.0 \
-            [::HWFlow::txt "正在创建 CONTACT 卡片" "Creating CONTACT card"] \
+            [::HWFlow::ctxt "正在创建 CONTACT 卡片" "Creating CONTACT card"] \
             "$mainSurf -> $secSurf" 1
         set stageStarted [clock milliseconds]
         set groupId [::ContactSetup::createGroup $groupName $mainSurfId $secSurfId]
@@ -1543,7 +1545,7 @@ proc ::ContactSetup::createContact {} {
         set last(restoreDisplay) ""
 
         ::ContactSetup::progress 96.0 \
-            [::HWFlow::txt "正在刷新模型浏览器" "Refreshing Model Browser"] "" 1
+            [::HWFlow::ctxt "正在刷新模型浏览器" "Refreshing Model Browser"] "" 1
         set stageStarted [clock milliseconds]
         catch {::HWFlow::refreshBrowser}
         set refreshMs [expr {[clock milliseconds] - $stageStarted}]
@@ -1568,19 +1570,19 @@ proc ::ContactSetup::createContact {} {
             total_ms $totalMs]
         set last(perf) $perf
         set last(perfReport) [::ContactSetup::writePerformanceReport $perf]
-        ::ContactSetup::msg [::HWFlow::txt \
+        ::ContactSetup::msg \
             "接触创建完成：公共区域 A=[llength $elemsA]/[llength $selectedA]，B=[llength $elemsB]/[llength $selectedB]，搜索距离=[format %.6g [dict get $contactFaces searchTol]]，group=$groupName。" \
-            "Contact created: common region A=[llength $elemsA]/[llength $selectedA], B=[llength $elemsB]/[llength $selectedB], search=[format %.6g [dict get $contactFaces searchTol]], group=$groupName."]
+            "Contact created: common region A=[llength $elemsA]/[llength $selectedA], B=[llength $elemsB]/[llength $selectedB], search=[format %.6g [dict get $contactFaces searchTol]], group=$groupName."
     } err]
     ::ContactSetup::clearGeometryCache
     if {$code} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "接触创建失败" "Contact creation failed"] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::ctxt "接触创建失败" "Contact creation failed"] 100.0}
         }
         tk_messageBox -icon error -title [::HWFlow::txt "Contact Setup" "Contact Setup"] -message $err
     } elseif {$progressOpened && [llength [info commands ::HWFlow::progressFinish]] > 0} {
         catch {::HWFlow::progressFinish \
-            [::HWFlow::txt "接触创建完成" "Contact creation completed"] 100.0}
+            [::HWFlow::ctxt "接触创建完成" "Contact creation completed"] 100.0}
     }
 }
 
@@ -1657,7 +1659,7 @@ proc ::ContactSetup::restoreView {} {
     ::ContactSetup::setComponentsDisplayByIds $last(restoreDisplay) on
     set last(restoreDisplay) ""
     catch {hm_redraw}
-    ::ContactSetup::msg [::HWFlow::txt "已恢复进入修改模式前的显示状态。" "Restored the display state before trim mode."]
+    ::ContactSetup::msg "已恢复进入修改模式前的显示状态。" "Restored the display state before trim mode."
 }
 
 proc ::ContactSetup::removeElemsFromSurface {surfName elems} {
@@ -1711,9 +1713,9 @@ proc ::ContactSetup::trimContact {} {
         set last(restoreDisplay) [::ContactSetup::displayedComponents]
     }
     ::ContactSetup::showOnlyLast
-    ::ContactSetup::msg [::HWFlow::txt \
+    ::ContactSetup::msg \
         "连续修改模式：选择要从 contact surface 中移除的单元，中键确认；取消选择/ESC 退出。" \
-        "Continuous trim mode: select elements to remove, middle-click to accept; cancel/ESC exits."]
+        "Continuous trim mode: select elements to remove, middle-click to accept; cancel/ESC exits."
 
     set totalA 0
     set totalB 0
@@ -1746,18 +1748,18 @@ proc ::ContactSetup::trimContact {} {
             }
         }
         if {[llength $removeA] == 0 && [llength $removeB] == 0} {
-            ::ContactSetup::msg [::HWFlow::txt \
+            ::ContactSetup::msg \
                 "所选单元不属于当前 contact surface，请重新选择；取消选择退出。" \
-                "Selected elements are not in the current contact surfaces. Select again, or cancel to exit."]
+                "Selected elements are not in the current contact surfaces. Select again, or cancel to exit."
             continue
         }
 
         set okA [::ContactSetup::removeElemsFromSurfaceWithUndo $last(surfA) $removeA "Trim Contact Surface A"]
         set okB [::ContactSetup::removeElemsFromSurfaceWithUndo $last(surfB) $removeB "Trim Contact Surface B"]
         if {!$okA && !$okB} {
-            ::ContactSetup::msg [::HWFlow::txt \
+            ::ContactSetup::msg \
                 "本次删除失败并已尝试撤销，请重新选择；取消选择退出。" \
-                "This trim failed and was rolled back where possible. Select again, or cancel to exit."]
+                "This trim failed and was rolled back where possible. Select again, or cancel to exit."
             continue
         }
         if {$okA} {
@@ -1769,15 +1771,15 @@ proc ::ContactSetup::trimContact {} {
             incr totalB [llength $removeB]
         }
         catch {hm_redraw}
-        ::ContactSetup::msg [::HWFlow::txt \
+        ::ContactSetup::msg \
             "本次移除 A=[expr {$okA ? [llength $removeA] : 0}]，B=[expr {$okB ? [llength $removeB] : 0}]；可继续选择，取消选择退出。" \
-            "Removed A=[expr {$okA ? [llength $removeA] : 0}], B=[expr {$okB ? [llength $removeB] : 0}]. Continue selecting, or cancel to exit."]
+            "Removed A=[expr {$okA ? [llength $removeA] : 0}], B=[expr {$okB ? [llength $removeB] : 0}]. Continue selecting, or cancel to exit."
     }
 
     catch {::HWFlow::refreshBrowser}
-    ::ContactSetup::msg [::HWFlow::txt \
+    ::ContactSetup::msg \
         "连续修改已退出：累计移除 A=$totalA，B=$totalB。可点击“恢复视图”。" \
-        "Continuous trim exited: total removed A=$totalA, B=$totalB. Click Restore View when finished."]
+        "Continuous trim exited: total removed A=$totalA, B=$totalB. Click Restore View when finished."
 }
 
 proc ::ContactSetup::listMinus {items removed} {

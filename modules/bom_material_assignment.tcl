@@ -23,11 +23,99 @@ namespace eval ::BomMaterialAssignment {
     variable VERSION "0.1"
     variable TARGET_ASSEMBLY "MIDSURFED"
     variable DEFAULT_MATERIAL "Q355"
+    variable ONLY_MIDSURFED_ASSEMBLY 1
+    variable SETTINGS_LOADED 0
 
     variable ui
     array set ui {
         ok 0
+        only_midsurfed_assembly 1
     }
+}
+
+proc ::BomMaterialAssignment::loadSettings {{force 0}} {
+    variable ONLY_MIDSURFED_ASSEMBLY
+    variable SETTINGS_LOADED
+
+    if {$SETTINGS_LOADED && !$force} {
+        return $ONLY_MIDSURFED_ASSEMBLY
+    }
+    set value 1
+    if {[llength [info commands ::HWFlow::loadState]] > 0} {
+        set state [::HWFlow::loadState bom_material_assignment]
+        if {[dict exists $state only_midsurfed_assembly]} {
+            set value [dict get $state only_midsurfed_assembly]
+        }
+    }
+    set ONLY_MIDSURFED_ASSEMBLY [expr {[string tolower [string trim $value]] in {1 true yes on}}]
+    set SETTINGS_LOADED 1
+    return $ONLY_MIDSURFED_ASSEMBLY
+}
+
+proc ::BomMaterialAssignment::saveSettings {} {
+    variable ONLY_MIDSURFED_ASSEMBLY
+    variable SETTINGS_LOADED
+
+    set ONLY_MIDSURFED_ASSEMBLY [expr {$ONLY_MIDSURFED_ASSEMBLY ? 1 : 0}]
+    set SETTINGS_LOADED 1
+    if {[llength [info commands ::HWFlow::saveState]] > 0} {
+        ::HWFlow::saveState bom_material_assignment [dict create \
+            only_midsurfed_assembly $ONLY_MIDSURFED_ASSEMBLY]
+    }
+    return $ONLY_MIDSURFED_ASSEMBLY
+}
+
+proc ::BomMaterialAssignment::saveSettingsPanel {w} {
+    variable ONLY_MIDSURFED_ASSEMBLY
+    variable ui
+
+    set ONLY_MIDSURFED_ASSEMBLY [expr {$ui(only_midsurfed_assembly) ? 1 : 0}]
+    ::BomMaterialAssignment::saveSettings
+    catch {destroy $w}
+}
+
+proc ::BomMaterialAssignment::showSettingsPanel {} {
+    variable ONLY_MIDSURFED_ASSEMBLY
+    variable TARGET_ASSEMBLY
+    variable ui
+
+    ::BomMaterialAssignment::loadSettings
+    set ui(only_midsurfed_assembly) $ONLY_MIDSURFED_ASSEMBLY
+
+    set w .bom_material_assignment_settings
+    catch {destroy $w}
+    ::HWFlow::createTopLevel $w
+    wm title $w [::HWFlow::windowTitle [::HWFlow::txt "读取 BOM 表设置" "BOM Reader Settings"] "BOM Reader Settings"]
+    wm resizable $w 0 0
+
+    frame $w.main -padx 14 -pady 12
+    pack $w.main -fill both -expand 1
+    label $w.main.title -text [::HWFlow::txt "读取 BOM 表设置" "BOM Reader Settings"] -font [::HWFlow::uiFont heading] -anchor w
+    pack $w.main.title -fill x -pady {0 10}
+    checkbutton $w.main.only_midsurfed -text [::HWFlow::txt \
+        "仅限 MIDSURFED Assembly" "Limit to MIDSURFED Assembly"] \
+        -variable ::BomMaterialAssignment::ui(only_midsurfed_assembly) -onvalue 1 -offvalue 0 -anchor w
+    pack $w.main.only_midsurfed -fill x
+    message $w.main.note -width 500 -anchor w -text [::HWFlow::txt \
+        "开启时只处理 $TARGET_ASSEMBLY Assembly 内的 component；关闭时处理当前模型中的全部 component。默认开启。" \
+        "When enabled, only components in the $TARGET_ASSEMBLY assembly are processed. When disabled, every component in the current model is processed. Enabled by default."]
+    pack $w.main.note -fill x -pady {8 0}
+
+    frame $w.buttons -padx 14 -pady 10
+    pack $w.buttons -fill x
+    button $w.buttons.cancel -text [::HWFlow::txt "取消" "Cancel"] -width 12 -command [list destroy $w]
+    button $w.buttons.save -text [::HWFlow::txt "保存设置" "Save Settings"] -width 14 -command [list ::BomMaterialAssignment::saveSettingsPanel $w]
+    pack $w.buttons.cancel -side right -padx 4
+    pack $w.buttons.save -side right -padx 4
+
+    bind $w <Escape> [list destroy $w]
+    wm protocol $w WM_DELETE_WINDOW [list destroy $w]
+    ::HWFlow::centerWindow $w
+    tkwait window $w
+}
+
+proc ::BomMaterialAssignment::runSettings {} {
+    ::BomMaterialAssignment::showSettingsPanel
 }
 
 proc ::BomMaterialAssignment::backToHome {w} {
@@ -42,7 +130,10 @@ proc ::BomMaterialAssignment::showPanel {} {
     variable VERSION
     variable TARGET_ASSEMBLY
     variable DEFAULT_MATERIAL
+    variable ONLY_MIDSURFED_ASSEMBLY
     variable ui
+
+    ::BomMaterialAssignment::loadSettings
 
     catch {destroy .bom_material_assignment}
     set ui(ok) 0
@@ -59,14 +150,17 @@ proc ::BomMaterialAssignment::showPanel {} {
 
     labelframe $w.main.target -text [::HWFlow::txt "当前处理范围" "Current Scope"] -padx 8 -pady 8
     grid $w.main.target -row 1 -column 0 -sticky ew -pady {0 8}
-    label $w.main.target.assembly -text [::HWFlow::txt "目标 Assembly：$TARGET_ASSEMBLY" "Target Assembly: $TARGET_ASSEMBLY"] -anchor w
+    set scopeText [expr {$ONLY_MIDSURFED_ASSEMBLY ? \
+        [::HWFlow::txt "仅 $TARGET_ASSEMBLY Assembly" "$TARGET_ASSEMBLY Assembly only"] : \
+        [::HWFlow::txt "当前模型全部 component" "All components in the current model"]}]
+    label $w.main.target.assembly -text [::HWFlow::txt "处理范围：$scopeText" "Scope: $scopeText"] -anchor w
     label $w.main.target.material -text [::HWFlow::txt "当前默认材料：$DEFAULT_MATERIAL" "Current default material: $DEFAULT_MATERIAL"] -anchor w
     grid $w.main.target.assembly -row 0 -column 0 -sticky w -pady 2
     grid $w.main.target.material -row 1 -column 0 -sticky w -pady 2
 
     message $w.main.note -width 560 -anchor w -text [::HWFlow::txt \
-        "当前版本暂不解析 BOM 文件。执行后会扫描 MIDSURFED 中的全部 component，创建/复用 Q355 材料，给组件赋予该材料，并将组件名规范为 *_Q355。后续只需替换 BOM 读取接口即可。" \
-        "This version does not parse a BOM file yet. It scans every component in MIDSURFED, creates or reuses Q355, assigns it to the components, and normalizes component names to end with *_Q355. The BOM reader can be plugged in later."]
+        "当前版本暂不解析 BOM 文件。执行后会按设置的处理范围扫描 component，创建/复用 Q355 材料，给组件赋予该材料，并将组件名规范为 *_Q355。" \
+        "This version does not parse a BOM file yet. It scans components in the configured scope, creates or reuses Q355, assigns it, and normalizes component names to end with *_Q355."]
     grid $w.main.note -row 2 -column 0 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -380,6 +474,17 @@ proc ::BomMaterialAssignment::defaultBomAssignments {componentIds} {
     return $assignments
 }
 
+proc ::BomMaterialAssignment::targetComponentIds {} {
+    variable ONLY_MIDSURFED_ASSEMBLY
+    variable TARGET_ASSEMBLY
+
+    ::BomMaterialAssignment::loadSettings
+    if {$ONLY_MIDSURFED_ASSEMBLY} {
+        return [::BomMaterialAssignment::assemblyComponentIds $TARGET_ASSEMBLY]
+    }
+    return [::BomMaterialAssignment::allEntityIds {comps components}]
+}
+
 proc ::BomMaterialAssignment::appendProgress {message} {
     if {[llength [info commands ::HWFlow::progressAppend]] > 0} {
         catch {::HWFlow::progressAppend $message 1}
@@ -388,12 +493,18 @@ proc ::BomMaterialAssignment::appendProgress {message} {
 
 proc ::BomMaterialAssignment::execute {} {
     variable TARGET_ASSEMBLY
+    variable ONLY_MIDSURFED_ASSEMBLY
 
-    set componentIds [::BomMaterialAssignment::assemblyComponentIds $TARGET_ASSEMBLY]
+    set componentIds [::BomMaterialAssignment::targetComponentIds]
     if {[llength $componentIds] == 0} {
+        if {$ONLY_MIDSURFED_ASSEMBLY} {
+            error [::HWFlow::txt \
+                "Assembly $TARGET_ASSEMBLY 中没有 component。" \
+                "Assembly $TARGET_ASSEMBLY does not contain any components."]
+        }
         error [::HWFlow::txt \
-            "Assembly $TARGET_ASSEMBLY 中没有 component。" \
-            "Assembly $TARGET_ASSEMBLY does not contain any components."]
+            "当前模型中没有 component。" \
+            "The current model does not contain any components."]
     }
     set materialId [::BomMaterialAssignment::ensureQ355Material]
     set assignments [::BomMaterialAssignment::defaultBomAssignments $componentIds]
@@ -415,7 +526,7 @@ proc ::BomMaterialAssignment::execute {} {
         if {[llength [info commands ::HWFlow::progressUpdate]] > 0} {
             set pct [expr {5.0 + 85.0 * ($index - 1) / double($total)}]
             catch {::HWFlow::progressUpdate $pct \
-                [::HWFlow::txt "正在处理 BOM 材料" "Applying BOM material"] \
+                [::HWFlow::ctxt "正在处理 BOM 材料" "Applying BOM material"] \
                 "$index / $total: $oldName" 1}
         }
 
@@ -450,7 +561,8 @@ proc ::BomMaterialAssignment::execute {} {
     catch {::HWFlow::refreshBrowserNow 0}
     catch {::HWFlow::refreshBrowser}
     return [dict create \
-        assembly $TARGET_ASSEMBLY \
+        scope [expr {$ONLY_MIDSURFED_ASSEMBLY ? $TARGET_ASSEMBLY : "ALL_COMPONENTS"}] \
+        assembly [expr {$ONLY_MIDSURFED_ASSEMBLY ? $TARGET_ASSEMBLY : ""}] \
         material $::BomMaterialAssignment::DEFAULT_MATERIAL \
         material_id $materialId \
         scanned $total \
@@ -464,6 +576,8 @@ proc ::BomMaterialAssignment::execute {} {
 proc ::BomMaterialAssignment::runAction {} {
     variable TARGET_ASSEMBLY
     variable DEFAULT_MATERIAL
+    variable ONLY_MIDSURFED_ASSEMBLY
+    ::BomMaterialAssignment::loadSettings
     set title [::HWFlow::txt "读取 BOM 表 / 材料赋予" "BOM Reader / Material Assignment"]
 
     if {![::BomMaterialAssignment::showPanel]} {
@@ -472,13 +586,14 @@ proc ::BomMaterialAssignment::runAction {} {
     }
 
     set progressOpened 0
+    set scopeText [expr {$ONLY_MIDSURFED_ASSEMBLY ? $TARGET_ASSEMBLY : [::HWFlow::txt "当前模型全部 component" "all model components"]}]
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen $title \
-            [::HWFlow::txt "正在扫描 $TARGET_ASSEMBLY..." "Scanning $TARGET_ASSEMBLY..."] 0]
+            [::HWFlow::ctxt "正在扫描$scopeText..." "Scanning $scopeText..."] 0]
     }
     if {[catch {set result [::BomMaterialAssignment::execute]} runError]} {
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "BOM 材料赋予失败" "BOM material assignment failed"] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::ctxt "BOM 材料赋予失败" "BOM material assignment failed"] 100.0}
         }
         tk_messageBox -icon error -title $title -message [::HWFlow::txt \
             "BOM 材料赋予失败：\n$runError" "BOM material assignment failed:\n$runError"]
@@ -487,14 +602,14 @@ proc ::BomMaterialAssignment::runAction {} {
 
     set failures [dict get $result failures]
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-        catch {::HWFlow::progressClose [::HWFlow::txt \
+        catch {::HWFlow::progressClose [::HWFlow::ctxt \
             "完成：$DEFAULT_MATERIAL 已处理 [dict get $result scanned] 个 component。" \
             "Complete: $DEFAULT_MATERIAL processed [dict get $result scanned] components."] 100.0}
     }
 
     set message [::HWFlow::txt \
-        "BOM 材料赋予完成。\n\n目标 Assembly：$TARGET_ASSEMBLY\n扫描 component：[dict get $result scanned]\n组件名更新：[dict get $result renamed]\n名称已是目标材料：[dict get $result unchanged]\n材料赋予成功：[dict get $result material_assigned]\n失败：[llength $failures]\n\n当前版本使用默认材料 $DEFAULT_MATERIAL，尚未读取 BOM 文件。" \
-        "BOM material assignment complete.\n\nTarget assembly: $TARGET_ASSEMBLY\nComponents scanned: [dict get $result scanned]\nNames updated: [dict get $result renamed]\nAlready using target name: [dict get $result unchanged]\nMaterial assignments: [dict get $result material_assigned]\nFailures: [llength $failures]\n\nThis version uses default $DEFAULT_MATERIAL; BOM file parsing is not implemented yet."]
+        "BOM 材料赋予完成。\n\n处理范围：$scopeText\n扫描 component：[dict get $result scanned]\n组件名更新：[dict get $result renamed]\n名称已是目标材料：[dict get $result unchanged]\n材料赋予成功：[dict get $result material_assigned]\n失败：[llength $failures]\n\n当前版本使用默认材料 $DEFAULT_MATERIAL，尚未读取 BOM 文件。" \
+        "BOM material assignment complete.\n\nScope: $scopeText\nComponents scanned: [dict get $result scanned]\nNames updated: [dict get $result renamed]\nAlready using target name: [dict get $result unchanged]\nMaterial assignments: [dict get $result material_assigned]\nFailures: [llength $failures]\n\nThis version uses default $DEFAULT_MATERIAL; BOM file parsing is not implemented yet."]
     if {[llength $failures] > 0} {
         set preview {}
         foreach row [lrange $failures 0 7] {

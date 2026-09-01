@@ -83,6 +83,8 @@ class BomMaterialAssignmentTests(unittest.TestCase):
             rename ::BomMaterialAssignment::componentName ::BomMaterialAssignment::componentName_real
             rename ::BomMaterialAssignment::renameComponent ::BomMaterialAssignment::renameComponent_real
             rename ::BomMaterialAssignment::assignMaterial ::BomMaterialAssignment::assignMaterial_real
+            set ::BomMaterialAssignment::ONLY_MIDSURFED_ASSEMBLY 1
+            set ::BomMaterialAssignment::SETTINGS_LOADED 1
             proc ::BomMaterialAssignment::assemblyComponentIds {name} {return {1 2}}
             proc ::BomMaterialAssignment::ensureQ355Material {} {return 99}
             proc ::BomMaterialAssignment::componentName {id} {
@@ -112,6 +114,50 @@ class BomMaterialAssignmentTests(unittest.TestCase):
         self.assertEqual(self.tcl.splitlist(material_calls[0]), ("1", "99"))
         self.assertEqual(self.tcl.splitlist(material_calls[1]), ("2", "99"))
 
+    def test_scope_can_include_all_model_components(self):
+        self.tcl.eval(
+            r"""
+            set ::BomMaterialAssignment::ONLY_MIDSURFED_ASSEMBLY 0
+            set ::BomMaterialAssignment::SETTINGS_LOADED 1
+            rename ::BomMaterialAssignment::allEntityIds ::BomMaterialAssignment::allEntityIds_real
+            proc ::BomMaterialAssignment::allEntityIds {types} {
+                set ::allEntityTypes $types
+                return {9 4 9}
+            }
+            """
+        )
+        result = self.tcl.call("::BomMaterialAssignment::targetComponentIds")
+        self.assertEqual(self.tcl.splitlist(result), ("9", "4", "9"))
+        self.assertEqual(
+            self.tcl.splitlist(self.tcl.eval("set ::allEntityTypes")),
+            ("comps", "components"),
+        )
+
+    def test_setting_load_and_save_are_persistent(self):
+        self.tcl.eval(
+            r"""
+            rename ::HWFlow::loadState ::HWFlow::loadState_real
+            rename ::HWFlow::saveState ::HWFlow::saveState_real
+            proc ::HWFlow::loadState {moduleKey} {
+                set ::loadedModule $moduleKey
+                return {only_midsurfed_assembly 0}
+            }
+            proc ::HWFlow::saveState {moduleKey state} {
+                set ::savedModule $moduleKey
+                set ::savedState $state
+            }
+            """
+        )
+        self.assertEqual(
+            int(self.tcl.call("::BomMaterialAssignment::loadSettings", 1)), 0
+        )
+        self.assertEqual(self.tcl.eval("set ::loadedModule"), "bom_material_assignment")
+        self.tcl.eval("set ::BomMaterialAssignment::ONLY_MIDSURFED_ASSEMBLY 1")
+        self.tcl.call("::BomMaterialAssignment::saveSettings")
+        self.assertEqual(self.tcl.eval("set ::savedModule"), "bom_material_assignment")
+        saved = self.tcl.eval("set ::savedState")
+        self.assertEqual(self.tcl.call("dict", "get", saved, "only_midsurfed_assembly"), "1")
+
 
 class BomMaterialAssignmentIntegrationTests(unittest.TestCase):
     def test_module_is_registered_and_visible(self):
@@ -121,6 +167,7 @@ class BomMaterialAssignmentIntegrationTests(unittest.TestCase):
         )[0]
         self.assertIn('group    "Geometry"', block)
         self.assertIn('proc     "::BomMaterialAssignment::runAction"', block)
+        self.assertIn('settings_proc "::BomMaterialAssignment::runSettings"', block)
         self.assertNotIn("hidden", block)
 
     def test_bom_reader_is_explicitly_reserved_for_follow_up(self):

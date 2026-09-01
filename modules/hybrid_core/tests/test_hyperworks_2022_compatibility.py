@@ -199,7 +199,7 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
             set ::shortcut_refreshes 0
             set ::panel_opens 0
             proc ::HWShortcut::initialize {} { incr ::shortcut_refreshes }
-            proc ::HWToolkit::sourceModules {} { return 1 }
+            proc ::HWToolkit::ensureCoreLoaded {} { return 1 }
             proc ::HWToolkit::clearExistingWindows {} { return }
             proc ::HWToolkit::showPanel {} { incr ::panel_opens }
             '''
@@ -211,6 +211,49 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
         tcl.eval("::HWToolkit::run")
         self.assertEqual(tcl.eval("set ::shortcut_refreshes"), "1")
         self.assertEqual(tcl.eval("set ::panel_opens"), "2")
+
+    def test_main_panel_defers_business_modules_until_first_use(self) -> None:
+        core = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
+        run_proc = core[
+            core.index("proc ::HWToolkit::run {{refreshShortcuts 1}}") :
+        ]
+        settings_proc = core[
+            core.index("proc ::HWToolkit::settingsModule") :
+            core.index("proc ::HWToolkit::helpModule")
+        ]
+
+        self.assertIn("::HWToolkit::ensureCoreLoaded", run_proc)
+        self.assertNotIn("::HWToolkit::sourceModules", run_proc)
+        self.assertIn("::HWToolkit::sourceOneModule $key $info", settings_proc)
+
+        tcl = tkinter.Tcl()
+        tcl.eval(
+            f"source -encoding utf-8 {{{(ROOT / 'hw_toolkit_core.tcl').as_posix()}}}"
+        )
+        tcl.eval(
+            r'''
+            namespace eval ::HWShortcut {}
+            set ::common_loads 0
+            set ::business_loads 0
+            set ::panel_opens 0
+            proc ::HWToolkit::ensureCoreLoaded {} {
+                incr ::common_loads
+                return 1
+            }
+            proc ::HWToolkit::sourceModules {} {
+                incr ::business_loads
+                return 1
+            }
+            proc ::HWToolkit::clearExistingWindows {} { return }
+            proc ::HWToolkit::showPanel {} { incr ::panel_opens }
+            proc ::HWShortcut::initialize {} { return 1 }
+            '''
+        )
+
+        tcl.eval("::HWToolkit::run")
+        self.assertEqual(tcl.eval("set ::common_loads"), "1")
+        self.assertEqual(tcl.eval("set ::business_loads"), "0")
+        self.assertEqual(tcl.eval("set ::panel_opens"), "1")
 
     def test_2022_startup_waits_for_native_shortcut_api_and_tracks_context(self) -> None:
         manager_path = ROOT / "modules" / "shortcut_manager.tcl"

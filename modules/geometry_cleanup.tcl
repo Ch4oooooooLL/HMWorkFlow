@@ -296,6 +296,38 @@ proc ::GeomCleanup::msg {text} {
     catch {hm_usermessage $text}
 }
 
+# A named history state only groups commands; HyperMesh does not add it to the
+# native Ctrl+Z stack when history recording (or the history limit) is off.
+proc ::GeomCleanup::enableNativeUndo {} {
+    foreach command {*startnotehistorystate *endnotehistorystate *undohistorystate *sethistoryrecord} {
+        if {[llength [info commands ::$command]] == 0} {
+            error [::HWFlow::txt "HyperMesh 缺少原生撤销命令 $command，已停止清理。" "HyperMesh native undo command $command is unavailable; cleanup was stopped."]
+        }
+    }
+    if {[llength [info commands ::hm_gethistorylimit]] > 0} {
+        set limit [hm_gethistorylimit]
+        if {$limit == 0} {
+            if {[llength [info commands ::*sethistorylimit]] == 0} {
+                error [::HWFlow::txt "HyperMesh 原生撤销容量为 0，且无法启用，已停止清理。" "HyperMesh native undo history has a zero limit and cannot be enabled; cleanup was stopped."]
+            }
+            *sethistorylimit 100
+        }
+    }
+    *sethistoryrecord 1
+    # HM2019 uses this installed legacy bridge for modifications originating
+    # in Tcl. It is optional because the public history commands remain the
+    # correctness contract and newer releases do not require it.
+    if {[llength [info commands ::hm_private_frwk]] > 0} {
+        catch {hm_private_frwk enablehistoryfromtcl 1}
+    }
+}
+
+proc ::GeomCleanup::nativeUndoActions {} {
+    if {[llength [info commands ::hm_getundoactions]] == 0} { return "" }
+    if {[catch {set actions [hm_getundoactions]}]} { return "" }
+    return $actions
+}
+
 proc ::GeomCleanup::beginPerformanceMode {} {
     variable ui
     if {![info exists ui(PERFORMANCE_MODE)] || !$ui(PERFORMANCE_MODE)} {
@@ -452,6 +484,14 @@ proc ::GeomCleanup::edgeEndPoints {edgeId} {
 }
 
 proc ::GeomCleanup::edgeLength {edgeId} {
+    # Endpoint distance is only a chord and becomes zero for a closed circular
+    # edge. HyperMesh exposes the true curve length on both supported builds;
+    # use it so pocket outer/inner-loop classification also works for circles.
+    if {[llength [info commands ::hm_linelength]] > 0 &&
+        ![catch {set length [hm_linelength $edgeId]}] &&
+        [string is double -strict $length] && $length >= 0.0} {
+        return [expr {double($length)}]
+    }
     set ep [::GeomCleanup::edgeEndPoints $edgeId]
     if {$ep eq ""} {
         return 0.0
@@ -1042,33 +1082,52 @@ proc ::GeomCleanup::classifyPocketLoops {loops seed} {
             set score [::GeomCleanup::loopWallDistanceScore $loop $walls]
         }
         set perimeter [::GeomCleanup::loopPerimeter $loop]
-        lappend rows [list $score [expr {-$perimeter}] $loop $walls $datumEdges $datumSurfs]
+        lappend rows [list $perimeter $score $loop $walls $datumEdges $datumSurfs]
     }
     if {[llength $rows] != 2} {
         error [::HWFlow::txt "简化沉台流程要求两个边界环都能找到相邻壁面；当前有效边界环数量：[llength $rows]。" "The simplified pocket workflow requires both boundary loops to have adjacent wall surfaces; valid loop count: [llength $rows]."]
     }
-    set rows [lsort -real -index 0 $rows]
+    # The pocket floor is an annular face: its geometrically outer boundary is
+    # the larger-perimeter loop, while the other loop belongs to the through
+    # hole. Do not infer this from wall height. A short remaining through-hole
+    # wall is perfectly valid and the former height sort deleted that normal
+    # hole wall, then ruled the pocket outer edge to the opposite hole edge.
+    set rows [lsort -real -decreasing -index 0 $rows]
     set outerRow [lindex $rows 0]
     set innerRow [lindex $rows 1]
-    set outerScore [lindex $outerRow 0]
-    set innerScore [lindex $innerRow 0]
-    if {$outerScore >= 1.0e98 || $innerScore >= 1.0e98 || !($outerScore + 1.0e-8 < $innerScore)} {
-        error [::HWFlow::txt "无法可靠区分沉台小竖直面和孔壁：候选高度分别为 $outerScore 与 $innerScore。已停止，避免误删其他平面。" "Could not reliably distinguish the small pocket wall from the hole wall: candidate heights are $outerScore and $innerScore. Stopped to avoid modifying unrelated planes."]
+    set outerPerimeter [lindex $outerRow 0]
+    set innerPerimeter [lindex $innerRow 0]
+    set outerScore [lindex $outerRow 1]
+    set innerScore [lindex $innerRow 1]
+    if {$outerPerimeter <= 0.0 || $innerPerimeter <= 0.0 ||
+        !($outerPerimeter > $innerPerimeter + 1.0e-8)} {
+        error [::HWFlow::txt "无法按边界周长可靠区分沉台外环和贯穿孔内环：候选周长分别为 $outerPerimeter 与 $innerPerimeter。已停止，避免删除正常孔壁。" "Could not reliably distinguish the pocket outer loop from the through-hole inner loop by boundary perimeter: candidates are $outerPerimeter and $innerPerimeter. Stopped to protect the normal hole wall."]
     }
     if {[llength [lindex $outerRow 4]] == 0 || [llength [lindex $outerRow 5]] == 0} {
-        error [::HWFlow::txt "较短候选壁面没有找到与基准平面相连的基准边，已停止。" "The shorter candidate wall has no datum edges connected to a datum surface. Stopped."]
+        error [::HWFlow::txt "沉台外环壁面没有找到与基准平面相连的基准边，已停止。" "The pocket outer-loop wall has no datum edges connected to a datum surface. Stopped."]
+    }
+    set overlap {}
+    foreach wall [lindex $outerRow 3] {
+        if {[::GeomCleanup::contains [lindex $innerRow 3] $wall]} {
+            lappend overlap $wall
+        }
+    }
+    if {[llength $overlap] > 0} {
+        error [::HWFlow::txt "沉台外壁与正常孔壁分类发生重叠（surface=$overlap），已停止，避免误删孔壁。" "Pocket-wall and normal-hole-wall classifications overlap (surface=$overlap). Stopped to protect the hole wall."]
     }
     return [dict create \
         outer_loop [lindex $outerRow 2] \
         outer_walls [lindex $outerRow 3] \
         outer_datum_edges [lindex $outerRow 4] \
         outer_datum_surfs [lindex $outerRow 5] \
-        outer_score [lindex $outerRow 0] \
+        outer_score [lindex $outerRow 1] \
+        outer_perimeter $outerPerimeter \
         inner_loop [lindex $innerRow 2] \
         inner_walls [lindex $innerRow 3] \
         inner_datum_edges [lindex $innerRow 4] \
         inner_datum_surfs [lindex $innerRow 5] \
-        inner_score [lindex $innerRow 0]]
+        inner_score [lindex $innerRow 1] \
+        inner_perimeter $innerPerimeter]
 }
 
 proc ::GeomCleanup::createSurfaceBetweenLoops {innerLines baseLines} {
@@ -1131,6 +1190,8 @@ proc ::GeomCleanup::removePocket {seed} {
     set innerWalls [dict get $classified inner_walls]
     set outerScore [dict get $classified outer_score]
     set innerScore [dict get $classified inner_score]
+    set outerPerimeter [dict get $classified outer_perimeter]
+    set innerPerimeter [dict get $classified inner_perimeter]
     set baseEdges [dict get $classified outer_datum_edges]
     set surroundingSurfs [dict get $classified outer_datum_surfs]
 
@@ -1157,9 +1218,14 @@ proc ::GeomCleanup::removePocket {seed} {
     set code [catch {
         set innerConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $innerLoop [::HWFlow::txt "沉台内边" "Pocket inner loop"]]
         set baseConstruction [::GeomCleanup::copyLinesOrEdgesToSourceComponent $baseEdges [::HWFlow::txt "沉台基准边" "Pocket datum loop"]]
-        ::GeomCleanup::msg [::HWFlow::txt "沉台面=$seed；小竖直面=${outerWalls}(score=$outerScore)；孔壁=${innerWalls}(score=$innerScore)；内边=$innerLoop；基准边=$baseEdges；基准平面=$surroundingSurfs" "Pocket face=$seed; small vertical walls=${outerWalls}(score=$outerScore); hole walls=${innerWalls}(score=$innerScore); inner loop=$innerLoop; datum edges=$baseEdges; datum surfaces=$surroundingSurfs"]
+        ::GeomCleanup::msg [::HWFlow::txt "沉台面=$seed；外环周长=$outerPerimeter；内环周长=$innerPerimeter；小竖直面=${outerWalls}(height=$outerScore)；保留孔壁=${innerWalls}(height=$innerScore)；内边=$innerLoop；基准边=$baseEdges；基准平面=$surroundingSurfs" "Pocket face=$seed; outer perimeter=$outerPerimeter; inner perimeter=$innerPerimeter; pocket walls=${outerWalls}(height=$outerScore); preserved hole walls=${innerWalls}(height=$innerScore); inner loop=$innerLoop; datum edges=$baseEdges; datum surfaces=$surroundingSurfs"]
 
         ::GeomCleanup::deleteSurfaces $deleteFaces
+        foreach holeWall $innerWalls {
+            if {![::GeomCleanup::entityExistsById surfs $holeWall]} {
+                error [::HWFlow::txt "正常孔壁 surface $holeWall 在删除沉台壁时被移除，已中止 ruled 并回滚本次清理。" "Normal hole-wall surface $holeWall was removed while deleting the pocket walls; ruled creation was stopped and this cleanup will be rolled back."]
+            }
+        }
         set newSurfs [::GeomCleanup::createSurfaceBetweenLoops $innerConstruction $baseConstruction]
         ::GeomCleanup::organizeSurfacesToComponent $newSurfs $compId
     } err opts]
@@ -1207,9 +1273,13 @@ proc ::GeomCleanup::processSurface {seed} {
     variable stat
     ::GeomCleanup::resetStats
     set historyName "Geometry Cleanup Surface $seed"
-    set historyStarted 0
-    if {![catch {*startnotehistorystate $historyName}]} {
-        set historyStarted 1
+    if {[catch {
+        ::GeomCleanup::enableNativeUndo
+        set canVerifyUndo [expr {[llength [info commands ::hm_getundoactions]] > 0}]
+        set undoBefore [::GeomCleanup::nativeUndoActions]
+        *startnotehistorystate $historyName
+    } historyError historyOptions]} {
+        return -options $historyOptions [::HWFlow::txt "无法接入 HyperMesh 原生 Ctrl+Z 撤销，未执行清理：$historyError" "Could not start HyperMesh native Ctrl+Z history; cleanup was not run: $historyError"]
     }
     set code [catch {
         ::GeomCleanup::beginPerformanceMode
@@ -1239,16 +1309,26 @@ proc ::GeomCleanup::processSurface {seed} {
 
     ::GeomCleanup::clearWorkingMarks
     ::GeomCleanup::endPerformanceMode
-    if {$historyStarted} {
-        catch {*endnotehistorystate $historyName}
+    set endCode [catch {*endnotehistorystate $historyName} endError endOptions]
+    if {$endCode && !$code} {
+        set code 1
+        set err [::HWFlow::txt "无法提交 HyperMesh 原生 Ctrl+Z 撤销项：$endError" "Could not commit the HyperMesh native Ctrl+Z undo action: $endError"]
+        set opts $endOptions
     }
     if {$code} {
-        if {$historyStarted} {
-            catch {*undohistorystate 1}
-            ::GeomCleanup::clearWorkingMarks
-            catch {::HWFlow::refreshBrowser}
-        }
+        # If closing the history state failed, retry once before invoking the
+        # native rollback. This keeps the best available rollback path even on
+        # a release that transiently rejects the first end call.
+        if {$endCode} { catch {*endnotehistorystate $historyName} }
+        catch {*undohistorystate 1}
+        ::GeomCleanup::clearWorkingMarks
+        catch {::HWFlow::refreshBrowser}
         return -options $opts $err
+    }
+
+    set undoAfter [::GeomCleanup::nativeUndoActions]
+    if {$canVerifyUndo && $undoBefore eq $undoAfter} {
+        ::GeomCleanup::msg [::HWFlow::txt "警告：HyperMesh 未报告新的原生撤销项；请在当前版本中确认 Ctrl+Z 行为。" "Warning: HyperMesh did not report a new native undo action; verify Ctrl+Z on this release."]
     }
 
     set msg [::HWFlow::txt "面 $seed 清理完成：模式=$stat(mode)，处理面=$stat(targetSurfs)，新建/补充 surface=$stat(newSurfs)，新建/补充 solid=$stat(newSolids)。请继续选择下一个面。" "Surface $seed cleaned: mode=$stat(mode), target surfaces=$stat(targetSurfs), new/repaired surfaces=$stat(newSurfs), new/repaired solids=$stat(newSolids). Select the next face."]

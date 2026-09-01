@@ -111,15 +111,15 @@ class GeometryPreprocessTests(unittest.TestCase):
 
             self.assertEqual(
                 tcl.call(".geometry_preprocess.main.coordinates.run", "cget", "-text"),
-                "转为车辆坐标系",
+                "Convert to Vehicle Coordinates",
             )
             self.assertEqual(
                 tcl.call(".geometry_preprocess.main.organization.clean", "cget", "-text"),
-                "清理无关部件",
+                "Clean Irrelevant Components",
             )
             self.assertEqual(
                 tcl.call(".geometry_preprocess.main.organization.skell", "cget", "-text"),
-                "移除骨架",
+                "Remove Skeleton",
             )
             self.assertEqual(
                 tcl.call("winfo", "class", ".geometry_preprocess.main.coordinates"),

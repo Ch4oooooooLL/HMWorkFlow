@@ -105,6 +105,21 @@ class HoleEvaluationTests(unittest.TestCase):
         self.assertAlmostEqual(result["diameter"], 10.0)
         self.assertEqual(len(result["boundary_loops"]), 2)
 
+    def test_inner_normal_filter_rejects_outer_cylindrical_surface(self):
+        model, faces = tube_faces()
+        outer_faces = [
+            Face(face.face_id, face.element_id, face.node_ids, tuple(-value for value in face.normal))
+            for face in faces
+        ]
+        result, reason = evaluate(
+            model,
+            [face.face_id for face in outer_faces],
+            {face.face_id: face for face in outer_faces},
+            self.settings(requireInnerNormal=True),
+        )
+        self.assertIsNone(result)
+        self.assertEqual(reason, "NOT_INNER_SURFACE")
+
     def test_radius_limits(self):
         _, result, reason = self.candidate(minRadius=6.0)
         self.assertIsNone(result)
@@ -334,6 +349,23 @@ class TclWorkflowContractTests(unittest.TestCase):
             source.index("*feoutput_select"),
         )
 
+    def test_internal_faces_component_is_temporarily_renamed_for_native_export(self):
+        source = self.source("tcl/exporter.tcl")
+        self.assertIn("proc ::AutoHoleRBE2::temporarySurfaceExportName", source)
+        self.assertIn("proc ::AutoHoleRBE2::renameSurfaceExportComponent", source)
+        export_body = source[source.index("proc ::AutoHoleRBE2::exportHybridSurfaceFem"):]
+        first_rename = export_body.index(
+            "renameSurfaceExportComponent $faceComponentId $temporaryName"
+        )
+        native_export = export_body.index("*feoutput_select")
+        restore = export_body.index(
+            "renameSurfaceExportComponent $faceComponentId $cfg(faceCompName)"
+        )
+        self.assertLess(first_rename, native_export)
+        self.assertLess(native_export, restore)
+        self.assertIn("if {$renamed}", export_body)
+        self.assertIn("if {$restoreError ne \"\"}", export_body)
+
     def test_faces_component_is_deleted_only_after_candidate_execution(self):
         exporter = self.source("tcl/exporter.tcl")
         workflow = self.source("tcl/workflow.tcl")
@@ -373,6 +405,7 @@ class TclWorkflowContractTests(unittest.TestCase):
 
     def test_creation_failure_has_explicit_rollback(self):
         source = self.source("../auto_hole_rbe2.tcl")
+        self.assertIn("proc ::AutoHoleRBE2::hybridNodeExists", source)
         self.assertIn("proc ::AutoHoleRBE2::cleanupFailedRBE2", source)
         self.assertIn("proc ::AutoHoleRBE2::latestCreatedEntityIds", source)
         create_body = source[source.index("proc ::AutoHoleRBE2::createRBE2"):]
@@ -396,7 +429,7 @@ class TclWorkflowContractTests(unittest.TestCase):
 
     def test_bugfix_version_is_visible_to_confirm_the_loaded_module(self):
         main_source = self.source("../auto_hole_rbe2.tcl")
-        self.assertIn('variable VERSION "1.1.2"', main_source)
+        self.assertIn('variable VERSION "1.1.3"', main_source)
 
     def test_python_result_caps_rejection_details_and_writes_once(self):
         source = self.source("python/main.py")

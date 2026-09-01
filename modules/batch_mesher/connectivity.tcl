@@ -70,6 +70,8 @@ proc ::BatchMesher::buildTasks {groups} {
             surface_ids [dict get $group surface_ids] surface_count [dict get $group surface_count] \
             component_ids $componentIds component_names $componentNames status pending \
             elapsed_seconds "" started_at "" ended_at "" error_message "" warning_message "" \
+            connectivity_status pending connectivity_components "" \
+            quality_status pending quality_failed_elements 0 optimization_status not_required optimization_attempts 0 \
             packaging_status pending packaging_error "" log_path ""]
     }
     return $tasks

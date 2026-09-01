@@ -107,6 +107,26 @@ proc ::AutoHoleRBE2::prepareSurfaceFacesForFemExport {faceComponentId} {
     return $markedCount
 }
 
+proc ::AutoHoleRBE2::temporarySurfaceExportName {faceComponentId} {
+    # The OptiStruct output template treats caret-prefixed collectors as
+    # HyperMesh-internal display data.  Both HM2019 and HM2022 consequently
+    # write GRID cards but silently omit the ^faces shell cards.  Use a unique
+    # ordinary name only for the duration of the export; the caller restores
+    # ^faces even when the exporter raises an error.
+    return "HMWF_AUTO_HOLE_FACES_${faceComponentId}_[clock clicks]"
+}
+
+proc ::AutoHoleRBE2::renameSurfaceExportComponent {faceComponentId newName} {
+    set errors {}
+    foreach entityType {comps components} {
+        if {![catch {*setvalue $entityType id=$faceComponentId name=$newName} err]} {
+            return
+        }
+        lappend errors "$entityType: $err"
+    }
+    error "Cannot rename generated free-face component $faceComponentId to $newName: [join $errors {; }]"
+}
+
 proc ::AutoHoleRBE2::exportHybridSurfaceFem {taskDir runId surfaceData} {
     variable cfg; variable ui
     set femPath [file join $taskDir surface_faces.fem]
@@ -119,8 +139,12 @@ proc ::AutoHoleRBE2::exportHybridSurfaceFem {taskDir runId surfaceData} {
     set template [::AutoHoleRBE2::surfaceFemExportTemplate]
     catch {*clearmark elems 1}
     catch {*clearmark nodes 1}
+    set faceComponentId [dict get $surfaceData face_component_id]
+    set temporaryName [::AutoHoleRBE2::temporarySurfaceExportName $faceComponentId]
+    set renamed 0
     set code [catch {
-        set faceComponentId [dict get $surfaceData face_component_id]
+        ::AutoHoleRBE2::renameSurfaceExportComponent $faceComponentId $temporaryName
+        set renamed 1
         ::AutoHoleRBE2::prepareSurfaceFacesForFemExport $faceComponentId
         *createmark elems 1 "by component id" $faceComponentId
         *createmark nodes 1 "by component id" $faceComponentId
@@ -129,8 +153,23 @@ proc ::AutoHoleRBE2::exportHybridSurfaceFem {taskDir runId surfaceData} {
         ::HWFlow::runHyperMeshIo export \
             [list *feoutput_select $template $femPath 1 0 0] $femPath
     } err opts]
+    # Restore the well-known disposable collector before propagating any
+    # export error so normal cleanup and a subsequent run remain reliable.
+    set restoreError ""
+    if {$renamed} {
+        catch {::AutoHoleRBE2::renameSurfaceExportComponent $faceComponentId $cfg(faceCompName)} restoreError
+    }
     catch {*clearmark elems 1}
     catch {*clearmark nodes 1}
+    if {$restoreError ne ""} {
+        if {$code} {
+            append err "; additionally failed to restore $cfg(faceCompName): $restoreError"
+        } else {
+            set code 1
+            set err "Surface FEM was exported, but the temporary component could not be restored: $restoreError"
+            set opts [dict create -code error -level 0 -errorcode NONE]
+        }
+    }
     if {$code} { return -options $opts $err }
     if {![file isfile $femPath] || [file size $femPath] == 0} {
         error "HyperMesh did not create the generated free-face FEM export"

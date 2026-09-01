@@ -76,6 +76,15 @@ proc ::BatchMesher::onTaskSelected {args} {
     if {[dict exists $task warning_message] && [dict get $task warning_message] ne ""} {
         append ui(task_detail) "\n[::BatchMesher::txt {网格警告} {Meshing warning}]: [dict get $task warning_message]"
     }
+    if {[dict exists $task quality_status]} {
+        append ui(task_detail) "\n[::BatchMesher::txt {质量状态} {Quality status}]: [dict get $task quality_status]"
+        if {[dict get $task quality_status] eq "needs_optimization"} {
+            append ui(task_detail) " ([dict get $task quality_failed_elements] [::BatchMesher::txt {个待后续迭代优化单元} {elements queued for later iterative optimization}])"
+        }
+    }
+    if {[dict exists $task connectivity_status]} {
+        append ui(task_detail) "\n[::BatchMesher::txt {跨边界连通性} {Cross-boundary connectivity}]: [dict get $task connectivity_status]"
+    }
     if {[dict exists $task packaging_status] && [dict get $task packaging_status] eq "failed"} {
         append ui(task_detail) "\n[::BatchMesher::txt {结果封装失败} {Result packaging failed}]: [dict get $task packaging_error]"
     }
@@ -168,10 +177,10 @@ proc ::BatchMesher::refreshUi {} {
 proc ::BatchMesher::validateConfigFromUi {} {
     if {[catch {set config [::BatchMesher::validateRunConfig]} err]} { ::BatchMesher::showError $err; return }
     if {[catch {set probe [::BatchMesher::testHmbatchStartup]} err]} { ::BatchMesher::showError $err; return }
-    set message [::BatchMesher::txt "Criteria 和 Param 有效。" "Criteria and param files are valid."]
+    set message [::BatchMesher::txt "Criteria 和 Param 已由目标 hmbatch 实际解析并完成试划分。" "The target hmbatch parsed the criteria and param files and completed a trial mesh."]
     append message [::BatchMesher::txt \
-        "\nhmbatch 已真实启动并执行 Tcl；版本：[dict get $probe version]；实际程序：[dict get $probe executable]" \
-        "\nhmbatch executed the Tcl preflight successfully; version: [dict get $probe version]; executable: [dict get $probe executable]"]
+        "\nhmbatch 已真实启动并执行 Tcl；版本：[dict get $probe version]；BatchMesh 接口：[dict get $probe selected_api]；实际程序：[dict get $probe executable]" \
+        "\nhmbatch executed the Tcl preflight successfully; version: [dict get $probe version]; BatchMesh API: [dict get $probe selected_api]; executable: [dict get $probe executable]"]
     if {[llength [dict get $config warnings]] > 0} { append message "\n\n[::BatchMesher::txt "提示：文件自保存预设后被外部修改，将使用最新内容。" "Notice: files changed since the preset was saved; latest contents will be used."]\n[join [dict get $config warnings] \n]" }
     tk_messageBox -icon info -title [::BatchMesher::txt "配置验证" "Configuration Validation"] -message $message
 }
@@ -255,7 +264,7 @@ proc ::BatchMesher::showPanel {} {
     grid rowconfigure $w.main.groups 0 -weight 1; grid columnconfigure $w.main.groups 0 -weight 1
     ttk::treeview $w.main.groups.tree -columns {surfaces components status warning} -show {tree headings} -height 7
     $w.main.groups.tree heading #0 -text [::BatchMesher::txt "连通域" "Group"]
-    foreach item {{surfaces "Surface 数量"} {components "Component 数量"} {status "状态"} {warning "诊断"}} { lassign $item key title; $w.main.groups.tree heading $key -text $title; $w.main.groups.tree column $key -width 130 -anchor center }
+    foreach item {{surfaces "Surface 数量" "Surface count"} {components "Component 数量" "Component count"} {status "状态" "Status"} {warning "诊断" "Diagnosis"}} { lassign $item key zh en; $w.main.groups.tree heading $key -text [::BatchMesher::txt $zh $en]; $w.main.groups.tree column $key -width 130 -anchor center }
     grid $w.main.groups.tree -row 0 -column 0 -sticky nsew
     bind $w.main.groups.tree <<TreeviewSelect>> ::BatchMesher::onGroupSelected
     label $w.main.groups.detail -textvariable ::BatchMesher::ui(group_detail) -anchor w
@@ -274,7 +283,7 @@ proc ::BatchMesher::showPanel {} {
     grid rowconfigure $w.main.tasks 0 -weight 1; grid columnconfigure $w.main.tasks 0 -weight 1
     ttk::treeview $w.main.tasks.tree -columns {group surfaces status elapsed} -show {tree headings} -height 7
     $w.main.tasks.tree heading #0 -text [::BatchMesher::txt "任务" "Task"]
-    foreach item {{group "连通域"} {surfaces "Surface 数量"} {status "状态"} {elapsed "耗时"}} { lassign $item key title; $w.main.tasks.tree heading $key -text $title; $w.main.tasks.tree column $key -width 140 -anchor center }
+    foreach item {{group "连通域" "Group"} {surfaces "Surface 数量" "Surface count"} {status "状态" "Status"} {elapsed "耗时" "Elapsed"}} { lassign $item key zh en; $w.main.tasks.tree heading $key -text [::BatchMesher::txt $zh $en]; $w.main.tasks.tree column $key -width 140 -anchor center }
     grid $w.main.tasks.tree -row 0 -column 0 -sticky nsew
     bind $w.main.tasks.tree <<TreeviewSelect>> ::BatchMesher::onTaskSelected
     label $w.main.tasks.detail -textvariable ::BatchMesher::ui(task_detail) -anchor w -justify left -wraplength 900

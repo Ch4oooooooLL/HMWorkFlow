@@ -1,5 +1,5 @@
 # ======================================================================
-# AutoHoleRBE2 v1.1.2
+# AutoHoleRBE2 v1.1.3
 # HyperMesh 2019 Tcl
 #
 # Purpose:
@@ -24,7 +24,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::AutoHoleRBE2 {
-    variable VERSION "1.1.2"
+    variable VERSION "1.1.3"
 
     variable cfg
     array set cfg {
@@ -38,7 +38,7 @@ namespace eval ::AutoHoleRBE2 {
         maxRadius            0.0
         rigidType            RBE2
         dof                  123456
-        requireInnerNormal   0
+        requireInnerNormal   1
         innerNormalMaxDot   -0.05
 
         preDeleteOldFaces    1
@@ -270,7 +270,7 @@ proc ::AutoHoleRBE2::applyPreset {mode} {
             set ui(loopNormalTolDeg) 35.0
             set ui(minWallNodes) 6
             set ui(minLoopNodes) 4
-            set ui(requireInnerNormal) 0
+            set ui(requireInnerNormal) 1
         }
     }
 }
@@ -560,6 +560,17 @@ proc ::AutoHoleRBE2::nodeXYZ {nodeId} {
     }
 
     error [::HWFlow::txt "无法读取节点 $nodeId 的坐标。" "Cannot read coordinates for node $nodeId."]
+}
+
+proc ::AutoHoleRBE2::hybridNodeExists {nodeId} {
+    if {![string is integer -strict $nodeId] || $nodeId <= 0} { return 0 }
+    foreach entityType {nodes node} {
+        if {![catch {set value [hm_getvalue $entityType id=$nodeId dataname=id]}] &&
+            $value ne "" && $value != 0} {
+            return 1
+        }
+    }
+    return 0
 }
 
 proc ::AutoHoleRBE2::elemNodes {elemId} {
@@ -1387,8 +1398,8 @@ proc ::AutoHoleRBE2::runCurrentSelection {} {
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
-            [::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] \
-            [::HWFlow::txt "准备识别实体贯通孔..." "Preparing through-hole detection..."] \
+            [::HWFlow::ctxt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] \
+            [::HWFlow::ctxt "准备识别实体贯通孔..." "Preparing through-hole detection..."] \
             0]
     }
     set rigidType [string toupper $cfg(rigidType)]
@@ -1424,7 +1435,7 @@ proc ::AutoHoleRBE2::runCurrentSelection {} {
             ::AutoHoleRBE2::message [::HWFlow::txt "完成：已创建 $stat(created) 个 $rigidType 单元，跳过既有 $stat(skippedExisting) 个。" "Finished: created $stat(created) $rigidType element(s), skipped $stat(skippedExisting) existing."]
         }
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "Solid Through-Hole RIGIDS finished." "Solid Through-Hole RIGIDS finished."] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::ctxt "Solid Through-Hole RIGIDS finished." "Solid Through-Hole RIGIDS finished."] 100.0}
         }
         catch {tk_messageBox -icon info -title "[::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] v$VERSION" -message $msg}
     } else {
@@ -1435,7 +1446,7 @@ proc ::AutoHoleRBE2::runCurrentSelection {} {
         }
 
         if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
-            catch {::HWFlow::progressClose [::HWFlow::txt "Solid Through-Hole RIGIDS failed." "Solid Through-Hole RIGIDS failed."] 100.0}
+            catch {::HWFlow::progressClose [::HWFlow::ctxt "Solid Through-Hole RIGIDS failed." "Solid Through-Hole RIGIDS failed."] 100.0}
         }
         catch {tk_messageBox -icon warning -title "[::HWFlow::txt "Solid Through-Hole RIGIDS" "Solid Through-Hole RIGIDS"] v$VERSION" -message $msg}
     }

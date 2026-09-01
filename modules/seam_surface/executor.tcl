@@ -554,8 +554,10 @@ proc ::hmtoolkit::seam::executor::_create_t {data strategy} {
 # T Surface creation (the public compatibility key remains T_PATH). This is
 # the surface-to-surface extend route recorded as
 #   *connect_surfaces_11 1 2 1 <trim> <distance> ... 59 0
-# Both selected surface groups are passed in one native call, matching the
-# command's source-mark/target-mark contract.
+# HyperMesh accepts a target-surface mark here, but with more than one target
+# it can complete the projection/trim stage without creating an extended
+# surface for every member of that mark.  Run one native call per target so a
+# successful trim cannot silently turn into an empty T seam result.
 proc ::hmtoolkit::seam::executor::_create_t_surface {data} {
     set sourceSurfs [::hmtoolkit::seam::validation::require_ids $data source_surfs surfs]
     set targetSurfs [::hmtoolkit::seam::validation::require_ids $data target_surfs surfs]
@@ -576,9 +578,6 @@ proc ::hmtoolkit::seam::executor::_create_t_surface {data} {
     set component [::hmtoolkit::seam::naming::get_or_create_component $thickness]
     set componentName [lindex $component 0]
     set componentId [lindex $component 1]
-    ::hmtoolkit::seam::native::ensure_current_component $componentName $componentId
-    set beforeComponent [::hmtoolkit::seam::entity::component_surfaces $componentId]
-    set beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]
     set distance [::hmtoolkit::seam::config::get connect_extend_distance]
     set trimMode [::hmtoolkit::seam::config::get t_surface_trim_mode]
     set minAngle [::hmtoolkit::seam::config::get connect_min_angle_to_target]
@@ -588,25 +587,32 @@ proc ::hmtoolkit::seam::executor::_create_t_surface {data} {
         error "\[T Surface\] connect_extend_distance must be positive."
     }
 
-    foreach type {surfs lines} {
-        foreach markId {1 2} { catch {*clearmark $type $markId} }
+    set created {}
+    foreach targetSurf $targetSurfs {
+        ::hmtoolkit::seam::native::ensure_current_component $componentName $componentId
+        set beforeComponent [::hmtoolkit::seam::entity::component_surfaces $componentId]
+        set beforeAll [::hmtoolkit::seam::entity::snapshot_ids surfs]
+        foreach type {surfs lines} {
+            foreach markId {1 2} { catch {*clearmark $type $markId} }
+        }
+        ::hmtoolkit::seam::entity::mark surfs 1 $sourceSurfs
+        ::hmtoolkit::seam::entity::mark surfs 2 [list $targetSurf]
+        ::hmtoolkit::seam::log::write INFO \
+            "T Surface native args: *connect_surfaces_11 1 2 1 $trimMode $distance $minAngle $maxAngle 1 0 2 $guideAngle 59 0; source=$sourceSurfs; target=$targetSurf"
+        if {[catch {
+            *connect_surfaces_11 1 2 1 $trimMode $distance $minAngle $maxAngle 1 0 2 $guideAngle 59 0
+        } connectErr]} {
+            catch {*clearmark surfs 1}; catch {*clearmark surfs 2}
+            error "\[T Surface\] Native surface extension failed for target $targetSurf: $connectErr"
+        }
+        # advanced_options=59 asks HyperMesh to create new extended surfaces
+        # in the current component. Validate each target immediately; otherwise
+        # a later successful target could hide an earlier no-output call.
+        set targetCreated [::hmtoolkit::seam::validation::created_surfaces_for_component \
+            $beforeComponent $beforeAll $componentId]
+        set created [concat $created $targetCreated]
     }
-    ::hmtoolkit::seam::entity::mark surfs 1 $sourceSurfs
-    ::hmtoolkit::seam::entity::mark surfs 2 $targetSurfs
-    ::hmtoolkit::seam::log::write INFO \
-        "T Surface native args: *connect_surfaces_11 1 2 1 $trimMode $distance $minAngle $maxAngle 1 0 2 $guideAngle 59 0; source=$sourceSurfs; targets=$targetSurfs"
-    if {[catch {
-        *connect_surfaces_11 1 2 1 $trimMode $distance $minAngle $maxAngle 1 0 2 $guideAngle 59 0
-    } connectErr]} {
-        catch {*clearmark surfs 1}; catch {*clearmark surfs 2}
-        error "\[T Surface\] Native surface extension failed: $connectErr"
-    }
-    # advanced_options=59 asks HyperMesh to create new extended surfaces in
-    # the current component. The result is a copied/extended surface, not a
-    # separate bridge strip, so the strip-oriented equivalence gate used by
-    # mode 3 is not applicable and previously rolled valid results back.
-    set created [::hmtoolkit::seam::validation::created_surfaces_for_component \
-        $beforeComponent $beforeAll $componentId]
+    set created [lsort -integer -unique $created]
     catch {*clearmark surfs 1}; catch {*clearmark surfs 2}
     return [::hmtoolkit::seam::executor::success T_PATH $created [list $componentName] {} \
         "\[T Surface\] Extended surface(s) created successfully."]

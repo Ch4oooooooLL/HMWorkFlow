@@ -1,10 +1,11 @@
 # ============================================================================
-# MidSurf v0.1
+# MidSurf v0.8
 # HyperMesh 2019 Tcl/Tk
 #
 # Batch midsurface extraction for sheet-metal geometry components.
 # Output component names are generated as:
-#   Vxx_<part name>_T<thickness>[_<material>]
+#   V01_<part name>_T<thickness>[_<material>]
+# Existing versions advance to V02, V03, ... without being overwritten.
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -12,7 +13,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::MidSurf {
-    variable VERSION "0.1"
+    variable VERSION "0.8"
     variable outputAssemblyName "MIDSURFED"
 
     variable cfg
@@ -338,34 +339,31 @@ proc ::MidSurf::getComponentName {compId} {
 }
 
 proc ::MidSurf::componentExistsByName {compName} {
-    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
-        return [expr {[::HWFlow::componentIdByName $compName] ne ""}]
-    }
-    if {![catch {set exists [hm_entityinfo exist components $compName -byname]}]} {
-        return $exists
-    }
-    if {![catch {set cid [hm_entityinfo id components $compName -byname]}] && $cid ne "" && $cid != 0} {
-        return 1
-    }
-    return 0
+    return [expr {[::MidSurf::componentIdByName $compName] ne ""}]
 }
 
 proc ::MidSurf::componentIdByName {compName} {
-    if {[llength [info commands ::HWFlow::componentIdByName]] > 0} {
-        return [::HWFlow::componentIdByName $compName]
-    }
+    # Do not use HWFlow::componentIdByName here. Its compatibility fallback
+    # intentionally treats HyperMesh .1/.2 duplicate suffixes as equivalent,
+    # while midsurface region names use those suffixes as real identities.
     foreach etype {components comps component} {
         if {![catch {set cid [hm_entityinfo id $etype $compName -byname]}] && $cid ne "" && $cid != 0} {
-            return $cid
+            if {[::MidSurf::getComponentName $cid] eq $compName} {
+                return $cid
+            }
         }
     }
 
     foreach etype {components comps} {
         catch {*clearmark $etype 2}
-        if {![catch {*createmark $etype 2 "by name only" $compName}]} {
-            if {![catch {set ids [hm_getmark $etype 2]}] && [llength $ids] > 0} {
-                catch {*clearmark $etype 2}
-                return [lindex $ids 0]
+        if {![catch {*createmark $etype 2 all}]} {
+            if {![catch {set ids [hm_getmark $etype 2]}]} {
+                foreach cid $ids {
+                    if {[::MidSurf::getComponentName $cid] eq $compName} {
+                        catch {*clearmark $etype 2}
+                        return $cid
+                    }
+                }
             }
         }
         catch {*clearmark $etype 2}
@@ -438,6 +436,10 @@ proc ::MidSurf::getCompEntityIds {compId dataname markEntityType} {
 }
 
 proc ::MidSurf::markInputGeometry {compId} {
+    # A midsurface extraction task is driven by solid bodies. Each solid in a
+    # multi-body component becomes an independent task and produces surfaces
+    # in its own result component. Surface input is compatibility fallback
+    # only for source components that genuinely contain no solids.
     set solids [::MidSurf::getCompEntityIds $compId solids solids]
     if {[llength $solids] > 0} {
         catch {*clearmark solids 1}
@@ -453,6 +455,240 @@ proc ::MidSurf::markInputGeometry {compId} {
     }
 
     return [list "" {}]
+}
+
+proc ::MidSurf::listDifference {left right} {
+    array set remove {}
+    foreach id $right {
+        set remove($id) 1
+    }
+    set out {}
+    foreach id $left {
+        if {![info exists remove($id)]} {
+            lappend out $id
+        }
+    }
+    return $out
+}
+
+# Return the topology-connected subset of target surfaces that contains seed.
+# HyperMesh 2019 patch levels may expand only one adjacency ring per call, so
+# repeat "by attached" until the mark stops growing.
+proc ::MidSurf::attachedTargetSurfaces {seed targetIds} {
+    catch {*clearmark surfs 1}
+    *createmark surfs 1 $seed
+
+    set previousCount -1
+    set iterations 0
+    while {1} {
+        set current [::MidSurf::uniq [hm_getmark surfs 1]]
+        set count [llength $current]
+        if {$count == $previousCount} {
+            break
+        }
+        set previousCount $count
+        incr iterations
+        if {$iterations > 100000} {
+            catch {*clearmark surfs 1}
+            error "by attached did not converge for seed surface $seed"
+        }
+        if {[catch {*appendmark surfs 1 "by attached"} err]} {
+            catch {*clearmark surfs 1}
+            error "by attached failed for seed surface $seed: $err"
+        }
+    }
+
+    set attached [::MidSurf::uniq [hm_getmark surfs 1]]
+    catch {*clearmark surfs 1}
+    array set allowed {}
+    foreach id $targetIds {
+        set allowed($id) 1
+    }
+    set group {}
+    foreach id $attached {
+        if {[info exists allowed($id)]} {
+            lappend group $id
+        }
+    }
+    if {[lsearch -exact $group $seed] < 0} {
+        lappend group $seed
+    }
+    return [::MidSurf::uniq $group]
+}
+
+proc ::MidSurf::surfaceBoundaryEdgeIds {surfaceId} {
+    set edgeIds {}
+    if {[catch {set loops [hm_getsurfaceedges $surfaceId]}]} {
+        return {}
+    }
+    foreach loop $loops {
+        foreach edgeId $loop {
+            lappend edgeIds $edgeId
+        }
+    }
+    return [::MidSurf::uniq $edgeIds]
+}
+
+# Build connectivity strictly from edges shared by surfaces in targetIds.
+# Native "by attached" may traverse through geometry owned by other
+# components before the result is intersected with targetIds, which can merge
+# otherwise independent sheet-metal bodies into one false group.
+proc ::MidSurf::surfaceTopologyGroups {targetIds} {
+    set targetIds [::MidSurf::uniq $targetIds]
+    array set surfaceEdges {}
+    array set edgeSurfaces {}
+    foreach surfaceId $targetIds {
+        set edges [::MidSurf::surfaceBoundaryEdgeIds $surfaceId]
+        set surfaceEdges($surfaceId) $edges
+        foreach edgeId $edges {
+            lappend edgeSurfaces($edgeId) $surfaceId
+        }
+    }
+
+    array set visited {}
+    set groups {}
+    foreach seed $targetIds {
+        if {[info exists visited($seed)]} {
+            continue
+        }
+        set visited($seed) 1
+        set queue [list $seed]
+        set group {}
+        while {[llength $queue] > 0} {
+            set current [lindex $queue 0]
+            set queue [lrange $queue 1 end]
+            lappend group $current
+            foreach edgeId $surfaceEdges($current) {
+                foreach neighbor $edgeSurfaces($edgeId) {
+                    if {![info exists visited($neighbor)]} {
+                        set visited($neighbor) 1
+                        lappend queue $neighbor
+                    }
+                }
+            }
+        }
+        lappend groups [::MidSurf::uniq $group]
+    }
+    return $groups
+}
+
+# A component can contain several independent sheet-metal bodies.  The native
+# extractor is not reliable when all of those bodies are submitted in one
+# call, so build explicit extraction groups first.
+proc ::MidSurf::inputGeometryGroups {entityType entityIds} {
+    set entityIds [::MidSurf::uniq $entityIds]
+    if {$entityType eq "solids"} {
+        set groups {}
+        foreach solidId $entityIds {
+            lappend groups [list $solidId]
+        }
+        return $groups
+    }
+
+    return [::MidSurf::surfaceTopologyGroups $entityIds]
+}
+
+proc ::MidSurf::markGeometryGroup {entityType entityIds} {
+    catch {*clearmark $entityType 1}
+    if {[llength $entityIds] == 0} {
+        error "Cannot mark an empty midsurface extraction group."
+    }
+    if {[catch {eval *createmark $entityType 1 $entityIds} err]} {
+        error "Cannot mark $entityType for midsurface extraction: $err"
+    }
+}
+
+proc ::MidSurf::renameComponent {oldName newName} {
+    if {$oldName eq $newName} {
+        return
+    }
+    if {[catch {*renamecollector component $oldName $newName} err1]} {
+        if {[catch {*renamecollector components $oldName $newName} err2]} {
+            error "Cannot rename component $oldName to $newName: $err1 / $err2"
+        }
+    }
+}
+
+proc ::MidSurf::moveSurfacesToComponent {surfaceIds compName} {
+    set surfaceIds [::MidSurf::uniq $surfaceIds]
+    if {[llength $surfaceIds] == 0} {
+        return 0
+    }
+    catch {*clearmark surfs 1}
+    if {[catch {eval *createmark surfs 1 $surfaceIds} err]} {
+        error "Cannot mark extracted midsurfaces for component $compName: $err"
+    }
+    if {[catch {*movemark surfs 1 $compName} err]} {
+        catch {*clearmark surfs 1}
+        error "Cannot move extracted midsurfaces to component $compName: $err"
+    }
+    catch {*clearmark surfs 1}
+    return [llength $surfaceIds]
+}
+
+proc ::MidSurf::allSurfaceIds {} {
+    set ids {}
+    catch {*clearmark surfs 2}
+    if {![catch {*createmark surfs 2 all}]} {
+        catch {set ids [hm_getmark surfs 2]}
+    }
+    catch {*clearmark surfs 2}
+    return [::MidSurf::uniq $ids]
+}
+
+proc ::MidSurf::deleteSurfaces {surfaceIds} {
+    set surfaceIds [::MidSurf::uniq $surfaceIds]
+    if {[llength $surfaceIds] == 0} {
+        return 0
+    }
+    catch {*clearmark surfs 2}
+    if {![catch {eval *createmark surfs 2 $surfaceIds}]} {
+        catch {*deletemark surfs 2}
+    }
+    catch {*clearmark surfs 2}
+    return [llength $surfaceIds]
+}
+
+proc ::MidSurf::createTemporaryComponent {baseName} {
+    set name [::MidSurf::uniqueComponentName $baseName]
+    set id ""
+    if {[llength [info commands ::HWFlow::createComponent]] > 0} {
+        set id [::HWFlow::createComponent $name "" external]
+    } else {
+        if {[catch {*createentity comps includeid=0 name=$name} err]} {
+            if {[catch {*collectorcreateonly components $name "" 1} err2]} {
+                error "Cannot create temporary midsurface component $name: $err / $err2"
+            }
+        }
+        set id [::MidSurf::componentIdByName $name]
+    }
+    if {$id eq ""} {
+        error "Cannot resolve temporary midsurface component $name after creation."
+    }
+    catch {*currentcollector component $name}
+    catch {*currentcollector components $name}
+    return [list $name $id]
+}
+
+proc ::MidSurf::createAccumulatorComponent {compId} {
+    return [::MidSurf::createTemporaryComponent "HW_MIDSURF_TMP_${compId}"]
+}
+
+proc ::MidSurf::moveGeometryToComponent {entityType entityIds compName} {
+    set entityIds [::MidSurf::uniq $entityIds]
+    if {[llength $entityIds] == 0} {
+        return 0
+    }
+    catch {*clearmark $entityType 1}
+    if {[catch {eval *createmark $entityType 1 $entityIds} markErr]} {
+        error "Cannot mark $entityType for component $compName: $markErr"
+    }
+    if {[catch {*movemark $entityType 1 $compName} moveErr]} {
+        catch {*clearmark $entityType 1}
+        error "Cannot move $entityType to component $compName: $moveErr"
+    }
+    catch {*clearmark $entityType 1}
+    return [llength $entityIds]
 }
 
 proc ::MidSurf::uniqueComponentName {baseName} {
@@ -687,49 +923,70 @@ proc ::MidSurf::sourceThicknessCandidate {sourceCompId sourceName} {
     return [::MidSurf::median [::MidSurf::sourceThicknessValues $sourceCompId]]
 }
 
-proc ::MidSurf::outputNameForSource {sourceName thickness} {
+proc ::MidSurf::outputNameForSource {sourceName thickness {version 1}} {
     set tText [::MidSurf::formatThickness $thickness]
-    if {[namespace exists ::HWFlow]} {
-        return [::HWFlow::formatMidsurfName $sourceName $tText]
+    if {![string is integer -strict $version] || $version < 1} {
+        set version 1
     }
-    return "${sourceName}_T${tText}"
+    set versionToken [format "V%02d" $version]
+    # Imported source geometry may carry a workflow suffix such as
+    # V01_PART_TT_Q355-Geometry. TT is not a real thickness token; discard it
+    # and everything after it before producing the canonical midsurface name.
+    if {[regexp -nocase {^(V[^_]+_)?(.+?)_TT(_.*)?$} $sourceName -> sourceVersion sourcePart sourceSuffix]} {
+        set sourceName "${sourceVersion}${sourcePart}"
+    }
+    if {[namespace exists ::HWFlow]} {
+        set formatted [::HWFlow::formatMidsurfName $sourceName $tText]
+        if {[regsub -nocase {^V[^_]*_} $formatted "${versionToken}_" versioned]} {
+            return $versioned
+        }
+        return "${versionToken}_${formatted}"
+    }
+    set partName $sourceName
+    regsub -nocase {^V[^_]*_} $partName "" partName
+    return "${versionToken}_${partName}_T${tText}"
 }
 
-proc ::MidSurf::existingOutputForSource {sourceCompId sourceName {thickness ""}} {
-    if {$thickness eq ""} {
-        set thickness [::MidSurf::sourceThicknessCandidate $sourceCompId $sourceName]
-    }
-    if {$thickness eq ""} {
-        return {}
-    }
-
-    set base [::MidSurf::outputNameForSource $sourceName $thickness]
-    set candidates [list $base]
-    for {set i 1} {$i <= 999} {incr i} {
-        lappend candidates [format "%s_%02d" $base $i]
-    }
-
-    foreach name $candidates {
-        set cid [::MidSurf::componentIdByName $name]
-        if {$cid eq ""} {
-            if {$name eq $base} {
-                continue
-            }
-            break
-        }
-        set surfs [::MidSurf::getCompEntityIds $cid surfaces surfs]
-        if {[llength $surfs] > 0} {
-            return [list $name [llength $surfs] $thickness]
+proc ::MidSurf::nextOutputNameForSource {sourceName thickness} {
+    for {set version 1} {$version <= 999} {incr version} {
+        set candidate [::MidSurf::outputNameForSource $sourceName $thickness $version]
+        if {![::MidSurf::componentExistsByName $candidate]} {
+            return $candidate
         }
     }
-    return {}
+    error [::HWFlow::txt \
+        "组件 $sourceName 已存在 V01 到 V999 的中面版本，无法分配新名称。" \
+        "Midsurface versions V01 through V999 already exist for $sourceName; a new name cannot be allocated."]
+}
+
+proc ::MidSurf::outputNameForRegion {sourceName thickness regionIndex regionCount {version 1}} {
+    set name [::MidSurf::outputNameForSource $sourceName $thickness $version]
+    if {$regionCount <= 1} {
+        return $name
+    }
+    if {![regexp {^(.*)(_T.*)$} $name -> stem tail]} {
+        return "${name}.${regionIndex}"
+    }
+    return "${stem}.${regionIndex}${tail}"
+}
+
+proc ::MidSurf::nextOutputNameForRegion {sourceName thickness regionIndex regionCount} {
+    for {set version 1} {$version <= 999} {incr version} {
+        set candidate [::MidSurf::outputNameForRegion $sourceName $thickness $regionIndex $regionCount $version]
+        if {![::MidSurf::componentExistsByName $candidate]} {
+            return $candidate
+        }
+    }
+    error [::HWFlow::txt \
+        "组件 $sourceName 的第 $regionIndex 个离散面域已存在 V01 到 V999，无法分配新名称。" \
+        "Midsurface versions V01 through V999 already exist for region $regionIndex of $sourceName."]
 }
 
 # ----------------------------------------------------------------------
 # HyperMesh operations
 # ----------------------------------------------------------------------
 
-proc ::MidSurf::extractMidsurface {entityType} {
+proc ::MidSurf::extractMidsurface {entityType {extractByCompOverride ""}} {
     variable cfg
 
     if {$entityType eq "solids"} {
@@ -739,6 +996,9 @@ proc ::MidSurf::extractMidsurface {entityType} {
     }
 
     set extractByComp $cfg(extractByComp)
+    if {$extractByCompOverride ne ""} {
+        set extractByComp $extractByCompOverride
+    }
     if {$cfg(keepTransparency)} {
         set extractByComp [expr {$extractByComp + 10}]
     }
@@ -765,7 +1025,7 @@ proc ::MidSurf::extractMidsurface {entityType} {
 
     set err19 ""
     if {![catch {eval $cmd19} err19]} {
-        return
+        return 19
     }
 
     set cmd17 [list *midsurface_extract_10 \
@@ -788,30 +1048,34 @@ proc ::MidSurf::extractMidsurface {entityType} {
 
     set err17 ""
     if {![catch {eval $cmd17} err17]} {
-        return
+        return 17
     }
 
     error [::HWFlow::txt "midsurface_extract_10 执行失败。19 参数错误：$err19；17 参数错误：$err17" "midsurface_extract_10 failed. 19-arg error: $err19; 17-arg error: $err17"]
 }
 
-proc ::MidSurf::renameMiddleSurface {sourceName thickness midCompId} {
+proc ::MidSurf::renameMiddleSurface {sourceName thickness midCompId {currentName ""} {outName ""}} {
     variable cfg
 
-    set outName [::MidSurf::outputNameForSource $sourceName $thickness]
+    if {$currentName eq ""} {
+        set currentName $cfg(middleSurfaceName)
+    }
+
+    if {$outName eq ""} {
+        set outName [::MidSurf::nextOutputNameForSource $sourceName $thickness]
+    }
     set existingId [::MidSurf::componentIdByName $outName]
     if {$existingId ne "" && $existingId ne $midCompId} {
         error [::HWFlow::txt "目标中面组件 $outName 已存在，本次创建已跳过。" "Target midsurface component $outName already exists; this creation was skipped."]
     }
 
-    if {$outName ne $cfg(middleSurfaceName)} {
+    if {$outName ne $currentName} {
         ::MidSurf::enableInteractiveBrowserUpdates
-        set histName "Renamed Component $cfg(middleSurfaceName) to $outName"
+        set histName "Renamed Component $currentName to $outName"
         catch {*startnotehistorystate $histName}
-        if {[catch {*renamecollector component $cfg(middleSurfaceName) $outName} err]} {
-            if {[catch {*renamecollector components $cfg(middleSurfaceName) $outName} err2]} {
-                catch {*endnotehistorystate $histName}
-                error [::HWFlow::txt "无法将 $cfg(middleSurfaceName) 重命名为 $outName：$err / $err2" "Cannot rename $cfg(middleSurfaceName) to $outName: $err / $err2"]
-            }
+        if {[catch {::MidSurf::renameComponent $currentName $outName} err]} {
+            catch {*endnotehistorystate $histName}
+            error [::HWFlow::txt "无法将 $currentName 重命名为 $outName：$err" "Cannot rename $currentName to $outName: $err"]
         }
         catch {*endnotehistorystate $histName}
     }
@@ -850,19 +1114,12 @@ proc ::MidSurf::organizeOutputComponent {compName} {
 
 proc ::MidSurf::processComponent {compId} {
     variable cfg
+    variable lastProcessFailures
+
+    set lastProcessFailures 0
 
     set sourceName [::MidSurf::getComponentName $compId]
     ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: 正在处理 $sourceName" "MidSurf: processing $sourceName"]
-
-    set existing [::MidSurf::existingOutputForSource $compId $sourceName]
-    if {[llength $existing] > 0} {
-        set outName [lindex $existing 0]
-        set surfCount [lindex $existing 1]
-        ::MidSurf::organizeOutputComponent $outName
-        ::MidSurf::hideSourceComponent $sourceName
-        ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: $sourceName 对应的 $outName 已存在，跳过创建。" "MidSurf: $sourceName already has $outName, skipped creation."]
-        return [list $outName $surfCount [lindex $existing 2] existing]
-    }
 
     if {$cfg(requireCleanMiddle) && [::MidSurf::componentExistsByName $cfg(middleSurfaceName)]} {
         error [::HWFlow::txt "组件 \"$cfg(middleSurfaceName)\" 已存在。请在运行前重命名/删除该组件，或关闭 Middle Surface 清洁检查。" "Component \"$cfg(middleSurfaceName)\" already exists. Rename/delete it before running, or disable the clean Middle Surface check."]
@@ -876,36 +1133,136 @@ proc ::MidSurf::processComponent {compId} {
         error [::HWFlow::txt "组件 $sourceName 中没有可抽取的实体或曲面。" "Component $sourceName contains no solids or surfaces."]
     }
 
-    ::MidSurf::extractMidsurface $entityType
+    set groups [::MidSurf::inputGeometryGroups $entityType $entities]
+    set groupCount [llength $groups]
+    set inputTemporary [expr {$entityType ne "surfaces"}]
+    if {$inputTemporary} {
+        set inputInfo [::MidSurf::createTemporaryComponent "HW_MIDSURF_INPUT_${compId}"]
+        set inputName [lindex $inputInfo 0]
+        set inputId [lindex $inputInfo 1]
+    } else {
+        set inputName $sourceName
+        set inputId $compId
+    }
+    set results {}
+    set groupFailures {}
+    set inputRestoreFailed 0
+    set groupIndex 0
 
-    set midCompId [::MidSurf::componentIdByName $cfg(middleSurfaceName)]
-    if {$midCompId eq ""} {
-        error [::HWFlow::txt "Midsurface Extraction finished, but \"$cfg(middleSurfaceName)\" component was not found." "Extraction finished, but \"$cfg(middleSurfaceName)\" component was not found."]
+    foreach group $groups {
+        incr groupIndex
+        set groupLabel "$entityType IDs=[join $group ,]"
+        if {$inputTemporary && [catch {::MidSurf::moveGeometryToComponent $entityType $group $inputName} isolateErr]} {
+            lappend groupFailures "$groupIndex/$groupCount ($groupLabel): cannot isolate input geometry: $isolateErr"
+            continue
+        }
+        catch {*currentcollector component $inputName}
+        catch {*currentcollector components $inputName}
+        ::MidSurf::markGeometryGroup $entityType $group
+        set beforeSurfs [::MidSurf::allSurfaceIds]
+        set middleBeforeId [::MidSurf::componentIdByName $cfg(middleSurfaceName)]
+        set extractByCompOverride ""
+        if {$entityType eq "surfaces"} {
+            set extractByCompOverride 0
+        }
+        if {[catch {set extractLayout [::MidSurf::extractMidsurface $entityType $extractByCompOverride]} extractErr]} {
+            set failedCreated [::MidSurf::listDifference [::MidSurf::allSurfaceIds] $beforeSurfs]
+            ::MidSurf::deleteSurfaces $failedCreated
+            if {[catch {::MidSurf::moveGeometryToComponent $entityType $group $sourceName} restoreErr]} {
+                set inputRestoreFailed 1
+                lappend groupFailures "$groupIndex/$groupCount ($groupLabel): source geometry restore failed: $restoreErr"
+            }
+            if {$middleBeforeId eq ""} {
+                catch {::MidSurf::deleteComponentByName $cfg(middleSurfaceName)}
+            }
+            lappend groupFailures "$groupIndex/$groupCount ($groupLabel): $extractErr"
+            continue
+        }
+
+        # Do not assume the output collector is named "Middle Surface".  The
+        # documented 19-argument layout normally creates that collector, but
+        # the HM2019-compatible 17-argument fallback writes into the current
+        # component.  Global surface-set differencing works for both layouts.
+        set groupSurfs [::MidSurf::listDifference [::MidSurf::allSurfaceIds] $beforeSurfs]
+        if {[llength $groupSurfs] == 0} {
+            if {[catch {::MidSurf::moveGeometryToComponent $entityType $group $sourceName} restoreErr]} {
+                set inputRestoreFailed 1
+                lappend groupFailures "$groupIndex/$groupCount ($groupLabel): source geometry restore failed: $restoreErr"
+            }
+            if {$middleBeforeId eq ""} {
+                catch {::MidSurf::deleteComponentByName $cfg(middleSurfaceName)}
+            }
+            lappend groupFailures "$groupIndex/$groupCount ($groupLabel): native layout $extractLayout returned success but created no new surfaces"
+            continue
+        }
+
+        set resultInfo [::MidSurf::createTemporaryComponent "HW_MIDSURF_RESULT_${compId}_${groupIndex}"]
+        set resultName [lindex $resultInfo 0]
+        set resultId [lindex $resultInfo 1]
+        if {[catch {::MidSurf::moveSurfacesToComponent $groupSurfs $resultName} moveErr]} {
+            ::MidSurf::deleteSurfaces $groupSurfs
+            catch {::MidSurf::deleteComponentByName $resultName}
+            if {[catch {::MidSurf::moveGeometryToComponent $entityType $group $sourceName} restoreErr]} {
+                set inputRestoreFailed 1
+                lappend groupFailures "$groupIndex/$groupCount ($groupLabel): source geometry restore failed: $restoreErr"
+            }
+            if {$middleBeforeId eq ""} {
+                catch {::MidSurf::deleteComponentByName $cfg(middleSurfaceName)}
+            }
+            lappend groupFailures "$groupIndex/$groupCount ($groupLabel): $moveErr"
+            continue
+        }
+
+        # Measure while the current region is still isolated in inputId so
+        # volume/area fallback uses this region rather than the whole source
+        # component. Name-tag thickness still comes from the original name.
+        set thickness [::MidSurf::chooseThickness $inputId $sourceName $resultId]
+        if {[catch {::MidSurf::moveGeometryToComponent $entityType $group $sourceName} restoreErr]} {
+            set inputRestoreFailed 1
+            lappend groupFailures "$groupIndex/$groupCount ($groupLabel): midsurface created but source geometry restore failed: $restoreErr"
+        }
+        if {$middleBeforeId eq ""} {
+            catch {::MidSurf::deleteComponentByName $cfg(middleSurfaceName)}
+        }
+
+        set nextOutName [::MidSurf::nextOutputNameForRegion $sourceName $thickness $groupIndex $groupCount]
+        if {[catch {
+            set outName [::MidSurf::renameMiddleSurface $sourceName $thickness $resultId $resultName $nextOutName]
+            ::MidSurf::organizeOutputComponent $outName
+        } finalizeErr]} {
+            catch {::MidSurf::deleteComponentByName $resultName}
+            lappend groupFailures "$groupIndex/$groupCount ($groupLabel): cannot finalize output component: $finalizeErr"
+            continue
+        }
+
+        lappend results [list $outName [llength $groupSurfs] $thickness]
+        ::MidSurf::msg "Midsurface Extraction: $sourceName region $groupIndex/$groupCount -> $outName; native layout=$extractLayout, surfaces=[llength $groupSurfs]."
     }
 
-    set newSurfs [::MidSurf::getCompEntityIds $midCompId surfaces surfs]
-    if {[llength $newSurfs] == 0} {
-        error [::HWFlow::txt "Midsurface Extraction finished, but \"$cfg(middleSurfaceName)\" contains no surfaces." "Extraction finished, but \"$cfg(middleSurfaceName)\" contains no surfaces."]
+    if {$inputTemporary && !$inputRestoreFailed} {
+        catch {::MidSurf::deleteComponentByName $inputName}
+    } elseif {$inputTemporary} {
+        ::MidSurf::msg "Midsurface Extraction warning: retained $inputName because source geometry restoration failed."
     }
 
-    set thickness [::MidSurf::chooseThickness $compId $sourceName $midCompId]
-    set existing [::MidSurf::existingOutputForSource $compId $sourceName $thickness]
-    if {[llength $existing] > 0} {
-        ::MidSurf::deleteComponentByName $cfg(middleSurfaceName)
-        set outName [lindex $existing 0]
-        set surfCount [lindex $existing 1]
-        ::MidSurf::organizeOutputComponent $outName
+    set lastProcessFailures [llength $groupFailures]
+    if {[llength $results] == 0} {
+        set detail [join $groupFailures "; "]
+        error [::HWFlow::txt "组件 $sourceName 的所有几何分区均未能抽取中面。$detail" "All geometry regions in $sourceName failed midsurface extraction. $detail"]
+    }
+
+    if {[llength $groupFailures] == 0} {
         ::MidSurf::hideSourceComponent $sourceName
-        ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: $sourceName 对应的 $outName 已存在，已清理本轮临时中面并跳过创建。" "MidSurf: $sourceName already has $outName; cleaned this run's temporary midsurface and skipped creation."]
-        return [list $outName $surfCount [lindex $existing 2] existing]
+    } else {
+        ::MidSurf::msg [::HWFlow::txt \
+            "Midsurface Extraction warning: $sourceName 有 [llength $groupFailures]/$groupCount 个几何分区抽取失败，源组件保持显示。详情：[join $groupFailures {；}]" \
+            "MidSurf warning: [llength $groupFailures]/$groupCount geometry regions failed for $sourceName; the source component remains visible. Details: [join $groupFailures {; }]" ]
     }
 
-    set outName [::MidSurf::renameMiddleSurface $sourceName $thickness $midCompId]
-    ::MidSurf::organizeOutputComponent $outName
-    ::MidSurf::hideSourceComponent $sourceName
-
-    ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction: $sourceName -> $outName，曲面数=[llength $newSurfs]" "MidSurf: $sourceName -> $outName, surfaces=[llength $newSurfs]"]
-    return [list $outName [llength $newSurfs] $thickness]
+    ::MidSurf::msg [::HWFlow::txt \
+        "Midsurface Extraction: $sourceName 完成，离散面域=$groupCount，输出组件=[llength $results]。" \
+        "MidSurf: $sourceName finished; regions=$groupCount, output components=[llength $results]."]
+    return $results
 }
 
 # ----------------------------------------------------------------------
@@ -926,7 +1283,6 @@ proc ::MidSurf::run {} {
     array set stat {
         selected 0
         created 0
-        existing 0
         skipped 0
         surfaces 0
     }
@@ -935,7 +1291,6 @@ proc ::MidSurf::run {} {
     set stat(selected) [llength $comps]
     set failures {}
     set createdNames {}
-    set existingNames {}
     set progressOpened 0
     if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
         set progressOpened [::HWFlow::progressOpen \
@@ -958,17 +1313,17 @@ proc ::MidSurf::run {} {
                 1}
         }
 
-        if {[catch {set result [::MidSurf::processComponent $compId]} err]} {
+        if {[catch {set componentResults [::MidSurf::processComponent $compId]} err]} {
             incr stat(skipped)
             lappend failures "$sourceName: $err"
             ::MidSurf::msg [::HWFlow::txt "Midsurface Extraction warning: $sourceName 已跳过。$err" "MidSurf warning: $sourceName skipped. $err"]
             continue
         }
 
-        if {[llength $result] >= 4 && [lindex $result 3] eq "existing"} {
-            incr stat(existing)
-            lappend existingNames [lindex $result 0]
-        } else {
+        if {[info exists ::MidSurf::lastProcessFailures] && $::MidSurf::lastProcessFailures > 0} {
+            incr stat(skipped)
+        }
+        foreach result $componentResults {
             incr stat(created)
             set stat(surfaces) [expr {$stat(surfaces) + [lindex $result 1]}]
             lappend createdNames [lindex $result 0]
@@ -984,7 +1339,7 @@ proc ::MidSurf::run {} {
             1}
     }
 
-    set msg [::HWFlow::txt "Midsurface Extraction v$VERSION finished.\n\n输出 assembly：$outputAssemblyName\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n已跳过既有中面：$stat(existing)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nOutput assembly: $outputAssemblyName\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped existing midsurfaces: $stat(existing)\nSkipped/failed: $stat(skipped)"]
+    set msg [::HWFlow::txt "Midsurface Extraction v$VERSION finished.\n\n输出 assembly：$outputAssemblyName\n已选择组件：$stat(selected)\n已创建中面组件：$stat(created)\n已创建曲面：$stat(surfaces)\n跳过/失败：$stat(skipped)" "MidSurf v$VERSION finished.\n\nOutput assembly: $outputAssemblyName\nSelected components: $stat(selected)\nCreated midsurface components: $stat(created)\nCreated surfaces: $stat(surfaces)\nSkipped/failed: $stat(skipped)"]
 
     if {[llength $createdNames] > 0} {
         append msg [::HWFlow::txt "\n\n已创建：\n" "\n\nCreated:\n"]
@@ -993,14 +1348,6 @@ proc ::MidSurf::run {} {
             append msg "\n..."
         }
     }
-    if {[llength $existingNames] > 0} {
-        append msg [::HWFlow::txt "\n\n已存在并跳过：\n" "\n\nAlready existed and skipped:\n"]
-        append msg [join [lrange $existingNames 0 9] "\n"]
-        if {[llength $existingNames] > 10} {
-            append msg "\n..."
-        }
-    }
-
     if {[llength $failures] > 0} {
         append msg [::HWFlow::txt "\n\n失败项：\n" "\n\nFailures:\n"]
         append msg [join [lrange $failures 0 4] "\n"]

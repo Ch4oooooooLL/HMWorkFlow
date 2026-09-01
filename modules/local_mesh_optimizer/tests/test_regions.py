@@ -124,8 +124,8 @@ class RegionTests(unittest.TestCase):
             self.assertTrue((output / "summary.html").is_file())
             report = (output / "summary.html").read_text(encoding="utf-8")
             self.assertIn("HyperMesh", report)
-            self.assertIn("局部网格优化报告", report)
-            self.assertIn("任务文件与报告产物", report)
+            self.assertIn("Local Mesh Optimizer Report", report)
+            self.assertIn("6. Task Files and Report Artifacts", report)
             self.assertIn("</html>", report)
             self.assertNotIn("灞€", report)
 

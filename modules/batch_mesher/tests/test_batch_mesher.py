@@ -109,14 +109,15 @@ class BatchMesherTests(unittest.TestCase):
             array set ::marks {}
             proc *clearmark {etype markId} {set ::marks($markId) {}}
             proc *createmark {etype markId args} {set ::marks($markId) $args}
-            proc *hm_batchmesh2 {args} {set ::batchArgs $args; return ok}
+            proc *readqualitycriteria {path} {}
+            proc *hm_batchmesh {args} {set ::batchArgs $args; return ok}
             ::BatchMesher::runBatchMesher2019 {11 12} C:/mesh/a.criteria C:/mesh/a.param
             """
         )
         args = self.h.tcl.splitlist(self.h.eval("set ::batchArgs"))
-        self.assertEqual(args[:4], ("surfs", "1", "1", "0"))
-        self.assertTrue(args[4].replace("\\", "/").endswith("/mesh/a.criteria"))
-        self.assertTrue(args[5].replace("\\", "/").endswith("/mesh/a.param"))
+        self.assertEqual(args[0], "1")
+        self.assertTrue(args[1].replace("\\", "/").endswith("/mesh/a.criteria"))
+        self.assertTrue(args[2].replace("\\", "/").endswith("/mesh/a.param"))
 
     def test_hmbatch_command_suppresses_command_and_profile_dialogs(self):
         command = self.h.tcl.splitlist(
@@ -368,6 +369,12 @@ class BatchMesherTests(unittest.TestCase):
                 "completed",
             )
             self.assertEqual(self.h.eval("set ::BatchMesherWorker::successfulElements"), "20")
+            self.assertEqual(
+                self.h.eval(
+                    "dict get [lindex $::BatchMesherWorker::records 0] created_elements"
+                ),
+                "1",
+            )
 
     def test_background_worker_keeps_created_mesh_when_batchmesh_reports_warning(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -387,7 +394,54 @@ class BatchMesherTests(unittest.TestCase):
                 self.h.eval("dict get [lindex $::BatchMesherWorker::records 0] warning_message"),
             )
 
-    def test_hm2019_worker_preloads_user_standards_and_calls_dummy(self):
+    def test_quality_failure_is_queued_for_optimization_and_mesh_is_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.install_background_worker_model_mock(directory)
+            self.h.eval(
+                r"""
+                proc *hm_batchmesh2 {args} {lappend ::workerElements 30}
+                proc hm_getvalue {etype args} {return {101 102 103 104}}
+                proc hm_getelementsqualityinfo {args} {
+                    set ::workerMarks(elems,2) {30}
+                    return {1 1 42.5}
+                }
+                """
+            )
+            self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "0")
+            task = "[lindex $::BatchMesherWorker::records 0]"
+            self.assertEqual(self.h.eval(f"dict get {task} status"), "completed")
+            self.assertEqual(self.h.eval(f"dict get {task} connectivity_status"), "valid")
+            self.assertEqual(self.h.eval(f"dict get {task} quality_status"), "needs_optimization")
+            self.assertEqual(self.h.eval(f"dict get {task} optimization_status"), "pending")
+            self.assertEqual(self.h.eval(f"dict get {task} quality_failed_elements"), "1")
+            self.assertEqual(self.h.eval("set ::BatchMesherWorker::successfulElements"), "30")
+            self.assertIn(
+                "mesh retained for later iterative optimization",
+                self.h.eval(f"dict get {task} warning_message"),
+            )
+
+    def test_disconnected_created_mesh_is_a_connectivity_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.install_background_worker_model_mock(directory)
+            self.h.eval(
+                r"""
+                proc *hm_batchmesh2 {args} {set ::workerElements {10 30 40}}
+                proc hm_getvalue {etype args} {
+                    set elementId [lindex [split [lindex $args 0] =] 1]
+                    if {$elementId == 30} {return {101 102 103 104}}
+                    if {$elementId == 40} {return {201 202 203 204}}
+                    return {1 2 3 4}
+                }
+                """
+            )
+            self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "1")
+            task = "[lindex $::BatchMesherWorker::records 0]"
+            self.assertEqual(self.h.eval(f"dict get {task} status"), "failed")
+            self.assertEqual(self.h.eval(f"dict get {task} connectivity_status"), "invalid")
+            self.assertIn("BATCHMESH_CONNECTIVITY_INVALID", self.h.eval(f"dict get {task} error_message"))
+            self.assertEqual(self.h.eval("set ::BatchMesherWorker::successfulElements"), "")
+
+    def test_hm2019_worker_passes_absolute_user_standard_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             self.install_background_worker_model_mock(directory)
             criteria = Path(directory) / "mesh.criteria"
@@ -404,22 +458,21 @@ class BatchMesherTests(unittest.TestCase):
                 set ::workerConfigCalls {}
                 proc *readqualitycriteria {path} {lappend ::workerConfigCalls [list criteria $path]}
                 proc *readbatchparamsfile {path} {lappend ::workerConfigCalls [list param $path]}
-                proc *hm_batchmesh2 {args} {
+                proc *hm_batchmesh {args} {
                     set ::workerBatchArgs $args
                     lappend ::workerElements 40
                 }
                 """
             )
             self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "0")
+            self.assertEqual(self.h.eval("llength $::workerConfigCalls"), "0")
+            args = self.h.eval("set ::workerBatchArgs")
+            self.assertEqual(self.h.eval("lindex $::workerBatchArgs 0"), "1")
             self.assertEqual(
-                self.h.eval("set ::workerBatchArgs"), "surfs 1 1 0 dummy dummy"
+                Path(self.h.eval("lindex $::workerBatchArgs 1")), criteria
             )
-            self.assertEqual(
-                self.h.eval("lindex [lindex $::workerConfigCalls 0] 0"), "criteria"
-            )
-            self.assertEqual(
-                self.h.eval("lindex [lindex $::workerConfigCalls 1] 0"), "param"
-            )
+            self.assertEqual(Path(self.h.eval("lindex $::workerBatchArgs 2")), param)
+            self.assertNotIn("dummy", args)
             self.assertEqual(
                 self.h.eval("set ::BatchMesherWorker::successfulElements"), "40"
             )
@@ -727,14 +780,83 @@ class BatchMesherTests(unittest.TestCase):
         ):
             self.h.eval("::BatchMesherWorker::initializeBatchMeshProfile 2024")
 
-    def test_worker_uses_hm2019_preloaded_configuration_contract(self):
+    def test_worker_uses_direct_standard_paths_for_both_releases(self):
         worker_source = (MODULE / "background_worker.tcl").read_text(
             encoding="utf-8"
         )
-        self.assertIn("*readbatchparamsfile", worker_source)
-        self.assertIn("*hm_batchmesh2 surfs 1 1 0 dummy dummy", worker_source)
-        self.assertIn("mode=hm2019_preloaded", worker_source)
+        run_task = worker_source[
+            worker_source.index("proc ::BatchMesherWorker::runTask") :
+            worker_source.index("proc ::BatchMesherWorker::entityReference")
+        ]
+        self.assertIn("mode=direct_paths", run_task)
+        self.assertIn("[file nativename $criteria]", run_task)
+        self.assertIn("[file nativename $param]", run_task)
+        self.assertNotIn("dummy dummy", run_task)
+        self.assertNotIn("*readbatchparamsfile", run_task)
         self.assertNotIn("params_generate_mode = shell", worker_source)
+
+    def test_preflight_executes_trial_mesh_with_selected_standard_paths(self):
+        source = (MODULE / "executor.tcl").read_text(encoding="utf-8")
+        probe = source[
+            source.index("proc ::BatchMesher::probeHmbatchExecutable") :
+            source.index("proc ::BatchMesher::hmbatchPreflightCurrent")
+        ]
+        self.assertIn("*hm_batchmesh 1", probe)
+        self.assertIn("*hm_batchmesh2 surfs 1 1 0", probe)
+        self.assertIn("spec_validation", probe)
+        self.assertIn("HMBATCH_PREFLIGHT_SPEC_INVALID", probe)
+
+    def test_preflight_cache_is_bound_to_standard_paths_and_fingerprints(self):
+        source = (MODULE / "executor.tcl").read_text(encoding="utf-8")
+        cache = source[
+            source.index("proc ::BatchMesher::hmbatchPreflightCurrent") :
+            source.index("proc ::BatchMesher::testHmbatchStartup")
+        ]
+        for token in (
+            "validated_criteria_path",
+            "validated_criteria_mtime",
+            "validated_criteria_size",
+            "validated_param_path",
+            "validated_param_mtime",
+            "validated_param_size",
+        ):
+            self.assertIn(token, cache)
+
+    def test_preflight_cache_is_invalidated_when_a_standard_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "hmbatch.exe"
+            criteria = root / "mesh.criteria"
+            param = root / "mesh.param"
+            executable.write_bytes(b"exe")
+            criteria.write_text("criteria\n", encoding="utf-8")
+            param.write_text("element_size 8\n", encoding="utf-8")
+            for key, value in (
+                ("cache_executable", executable),
+                ("cache_criteria", criteria),
+                ("cache_param", param),
+            ):
+                self.h.tcl.setvar(key, value.as_posix())
+            self.h.eval(
+                r"""
+                set ::BatchMesher::runtime(validated_hmbatch_path) [file normalize $cache_executable]
+                set ::BatchMesher::runtime(validated_hmbatch_mtime) [file mtime $cache_executable]
+                set ::BatchMesher::runtime(validated_hmbatch_version) 19.000000
+                set ::BatchMesher::runtime(validated_criteria_path) [file normalize $cache_criteria]
+                set ::BatchMesher::runtime(validated_criteria_mtime) [file mtime $cache_criteria]
+                set ::BatchMesher::runtime(validated_criteria_size) [file size $cache_criteria]
+                set ::BatchMesher::runtime(validated_param_path) [file normalize $cache_param]
+                set ::BatchMesher::runtime(validated_param_mtime) [file mtime $cache_param]
+                set ::BatchMesher::runtime(validated_param_size) [file size $cache_param]
+                """
+            )
+            command = (
+                "::BatchMesher::hmbatchPreflightCurrent "
+                "$cache_executable $cache_criteria $cache_param"
+            )
+            self.assertEqual(self.h.eval(command), "1")
+            param.write_text("element_size 10.000\n", encoding="utf-8")
+            self.assertEqual(self.h.eval(command), "0")
 
     def test_file_sensitive_command_runs_beside_standard_and_restores_cwd(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -754,6 +876,66 @@ class BatchMesherTests(unittest.TestCase):
             self.assertEqual(Path(self.h.eval("set ::capturedConfigCwd")), standards)
             self.assertEqual(Path(self.h.eval("pwd")), root)
             self.h.eval("cd $::cwd_test_original")
+
+    def test_native_batchmesh_runs_in_private_worker_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worker = root / "workers" / "T001"
+            standards = root / "shared-standards"
+            worker.mkdir(parents=True)
+            standards.mkdir()
+            criteria = standards / "mesh.criteria"
+            param = standards / "mesh.param"
+            criteria.write_text("criteria\n", encoding="utf-8")
+            param.write_text("element_size 8.0\n", encoding="utf-8")
+            self.h.tcl.setvar("private_worker_dir", worker.as_posix())
+            self.h.tcl.setvar("shared_criteria", criteria.as_posix())
+            self.h.tcl.setvar("shared_param", param.as_posix())
+            self.h.eval(
+                r"""
+                set ::BatchMesherWorker::config [dict create run_dir $private_worker_dir \
+                    criteria $shared_criteria param $shared_param \
+                    state_path [file join $private_worker_dir background.state] \
+                    result_fem [file join $private_worker_dir result.fem]]
+                set ::BatchMesherWorker::records [list [dict create task_id T001 group_id G001 \
+                    surface_ids {1} component_names {PANEL} status pending]]
+                set ::BatchMesherWorker::successfulElements {}
+                set ::workerElements {}
+                array set ::workerMarks {}
+                proc *clearmark {etype markId} {set ::workerMarks($etype,$markId) {}}
+                proc *createmark {etype markId args} {
+                    if {$etype eq "elems" && $args eq "all"} {
+                        set ::workerMarks($etype,$markId) $::workerElements
+                    } else {
+                        set ::workerMarks($etype,$markId) $args
+                    }
+                }
+                proc hm_getmark {etype markId} {return $::workerMarks($etype,$markId)}
+                proc *readqualitycriteria {path} {}
+                proc *readbatchparamsfile {path} {}
+                proc *hm_batchmesh {args} {
+                    set ::batchmeshObservedCwd [pwd]
+                    lappend ::workerElements 40
+                }
+                proc *hm_batchmesh2 {args} {
+                    set ::batchmeshObservedCwd [pwd]
+                    lappend ::workerElements 40
+                }
+                """
+            )
+            for release in (2019, 2022):
+                with self.subTest(release=release):
+                    self.h.eval("set ::workerElements {}; set ::BatchMesherWorker::successfulElements {}")
+                    self.h.eval(
+                        "set ::BatchMesherWorker::records [lreplace "
+                        "$::BatchMesherWorker::records 0 0 "
+                        "[dict replace [lindex $::BatchMesherWorker::records 0] status pending]]"
+                    )
+                    self.h.eval(f"set ::BatchMesherWorker::workerRelease {release}")
+                    self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "0")
+                    self.assertEqual(
+                        Path(self.h.eval("set ::batchmeshObservedCwd")), worker
+                    )
 
     def test_scale_preflight_rejects_element_size_larger_than_model_span(self):
         with tempfile.TemporaryDirectory() as directory:

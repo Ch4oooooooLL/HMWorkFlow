@@ -18,6 +18,14 @@ class BatchPropertyAssignmentNamingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tcl = tkinter.Tcl()
         self.tcl.eval(f"source {{{MODULE.as_posix()}}}")
+        # The module routes UI and command-stream text through the shared
+        # runtime; provide the English stubs when the toolkit core is not
+        # sourced by this isolated Tcl test.
+        self.tcl.eval(
+            "namespace eval ::HWFlow {}; "
+            "proc ::HWFlow::txt {zh en} {return $en}; "
+            "proc ::HWFlow::ctxt {zh en} {return $en}"
+        )
 
     def field(self, name: str, field: str) -> str:
         return self.tcl.call(
@@ -93,6 +101,65 @@ class BatchPropertyAssignmentNamingTests(unittest.TestCase):
         self.assertIn("Nu=0.30", values)
         self.assertIn("Rho=7.85e-9", values)
 
+    def test_missing_named_material_is_created_empty(self):
+        self.tcl.eval(
+            r"""
+            rename ::BatchPropertyAssignment::materialIdByName ::BatchPropertyAssignment::materialIdByName_real
+            set ::newMaterialId ""
+            set ::emptyMaterialCreateArgs {}
+            proc ::BatchPropertyAssignment::materialIdByName {name} {return $::newMaterialId}
+            proc *createentity {args} {
+                lappend ::emptyMaterialCreateArgs $args
+                set ::newMaterialId 23
+            }
+            """
+        )
+        self.assertEqual(
+            int(self.tcl.call("::BatchPropertyAssignment::ensureEmptyMaterial", "Q690")),
+            23,
+        )
+        create_args = self.tcl.eval("set ::emptyMaterialCreateArgs")
+        self.assertIn("cardimage=MAT1", create_args)
+        self.assertIn("name=Q690", create_args)
+        self.assertNotIn("E=", create_args)
+        self.assertNotIn("Nu=", create_args)
+        self.assertNotIn("Rho=", create_args)
+
+    def test_seam_solid_property_is_created_as_psolid_without_thickness(self):
+        self.tcl.eval(
+            r"""
+            rename ::BatchPropertyAssignment::entityIdByName ::BatchPropertyAssignment::entityIdByName_real
+            rename ::BatchPropertyAssignment::trySetValue ::BatchPropertyAssignment::trySetValue_real
+            rename ::BatchPropertyAssignment::propertyMaterialMatches ::BatchPropertyAssignment::propertyMaterialMatches_real
+            set ::newPropertyId ""
+            set ::solidPropertyCreateArgs {}
+            proc ::BatchPropertyAssignment::entityIdByName {types name} {return $::newPropertyId}
+            proc ::BatchPropertyAssignment::trySetValue {types selector field value} {return 1}
+            proc ::BatchPropertyAssignment::propertyMaterialMatches {propertyId materialId} {return 1}
+            proc *createentity {args} {
+                lappend ::solidPropertyCreateArgs $args
+                set ::newPropertyId 31
+            }
+            proc *setvalue {args} {}
+            proc hm_getthickness {args} {error "PSOLID must not query shell thickness"}
+            """
+        )
+        self.assertEqual(
+            int(
+                self.tcl.call(
+                    "::BatchPropertyAssignment::ensureProperty",
+                    "SEAM_SOLID",
+                    "",
+                    17,
+                    "PSOLID",
+                )
+            ),
+            31,
+        )
+        create_args = self.tcl.eval("set ::solidPropertyCreateArgs")
+        self.assertIn("cardimage=PSOLID", create_args)
+        self.assertIn("name=SEAM_SOLID", create_args)
+
     def test_part_allows_extra_tokens_between_thickness_and_material(self):
         name = "V01_floor_T2.5.surf_revision_Q355"
         self.assertEqual(self.field(name, "thickness_token"), "2.5")
@@ -104,6 +171,25 @@ class BatchPropertyAssignmentNamingTests(unittest.TestCase):
         self.assertEqual(self.field(name, "kind"), "SEAM")
         self.assertEqual(self.field(name, "material"), "Steel")
         self.assertEqual(self.field(name, "property_name"), "SEAM_T20")
+
+    def test_seam_solid_uses_steel_and_psolid(self):
+        name = "SEAM_SOLID"
+        self.assertEqual(self.field(name, "kind"), "SEAM_SOLID")
+        self.assertEqual(self.field(name, "material"), "Steel")
+        self.assertEqual(self.field(name, "property_name"), "SEAM_SOLID")
+        self.assertEqual(self.field(name, "card_image"), "PSOLID")
+
+    def test_tt_thickness_marker_is_ignored(self):
+        for name in ("V01_FLOOR_TT_Q355", "part_TT", "PART_tt.surf"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    int(self.tcl.call("::BatchPropertyAssignment::isIgnoredThicknessName", name)),
+                    1,
+                )
+        self.assertEqual(
+            int(self.tcl.call("::BatchPropertyAssignment::isIgnoredThicknessName", "V01_TTOWER_T2_Q355")),
+            0,
+        )
 
     def test_seam_ignores_suffix_after_thickness(self):
         for name in ("SEAM_T10_dff", "SEAM_T10.surf", "WELD_SEAM_NOTE_T10abc"):
@@ -158,18 +244,27 @@ rename ::BatchPropertyAssignment::allComponentIds ::BatchPropertyAssignment::all
 rename ::BatchPropertyAssignment::nativeEmptyComponentIds ::BatchPropertyAssignment::nativeEmptyComponentIds_real
 rename ::BatchPropertyAssignment::componentName ::BatchPropertyAssignment::componentName_real
 rename ::BatchPropertyAssignment::materialIdByName ::BatchPropertyAssignment::materialIdByName_real
+rename ::BatchPropertyAssignment::ensureEmptyMaterial ::BatchPropertyAssignment::ensureEmptyMaterial_real
 rename ::BatchPropertyAssignment::componentHasAnyProperty ::BatchPropertyAssignment::componentHasAnyProperty_real
 rename ::BatchPropertyAssignment::isIgnoredOneDimensionalName ::BatchPropertyAssignment::isIgnoredOneDimensionalName_real
 rename ::BatchPropertyAssignment::ensureProperty ::BatchPropertyAssignment::ensureProperty_real
 rename ::BatchPropertyAssignment::assignProperty ::BatchPropertyAssignment::assignProperty_real
 rename ::BatchPropertyAssignment::ensureReviewEntry ::BatchPropertyAssignment::ensureReviewEntry_real
-proc ::BatchPropertyAssignment::allComponentIds {} {return {1 2 3 4 5 6}}
+proc ::BatchPropertyAssignment::allComponentIds {} {return {1 2 3 4 5 6 7 8 9}}
 proc ::BatchPropertyAssignment::nativeEmptyComponentIds {} {return {6}}
 proc ::BatchPropertyAssignment::componentName {id} {
-    return [dict get {1 V01_FLOOR_T10_Q355 2 SEAM_T20 3 BAD_NAME 4 V01_DONE_T3_Q355 5 auto_RBE2_output 6 BAD_EMPTY_NAME} $id]
+    return [dict get {1 V01_FLOOR_T10_Q355 2 SEAM_T20 3 BAD_NAME 4 V01_DONE_T3_Q355 5 auto_RBE2_output 6 BAD_EMPTY_NAME 7 V01_UNKNOWN_TT_Q355 8 SEAM_SOLID 9 V01_BRACKET_T2_NEWSTEEL} $id]
 }
 proc ::BatchPropertyAssignment::materialIdByName {name} {
-    return [dict get {Q355 101 Steel 102} $name]
+    if {[dict exists {Q355 101 Steel 102} $name]} {
+        return [dict get {Q355 101 Steel 102} $name]
+    }
+    return {}
+}
+set ::emptyMaterialCalls {}
+proc ::BatchPropertyAssignment::ensureEmptyMaterial {name} {
+    lappend ::emptyMaterialCalls $name
+    return 103
 }
 proc ::BatchPropertyAssignment::componentHasAnyProperty {componentId} {
     return [expr {$componentId == 4}]
@@ -178,8 +273,8 @@ proc ::BatchPropertyAssignment::isIgnoredOneDimensionalName {name} {
     return [expr {[string first RBE [string toupper $name]] >= 0}]
 }
 set ::propertyCalls {}
-proc ::BatchPropertyAssignment::ensureProperty {name thickness materialId} {
-    lappend ::propertyCalls [list $name $thickness $materialId]
+proc ::BatchPropertyAssignment::ensureProperty {name thickness materialId {cardImage PSHELL}} {
+    lappend ::propertyCalls [list $name $thickness $materialId $cardImage]
     return [expr {200 + [llength $::propertyCalls]}]
 }
 proc ::BatchPropertyAssignment::assignProperty {componentId propertyId propertyName} {return 1}
@@ -191,8 +286,8 @@ proc ::BatchPropertyAssignment::ensureReviewEntry {componentName} {
 """
         )
         result = self.tcl.call("::BatchPropertyAssignment::execute")
-        self.assertEqual(self.tcl.call("dict", "get", result, "scanned"), 6)
-        self.assertEqual(self.tcl.call("dict", "get", result, "assigned"), 2)
+        self.assertEqual(self.tcl.call("dict", "get", result, "scanned"), 9)
+        self.assertEqual(self.tcl.call("dict", "get", result, "assigned"), 4)
         self.assertEqual(self.tcl.call("dict", "get", result, "skipped_empty"), 1)
         self.assertEqual(
             self.tcl.splitlist(self.tcl.call("dict", "get", result, "skipped_empty_names")),
@@ -200,14 +295,21 @@ proc ::BatchPropertyAssignment::ensureReviewEntry {componentName} {
         )
         self.assertEqual(self.tcl.call("dict", "get", result, "skipped_existing"), 1)
         self.assertEqual(self.tcl.call("dict", "get", result, "skipped_1d"), 1)
+        self.assertEqual(self.tcl.call("dict", "get", result, "skipped_tt"), 1)
         self.assertEqual(
             self.tcl.splitlist(self.tcl.call("dict", "get", result, "property_names")),
-            ("Q355_T10", "SEAM_T20"),
+            ("Q355_T10", "SEAM_T20", "SEAM_SOLID", "NEWSTEEL_T2"),
         )
         self.assertEqual(self.tcl.splitlist(self.tcl.eval("set ::reviewCalls")), ("BAD_NAME",))
+        self.assertEqual(
+            self.tcl.splitlist(self.tcl.call("dict", "get", result, "created_material_names")),
+            ("NEWSTEEL",),
+        )
         property_calls = self.tcl.splitlist(self.tcl.eval("set ::propertyCalls"))
-        self.assertEqual(self.tcl.splitlist(property_calls[0]), ("Q355_T10", "10.0", "101"))
-        self.assertEqual(self.tcl.splitlist(property_calls[1]), ("SEAM_T20", "20.0", "102"))
+        self.assertEqual(self.tcl.splitlist(property_calls[0]), ("Q355_T10", "10.0", "101", "PSHELL"))
+        self.assertEqual(self.tcl.splitlist(property_calls[1]), ("SEAM_T20", "20.0", "102", "PSHELL"))
+        self.assertEqual(self.tcl.splitlist(property_calls[2]), ("SEAM_SOLID", "", "102", "PSOLID"))
+        self.assertEqual(self.tcl.splitlist(property_calls[3]), ("NEWSTEEL_T2", "2.0", "103", "PSHELL"))
 
     def test_native_empty_detection_uses_hypermesh_preview_empty_once(self):
         self.tcl.eval(
@@ -251,9 +353,11 @@ class BatchPropertyAssignmentIntegrationPolicyTests(unittest.TestCase):
         body = source.split("proc ::BatchPropertyAssignment::ensureProperty", 1)[1].split(
             "\nproc ::BatchPropertyAssignment::", 1
         )[0]
-        self.assertIn("cardimage=PSHELL", body)
+        self.assertIn("{cardImage PSHELL}", body)
+        self.assertIn("cardimage=$cardImage", body)
         self.assertIn("*attributeupdatedouble properties $propertyId 95", body)
         self.assertIn("materialid", body)
+        self.assertIn('if {$cardImage eq "PSOLID"}', body)
 
     def test_empty_components_are_filtered_before_property_checks(self):
         source = MODULE.read_text(encoding="utf-8")

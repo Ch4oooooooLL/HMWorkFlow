@@ -51,12 +51,14 @@ set nativeCommands {
     *solids_create_from_surfaces *surface_patch *surfacecreateruled
     *surfacefilletremove *surfacemarkremovelinefillets *surfacemode
     *startnotehistorystate *endnotehistorystate *undohistorystate
+    *sethistoryrecord *sethistorylimit
     *createpoint *surfaceprimitivefrompoints *collectorcreateonly
     *currentcollector *createdoublearray *createarray
     hm_getfilletfacesfrommark hm_getsurfaceedges hm_getverticesfromedge
     hm_getcoordinatesofpointsonline hm_getsurfacesfromedge
-    hm_getareaofsurface hm_latestentityid hm_getsolidboundsforsurfaces
+    hm_getareaofsurface hm_linelength hm_latestentityid hm_getsolidboundsforsurfaces
     hm_getmark hm_getvalue hm_getentityvalue hm_usermessage
+    hm_gethistorylimit hm_getundoactions
     hm_blockredraw hm_blockmessages hm_blockerrormessages
     hwbrowsermanager hmbr_signals hm_getcollectorname hm_entityinfo
     hm_getlist
@@ -283,12 +285,23 @@ P "SOLIDS created-count" [expr {$solidsAfter - $solidsBefore}]
 *clearmark surfs 1
 
 # 3.11 history state (module's exact chain, each step logged)
+T "HISTORY sethistoryrecord" [list *sethistoryrecord 1]
+if {[llength [info commands ::hm_gethistorylimit]] > 0} {
+    T "HISTORY gethistorylimit" [list hm_gethistorylimit]
+}
+set undoActionsBefore ""
+if {[llength [info commands ::hm_getundoactions]] > 0} {
+    T "HISTORY getundoactions-before" [list set undoActionsBefore [hm_getundoactions]]
+}
 set hisLinesBefore [hm_latestentityid lines]
 T "HISTORY startnotehistorystate" [list *startnotehistorystate "AUDIT_GEOM_CLEANUP_TEST"]
 T "HISTORY clearmark lines" [list *clearmark lines 1]
 T "HISTORY createmark lines edge" [list *createmark lines 1 $edge0]
 T "HISTORY linefromsurfedgecomp" [list *linefromsurfedgecomp lines 1 0]
 T "HISTORY endnotehistorystate" [list *endnotehistorystate "AUDIT_GEOM_CLEANUP_TEST"]
+if {[llength [info commands ::hm_getundoactions]] > 0} {
+    T "HISTORY getundoactions-after" [list hm_getundoactions]
+}
 T "HISTORY undohistorystate" [list *undohistorystate 1]
 set hisLinesAfter [hm_latestentityid lines]
 P "HISTORY lines-reverted" [expr {$hisLinesAfter == $hisLinesBefore}]

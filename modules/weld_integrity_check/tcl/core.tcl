@@ -1,4 +1,5 @@
 proc ::WeldIntegrityCheck::txt {zh en} { return [::HWFlow::txt $zh $en] }
+proc ::WeldIntegrityCheck::ctxt {zh en} { return [::HWFlow::ctxt $zh $en] }
 
 proc ::WeldIntegrityCheck::log {level message} {
     variable logChannel
@@ -84,10 +85,10 @@ proc ::WeldIntegrityCheck::runDetection {} {
     set workspace [::HybridCore::createTaskWorkspace weld_integrity_check]
     set taskDir [dict get $workspace task_dir]; set taskId [dict get $workspace run_id]
     foreach child {input output state} { file mkdir [file join $taskDir $child] }
-    ::HWFlow::progressOpen [::WeldIntegrityCheck::txt "网格焊缝完整性检查" "Weld Integrity Check"] [::WeldIntegrityCheck::txt "正在读取组件信息" "Reading components"] 0
-    ::HWFlow::progressUpdate 8 [::WeldIntegrityCheck::txt "正在读取组件信息" "Reading components"]
+    ::HWFlow::progressOpen [::WeldIntegrityCheck::ctxt "网格焊缝完整性检查" "Weld Integrity Check"] [::WeldIntegrityCheck::ctxt "正在读取组件信息" "Reading components"] 0
+    ::HWFlow::progressUpdate 8 [::WeldIntegrityCheck::ctxt "正在读取组件信息" "Reading components"]
     set exported [::WeldIntegrityCheck::exportInput $selected]
-    ::HWFlow::progressUpdate 48 [::WeldIntegrityCheck::txt "正在启动 Python 检测" "Starting Python detection"]
+    ::HWFlow::progressUpdate 48 [::WeldIntegrityCheck::ctxt "正在启动 Python 检测" "Starting Python detection"]
     set inputDir [file join $taskDir input]
     set outputPath [file join $taskDir output result.json]
     set tclPath [file join $taskDir output result.tcl]
@@ -105,7 +106,7 @@ proc ::WeldIntegrityCheck::runDetection {} {
         }
         error [::WeldIntegrityCheck::txt "Python 返回失败（返回码：$exitCode）：$processResult；日志：$pythonLog；stderr：$stderrPath" "Python failed (exit code: $exitCode): $processResult; log: $pythonLog; stderr: $stderrPath"]
     }
-    ::HWFlow::progressUpdate 88 [::WeldIntegrityCheck::txt "正在加载结果" "Loading result"]
+    ::HWFlow::progressUpdate 88 [::WeldIntegrityCheck::ctxt "正在加载结果" "Loading result"]
     if {![file isfile $outputPath] || ![file isfile $tclPath]} {
         error [::WeldIntegrityCheck::txt "检测程序未生成有效结果文件，请查看 Python 日志：$pythonLog" "No valid result was generated. See Python log: $pythonLog"]
     }
@@ -120,7 +121,7 @@ proc ::WeldIntegrityCheck::runDetection {} {
     foreach pair $pairRows { set pairStates([dict get $pair pair_id]) pending }
     set currentPairId [expr {[llength $pairRows] ? [dict get [lindex $pairRows 0] pair_id] : ""}]
     ::WeldIntegrityCheck::saveReviewState
-    ::HWFlow::progressFinish [::WeldIntegrityCheck::txt "检测完成" "Detection complete"] 100
+    ::HWFlow::progressFinish [::WeldIntegrityCheck::ctxt "检测完成" "Detection complete"] 100
     ::WeldIntegrityCheck::log INFO "detection complete selected=[llength $selected] excluded=[llength $ui(excludedCompIds)] pairs=[llength $pairRows] input=$inputDir"
     if {[llength $pairRows] == 0} {
         tk_messageBox -icon info -title [::WeldIntegrityCheck::txt "网格焊缝完整性检查" "Weld Integrity Check"] \

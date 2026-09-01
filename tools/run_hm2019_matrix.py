@@ -16,6 +16,7 @@ DEFAULT_HMBATCH = Path(r"C:\Program Files\Altair\2019\hm\bin\win64\hmbatch.exe")
 BASE_CASES = (
     "modules/hybrid_core/tests/hm_platform_services_smoke.tcl",
     "modules/hybrid_core/tests/hm_hybrid_export_smoke.tcl",
+    "modules/quick_selector/tests/hm2019_api_probe.tcl",
     "modules/batch_mesher/tests/hm2019_api_smoke.tcl",
     "modules/mesh_seam_weld/tests/hm2019_shared_node_imprint_smoke.tcl",
     "modules/fem_auto_seam/tests/hm2019_module_smoke.tcl",

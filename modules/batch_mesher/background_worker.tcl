@@ -53,6 +53,24 @@ proc ::BatchMesherWorker::invokeFromFileDirectory {anchorPath command} {
     return $result
 }
 
+proc ::BatchMesherWorker::invokeFromWorkerDirectory {command} {
+    variable config
+    # BatchMesh creates process-local scratch/command artifacts relative to
+    # cwd.  Configuration files are shared by every worker, so running the
+    # native mesher beside a .criteria/.param file makes parallel workers
+    # overwrite one another.  Keep only the file-loading calls beside their
+    # source files and always execute the mesher in this worker's private dir.
+    set previous [pwd]
+    set target [file normalize [dict get $config run_dir]]
+    file mkdir $target
+    cd $target
+    set code [catch {uplevel #0 $command} result options]
+    set restoreCode [catch {cd $previous} restoreError]
+    if {$restoreCode && !$code} { error "Could not restore worker directory to $previous: $restoreError" }
+    if {$code} { return -options $options $result }
+    return $result
+}
+
 proc ::BatchMesherWorker::writeState {overall current message} {
     variable config
     variable records
@@ -96,7 +114,7 @@ proc ::BatchMesherWorker::initializeBatchMeshProfile {release} {
     }
     # A standalone hmbatch process does not inherit the interactive session's
     # solver profile or quality-criteria state.  Both HM2019 and HM2022 need
-    # these initialized before *hm_batchmesh2 parses the cleanup parameter
+    # these initialized before the release-specific BatchMesh API parses the cleanup parameter
     # file.  Skipping this for HM2019 makes valid parameter files abort in the
     # holes-recognition section before any elements are created.
     set template [::BatchMesherWorker::optistructTemplate]
@@ -228,6 +246,97 @@ proc ::BatchMesherWorker::replaceRecord {index record} {
     set records [lreplace $records $index $index $record]
 }
 
+proc ::BatchMesherWorker::appendTaskWarning {taskVar message} {
+    upvar 1 $taskVar task
+    set message [string trim $message]
+    if {$message eq ""} { return }
+    set warning ""
+    if {[dict exists $task warning_message]} { set warning [string trim [dict get $task warning_message]] }
+    if {$warning ne ""} { append warning "\n" }
+    append warning $message
+    dict set task warning_message $warning
+}
+
+# Check the result at the engineering boundary that matters for downstream
+# assembly: every element created for one topology-connected surface group
+# must belong to the same node-connected FE region. Quality failures do not
+# affect this result and are handled separately.
+proc ::BatchMesherWorker::meshConnectivitySummary {elementIds} {
+    set elementIds [::BatchMesherWorker::uniqueIds $elementIds]
+    if {[llength $elementIds] == 0} {
+        return [dict create status invalid component_count 0 component_sizes {} message "no created elements"]
+    }
+    array set elementNodes {}
+    array set nodeElements {}
+    foreach elementId $elementIds {
+        if {[catch {set nodes [hm_getvalue elems id=$elementId dataname=nodes]} queryError]} {
+            return [dict create status unavailable component_count "" component_sizes {} \
+                message "could not read element $elementId connectivity: $queryError"]
+        }
+        set nodes [::BatchMesherWorker::uniqueIds $nodes]
+        if {[llength $nodes] < 2} {
+            return [dict create status invalid component_count "" component_sizes {} \
+                message "element $elementId has invalid connectivity: $nodes"]
+        }
+        set elementNodes($elementId) $nodes
+        foreach nodeId $nodes { lappend nodeElements($nodeId) $elementId }
+    }
+    array set visited {}
+    set componentSizes {}
+    foreach seed $elementIds {
+        if {[info exists visited($seed)]} { continue }
+        set queue [list $seed]
+        set visited($seed) 1
+        set size 0
+        set queueIndex 0
+        while {$queueIndex < [llength $queue]} {
+            set current [lindex $queue $queueIndex]
+            incr queueIndex
+            incr size
+            foreach nodeId $elementNodes($current) {
+                foreach neighbor $nodeElements($nodeId) {
+                    if {[info exists visited($neighbor)]} { continue }
+                    set visited($neighbor) 1
+                    lappend queue $neighbor
+                }
+            }
+        }
+        lappend componentSizes $size
+    }
+    set componentSizes [lsort -integer -decreasing $componentSizes]
+    set count [llength $componentSizes]
+    return [dict create status [expr {$count == 1 ? "valid" : "invalid"}] \
+        component_count $count component_sizes $componentSizes \
+        message [expr {$count == 1 ? "" : "created mesh has $count node-connected regions"}]]
+}
+
+# A native quality miss is intentionally advisory. Record the failing element
+# IDs so the merged mesh can be fed to Local Mesh Optimizer in later passes,
+# while keeping this worker's mesh package usable even if no pass can satisfy
+# every criterion.
+proc ::BatchMesherWorker::meshQualitySummary {elementIds} {
+    set elementIds [::BatchMesherWorker::uniqueIds $elementIds]
+    if {[llength $elementIds] == 0} {
+        return [dict create status unavailable failed_ids {} info ""]
+    }
+    if {[llength [info commands hm_getelementsqualityinfo]] == 0} {
+        return [dict create status unavailable failed_ids {} info "quality query command is unavailable"]
+    }
+    ::BatchMesherWorker::markIds elems 1 $elementIds
+    catch {*clearmark elems 2}
+    set code [catch {set info [hm_getelementsqualityinfo 1 1 2]} queryError]
+    set failed {}
+    if {!$code} {
+        catch {set failed [::BatchMesherWorker::uniqueIds [hm_getmark elems 2]]}
+        set failed [::BatchMesherWorker::difference $failed [::BatchMesherWorker::difference $failed $elementIds]]
+    }
+    catch {*clearmark elems 1}
+    catch {*clearmark elems 2}
+    if {$code} { return [dict create status unavailable failed_ids {} info $queryError] }
+    return [dict create status [expr {[llength $failed] > 0 ? "needs_optimization" : "passed"}] \
+        failed_ids $failed info $info]
+}
+
 proc ::BatchMesherWorker::runTask {index} {
     variable config
     variable records
@@ -262,40 +371,78 @@ proc ::BatchMesherWorker::runTask {index} {
         }
         set criteria [dict get $config criteria]
         set param [dict get $config param]
+        # HM2019's standalone BatchMesher invokes *hm_batchmesh, not
+        # *hm_batchmesh2.  The latter rejects some valid 2019 holes-recognition
+        # sections. Match Altair's release-specific runner contract exactly.
         if {$workerRelease eq "2019"} {
-            if {[llength [info commands *readbatchparamsfile]] == 0} {
-                error "HM2019 command *readbatchparamsfile is unavailable"
-            }
-            # Cleanup parameters used via "dummy" are consumed by one call,
-            # so reload both standards for every independently meshed group.
-            ::BatchMesherWorker::invokeFromFileDirectory $criteria \
-                [list *readqualitycriteria [file nativename $criteria]]
-            ::BatchMesherWorker::invokeFromFileDirectory $param \
-                [list *readbatchparamsfile [file nativename $param]]
-            ::BatchMesherWorker::appendLog $taskLog INFO \
-                "configuration_loaded mode=hm2019_preloaded criteria=$criteria param=$param"
-            ::BatchMesherWorker::invokeFromFileDirectory $param \
-                [list *hm_batchmesh2 surfs 1 1 0 dummy dummy]
+            if {[llength [info commands *hm_batchmesh]] == 0} { error "HyperMesh command *hm_batchmesh is unavailable" }
+            set batchApi hm_batchmesh
+            # The legacy parser used by HM2019 tokenizes native backslash paths
+            # incorrectly when a directory contains spaces. Altair's own
+            # standalone runner always supplies normalized forward-slash paths.
+            set legacyCriteria [string map {\\ /} [file normalize $criteria]]
+            set legacyParam [string map {\\ /} [file normalize $param]]
+            set command [list *hm_batchmesh 1 \
+                $legacyCriteria $legacyParam]
         } else {
+            if {[llength [info commands *hm_batchmesh2]] == 0} { error "HyperMesh command *hm_batchmesh2 is unavailable" }
+            set batchApi hm_batchmesh2
             set command [list *hm_batchmesh2 surfs 1 1 0 \
                 [file nativename $criteria] [file nativename $param]]
-            ::BatchMesherWorker::invokeFromFileDirectory $param $command
         }
+        ::BatchMesherWorker::appendLog $taskLog INFO \
+            "configuration_loaded mode=direct_paths release=$workerRelease api=$batchApi criteria=$criteria param=$param"
+        ::BatchMesherWorker::invokeFromWorkerDirectory $command
     } errorMessage errorOptions]
     catch {*clearmark surfs 1}
     set after [::BatchMesherWorker::allIds elems 2]
     set created [::BatchMesherWorker::difference $after $before]
+    dict set task created_elements [llength $created]
     if {[llength $created] == 0} {
         set code 1
         if {[string trim $errorMessage] eq ""} {
             set errorMessage "BatchMesher returned without creating elements; surface_ids=$ids"
             set errorOptions [dict create -errorinfo $errorMessage]
         }
-    } elseif {$code} {
-        # Preserve the diagnostic, but the newly created elements make this a
-        # usable result rather than a failed task.
-        set batchWarning $errorMessage
-        set code 0
+    } else {
+        set connectivity [::BatchMesherWorker::meshConnectivitySummary $created]
+        dict set task connectivity_status [dict get $connectivity status]
+        dict set task connectivity_components [dict get $connectivity component_count]
+        if {[dict get $connectivity status] eq "invalid"} {
+            set code 1
+            set connectivityError "BATCHMESH_CONNECTIVITY_INVALID [dict get $connectivity message]; component_sizes=[dict get $connectivity component_sizes] surface_ids=$ids"
+            if {[string trim $errorMessage] ne ""} { append connectivityError "\nNative BatchMesh diagnostic: $errorMessage" }
+            set errorMessage $connectivityError
+            set errorOptions [dict create -errorinfo $connectivityError]
+        } else {
+            if {[dict get $connectivity status] eq "unavailable"} {
+                ::BatchMesherWorker::appendTaskWarning task \
+                    "Connectivity verification unavailable; mesh retained: [dict get $connectivity message]"
+            }
+            if {$code} {
+                # Preserve the native diagnostic, but a created mesh whose
+                # connectivity is not known to be wrong remains usable.
+                set batchWarning $errorMessage
+                set code 0
+            }
+            set quality [::BatchMesherWorker::meshQualitySummary $created]
+            set qualityStatus [dict get $quality status]
+            set qualityFailed [dict get $quality failed_ids]
+            dict set task quality_status $qualityStatus
+            dict set task quality_failed_elements [llength $qualityFailed]
+            dict set task optimization_attempts 0
+            if {$qualityStatus eq "needs_optimization"} {
+                dict set task optimization_status pending
+                ::BatchMesherWorker::appendTaskWarning task \
+                    "QUALITY_NEEDS_OPTIMIZATION failed_elements=[llength $qualityFailed] element_ids=$qualityFailed; mesh retained for later iterative optimization"
+            } elseif {$qualityStatus eq "passed"} {
+                dict set task optimization_status not_required
+            } else {
+                dict set task optimization_status available
+                ::BatchMesherWorker::appendTaskWarning task \
+                    "Quality verification unavailable; mesh retained for later review: [dict get $quality info]"
+            }
+        }
     }
     set ended [clock milliseconds]
     dict set task ended_at [clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S}]
@@ -316,7 +463,7 @@ proc ::BatchMesherWorker::runTask {index} {
             # BatchMesher can return a Tcl error after producing a usable mesh
             # (for example when quality optimization cannot meet every target).
             # Element creation is the authoritative result boundary.
-            dict set task warning_message $batchWarning
+            ::BatchMesherWorker::appendTaskWarning task $batchWarning
             ::BatchMesherWorker::appendLog $taskLog WARN \
                 "completed_with_warning created_elements=[llength $created] warning=$batchWarning"
         } else {

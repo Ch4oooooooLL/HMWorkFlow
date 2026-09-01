@@ -1306,7 +1306,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 <h1 class="section-title">中面抽取 (Midsurface Extraction)</h1>
                 <div class="module-detail">
                     <div class="detail-header"><div class="detail-title"><span class="card-badge geometry">几何</span><span>钣金中面批量抽取</span></div><div class="detail-path-badge">modules/midsurf.tcl</div></div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">对选中的钣金几何 component 批量抽取中面，按 <code>Vxx_Name_Tx[_材料]</code> 规则命名，并统一放入 <code>MIDSURFED</code> assembly。抽中面时材料可为空，源几何保留并隐藏。</p>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">对选中的钣金 component 按 solid 逐个抽取中面 surfaces；同一源 component 含多个不连续 solids 时分别输出为 <code>V01_Name.1_Tx</code>、<code>V01_Name.2_Tx</code>……。同一 solid 已有精确同名结果时才递增为 <code>V02</code>、<code>V03</code>；仅无 solid 时使用 surface 兼容回退。</p>
                     <div class="step-list">
                         <div class="step-item"><span class="step-num">1</span><div class="step-title">选择组件</div><div class="step-detail">在主面板进入“抽中面”，选择需要处理的钣金几何组件。</div></div>
                         <div class="step-item"><span class="step-num">2</span><div class="step-title">确认抽取参数</div><div class="step-detail">检查抽取方法、阶梯对齐步数、中面位置和 R/T 比。</div></div>
@@ -2010,7 +2010,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                                     </tr>
                                     <tr><td><code>rigidType / dof</code></td><td><code>RBE2 / 123456</code></td><td>刚性类型可选 <code>RBE2</code> 或 <code>RBE3</code>；<code>dof</code> 为耦合自由度集合。</td></tr>
                                     <tr><td><code>loopRadiusTol / minWallNodes / minLoopNodes</code></td><td><code>0.35 / 6 / 4</code></td><td>端环半径一致性容差，以及孔壁/端环最少节点数；不足时候选会被跳过。</td></tr>
-                                    <tr><td><code>requireInnerNormal / innerNormalMaxDot</code></td><td><code>0 / -0.05</code></td><td>可选的内壁法向方向检查；开启后排除方向不符合预期的孔壁。</td></tr>
+                                    <tr><td><code>requireInnerNormal / innerNormalMaxDot</code></td><td><code>1 / -0.05</code></td><td>默认启用内壁法向方向检查，排除实体外圆柱面；仅在自由面法向不可靠的旧模型上临时关闭。</td></tr>
                                     <tr>
                                         <td><code>deleteTempFaces</code></td>
                                         <td><code>1</code> (开启)</td>
