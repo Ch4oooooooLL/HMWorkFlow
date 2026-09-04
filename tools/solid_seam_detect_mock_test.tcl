@@ -85,6 +85,16 @@ proc hm_getvalue {args} {
         }
         comps {
             if {$dataname eq "name"} { return $::M::compName($id) }
+            if {$dataname in {nodes elements}} {
+                set ids {}
+                foreach element [array names ::M::elemComp] {
+                    if {$::M::elemComp($element) != $id} { continue }
+                    if {$dataname eq "nodes"} {
+                        set ids [concat $ids $::M::elemNodes($element)]
+                    } else { lappend ids $element }
+                }
+                return [lsort -integer -unique $ids]
+            }
         }
     }
     error "unknown hm_getvalue: $args"

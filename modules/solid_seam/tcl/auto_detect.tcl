@@ -9,6 +9,22 @@
 # those).  All geometry queries use hm_getvalue on nodes/elems.
 
 namespace eval ::SolidSeam {}
+source -encoding utf-8 [file join [file dirname [info script]] spatial_index.tcl]
+source -encoding utf-8 [file join [file dirname [info script]] closed_boundary.tcl]
+source -encoding utf-8 [file join [file dirname [info script]] automatic_mode.tcl]
+source -encoding utf-8 [file join [file dirname [info script]] boundary_refinement.tcl]
+
+# Internal selection marks must not survive a query, including on failure.
+proc ::SolidSeam::queryMarkedIds {entityType slot args} {
+    catch {*clearmark $entityType $slot}
+    set code [catch {
+        *createmark $entityType $slot {*}$args
+        hm_getmark $entityType $slot
+    } result opts]
+    catch {*clearmark $entityType $slot}
+    if {$code} { return -options $opts $result }
+    return $result
+}
 
 # ---------------------------------------------------------------------------
 # Native surface/boundary extraction
@@ -61,7 +77,22 @@ proc ::SolidSeam::nativeDeleteComponent {componentId} {
     error "could not delete temporary component $componentId: $lastError"
 }
 
-proc ::SolidSeam::nativeBoundaryData {componentId kind} {
+proc ::SolidSeam::nativeBoundaryData {componentId kind {withEdges 0}} {
+    variable detectionCacheActive
+    variable detectionReadCache
+    if {![info exists detectionCacheActive] || !$detectionCacheActive} {
+        return [::SolidSeam::nativeBoundaryDataImpl $componentId $kind $withEdges]
+    }
+    set key [list nativeBoundary $componentId $kind]
+    if {[info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
+    # Read edge connectivity during the first extraction, so node-only and
+    # graph callers share one native temporary collector. Never cache failure.
+    set result [::SolidSeam::nativeBoundaryDataImpl $componentId $kind 1]
+    if {$result ne ""} { set detectionReadCache($key) $result }
+    return $result
+}
+
+proc ::SolidSeam::nativeBoundaryDataImpl {componentId kind {withEdges 0}} {
     if {$kind eq "edges"} {
         set commandName *findedges
         set collectorName ^edges
@@ -96,20 +127,24 @@ proc ::SolidSeam::nativeBoundaryData {componentId kind} {
         if {$temporaryId eq "" || $temporaryId eq $existingId} {
             error "HyperMesh did not create $collectorName"
         }
-        catch {*clearmark nodes 2}
-        *createmark nodes 2 "by comp id" $temporaryId
-        set nodeIds [lsort -integer -unique [hm_getmark nodes 2]]
+        set nodeIds [lsort -integer -unique [::SolidSeam::componentNodeIds $temporaryId]]
         set faces {}
+        set edges {}
+        if {$kind eq "edges" && $withEdges} {
+            foreach elementId [::SolidSeam::componentElementIds $temporaryId] {
+                set a [hm_getvalue elems id=$elementId dataname=node1]
+                set b [hm_getvalue elems id=$elementId dataname=node2]
+                if {$a > 0 && $b > 0 && $a != $b} { lappend edges [list $a $b] }
+            }
+        }
         if {$kind eq "faces"} {
-            catch {*clearmark elems 2}
-            *createmark elems 2 "by comp id" $temporaryId
-            foreach elementId [hm_getmark elems 2] {
+            foreach elementId [::SolidSeam::componentElementIds $temporaryId] {
                 set ring [::SolidSeam::elementNodes $elementId]
                 if {[llength $ring] >= 3} { lappend faces $ring }
             }
         }
         if {[llength $nodeIds] == 0} { error "$collectorName contains no nodes" }
-        set result [dict create node_ids $nodeIds faces $faces]
+        set result [dict create node_ids $nodeIds faces $faces edges $edges]
     } nativeError]
 
     catch {*clearmark comps 1}
@@ -149,16 +184,34 @@ proc ::SolidSeam::surfaceNodeIdsOfComponent {componentId isSolid} {
 # Node helpers
 # ---------------------------------------------------------------------------
 proc ::SolidSeam::componentNodeIds {componentId} {
-    catch {*clearmark nodes 1}
-    *createmark nodes 1 "by comp id" $componentId
-    return [hm_getmark nodes 1]
+    return [::SolidSeam::detectionComponentValue $componentId nodes]
+}
+
+# Only source/target IDs are stable during detection. Native extraction creates
+# and deletes temporary collectors, whose IDs can be reused within the call.
+proc ::SolidSeam::detectionComponentValue {componentId field} {
+    variable detectionCacheActive; variable detectionComponents; variable detectionReadCache
+    set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive &&
+        [info exists detectionComponents] && $componentId in $detectionComponents}]
+    set key [list component $componentId $field]
+    if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
+    set result [hm_getvalue comps id=$componentId dataname=$field]
+    if {$cache} { set detectionReadCache($key) $result }
+    return $result
 }
 
 proc ::SolidSeam::nodeXYZ {nodeId} {
+    variable detectionCacheActive
+    variable detectionCoordinates
+    if {[info exists detectionCacheActive] && $detectionCacheActive && [info exists detectionCoordinates($nodeId)]} {
+        return $detectionCoordinates($nodeId)
+    }
     set x [hm_getvalue nodes id=$nodeId dataname=x]
     set y [hm_getvalue nodes id=$nodeId dataname=y]
     set z [hm_getvalue nodes id=$nodeId dataname=z]
-    return [list $x $y $z]
+    set xyz [list $x $y $z]
+    if {[info exists detectionCacheActive] && $detectionCacheActive} { set detectionCoordinates($nodeId) $xyz }
+    return $xyz
 }
 
 proc ::SolidSeam::nodeDistance {p q} {
@@ -184,9 +237,8 @@ proc ::SolidSeam::clamp {value lower upper} {
 # Element topology helpers
 # ---------------------------------------------------------------------------
 proc ::SolidSeam::componentElementIds {componentId} {
-    catch {*clearmark elems 1}
-    *createmark elems 1 "by comp id" $componentId
-    return [hm_getmark elems 1]
+    # Supported in HM2019: reading connectivity must not select the component.
+    return [::SolidSeam::detectionComponentValue $componentId elements]
 }
 
 proc ::SolidSeam::elementConfig {elementId} {
@@ -212,7 +264,26 @@ proc ::SolidSeam::elementNodes {elementId} {
 #   210 tetra10, 213 pyra13, 215 penta15, 220 hex20
 # Shells (never solids): 103 tria3, 104 quad4, 106 tria6, 108 quad8.
 proc ::SolidSeam::componentIsSolid {componentId} {
-    foreach elementId [::SolidSeam::componentElementIds $componentId] {
+    variable detectionCacheActive; variable detectionReadCache
+    set key [list solid $componentId]
+    set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive}]
+    if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
+    set result [::SolidSeam::componentIsSolidImpl $componentId]
+    if {$cache} { set detectionReadCache($key) $result }
+    return $result
+}
+
+proc ::SolidSeam::componentIsSolidImpl {componentId} {
+    set elementIds [::SolidSeam::componentElementIds $componentId]
+    # Bulk config query avoids one host API call per shell element before
+    # reaching *findedges. Keep compatibility with profiles lacking arrays.
+    if {![catch {set configs [hm_getvalue elems "user_ids=$elementIds" dataname=config]}] && [llength $configs] == [llength $elementIds]} {
+        foreach config $configs {
+            if {$config in {204 205 206 208 210 213 215 220}} { return 1 }
+        }
+        return 0
+    }
+    foreach elementId $elementIds {
         if {[::SolidSeam::elementConfig $elementId] in {204 205 206 208 210 213 215 220}} {
             return 1
         }
@@ -399,10 +470,8 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targe
         set targetSolid [::SolidSeam::componentIsSolid $targetComponentId]
         set targetNodes [::SolidSeam::surfaceNodeIdsOfComponent $targetComponentId $targetSolid]
     }
-    array set targetXYZ {}
-    foreach nodeId $targetNodes {
-        set targetXYZ($nodeId) [::SolidSeam::nodeXYZ $nodeId]
-    }
+    if {[llength $targetNodes] == 0} { return {} }
+    set targetIndex [::SolidSeam::spatialIndex $targetNodes]
     set elementIds {}
     set nativeFaces [::SolidSeam::nativeBoundaryData $componentId faces]
     set nativeSurface [expr {$nativeFaces ne "" && [llength [dict get $nativeFaces faces]] > 0}]
@@ -483,16 +552,8 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targe
         }
         set n [llength $face]
         set centroid [list [expr {$cx / $n}] [expr {$cy / $n}] [expr {$cz / $n}]]
-        set nearest 1.0e12
-        set tx 0.0; set ty 0.0; set tz 0.0
-        foreach targetNode $targetNodes {
-            set p $targetXYZ($targetNode)
-            set d [::SolidSeam::nodeDistance $centroid $p]
-            if {$d < $nearest} {
-                set nearest $d
-                set tx [lindex $p 0]; set ty [lindex $p 1]; set tz [lindex $p 2]
-            }
-        }
+        lassign [::SolidSeam::nearestNode $targetIndex $centroid] targetNode nearest
+        lassign [::SolidSeam::nodeXYZ $targetNode] tx ty tz
         set dx [expr {$tx - [lindex $centroid 0]}]
         set dy [expr {$ty - [lindex $centroid 1]}]
         set dz [expr {$tz - [lindex $centroid 2]}]
@@ -567,11 +628,7 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targe
     set nodeDistances {}
     foreach nodeId $boundary {
         set p [::SolidSeam::nodeXYZ $nodeId]
-        set nearest 1.0e12
-        foreach targetNode $targetNodes {
-            set d [::SolidSeam::nodeDistance $p $targetXYZ($targetNode)]
-            if {$d < $nearest} { set nearest $d }
-        }
+        lassign [::SolidSeam::nearestNode $targetIndex $p] targetNode nearest
         lappend nodeDistances [list $nearest $nodeId]
     }
     set sortedNodes [lsort -real -index 0 $nodeDistances]
@@ -627,25 +684,14 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     foreach nodeId $sourceNodes {
         set sourceXYZ($nodeId) [::SolidSeam::nodeXYZ $nodeId]
     }
-    array set targetXYZ {}
-    foreach nodeId $targetNodes {
-        set targetXYZ($nodeId) [::SolidSeam::nodeXYZ $nodeId]
-    }
+    set targetIndex [::SolidSeam::spatialIndex $targetNodes]
 
     # nearest compB node for every compA node inside the search distance
     set pairs {}
     foreach sourceNode $sourceNodes {
         set p $sourceXYZ($sourceNode)
-        set bestDistance $searchDistance
-        set bestTarget 0
-        foreach targetNode $targetNodes {
-            set d [::SolidSeam::nodeDistance $p $targetXYZ($targetNode)]
-            if {$d < $bestDistance} {
-                set bestDistance $d
-                set bestTarget $targetNode
-            }
-        }
-        if {$bestTarget != 0} {
+        lassign [::SolidSeam::nearestNode $targetIndex $p $searchDistance] bestTarget bestDistance
+        if {$bestTarget ne ""} {
             lappend pairs [list $sourceNode $bestTarget $bestDistance]
         }
     }
@@ -692,6 +738,9 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     set closest {}
     foreach pair $pairs {
         if {[lindex $pair 2] <= $splitDistance} { lappend closest $pair }
+    }
+    if {!$sourceSolid && [llength $closest] < [llength $pairs]} {
+        set closest [::SolidSeam::retainBoundaryInteriors $sourceComponentId $pairs $closest]
     }
     return $closest
 }
@@ -842,9 +891,11 @@ proc ::SolidSeam::angleBetween {a b} {
 # first three nodes, averaged and aligned).
 # ---------------------------------------------------------------------------
 proc ::SolidSeam::componentAverageNormal {componentId} {
-    catch {*clearmark elems 1}
-    *createmark elems 1 "by comp id" $componentId
-    set elementIds [hm_getmark elems 1]
+    set elementIds [::SolidSeam::componentElementIds $componentId]
+    variable detectionAutoMode
+    if {[info exists detectionAutoMode] && $detectionAutoMode} {
+        set elementIds [::SolidSeam::sampleEvenly $elementIds 128]
+    }
     set normals {}
     foreach elementId $elementIds {
         catch {
@@ -966,6 +1017,29 @@ proc ::SolidSeam::deriveParameters {chainNodeIds pairs defaultWidth defaultSpaci
 # createOneCandidate / validateBeforeCreate / validateAfterCreate flow.
 # ---------------------------------------------------------------------------
 proc ::SolidSeam::autoDetectSeams {sourceComponentId targetComponentId settings} {
+    variable detectionCacheActive
+    variable detectionCoordinates
+    variable autoNormalCache
+    variable detectionAutoMode
+    variable detectionReadCache; variable detectionComponents
+    array unset detectionReadCache
+    set detectionComponents [list $sourceComponentId $targetComponentId]
+    set detectionAutoMode [expr {[dict exists $settings automatic] && [dict get $settings automatic]}]
+    array unset autoNormalCache
+    set detectionCacheActive 1
+    array unset detectionCoordinates
+    set code [catch {::SolidSeam::detectSeamsImpl $sourceComponentId $targetComponentId $settings} result opts]
+    set detectionCacheActive 0
+    set detectionAutoMode 0
+    array unset detectionCoordinates
+    array unset autoNormalCache
+    array unset detectionReadCache
+    set detectionComponents {}
+    if {$code} { return -options $opts $result }
+    return $result
+}
+
+proc ::SolidSeam::detectSeamsImpl {sourceComponentId targetComponentId settings} {
     set searchDistance [dict get $settings search_distance]
     set maxSearchDistance [dict get $settings max_search_distance]
     set minWeldLength [dict get $settings min_weld_length]
@@ -984,8 +1058,13 @@ proc ::SolidSeam::autoDetectSeams {sourceComponentId targetComponentId settings}
     # of the outer face that faces the target for solids.
     set pairs [::SolidSeam::detectJunctionNodes $sourceComponentId $targetComponentId $searchDistance]
     set sourceNodeIds {}
+    set sourceSeen [dict create]
     foreach pair $pairs {
-        if {[lsearch -exact $sourceNodeIds [lindex $pair 0]] < 0} { lappend sourceNodeIds [lindex $pair 0] }
+        set node [lindex $pair 0]
+        if {![dict exists $sourceSeen $node]} {
+            dict set sourceSeen $node 1
+            lappend sourceNodeIds $node
+        }
     }
     if {[llength $sourceNodeIds] == 0} { return {} }
 
@@ -994,30 +1073,57 @@ proc ::SolidSeam::autoDetectSeams {sourceComponentId targetComponentId settings}
     # default gap_jump_limit of 5 would otherwise split every chain into
     # single-node pieces.
     set spacingValues {}
-    for {set i 0} {$i < [llength $sourceNodeIds]} {incr i} {
-        set p [::SolidSeam::nodeXYZ [lindex $sourceNodeIds $i]]
-        set nearest 1.0e12
-        for {set j 0} {$j < [llength $sourceNodeIds]} {incr j} {
-            if {$j == $i} { continue }
-            set d [::SolidSeam::nodeDistance $p [::SolidSeam::nodeXYZ [lindex $sourceNodeIds $j]]]
-            if {$d < $nearest} { set nearest $d }
-        }
-        if {$nearest < 1.0e11} { lappend spacingValues $nearest }
+    set sourceIndex [::SolidSeam::spatialIndex $sourceNodeIds]
+    foreach nodeId $sourceNodeIds {
+        lassign [::SolidSeam::nearestNode $sourceIndex [::SolidSeam::nodeXYZ $nodeId] 1.0e100 $nodeId] partner nearest
+        if {$partner ne ""} { lappend spacingValues $nearest }
     }
     set localSpacing [::SolidSeam::median $spacingValues]
     if {$localSpacing <= 0.0} { set localSpacing 10.0 }
     set chainGap [expr {max($gapJumpLimit, 1.5 * $localSpacing)}]
 
-    set chains [::SolidSeam::buildChains $sourceNodeIds $chainGap]
-    set sourceNormal [::SolidSeam::componentAverageNormal $sourceComponentId]
-    set targetNormal [::SolidSeam::componentAverageNormal $targetComponentId]
+    set automatic [expr {[dict exists $settings automatic] && [dict get $settings automatic]}]
+    set pathRecords {}
+    if {![::SolidSeam::componentIsSolid $sourceComponentId]} {
+        set graph [::SolidSeam::freeBoundaryGraph $sourceComponentId]
+        # Filter the complete contour before applying the distance mask: a
+        # notch bottom may already have fallen outside the search radius.
+        set outlines [::SolidSeam::automaticBoundaryPaths [dict keys $graph] $graph 1]
+        set outlines [::SolidSeam::excludeBoundaryNotches $outlines $sourceComponentId $localSpacing]
+        set allowed [dict create]
+        foreach outline $outlines {
+            set path [dict get $outline node_ids]
+            if {[dict get $outline is_closed]} { lappend path [lindex $path 0] }
+            for {set i 1} {$i < [llength $path]} {incr i} {
+                set a [lindex $path [expr {$i-1}]]; set b [lindex $path $i]
+                dict lappend allowed $a $b; dict lappend allowed $b $a
+            }
+        }
+        set retained {}
+        foreach node $sourceNodeIds { if {[dict exists $allowed $node]} { lappend retained $node } }
+        set pathRecords [::SolidSeam::automaticBoundaryPaths $retained $allowed 1]
+    } else {
+        foreach chain [::SolidSeam::buildChains $sourceNodeIds $chainGap] {
+            lappend pathRecords [dict create node_ids $chain is_closed 0]
+        }
+    }
+    set sourceNormal {0 0 0}; set targetNormal {0 0 0}
+    if {!$automatic} {
+        set sourceNormal [::SolidSeam::componentAverageNormal $sourceComponentId]
+        set targetNormal [::SolidSeam::componentAverageNormal $targetComponentId]
+    }
 
     set candidates {}
     set index 0
-    foreach chainNodeIds $chains {
+    foreach record $pathRecords {
+        set chainNodeIds [dict get $record node_ids]
         incr index
         if {[llength $chainNodeIds] < 2} { continue }
-        set parameters [::SolidSeam::deriveParameters $chainNodeIds $pairs $defaultWidth $defaultSpacing]
+        set members [dict create]
+        foreach node $chainNodeIds { dict set members $node 1 }
+        set chainPairs {}
+        foreach pair $pairs { if {[dict exists $members [lindex $pair 0]]} { lappend chainPairs $pair } }
+        set parameters [::SolidSeam::deriveParameters $chainNodeIds $chainPairs $defaultWidth $defaultSpacing]
         if {[dict get $parameters mesh_size] <= 0.0} { continue }
         set chainLength 0.0
         for {set i 0} {$i < [llength $chainNodeIds] - 1} {incr i} {
@@ -1045,6 +1151,10 @@ proc ::SolidSeam::autoDetectSeams {sourceComponentId targetComponentId settings}
             chain_length [format %.3f $chainLength] \
         ]
         set candidate [dict merge $candidate $parameters]
+        dict set candidate is_closed [dict get $record is_closed]
+        if {$automatic} {
+            set candidate [::SolidSeam::applyAutomaticParameters $candidate $chainPairs]
+        }
         lappend candidates $candidate
     }
     return $candidates

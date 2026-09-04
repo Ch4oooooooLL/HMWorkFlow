@@ -20,7 +20,8 @@ namespace eval ::SolidSeam {
         gap_jump_limit 5.0 allow_closed_loop 1 detect_duplicates 1
         high_confidence_threshold 0.85 review_confidence_threshold 0.60
         default_realization PENTA_MIG_T auto_accept_high 1 status "Ready"
-        default_width 6.0 default_spacing 6.0
+        default_width 6.0 default_spacing 6.0 tolerance 15.0
+        input_type NODES_COMPS weld_type T side_mode POSITIVE
     }
 }
 
@@ -48,6 +49,15 @@ proc ::SolidSeam::log {level message {candidateId "-"}} {
     variable runtimeDir; variable runId
     set line "[clock format [clock seconds] -format {%Y-%m-%dT%H:%M:%S}] $level run=$runId candidate=$candidateId $message"
     catch {puts "SolidSeam: $line"}
+    if {$::SolidSeam::ui(input_type) eq "AUTO_GROUP"} {
+        catch {::HWFlow::progressAppend "SolidSeam: $line"}
+        if {[info exists ::SolidSeam::groupLogPath] && $::SolidSeam::groupLogPath ne ""} {
+            set groupChannel [open $::SolidSeam::groupLogPath a]
+            fconfigure $groupChannel -encoding utf-8 -translation lf
+            puts $groupChannel $line
+            close $groupChannel
+        }
+    }
     if {$runtimeDir ne ""} {
         set channel [open [file join $runtimeDir operation.log] a]
         fconfigure $channel -encoding utf-8 -translation lf

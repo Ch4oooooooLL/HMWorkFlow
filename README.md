@@ -231,7 +231,7 @@ HyperMesh 2019 会在读取 `hmcustom.tcl` 时直接恢复快捷键；HyperMesh 
 
 抽中面前只需保证源组件名称保留 `Vxx_件号`，例如 `V01_BRACKET`；抽中面会根据名称和几何结果生成厚度字段。中面完成后，`读取 BOM 表` 模块当前会扫描 `MIDSURFED` Assembly 并统一设置 Q355，真实 BOM 文件读取将在后续版本实现。
 
-几何导入后可先打开 `预处理` 面板：`转为车辆坐标系` 对当前显示组件依次执行绕全局 X 轴 +90°、绕全局 Z 轴 -90°；`清理无关部件` 选择一个 component 后，会把同名本体及 `.数字` 重名组件统一归入 `USELESS` Assembly 并隐藏；`移除骨架` 会对名称中包含 `SKELL`（不区分大小写）的组件执行相同归档。两项清理都不删除组件。
+几何导入后可先打开 `预处理` 面板：`转为车辆坐标系` 对当前显示组件依次执行绕全局 X 轴 +90°、绕全局 Z 轴 -90°；`清理无关部件` 可一次选择多个 component，并把各自同名本体及 `.数字` 重名组件去重后统一归入 `USELESS` Assembly 并隐藏；`移除骨架` 会对名称中包含 `SKELL`（不区分大小写）的组件执行相同归档。两项清理都会显示处理进度，且都不删除组件。
 
 ### 处理钣金件
 
@@ -630,17 +630,17 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 入口：`::SolidSeam::run`
 
-功能：选择两个 Components 后自动识别交界焊缝位置与接头类型，并按原生 1D connector seam 流程直接创建 `PENTA6 + RBE3` 实体焊缝（推荐 `PENTA_MIG_T/L/B` 或通用 `PENTA_MIG`），输出到 `SEAM_SOLID` 组件。
+功能：通过子面板设置并批量创建 `PENTA6 + RBE3` 实体焊缝，结果归入 `SEAM_SOLID`。
 
-用法：
+**AutoGroup**：点击“开始”后一次选择所有待处理 comps，自动识别配对及源/目标方向，再按 Auto 参数批量创建。支持一个组件连接多个邻接组件；显示进度条和滚动命令流，结束后保留窗口及完整日志。以下两次选择流程适用于其他三种模式。
 
-1. 在主面板运行 `实体焊缝 / Solid Seam Connector`。
-2. 设置搜索距离、最小焊缝长度、链断点容差；焊缝宽度与节点间距默认 6，模块会根据实际网格尺寸自动修正。
-3. 点击 `选择组件并创建`，在 HyperMesh 原生 Components 面板中选择两个组件。
-4. 模块自动检测交界节点链、判断接头类型（T/LAP/BUTT/ANGLED）、计算容差并批量创建；每条失败独立记录，不中断后续候选。
-5. 创建结果（PENTA6/RBE3）移入 `SEAM_SOLID` 组件，结果写入 `temp/solid_seam/<run_id>/realization_result.json` 与 `operation.log`。
+1. 选择 `nodes+comps`、`comps+comps` 或 `Auto`。手动模式设置 T/B/L、spacing、tolerance、width 和创建侧；Auto 自动推导类型、数值参数及创建侧；侧向不明确时回退到用户设置，显式双侧保持不变。
+2. 点击“开始”后两两一组收集。`nodes+comps` 默认使用原生 node path，支持多个有序节点或一个闭环种子点，然后选择目标 comp，源 comp 自动确定；其他模式依次选择源 comp 和目标 comp。
+3. 完整组先缓存。第一步空选提交全部缓存；第二步空选仅取消当前未完成组。提交前不创建焊缝。
+4. 先计算所有组的路径及参数，再逐组创建；各组源/目标保持选择顺序，失败不阻断后续组。执行后恢复子面板并显示结果。
+5. 各组结果写入 HybridCore 任务目录下的 `realization_result.json` 与 `operation.log`。默认位于 `%LOCALAPPDATA%/HMWorkFlow/runtime/tasks/solid_seam/`，也支持配置的运行目录。
 
-realization 容差自适应：`max(6.0, 1.5 × 网格尺寸, 最大间隙 + 网格尺寸)`，确保原生 seam 搜索始终覆盖局部网格与焊缝间隙（真实模型上 1–2 mm 容差会导致 realize 失败，3 mm 以上成功）。
+单点闭环、Auto 几何判定和验证说明见 [实体焊缝模块说明](modules/solid_seam/README.md)。Auto 根据局部网格尺度推导参数；手动输入按显式数值执行，复杂几何仍需复核结果。
 
 双版本实机验证（2019.0.0.70 / 2022.0.0.33）见 `docs/solid_seam_dual_version_alignment_2026-08-08.md`。
 

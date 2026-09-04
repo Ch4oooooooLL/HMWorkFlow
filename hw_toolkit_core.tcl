@@ -38,8 +38,8 @@ namespace eval ::HWToolkit {
             group    "Geometry"
             label_zh "预处理"
             label_en "Preprocess"
-            desc_zh  "打开独立预处理面板：可将当前显示组件按标准两步旋转转换到车辆坐标系；按所选组件名称归档同名及 .数字 后缀组件；或归档名称中包含 SKELL 的骨架组件。\n归档结果统一移动到 USELESS Assembly 并隐藏，不删除任何组件。\n坐标转换作用于当前显示组件，请在执行前确认显示范围与模型初始坐标系。"
-            desc_en  "Open a dedicated preprocessing panel: rotate all displayed components in two steps into the vehicle coordinate system; archive the selected component name family (the base name and .number duplicates); or archive skeleton components whose names contain SKELL.\nArchived components are moved into the USELESS assembly and hidden; nothing is deleted.\nThe coordinate conversion affects all displayed components, so verify the display set and starting coordinate system first."
+            desc_zh  "打开独立预处理面板：可将当前显示组件按标准两步旋转转换到车辆坐标系；一次选择多个组件，批量归档各自同名及 .数字 后缀组件；或归档名称中包含 SKELL 的骨架组件。\n归档过程显示实时进度，结果统一移动到 USELESS Assembly 并隐藏，不删除任何组件。\n坐标转换作用于当前显示组件，请在执行前确认显示范围与模型初始坐标系。"
+            desc_en  "Open a dedicated preprocessing panel: rotate all displayed components in two steps into the vehicle coordinate system; select multiple components and batch-archive every selected name family (base names and .number duplicates); or archive skeleton components whose names contain SKELL.\nArchiving shows live progress; results are moved to the USELESS assembly and hidden, and nothing is deleted.\nThe coordinate conversion affects all displayed components, so verify the display set and starting coordinate system first."
             proc     "::GeometryPreprocess::runAction"
         }
         geometry_cleanup {
@@ -190,8 +190,8 @@ namespace eval ::HWToolkit {
             group    "Connector"
             label_zh "实体焊缝"
             label_en "Solid Seam Connector"
-            desc_zh  "选择两个 Components 后自动识别交界焊缝：检测交界节点链、判断接头类型（T/LAP/BUTT/ANGLED），按原生 seam connector 流程创建 PENTA6 + RBE3 实体焊缝。\n焊缝宽度与节点间距默认 6 并随网格尺寸自动修正；realization 容差自适应为 max(6.0, 1.5×网格尺寸, 最大间隙+网格尺寸)。\n输出归入 SEAM_SOLID 组件，单条失败独立记录；2019 与 2022 双版本实机验证通过。"
-            desc_en  "Pick two components; the module detects the junction node chains, classifies the joint (T/LAP/BUTT/ANGLED), and creates PENTA6 + RBE3 solid welds through the native seam connector flow.\nWidth/spacing default to 6 and adapt to the mesh; the realization tolerance floors at max(6.0, 1.5×mesh size, max gap + mesh size).\nOutput goes to SEAM_SOLID with per-seam failure records; verified on both 2019 and 2022 builds."
+            desc_zh  "打开实体焊缝子面板，选择 nodes+comps、comps+comps 或 Auto 输入、T/B/L 类型、spacing/tolerance/width 和正侧/负侧/双侧。\nnodes+comps 默认 node path，支持单点闭环与多点路径；选择目标组件后自动补齐源组件。Auto 根据局部网格和几何推导类型与数值参数。\n两两一组缓存，第一步空选后批量执行；第二步空选仅取消当前组。创建 PENTA6 + RBE3，输出归入 SEAM_SOLID，结束后恢复子面板。"
+            desc_en  "Choose nodes+comps, comps+comps or Auto, with manual T/B/L and dimensions or inferred Auto parameters.\nNative node path accepts ordered nodes or a closed-boundary seed, followed by a target component; the source is inferred.\nCache complete pairs, then submit with an empty first selection. Empty target cancels only that pair. Create PENTA6 + RBE3 in SEAM_SOLID and restore the panel after execution."
             proc     "::SolidSeam::runAction"
             settings_proc "::SolidSeam::runSettings"
         }

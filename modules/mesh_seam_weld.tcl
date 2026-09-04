@@ -3245,6 +3245,36 @@ proc ::MeshSeamWeld::matchContinuousTargetPathNodes {sourceNodes candidateNodes 
         }
     }
 
+    # A unique connected closest-node projection needs no beam search.
+    # Otherwise long simple paths retain O(N*beamWidth) backpointers.
+    set projectedPathValid [expr {$sourceCount >= 2 &&
+        [llength [lsort -integer -unique $anchorNodes]] == $sourceCount}]
+    set anchorIndex 0
+    foreach anchor $anchorNodes {
+        if {![dict exists $candidateAllowed $anchor]} {
+            set projectedPathValid 0
+            break
+        }
+        if {$anchorIndex > 0 && ![dict exists $lastLocalTargetEdges \
+            [::MeshSeamWeld::canonicalEdgeKey $previousAnchor $anchor]]} {
+            set projectedPathValid 0
+            break
+        }
+        set previousAnchor $anchor
+        incr anchorIndex
+        ::MeshSeamWeld::responsiveCheckpoint $anchorIndex 256
+    }
+    if {$projectedPathValid && $closedLoop &&
+        ![dict exists $lastLocalTargetEdges [::MeshSeamWeld::canonicalEdgeKey \
+            [lindex $anchorNodes end] [lindex $anchorNodes 0]]]} {
+        set projectedPathValid 0
+    }
+    if {$projectedPathValid} {
+        ::HybridCore::log INFO \
+            "imprint target_path=projected_continuous nodes=$sourceCount"
+        return $anchorNodes
+    }
+
     # Interior closest-node anchors are only reliable as matching hints. In
     # particular,
     # a fine source boundary can produce a long run of identical closest
@@ -5006,13 +5036,25 @@ proc ::MeshSeamWeld::anchoredTargetCorrespondence {sourceNodes targetNodes {clos
     set targetCount [llength $targetNodes]
     if {$sourceCount < 2 || $targetCount < $sourceCount} { return {} }
 
+    # Equal counts admit exactly one strictly increasing full-path mapping.
+    # Avoid a quadratic scan with no choices and no UI checkpoints.
+    if {$sourceCount == $targetCount} {
+        set anchorIndices {}
+        for {set index 0} {$index < $sourceCount} {incr index} {
+            lappend anchorIndices $index
+            ::MeshSeamWeld::responsiveCheckpoint $index 256
+        }
+        return [dict create target_nodes $targetNodes anchor_indices $anchorIndices]
+    }
+
     # Solve the correspondence for the complete path instead of selecting the
     # closest target independently for each source node.  Independent nearest
     # selection is greedy: ordinary longitudinal staggering, curved rows, or
     # different local mesh spacing can map two source nodes to one target or
     # make the indices step backward even when a valid one-to-one monotonic
     # mapping exists.  This dynamic program finds the minimum total geometric
-    # cost under a strict increasing-index constraint in O(S*T).
+    # cost under a strict increasing-index constraint. Only T-S+1 feasible
+    # target indices per source station need to be scanned.
     #
     # The aligned first stations are fixed together.  Open paths also fix both
     # end stations, which prevents a partial target subsection from being
@@ -5024,7 +5066,10 @@ proc ::MeshSeamWeld::anchoredTargetCorrespondence {sourceNodes targetNodes {clos
         array set currentCost {}
         set bestPreviousIndex ""
         set bestPreviousCost ""
-        for {set targetIndex 0} {$targetIndex < $targetCount} {incr targetIndex} {
+        # Only these indices can leave enough nodes for the remaining source.
+        set minimumIndex $sourceIndex
+        set maximumIndex [expr {$targetCount - ($sourceCount - $sourceIndex)}]
+        for {set targetIndex $minimumIndex} {$targetIndex <= $maximumIndex} {incr targetIndex} {
             set candidatePrevious [expr {$targetIndex - 1}]
             if {$candidatePrevious >= 0 &&
                 [info exists previousCost($candidatePrevious)] &&
@@ -5033,10 +5078,7 @@ proc ::MeshSeamWeld::anchoredTargetCorrespondence {sourceNodes targetNodes {clos
                 set bestPreviousIndex $candidatePrevious
                 set bestPreviousCost $previousCost($candidatePrevious)
             }
-            set minimumIndex $sourceIndex
-            set maximumIndex [expr {$targetCount - ($sourceCount - $sourceIndex)}]
-            if {$targetIndex < $minimumIndex || $targetIndex > $maximumIndex ||
-                $bestPreviousIndex eq ""} {
+            if {$bestPreviousIndex eq ""} {
                 continue
             }
             if {!$closedLoop && $sourceIndex == $sourceCount - 1 &&
@@ -5053,6 +5095,7 @@ proc ::MeshSeamWeld::anchoredTargetCorrespondence {sourceNodes targetNodes {clos
         array set previousCost [array get currentCost]
         unset currentCost
         if {[array size previousCost] == 0} { return {} }
+        ::MeshSeamWeld::responsiveCheckpoint $sourceIndex 128
     }
 
     set finalTargetIndex ""

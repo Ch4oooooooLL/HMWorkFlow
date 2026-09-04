@@ -32,16 +32,16 @@ proc ::SolidSeam::componentPairs {componentIds} {
     return $pairs
 }
 
-proc ::SolidSeam::autoDetectAndCreate {componentIds} {
+proc ::SolidSeam::autoDetectAndCreate {componentIds {prepareOnly 0}} {
     variable ui; variable candidateRows; variable lastResultSummary
     set pairs [::SolidSeam::componentPairs $componentIds]
     if {[llength $pairs] == 0} {
         error [::SolidSeam::txt "请至少选择两个组件。" "Select at least two components."]
     }
     set settings [dict create \
-        search_distance $ui(search_distance) \
-        max_search_distance $ui(max_search_distance) \
-        min_weld_length $ui(min_weld_length) \
+        search_distance $ui(tolerance) \
+        max_search_distance $ui(tolerance) \
+        min_weld_length 0.0 \
         gap_jump_limit $ui(gap_jump_limit) \
         default_width $ui(default_width) \
         default_spacing $ui(default_spacing) \
@@ -50,18 +50,58 @@ proc ::SolidSeam::autoDetectAndCreate {componentIds} {
     foreach pair $pairs {
         set source [lindex $pair 0]
         set target [lindex $pair 1]
-        set detected [::SolidSeam::autoDetectSeams $source $target $settings]
+        if {$ui(input_type) eq "AUTO"} {
+            set pairSettings [::SolidSeam::automaticSettings $source $target]
+        } else { set pairSettings $settings }
+        set detected [::SolidSeam::autoDetectSeams $source $target $pairSettings]
         ::SolidSeam::log INFO "auto detect pair $source -> $target candidates=[llength $detected]"
         foreach candidate $detected {
+            if {$ui(input_type) eq "AUTO"} {
+                # Auto already resolved side_mode, retaining BOTH or the manual
+                # fallback where the geometry cannot select a unique side.
+            } else { set candidate [::SolidSeam::applyCreationSettings $candidate] }
             dict set candidate status ACCEPTED
             lappend candidateRows $candidate
         }
     }
     if {[llength $candidateRows] == 0} {
-        error [::SolidSeam::txt "未识别到可创建的焊缝位置。请检查搜索距离与组件选择。" "No weld location was detected. Check the search distance and component selection."]
+        if {$ui(input_type) eq "AUTO"} {
+            error [::SolidSeam::txt "Auto 在当前网格尺度的搜索范围内未找到焊缝。请检查组件，或切换 comps+comps 指定 tolerance。" "Auto found no seam within the mesh-scaled search range. Check components or use comps+comps to specify tolerance."]
+        }
+        error [::SolidSeam::txt "未识别到可创建的焊缝位置。请检查 tolerance 与组件选择。" "No weld location was detected. Check tolerance and the selected components."]
     }
+    if {$prepareOnly} { return $candidateRows }
     ::SolidSeam::createAcceptedCandidates
-    set lastResultSummary [::SolidSeam::txt "候选 [llength $candidateRows] 条" "[llength $candidateRows] candidates"]
+}
+
+proc ::SolidSeam::applyCreationSettings {candidate} {
+    variable ui
+    dict set candidate suggested_realization PENTA_MIG_$ui(weld_type)
+    dict set candidate joint_type [dict get {T T_JOINT B BUTT_JOINT L LAP_JOINT} $ui(weld_type)]
+    dict set candidate line_spacing $ui(default_spacing)
+    dict set candidate weld_width $ui(default_width)
+    dict set candidate realization_tolerance $ui(tolerance)
+    dict set candidate side_mode $ui(side_mode)
+    dict set candidate parameter_strategy USER_EXPLICIT
+    return $candidate
+}
+
+proc ::SolidSeam::createFromNodes {nodeIds componentIds {prepareOnly 0}} {
+    variable candidateRows
+    set closed [expr {[llength $nodeIds] == 1}]
+    if {$closed} {
+        set paths [::SolidSeam::closedBoundariesForSeed [lindex $nodeIds 0] [lindex $componentIds 0]]
+    } else { set paths [list $nodeIds] }
+    set candidateRows {}; set index 0
+    foreach path $paths {
+        incr index
+        set candidate [dict create candidate_id MANUAL_$index node_ids $path is_closed $closed \
+            source_component_id [lindex $componentIds 0] target_component_id [lindex $componentIds 1] \
+            status ACCEPTED duplicate_state NONE]
+        lappend candidateRows [::SolidSeam::applyCreationSettings $candidate]
+    }
+    if {$prepareOnly} { return $candidateRows }
+    ::SolidSeam::createAcceptedCandidates
 }
 
 proc ::SolidSeam::createOneCandidate {candidate} {
@@ -71,11 +111,16 @@ proc ::SolidSeam::createOneCandidate {candidate} {
     set profile [::SolidSeam::loadRealizationProfile [dict get $candidate suggested_realization]]
     catch {*clearmark nodes 1}; catch {*clearmark connectors 1}; catch {*clearmark elems 1}
     set parameterSummary ""
-    foreach field {parameter_strategy mesh_size source_thickness line_spacing weld_width realization_tolerance side_mode right_angled orientation_reversed} {
+    foreach field {parameter_strategy side_strategy side_confidence side_votes mesh_size source_thickness line_spacing weld_width realization_tolerance side_mode right_angled orientation_reversed} {
         if {[dict exists $candidate $field]} { append parameterSummary " $field=[dict get $candidate $field]" }
     }
     ::SolidSeam::log INFO "realization start profile=[dict get $profile profile_name] nodes=[dict get $candidate node_ids]$parameterSummary" $candidateId
-    set result [::SolidSeamCommandProfile::realize $candidate $profile]
+    set code [catch {::SolidSeamCommandProfile::realize $candidate $profile} result opts]
+    foreach slot {1 2} {
+        foreach entity {elems nodes comps connectors} { catch {*clearmark $entity $slot} }
+        catch {*clearlist nodes $slot}
+    }
+    if {$code} { return -options $opts $result }
     set validation [::SolidSeam::validateAfterCreate $candidate $result]
     dict set result validation $validation
     ::SolidSeam::log INFO "realization complete grade=[dict get $validation grade] state=[dict get $validation connector_state]" $candidateId
@@ -83,7 +128,7 @@ proc ::SolidSeam::createOneCandidate {candidate} {
 }
 
 proc ::SolidSeam::createAcceptedCandidates {} {
-    variable candidateRows; variable cancelled
+    variable candidateRows; variable cancelled; variable lastResultSummary
     set accepted {}
     foreach row $candidateRows { if {[dict get $row status] eq "ACCEPTED"} { lappend accepted $row } }
     if {[llength $accepted] == 0} { ::SolidSeam::message warning [::SolidSeam::txt "没有已接受候选。" "No accepted candidates."]; return }
@@ -96,6 +141,10 @@ proc ::SolidSeam::createAcceptedCandidates {} {
             continue
         }
         set candidateId [dict get $candidate candidate_id]
+        if {$::SolidSeam::ui(input_type) eq "AUTO_GROUP"} {
+            ::SolidSeam::log INFO "AutoGroup create seam $index/[llength $accepted]: $candidateId"
+            catch {::HWFlow::progressPumpEvents 0}
+        }
         if {[catch {set created [::SolidSeam::createOneCandidate $candidate]} err opts]} {
             ::SolidSeam::updateCandidate $candidateId status FAILED
             ::SolidSeam::log ERROR "realization failed: $err" $candidateId
@@ -113,5 +162,12 @@ proc ::SolidSeam::createAcceptedCandidates {} {
     catch {hm_markclear components 1}
     catch {hm_markclear components 2}
     ::SolidSeam::writeRealizationResult $results
-    ::SolidSeam::message info [::SolidSeam::txt "创建批次完成：总计 [llength $results]，详见 operation.log 与 realization_result.json。" "Creation batch complete: [llength $results] items. See operation.log and realization_result.json."]
+    set created 0; set failed 0
+    foreach result $results {
+        if {[dict get $result status] eq "CREATED"} { incr created }
+        if {[dict get $result status] eq "FAILED"} { incr failed }
+    }
+    set lastResultSummary [::SolidSeam::txt "成功 $created，失败 $failed，总计 [llength $results]" "Created $created, failed $failed, total [llength $results]"]
+    if {$failed > 0} { error "$lastResultSummary. See operation.log / realization_result.json." }
+    return $results
 }

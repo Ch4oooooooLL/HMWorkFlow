@@ -1,15 +1,16 @@
 namespace eval ::SolidSeamCommandProfile {}
 
 proc ::SolidSeamCommandProfile::snapshotIds {entityType} {
-    catch {*clearmark $entityType 1}
-    *createmark $entityType 1 all
-    return [hm_getmark $entityType 1]
+    # Read-only enumeration: never put the entire model into a UI mark.
+    return [hm_entitylist $entityType id all]
 }
 
 proc ::SolidSeamCommandProfile::newIds {before after} {
+    set known [dict create]
+    foreach entityId $before { dict set known $entityId 1 }
     set result {}
     foreach entityId $after {
-        if {[lsearch -exact $before $entityId] < 0} { lappend result $entityId }
+        if {![dict exists $known $entityId]} { lappend result $entityId }
     }
     return $result
 }
@@ -119,10 +120,7 @@ proc ::SolidSeamCommandProfile::moveRealizationToOutputComponent {elementIds bef
     set generatedComponentIds [::SolidSeamCommandProfile::newIds $beforeComponentIds $afterComponentIds]
     foreach componentId $generatedComponentIds {
         if {$componentId == [dict get $outputComponent id]} { continue }
-        catch {*clearmark elems 1}
-        catch {eval *createmark elems 1 "by comp id" $componentId}
-        set remainingElements {}
-        catch {set remainingElements [hm_getmark elems 1]}
+        set remainingElements [hm_getvalue comps id=$componentId dataname=elements]
         if {[llength $remainingElements] == 0} {
             *createmark comps 1 $componentId
             catch {*deletemark comps 1}
@@ -135,15 +133,24 @@ proc ::SolidSeamCommandProfile::moveRealizationToOutputComponent {elementIds bef
 }
 
 proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName} {
+    if {[::SolidSeamCommandProfile::candidateValue $candidate is_closed 0]} {
+        return [::SolidSeamCommandProfile::realizeClosedPentaMig $candidate $profile $feType $feName]
+    }
     ::SolidSeamCommandProfile::ensureOptiStructTemplate
 
     set sourceComponentId [dict get $candidate source_component_id]
     set targetComponentId [dict get $candidate target_component_id]
     set nodeIds [dict get $candidate node_ids]
     set tolerance [::SolidSeamCommandProfile::candidateValue $candidate realization_tolerance [dict get $profile default_tolerance]]
-    set tolerance [::SolidSeamCommandProfile::adaptiveTolerance $candidate $tolerance]
+    set closedPiece [::SolidSeamCommandProfile::candidateValue $candidate closed_boundary_piece 0]
+    if {[::SolidSeamCommandProfile::candidateValue $candidate parameter_strategy ""] ni {USER_EXPLICIT AUTO_GEOMETRY_V1}} {
+        set tolerance [::SolidSeamCommandProfile::adaptiveTolerance $candidate $tolerance]
+    }
     set width [::SolidSeamCommandProfile::candidateValue $candidate weld_width [dict get $profile default_width]]
     set spacing [::SolidSeamCommandProfile::candidateValue $candidate line_spacing $width]
+    set side [::SolidSeamCommandProfile::candidateValue $candidate side_mode POSITIVE]
+    if {$side ni {POSITIVE NEGATIVE BOTH}} { error "Invalid weld side: $side" }
+    set sideOption [dict get {POSITIVE 1 NEGATIVE 2 BOTH 3} $side]
     set rightAngledRaw [string tolower [::SolidSeamCommandProfile::candidateValue $candidate right_angled false]]
     set rightAngled [expr {$rightAngledRaw in {1 true yes on}}]
 
@@ -162,6 +169,7 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
     # creation time.  The weld nodes come from the FIRST component, so the
     # connector must be marked on it too - never on the second component.
     # (Verified on 2019.0.0.70: ce_comp follows *currentcollector components.)
+    set sourceComponentName ""
     catch {set sourceComponentName [hm_getvalue comps id=$sourceComponentId dataname=name]}
     if {$sourceComponentName ne ""} {
         catch {*currentcollector components $sourceComponentName}
@@ -171,8 +179,10 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
     set feConfigPath [file join $executableDir feconfig.cfg]
     if {![file isfile $feConfigPath]} { error "HM2019 connector configuration is missing: $feConfigPath" }
 
-    # Option set verified on 2019.0.0.70 and 2022.0.0.33 (user-recorded
-    # command file + headless harness): the 45 native seam options with
+    # Base option set verified on 2019.0.0.70 and 2022.0.0.33 (user-recorded
+    # command file + headless harness). ce_pentasideoption is the creation
+    # keyword; ce_penta_side_option is the stored detail name (1/2/3).
+    # The native seam options use
     # ce_pentafitoption=2, width fed into ce_fedepth, spacing into
     # line_spacing.  ce_configfile/ce_propertyscript are optional; the
     # explicit config file keeps the custom (1001) FE types resolvable.
@@ -199,6 +209,7 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
         "ce_fe_edgesnapping_t=2" \
         "ce_fe_edgesnapping_l=1" \
         "ce_pentafitoption=2" \
+        "ce_pentasideoption=$sideOption" \
         "ce_fe_offsetangle=45.000000" \
         "ce_fe_thck_flag=1" \
         "ce_fe_density=1" \
@@ -212,7 +223,7 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
         "ce_prop_opt=1" \
         "ce_propertyid=0" \
         "ce_fe_height=5.000000" \
-        "ce_fe_createcap=1" \
+        "ce_fe_createcap=[expr {!$closedPiece}]" \
         "ce_fe_runoffangle=10.000000" \
         "ce_fe_capangle=65.000000" \
         "ce_fe_sharpcorner=0" \
@@ -266,6 +277,39 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
         linked_component_ids [list $sourceComponentId $targetComponentId] \
         output_component_id [dict get $outputComponent id] \
         output_component_name [dict get $outputComponent name] \
-        applied_parameters [dict create spacing $spacing width $width tolerance $tolerance side POSITIVE right_angled $rightAngled connectivity ENSURE_PROJECTION] \
+        applied_parameters [dict create spacing $spacing width $width tolerance $tolerance side $side right_angled $rightAngled connectivity ENSURE_PROJECTION] \
     ]
+}
+
+# HM2019 *createlist removes duplicate IDs, including a repeated start node.
+# Two open arcs share both endpoints and together cover each boundary edge
+# exactly once. They require no duplicate input IDs or synthetic model nodes.
+proc ::SolidSeamCommandProfile::closedBoundaryArcs {nodes} {
+    if {[llength $nodes] < 3 || [llength [lsort -unique $nodes]] != [llength $nodes]} {
+        error "A closed boundary needs at least three distinct ordered nodes"
+    }
+    set middle [expr {[llength $nodes] / 2}]
+    return [list [lrange $nodes 0 $middle] [concat [lrange $nodes $middle end] [list [lindex $nodes 0]]]]
+}
+
+proc ::SolidSeamCommandProfile::realizeClosedPentaMig {candidate profile feType feName} {
+    set paths [::SolidSeamCommandProfile::closedBoundaryArcs [dict get $candidate node_ids]]
+    dict set candidate is_closed 0
+    dict set candidate closed_boundary_piece 1
+    set connectors {}; set pentas {}; set rigids {}
+    foreach path $paths {
+        dict set candidate node_ids $path
+        if {[catch {set result [::SolidSeamCommandProfile::realizePentaMig $candidate $profile $feType $feName]} err opts]} {
+            return -options $opts "Closed boundary creation failed (completed arc connectors: $connectors): $err"
+        }
+        lappend connectors [dict get $result connector_id]
+        set pentas [concat $pentas [dict get $result penta_ids]]
+        set rigids [concat $rigids [dict get $result rbe3_ids]]
+    }
+    dict set result connector_id [lindex $connectors 0]
+    dict set result connector_ids $connectors
+    dict set result penta_ids $pentas
+    dict set result rbe3_ids $rigids
+    dict set result applied_parameters closed_boundary 1
+    return $result
 }

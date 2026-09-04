@@ -9,7 +9,7 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::GeometryPreprocess {
-    variable VERSION "1.0"
+    variable VERSION "1.1"
     variable WINDOW ".geometry_preprocess"
     variable USELESS_ASSEMBLY "USELESS"
     variable ui
@@ -52,6 +52,47 @@ proc ::GeometryPreprocess::componentFamilyIds {selectedName} {
     return [lsort -integer -unique $result]
 }
 
+# Resolve all selected name families before changing the model. Multiple
+# selected components may belong to the same imported-name family, so both the
+# family list and the final component list are de-duplicated.
+proc ::GeometryPreprocess::selectedFamilyBases {selectedIds} {
+    set seen [dict create]
+    foreach compId $selectedIds {
+        if {[catch {set name [::HWFlow::componentName $compId]}] || $name eq ""} {
+            continue
+        }
+        set base [::GeometryPreprocess::familyBase $name]
+        if {$base ne ""} {
+            dict set seen $base 1
+        }
+    }
+    return [lsort -dictionary [dict keys $seen]]
+}
+
+proc ::GeometryPreprocess::componentFamilyIdsForBases {bases} {
+    set wanted [dict create]
+    foreach base $bases {
+        set normalized [::GeometryPreprocess::familyBase $base]
+        if {$normalized ne ""} {
+            dict set wanted $normalized 1
+        }
+    }
+    if {[dict size $wanted] == 0} {
+        return {}
+    }
+
+    set result {}
+    foreach compId [::HWFlow::componentIds 2] {
+        if {[catch {set name [::HWFlow::componentName $compId]}] || $name eq ""} {
+            continue
+        }
+        if {[dict exists $wanted [::GeometryPreprocess::familyBase $name]]} {
+            lappend result $compId
+        }
+    }
+    return [lsort -integer -unique $result]
+}
+
 proc ::GeometryPreprocess::skeletonComponentIds {} {
     set result {}
     foreach compId [::HWFlow::componentIds 2] {
@@ -62,7 +103,7 @@ proc ::GeometryPreprocess::skeletonComponentIds {} {
     return [lsort -integer -unique $result]
 }
 
-proc ::GeometryPreprocess::archiveComponents {compIds} {
+proc ::GeometryPreprocess::archiveComponents {compIds {progressStart ""} {progressEnd ""} {progressLabel ""}} {
     variable USELESS_ASSEMBLY
     if {[llength $compIds] == 0} {
         return 0
@@ -74,14 +115,28 @@ proc ::GeometryPreprocess::archiveComponents {compIds} {
         set historyStarted 1
     }
     set code [catch {
+        if {$progressStart ne ""} {
+            catch {::HWFlow::progressUpdate $progressStart $progressLabel [::HWFlow::txt \
+                "正在更新 $USELESS_ASSEMBLY Assembly" \
+                "Updating the $USELESS_ASSEMBLY assembly"] 1}
+        }
         set assemblyId [::HWFlow::addComponentsToAssembly $USELESS_ASSEMBLY $compIds]
         if {$assemblyId eq ""} {
             error [::HWFlow::txt \
                 "无法创建或更新 $USELESS_ASSEMBLY Assembly。" \
                 "Could not create or update the $USELESS_ASSEMBLY assembly."]
         }
+        set total [llength $compIds]
+        set index 0
         foreach compId $compIds {
+            incr index
             ::HWFlow::displayComponent [::HWFlow::componentName $compId] off
+            if {$progressStart ne "" && ($index == 1 || $index == $total || ($index % 20) == 0)} {
+                set pct [expr {$progressStart + ($progressEnd - $progressStart) * $index / double($total)}]
+                catch {::HWFlow::progressUpdate $pct $progressLabel [::HWFlow::txt \
+                    "正在隐藏组件：$index/$total" \
+                    "Hiding components: $index/$total"] [expr {$index == $total}]}
+            }
         }
     } message options]
     if {$historyStarted} {
@@ -154,8 +209,8 @@ proc ::GeometryPreprocess::cleanIrrelevantComponents {} {
     variable ui
     catch {*clearmark comps 1}
     if {[catch {set selectedIds [::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt \
-            "请选择一个组件，中键确认" \
-            "Select one component and middle-click to confirm"]]} message]} {
+            "请选择一个或多个组件，中键确认" \
+            "Select one or more components and middle-click to confirm"]]} message]} {
         set ui(status) [::HWFlow::txt "组件选择已取消或失败。" "Component selection was cancelled or failed."]
         return 0
     }
@@ -164,41 +219,77 @@ proc ::GeometryPreprocess::cleanIrrelevantComponents {} {
         set ui(status) [::HWFlow::txt "未选择组件。" "No component was selected."]
         return 0
     }
-    if {[llength $selectedIds] != 1} {
-        set ui(status) [::HWFlow::txt "请只选择一个组件作为名称样本。" "Select exactly one component as the name sample."]
-        ::GeometryPreprocess::showMessage warning [::HWFlow::txt "清理无关部件" "Clean Irrelevant Components"] $ui(status)
-        return 0
+    set title [::HWFlow::txt "清理无关部件" "Clean Irrelevant Components"]
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        catch {set progressOpened [::HWFlow::progressOpen $title [::HWFlow::txt \
+            "正在解析所选组件的名称族" \
+            "Resolving selected component families"] 0]}
     }
+    catch {::HWFlow::progressUpdate 5.0 [::HWFlow::txt \
+        "正在解析所选组件的名称族" \
+        "Resolving selected component families"] [::HWFlow::txt \
+        "已选择 [llength $selectedIds] 个组件" \
+        "Selected [llength $selectedIds] component(s)"] 1}
 
-    set selectedName [::HWFlow::componentName [lindex $selectedIds 0]]
-    set familyIds [::GeometryPreprocess::componentFamilyIds $selectedName]
-    if {[catch {set count [::GeometryPreprocess::archiveComponents $familyIds]} message]} {
-        set ui(status) [::HWFlow::txt "归档失败。" "Archiving failed."]
-        ::GeometryPreprocess::showMessage error [::HWFlow::txt "清理无关部件" "Clean Irrelevant Components"] "$ui(status)\n\n$message"
+    set bases [::GeometryPreprocess::selectedFamilyBases $selectedIds]
+    set familyIds [::GeometryPreprocess::componentFamilyIdsForBases $bases]
+    if {[llength $bases] == 0 || [llength $familyIds] == 0} {
+        set ui(status) [::HWFlow::txt "所选组件没有可归档的有效名称族。" "No valid component family could be resolved from the selection."]
+        if {$progressOpened} { catch {::HWFlow::progressClose $ui(status) 100.0} }
+        ::GeometryPreprocess::showMessage warning $title $ui(status)
         return 0
     }
-    set base [::GeometryPreprocess::familyBase $selectedName]
+    catch {::HWFlow::progressUpdate 25.0 [::HWFlow::txt \
+        "名称族解析完成" \
+        "Component families resolved"] [::HWFlow::txt \
+        "名称族：[llength $bases]；待归档组件：[llength $familyIds]" \
+        "Families: [llength $bases]; components to archive: [llength $familyIds]"] 1}
+
+    if {[catch {set count [::GeometryPreprocess::archiveComponents $familyIds 30.0 95.0 [::HWFlow::txt \
+            "正在批量归档无关组件" \
+            "Archiving irrelevant components"]]} message]} {
+        set ui(status) [::HWFlow::txt "归档失败。" "Archiving failed."]
+        if {$progressOpened} { catch {::HWFlow::progressClose $ui(status) 100.0} }
+        ::GeometryPreprocess::showMessage error $title "$ui(status)\n\n$message"
+        return 0
+    }
     set ui(status) [::HWFlow::txt \
-        "已将名称族“$base”的 $count 个组件归入 USELESS 并隐藏。" \
-        "Archived and hid $count component(s) in the '$base' family under USELESS."]
+        "已根据 [llength $selectedIds] 个所选组件，将 [llength $bases] 个名称族的 $count 个组件归入 USELESS 并隐藏。" \
+        "Using [llength $selectedIds] selected component(s), archived and hid $count component(s) from [llength $bases] family/families under USELESS."]
+    if {$progressOpened} { catch {::HWFlow::progressClose $ui(status) 100.0} }
     return $count
 }
 
 proc ::GeometryPreprocess::removeSkeleton {} {
     variable ui
+    set title [::HWFlow::txt "移除骨架" "Remove Skeleton"]
+    set progressOpened 0
+    if {[llength [info commands ::HWFlow::progressOpen]] > 0} {
+        catch {set progressOpened [::HWFlow::progressOpen $title [::HWFlow::txt \
+            "正在查找 SKELL 组件" \
+            "Finding SKELL components"] 0]}
+    }
     set compIds [::GeometryPreprocess::skeletonComponentIds]
     if {[llength $compIds] == 0} {
         set ui(status) [::HWFlow::txt "未找到名称中包含 SKELL 的组件。" "No component name containing SKELL was found."]
+        if {$progressOpened} { catch {::HWFlow::progressClose $ui(status) 100.0} }
         return 0
     }
-    if {[catch {set count [::GeometryPreprocess::archiveComponents $compIds]} message]} {
+    catch {::HWFlow::progressUpdate 25.0 [::HWFlow::txt "已找到 SKELL 组件" "SKELL components found"] \
+        [::HWFlow::txt "待归档组件：[llength $compIds]" "Components to archive: [llength $compIds]"] 1}
+    if {[catch {set count [::GeometryPreprocess::archiveComponents $compIds 30.0 95.0 [::HWFlow::txt \
+            "正在归档骨架组件" \
+            "Archiving skeleton components"]]} message]} {
         set ui(status) [::HWFlow::txt "骨架归档失败。" "Skeleton archiving failed."]
-        ::GeometryPreprocess::showMessage error [::HWFlow::txt "移除骨架" "Remove Skeleton"] "$ui(status)\n\n$message"
+        if {$progressOpened} { catch {::HWFlow::progressClose $ui(status) 100.0} }
+        ::GeometryPreprocess::showMessage error $title "$ui(status)\n\n$message"
         return 0
     }
     set ui(status) [::HWFlow::txt \
         "已将 $count 个 SKELL 组件归入 USELESS 并隐藏。" \
         "Archived and hid $count SKELL component(s) under USELESS."]
+    if {$progressOpened} { catch {::HWFlow::progressClose $ui(status) 100.0} }
     return $count
 }
 
@@ -270,8 +361,8 @@ proc ::GeometryPreprocess::runAction {} {
     pack $w.main.organization -fill x -pady {0 8}
     ::HWFlow::uiWidget label $w.main.organization.cleanDesc \
         -text [::HWFlow::txt \
-            "选择一个 component，中键确认后归档同名本体及 .数字 重名族。" \
-            "Pick one component and middle-click; archive its base name and .number duplicates."] \
+            "可选择多个 component；中键确认后批量归档各自同名本体及 .数字 重名族，并显示处理进度。" \
+            "Pick multiple components; archive every selected base-name/.number family in one batch with progress."] \
         -font [::HWFlow::uiFont default] -foreground $textPrimary -anchor w -justify left
     ::HWFlow::uiWidget button $w.main.organization.clean \
         -text [::HWFlow::txt "清理无关部件" "Clean Irrelevant Components"] \

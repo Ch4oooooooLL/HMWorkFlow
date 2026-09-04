@@ -52,6 +52,32 @@ class GeometryPreprocessTests(unittest.TestCase):
             (1, 2, 3),
         )
 
+    def test_multiple_selected_components_resolve_unique_families_and_targets(self):
+        self.tcl.eval("proc ::HWFlow::componentIds {{markId 2}} {return {1 2 3 4 5 6 7}}")
+        self.tcl.eval(
+            "proc ::HWFlow::componentName {id} {"
+            "return [dict get {1 body 2 body.1 3 body.2 4 door.rev 5 door.rev.3 6 door 7 body.2.1} $id]}"
+        )
+        self.assertEqual(
+            tuple(self.call("::GeometryPreprocess::selectedFamilyBases", (2, 3, 5))),
+            ("body", "door.rev"),
+        )
+        self.assertEqual(
+            tuple(self.call("::GeometryPreprocess::componentFamilyIdsForBases", ("body", "door.rev"))),
+            (1, 2, 3, 4, 5),
+        )
+
+    def test_multi_family_resolution_skips_invalid_selected_ids(self):
+        self.tcl.eval(
+            "proc ::HWFlow::componentName {id} {"
+            "if {$id == 99} {error {component not found}}; "
+            "return [dict get {1 body 2 body.1 3 door} $id]}"
+        )
+        self.assertEqual(
+            tuple(self.call("::GeometryPreprocess::selectedFamilyBases", (1, 2, 99, 3))),
+            ("body", "door"),
+        )
+
     def test_vehicle_transform_uses_legacy_two_step_rotation(self):
         self.tcl.eval("set ::rotation_calls {}")
         self.tcl.eval("proc *clearmark {args} {}")
@@ -95,6 +121,49 @@ class GeometryPreprocessTests(unittest.TestCase):
             ("name", "off", "name.1", "off"),
         )
 
+    def test_archive_reports_incremental_progress(self):
+        self.tcl.eval("set ::progress_calls {}")
+        self.tcl.eval("proc *startnotehistorystate {args} {}")
+        self.tcl.eval("proc *endnotehistorystate {args} {}")
+        self.tcl.eval("proc ::HWFlow::addComponentsToAssembly {name ids {color 9}} {return 99}")
+        self.tcl.eval("proc ::HWFlow::componentName {id} {return comp$id}")
+        self.tcl.eval("proc ::HWFlow::displayComponent {name state} {}")
+        self.tcl.eval("proc ::HWFlow::progressUpdate {args} {lappend ::progress_calls $args}")
+        self.assertEqual(
+            self.call("::GeometryPreprocess::archiveComponents", (7, 8, 9), 30.0, 95.0, "Cleaning"),
+            3,
+        )
+        calls = self.tcl.splitlist(self.tcl.eval("set ::progress_calls"))
+        percents = [float(self.tcl.splitlist(item)[0]) for item in calls]
+        self.assertEqual(percents[0], 30.0)
+        self.assertEqual(percents[-1], 95.0)
+
+    def test_clean_irrelevant_components_archives_all_selected_families_once(self):
+        self.tcl.eval("set ::archive_ids {}; set ::progress_closed 0")
+        self.tcl.eval("proc *clearmark {args} {}")
+        self.tcl.eval("proc *startnotehistorystate {args} {}")
+        self.tcl.eval("proc *endnotehistorystate {args} {}")
+        self.tcl.eval("proc ::HWFlow::nativeMarkPanel {args} {return {2 3 5}}")
+        self.tcl.eval("proc ::HWFlow::componentIds {{markId 2}} {return {1 2 3 4 5 6}}")
+        self.tcl.eval(
+            "proc ::HWFlow::componentName {id} {"
+            "return [dict get {1 body 2 body.1 3 body.2 4 door 5 door.1 6 keep} $id]}"
+        )
+        self.tcl.eval(
+            "proc ::HWFlow::addComponentsToAssembly {name ids {color 9}} {"
+            "set ::archive_ids $ids; return 99}"
+        )
+        self.tcl.eval("proc ::HWFlow::displayComponent {name state} {}")
+        self.tcl.eval("proc ::HWFlow::progressOpen {args} {return 1}")
+        self.tcl.eval("proc ::HWFlow::progressUpdate {args} {}")
+        self.tcl.eval("proc ::HWFlow::progressClose {args} {set ::progress_closed 1}")
+        self.assertEqual(self.call("::GeometryPreprocess::cleanIrrelevantComponents"), 5)
+        self.assertEqual(
+            tuple(self.tcl.splitlist(self.tcl.eval("set ::archive_ids"))),
+            ("1", "2", "3", "4", "5"),
+        )
+        self.assertEqual(self.tcl.eval("set ::progress_closed"), "1")
+
     def test_panel_builds_with_shared_module_layout(self):
         try:
             root = tkinter.Tk()
@@ -104,6 +173,7 @@ class GeometryPreprocessTests(unittest.TestCase):
         tcl = root.tk
         try:
             tcl.eval(f"source -encoding utf-8 {{{MODULE.as_posix()}}}")
+            tcl.eval("set ::HWFlow::LANGUAGE en_US; set ::HWFlow::LANGUAGE_LOADED 1")
             # Do not block the test in the module's normal modal wait.
             tcl.eval("rename tkwait ::GeometryPreprocess::__real_tkwait")
             tcl.eval("proc tkwait {args} {return}")
