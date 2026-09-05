@@ -2,7 +2,9 @@ proc ::SolidSeam::writeRealizationResult {results} {
     variable runtimeDir; variable runId
     set rows {}
     foreach result $results {
-        lappend rows "    {\"candidate_id\": [::SolidSeam::jsonString [dict get $result candidate_id]], \"status\": [::SolidSeam::jsonString [dict get $result status]], \"grade\": [::SolidSeam::jsonString [dict get $result grade]], \"message\": [::SolidSeam::jsonString [dict get $result message]]}"
+        set fingerprint ""
+        if {[dict exists $result candidate_fingerprint]} { set fingerprint [dict get $result candidate_fingerprint] }
+        lappend rows "    {\"candidate_id\": [::SolidSeam::jsonString [dict get $result candidate_id]], \"candidate_fingerprint\": [::SolidSeam::jsonString $fingerprint], \"status\": [::SolidSeam::jsonString [dict get $result status]], \"grade\": [::SolidSeam::jsonString [dict get $result grade]], \"message\": [::SolidSeam::jsonString [dict get $result message]]}"
     }
     set json "{\n  \"schema_version\": \"1.0\",\n  \"run_id\": [::SolidSeam::jsonString $runId],\n  \"results\": \[\n[join $rows ,\n]\n  \]\n}\n"
     ::HWFlow::writeTextFile [file join $runtimeDir realization_result.json] $json
@@ -54,13 +56,26 @@ proc ::SolidSeam::autoDetectAndCreate {componentIds {prepareOnly 0}} {
             set pairSettings [::SolidSeam::automaticSettings $source $target]
         } else { set pairSettings $settings }
         set detected [::SolidSeam::autoDetectSeams $source $target $pairSettings]
-        ::SolidSeam::log INFO "auto detect pair $source -> $target candidates=[llength $detected]"
+        set timings {}
+        if {[info exists ::SolidSeam::lastDetectionStages]} { set timings $::SolidSeam::lastDetectionStages }
+        set shadow {}
+        if {$ui(input_type) eq "AUTO" && [info exists ui(shadow_face_distance)] && $ui(shadow_face_distance)} {
+            if {[catch {set shadow [::SolidSeam::shadowFaceDistanceAudit $source $target $detected [dict get $pairSettings search_distance]]} shadowError]} {
+                ::SolidSeam::log WARN "shadow face-distance audit failed $source -> $target: $shadowError"
+            } else {
+                ::SolidSeam::log INFO "shadow face-distance $source -> $target: $shadow"
+            }
+        }
+        ::SolidSeam::log INFO "auto detect pair $source -> $target candidates=[llength $detected] timings=$timings"
         foreach candidate $detected {
             if {$ui(input_type) eq "AUTO"} {
                 # Auto already resolved side_mode, retaining BOTH or the manual
                 # fallback where the geometry cannot select a unique side.
             } else { set candidate [::SolidSeam::applyCreationSettings $candidate] }
+            dict set candidate recognition_timings $timings
+            if {$shadow ne ""} { dict set candidate shadow_face_summary $shadow }
             dict set candidate status ACCEPTED
+            set candidate [::SolidSeam::finalizeCandidateDiagnostics $candidate]
             lappend candidateRows $candidate
         }
     }
@@ -98,7 +113,8 @@ proc ::SolidSeam::createFromNodes {nodeIds componentIds {prepareOnly 0}} {
         set candidate [dict create candidate_id MANUAL_$index node_ids $path is_closed $closed \
             source_component_id [lindex $componentIds 0] target_component_id [lindex $componentIds 1] \
             status ACCEPTED duplicate_state NONE]
-        lappend candidateRows [::SolidSeam::applyCreationSettings $candidate]
+        set candidate [::SolidSeam::applyCreationSettings $candidate]
+        lappend candidateRows [::SolidSeam::finalizeCandidateDiagnostics $candidate]
     }
     if {$prepareOnly} { return $candidateRows }
     ::SolidSeam::createAcceptedCandidates
@@ -111,19 +127,25 @@ proc ::SolidSeam::createOneCandidate {candidate} {
     set profile [::SolidSeam::loadRealizationProfile [dict get $candidate suggested_realization]]
     catch {*clearmark nodes 1}; catch {*clearmark connectors 1}; catch {*clearmark elems 1}
     set parameterSummary ""
-    foreach field {parameter_strategy side_strategy side_confidence side_votes mesh_size source_thickness line_spacing weld_width realization_tolerance side_mode right_angled orientation_reversed} {
+    foreach field {candidate_fingerprint recognition_timings shadow_face_summary parameter_strategy side_strategy side_confidence side_votes mesh_size source_thickness line_spacing weld_width realization_tolerance side_mode right_angled orientation_reversed} {
         if {[dict exists $candidate $field]} { append parameterSummary " $field=[dict get $candidate $field]" }
     }
     ::SolidSeam::log INFO "realization start profile=[dict get $profile profile_name] nodes=[dict get $candidate node_ids]$parameterSummary" $candidateId
+    set realizationStarted [clock milliseconds]
     set code [catch {::SolidSeamCommandProfile::realize $candidate $profile} result opts]
+    set realizationMs [expr {[clock milliseconds]-$realizationStarted}]
     foreach slot {1 2} {
         foreach entity {elems nodes comps connectors} { catch {*clearmark $entity $slot} }
         catch {*clearlist nodes $slot}
     }
-    if {$code} { return -options $opts $result }
+    if {$code} {
+        ::SolidSeam::log ERROR "realization command failed elapsed_ms=$realizationMs error=$result" $candidateId
+        return -options $opts $result
+    }
     set validation [::SolidSeam::validateAfterCreate $candidate $result]
     dict set result validation $validation
-    ::SolidSeam::log INFO "realization complete grade=[dict get $validation grade] state=[dict get $validation connector_state]" $candidateId
+    dict set result realization_ms $realizationMs
+    ::SolidSeam::log INFO "realization complete elapsed_ms=$realizationMs grade=[dict get $validation grade] state=[dict get $validation connector_state]" $candidateId
     return $result
 }
 
@@ -135,9 +157,12 @@ proc ::SolidSeam::createAcceptedCandidates {} {
     set results {}; set cancelled 0; set index 0
     foreach candidate $accepted {
         incr index
+        # Recompute at the creation boundary so candidate-viewer edits are
+        # reflected in the audit identity written to logs/results.
+        set candidate [::SolidSeam::finalizeCandidateDiagnostics $candidate]
         if {$cancelled} {
             ::SolidSeam::updateCandidate [dict get $candidate candidate_id] status SKIPPED_BY_USER
-            lappend results [dict create candidate_id [dict get $candidate candidate_id] status SKIPPED_BY_USER grade FAIL message "stopped by user"]
+            lappend results [dict create candidate_id [dict get $candidate candidate_id] candidate_fingerprint [dict get $candidate candidate_fingerprint] status SKIPPED_BY_USER grade FAIL message "stopped by user"]
             continue
         }
         set candidateId [dict get $candidate candidate_id]
@@ -148,14 +173,14 @@ proc ::SolidSeam::createAcceptedCandidates {} {
         if {[catch {set created [::SolidSeam::createOneCandidate $candidate]} err opts]} {
             ::SolidSeam::updateCandidate $candidateId status FAILED
             ::SolidSeam::log ERROR "realization failed: $err" $candidateId
-            lappend results [dict create candidate_id $candidateId status FAILED grade FAIL message $err]
+            lappend results [dict create candidate_id $candidateId candidate_fingerprint [dict get $candidate candidate_fingerprint] status FAILED grade FAIL message $err]
             catch {*clearmark nodes 1}; catch {*clearmark connectors 1}; catch {*clearmark elems 1}
             continue
         }
         set validation [dict get $created validation]
         set grade [dict get $validation grade]
         ::SolidSeam::updateCandidate $candidateId status [expr {$grade eq "FAIL" ? "FAILED" : "CREATED"}]
-        lappend results [dict create candidate_id $candidateId status [expr {$grade eq "FAIL" ? "FAILED" : "CREATED"}] grade $grade message "connector_state=[dict get $validation connector_state]; penta=[dict get $validation penta_count]; rbe3=[dict get $validation rbe3_count]"]
+        lappend results [dict create candidate_id $candidateId candidate_fingerprint [dict get $candidate candidate_fingerprint] status [expr {$grade eq "FAIL" ? "FAILED" : "CREATED"}] grade $grade message "connector_state=[dict get $validation connector_state]; penta=[dict get $validation penta_count]; rbe3=[dict get $validation rbe3_count]; realization_ms=[dict get $created realization_ms]"]
     }
     catch {*clearmarkall 1}
     catch {*clearmarkall 2}

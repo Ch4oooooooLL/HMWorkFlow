@@ -21,8 +21,15 @@ set rc [catch {
     } { lappend comps [hm_getvalue comps name=$name dataname=id] }
     set ::SolidSeam::ui(input_type) AUTO_GROUP
     set before [lsort -integer [hm_entitylist elems id all]]
-    set timings {}; set ::queryCount 0; set ::edgeCount 0
-    proc countQuery {args} { incr ::queryCount }
+    set timings {}; set ::queryCount 0; set ::queryFields {}; set ::edgeCount 0
+    proc countQuery {command operation} {
+        incr ::queryCount
+        set field unknown
+        foreach token $command {
+            if {[string match "dataname=*" $token]} { set field [string range $token 9 end]; break }
+        }
+        dict incr ::queryFields $field
+    }
     proc countEdges {args} { incr ::edgeCount }
     trace add execution hm_getvalue enter countQuery
     trace add execution *findedges enter countEdges
@@ -33,14 +40,48 @@ set rc [catch {
     }
     trace remove execution hm_getvalue enter countQuery
     trace remove execution *findedges enter countEdges
-    puts $channel "PREPARE median_us=[::SolidSeam::median $timings] query_count=$::queryCount findedges_count=$::edgeCount repeats=7"
-    set baseline [file join $root temp solid_seam_refactor performance_plans.txt]
+    puts $channel "PREPARE median_us=[::SolidSeam::median $timings] query_count=$::queryCount findedges_count=$::edgeCount repeats=7 query_fields=$::queryFields"
+    set originalSummary $::SolidSeam::autoGroupSummary
+    set sharedComps {}
+    foreach name {F05_CASE_05_MULTI_TARGET_SAME_EDGE__SHARED_SOURCE_WEB_T1 F05_CASE_05_MULTI_TARGET_SAME_EDGE__UPPER_TARGET_T2 F05_CASE_05_MULTI_TARGET_SAME_EDGE__LOWER_TARGET_T2} {
+        lappend sharedComps [hm_getvalue comps name=$name dataname=id]
+    }
+    set ::sharedEdges 0
+    proc countSharedEdges {args} { incr ::sharedEdges }
+    trace add execution *findedges enter countSharedEdges
+    set sharedPlans [::SolidSeam::prepareAutoGroup $sharedComps]
+    trace remove execution *findedges enter countSharedEdges
+    # Preserve the legacy output exactly, including the third target-target
+    # candidate; accuracy changes are evaluated separately in shadow mode.
+    if {[llength $sharedPlans] != 3} { error "Shared-source fixture legacy pair count changed: [llength $sharedPlans]" }
+    puts $channel "SHARED_SOURCE pairs=[llength $sharedPlans] findedges=$::sharedEdges unique_components=[llength $sharedComps]"
+    set ::SolidSeam::autoGroupSummary $originalSummary
+    proc planFingerprints {inputPlans} {
+        set result {}
+        foreach plan $inputPlans {
+            set rows {}
+            foreach candidate [dict get $plan candidates] { lappend rows [::SolidSeam::candidateFingerprint $candidate] }
+            lappend result [list [dict get $plan pair_index] $rows]
+        }
+        return $result
+    }
+    set fingerprints [planFingerprints $plans]
+    set legacyBaseline [file join $root temp solid_seam_refactor performance_plans.txt]
+    set baseline [file join $root temp solid_seam_refactor performance_candidate_fingerprints.txt]
     if {[file exists $baseline]} {
         set input [open $baseline r]; set previous [read $input]; close $input
-        if {$previous ne $plans} { error "Candidate plans changed from baseline" }
-        puts $channel "CANDIDATES_EXACT_MATCH=1"
-    } else {
-        set output [open $baseline w]; puts -nonewline $output $plans; close $output
+    } elseif {[file exists $legacyBaseline]} {
+        set input [open $legacyBaseline r]; set legacyPlans [read $input]; close $input
+        set previous [planFingerprints $legacyPlans]
+    } else { set previous $fingerprints }
+    if {$previous ne $fingerprints} { error "Candidate fingerprints changed from baseline: old=$previous new=$fingerprints" }
+    set output [open $baseline w]; puts -nonewline $output $fingerprints; close $output
+    puts $channel "CANDIDATE_FINGERPRINTS_MATCH=1 values=$fingerprints"
+    foreach plan $plans {
+        if {![dict exists $plan recognition_timings]} { error "Missing staged recognition timings" }
+        foreach row [dict get $plan candidates] {
+            if {![dict exists $row candidate_fingerprint]} { error "Missing candidate fingerprint" }
+        }
     }
     set creationStart [clock microseconds]
     puts $channel $::SolidSeam::autoGroupSummary

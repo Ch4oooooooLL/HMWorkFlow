@@ -1,6 +1,7 @@
 # Exact nearest-neighbour queries on a balanced 3D k-d tree. Coordinates are
 # fetched once at construction, not in the source x target inner loop.
 proc ::SolidSeam::spatialIndex {nodeIds} {
+    ::SolidSeam::prefetchCoordinates $nodeIds
     set points {}
     foreach id [lsort -integer -unique $nodeIds] {
         lappend points [concat [::SolidSeam::nodeXYZ $id] [list $id]]

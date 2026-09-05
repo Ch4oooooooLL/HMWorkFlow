@@ -40,6 +40,7 @@ ENDDATA}
     puts $channel "OPEN_EDGE=$edge BRANCHED=$branched"
     foreach mode {AUTO AUTO_GROUP} {
         set ::SolidSeam::ui(input_type) $mode
+        set ::SolidSeam::ui(shadow_face_distance) [expr {$mode eq "AUTO_GROUP"}]
         if {$mode eq "AUTO"} {
             set rows [::SolidSeam::autoDetectAndCreate [list $source $target] 1]
         } else {
@@ -50,6 +51,8 @@ ENDDATA}
         if {![llength $rows]} { error "No open seam" }
         foreach row $rows {
             if {[dict get $row is_closed]} { error "Open edge falsely closed" }
+            if {$mode eq "AUTO_GROUP" && ![dict exists $row shadow_face_summary]} { error "Missing shadow face-distance summary" }
+            if {$mode eq "AUTO_GROUP"} { puts $channel "SHADOW [dict get $row shadow_face_summary]" }
             foreach n [dict get $row node_ids] { if {$n ni $edge} { error "Unrelated boundary included" } }
         }
         set found {}

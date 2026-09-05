@@ -17,7 +17,10 @@ class RefactorTests(unittest.TestCase):
             self.skipTest("Set TCLSH to a Tcl 8.5+ interpreter")
         for filename, marker in (("refactor_offline.tcl", "PASS all refactor checks"),
                                  ("auto_group_offline.tcl", "PASS AutoGroup checks"),
-                                 ("cache_offline.tcl", "PASS detection cache checks")):
+                                 ("cache_offline.tcl", "PASS detection cache checks"),
+                                 ("speed_offline.tcl", "PASS speed checks"),
+                                 ("diagnostics_offline.tcl", "PASS solid seam diagnostics checks"),
+                                 ("face_distance_parameterized_benchmark.tcl", "PASS parameterized face-distance benchmark")):
             with self.subTest(script=filename):
                 script = Path(__file__).with_name(filename)
                 result = subprocess.run([interpreter, str(script)], stdout=subprocess.PIPE,

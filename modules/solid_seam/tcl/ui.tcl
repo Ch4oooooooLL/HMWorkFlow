@@ -1,11 +1,14 @@
 proc ::SolidSeam::stateKeys {} {
-    return {input_type weld_type side_mode tolerance default_width default_spacing}
+    return {input_type weld_type side_mode tolerance default_width default_spacing shadow_face_distance}
 }
 proc ::SolidSeam::loadState {} { ::HWFlow::applyStateToArray solid_seam ::SolidSeam::ui [::SolidSeam::stateKeys] }
 proc ::SolidSeam::saveState {} { ::HWFlow::saveArrayState solid_seam ::SolidSeam::ui {status} }
 
 proc ::SolidSeam::validateSettings {} {
     variable ui
+    if {![info exists ui(shadow_face_distance)] || ![string is boolean -strict $ui(shadow_face_distance)]} {
+        error [::SolidSeam::txt "shadow_face_distance 必须为布尔值。" "shadow_face_distance must be boolean."]
+    }
     set numericKeys {tolerance default_width default_spacing}
     if {$ui(input_type) in {AUTO AUTO_GROUP}} { set numericKeys {} }
     foreach key $numericKeys {
@@ -79,6 +82,11 @@ proc ::SolidSeam::showPanel {} {
         "AutoGroup：一次多选组件后直接自动配对并执行。其他模式：两两一组缓存，第一步空选提交，第二步空选取消当前组。结束后恢复面板。" \
         "AutoGroup: select all components once to match and execute. Other modes: cache pairs; empty first selection submits, empty target cancels the pair. The panel returns afterwards."] -anchor w -justify left -wraplength 660
     pack $w.main.continuousHelp -fill x -pady 6
+    checkbutton $w.main.shadow -text [::SolidSeam::txt \
+        "影子检测：计算点到目标面的真实距离（只记录潜在漏识别，不改变焊缝结果）" \
+        "Shadow audit: compute true point-to-target-face distance (reports possible misses without changing weld output)"] \
+        -variable ::SolidSeam::ui(shadow_face_distance)
+    pack $w.main.shadow -fill x -pady {0 6}
     label $w.main.status -textvariable ::SolidSeam::ui(status) -anchor nw -justify left -wraplength 660
     pack $w.main.status -fill both -expand 1 -pady 6
     frame $w.buttons -padx 12 -pady 8

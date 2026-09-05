@@ -79,7 +79,7 @@ check invalid_numeric_inputs {
     set ::SolidSeam::ui(tolerance) 15
 }
 check settings_persistence_keys {
-    foreach key {input_type weld_type side_mode tolerance default_spacing default_width} {
+    foreach key {input_type weld_type side_mode tolerance default_spacing default_width shadow_face_distance} {
         assert {$key in [::SolidSeam::stateKeys]} "Missing saved key $key"
     }
 }

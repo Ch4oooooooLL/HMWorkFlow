@@ -1,5 +1,55 @@
 namespace eval ::SolidSeamCommandProfile {}
 
+# A recorder scope belongs to one synchronous CE call, including each closed
+# arc. Fall back before creation when recorders are unavailable. Never retry
+# the creation command after an error (it may have partially changed the model).
+proc ::SolidSeamCommandProfile::recordCreation {script} {
+    variable recorderShadow
+    set shadow [expr {[info exists recorderShadow] && $recorderShadow}]
+    set enabled {}; set useRecorder [expr {[llength [info commands hm_entityrecorder]] > 0}]
+    if {$useRecorder} {
+        foreach entity {elems connectors} {
+            if {[catch {hm_entityrecorder $entity on}]} { set useRecorder 0; break }
+            lappend enabled $entity
+        }
+    }
+    if {!$useRecorder} {
+        foreach entity $enabled { hm_entityrecorder $entity off }
+        set enabled {}
+    }
+    set code [catch {
+        if {!$useRecorder || $shadow} {
+            foreach entity {elems connectors} { set before($entity) [::SolidSeamCommandProfile::snapshotIds $entity] }
+        }
+        uplevel 1 $script
+    } result opts]
+    set stopError ""
+    foreach entity $enabled {
+        if {[catch {hm_entityrecorder $entity off} err]} { set stopError $err }
+    }
+    if {$code} { return -options $opts $result }
+    if {$stopError ne ""} { error "Cannot stop entity recorder: $stopError" }
+    set created {}
+    foreach entity {elems connectors} {
+        if {$useRecorder} {
+            set ids [hm_entityrecorder $entity ids]
+            # CE can create and delete temporary entities in the same call.
+            set surviving {}
+            foreach id $ids {
+                if {![catch {set found [hm_getvalue $entity id=$id dataname=id]}] && $found eq $id} { lappend surviving $id }
+            }
+            set ids [lsort -integer -unique $surviving]
+        }
+        if {!$useRecorder || $shadow} {
+            set delta [lsort -integer [::SolidSeamCommandProfile::newIds $before($entity) [::SolidSeamCommandProfile::snapshotIds $entity]]]
+            if {$useRecorder && $delta ne $ids} { error "Entity recorder differs from snapshot: $entity" }
+            set ids $delta
+        }
+        dict set created $entity $ids
+    }
+    return $created
+}
+
 proc ::SolidSeamCommandProfile::snapshotIds {entityType} {
     # Read-only enumeration: never put the entire model into a UI mark.
     return [hm_entitylist $entityType id all]
@@ -156,8 +206,6 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
 
     set outputComponent [::SolidSeamCommandProfile::ensureOutputComponent]
     set beforeComponents [::SolidSeamCommandProfile::snapshotIds comps]
-    set beforeConnectors [::SolidSeamCommandProfile::snapshotIds connectors]
-    set beforeElements [::SolidSeamCommandProfile::snapshotIds elems]
 
     # Location must be an ORDERED node list (native 1D connector seam flow).
     catch {*clearmark nodes 1}
@@ -239,15 +287,15 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
     eval *createstringarray [llength $options] $options
 
     if {[catch {
-        *CE_ConnectorCreateByListAndRealizeWithDetails nodes 1 seam 2 comps 2 optistruct 1001 $feType $tolerance 1 [llength $options]
+        set created [::SolidSeamCommandProfile::recordCreation {
+            *CE_ConnectorCreateByListAndRealizeWithDetails nodes 1 seam 2 comps 2 optistruct 1001 $feType $tolerance 1 [llength $options]
+        }]
     } commandError commandOptions]} {
         error "HM2019 $feName creation command failed: $commandError"
     }
 
-    set afterConnectors [::SolidSeamCommandProfile::snapshotIds connectors]
-    set afterElements [::SolidSeamCommandProfile::snapshotIds elems]
-    set connectorIds [::SolidSeamCommandProfile::newIds $beforeConnectors $afterConnectors]
-    set newElementIds [::SolidSeamCommandProfile::newIds $beforeElements $afterElements]
+    set connectorIds [dict get $created connectors]
+    set newElementIds [dict get $created elems]
 
     if {[llength $connectorIds] != 1} {
         error "HM2019 $feName creation returned [llength $connectorIds] new connectors; expected 1"
@@ -258,8 +306,22 @@ proc ::SolidSeamCommandProfile::realizePentaMig {candidate profile feType feName
     }
 
     # HM2019 element configs: 206=PENTA6 and 56=RBE3.
-    set pentaIds [::SolidSeamCommandProfile::elementIdsByConfig $newElementIds 206]
-    set rbe3Ids [::SolidSeamCommandProfile::elementIdsByConfig $newElementIds 56]
+    set pentaIds {}; set rbe3Ids {}
+    foreach chunk [::SolidSeam::queryChunks $newElementIds] {
+        set configs {}
+        if {[catch {
+            set ids [hm_getvalue elems "user_ids=$chunk" dataname=id]
+            set configs [hm_getvalue elems "user_ids=$chunk" dataname=config]
+            if {[lsort -integer $ids] ne [lsort -integer $chunk] || [llength $configs] != [llength $ids]} { error "Invalid batch configs" }
+        }]} {
+            set ids $chunk; set configs {}
+            foreach id $ids { lappend configs [hm_getvalue elems id=$id dataname=config] }
+        }
+        foreach id $ids config $configs {
+            if {$config == 206} { lappend pentaIds $id }
+            if {$config == 56} { lappend rbe3Ids $id }
+        }
+    }
     if {$connectorState ne "REALIZED"} {
         error "Connector $connectorId realization state is $connectorState"
     }

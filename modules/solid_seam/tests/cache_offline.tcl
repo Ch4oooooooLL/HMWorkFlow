@@ -8,6 +8,7 @@ foreach name {logger auto_detect} {
 proc assert {condition message} { if {![uplevel 1 [list expr $condition]]} { error $message } }
 set version 1; set fail 0
 proc hm_getvalue {entity selector field} {
+    if {[string match user_ids=* $selector]} { error "Batch unsupported by this mock" }
     if {$selector eq "id=1"} { incr ::sourceQueries; return $::version }
     incr ::temporaryQueries
     return $::temporaryQueries

@@ -35,6 +35,23 @@ proc ::SolidSeam::collectSelectionPairs {} {
 # Resolve all geometry before creating any weld. Later pairs must not detect
 # nodes/elements introduced by earlier pairs in this same batch.
 proc ::SolidSeam::prepareSelectionPairs {pairs} {
+    variable ui
+    set ownsCache [expr {$ui(input_type) eq "AUTO" &&
+        (![info exists ::SolidSeam::groupRecognitionActive] || !$::SolidSeam::groupRecognitionActive)}]
+    if {$ownsCache} {
+        set components {}
+        foreach selection $pairs {
+            if {[dict exists $selection component_ids]} { set components [concat $components [dict get $selection component_ids]] }
+        }
+        ::SolidSeam::beginGroupRecognitionCache $components
+    }
+    set code [catch {::SolidSeam::prepareSelectionPairsImpl $pairs} result opts]
+    if {$ownsCache} { ::SolidSeam::endGroupRecognitionCache }
+    if {$code} { return -options $opts $result }
+    return $result
+}
+
+proc ::SolidSeam::prepareSelectionPairsImpl {pairs} {
     variable ui; variable candidateRows
     set plans {}; set index 0
     foreach selection $pairs {
@@ -51,6 +68,7 @@ proc ::SolidSeam::prepareSelectionPairs {pairs} {
             set tagged {}
             foreach row $rows {
                 dict set row candidate_id "PAIR_${index}_[dict get $row candidate_id]"
+                set row [::SolidSeam::finalizeCandidateDiagnostics $row]
                 lappend tagged $row
             }
             if {![llength $tagged]} { error "No weld candidates in pair $index" }
@@ -73,6 +91,7 @@ proc ::SolidSeam::executeSelectionPlan {plan} {
     set code [catch {
         ::SolidSeam::newRun
         ::SolidSeam::log INFO "batch pair=$index"
+        if {[dict exists $plan recognition_timings]} { ::SolidSeam::log INFO "recognition timings=[dict get $plan recognition_timings]" }
         if {[dict exists $plan error]} { error [dict get $plan error] }
         set candidateRows [dict get $plan candidates]
         ::SolidSeam::createAcceptedCandidates
@@ -125,7 +144,7 @@ proc ::SolidSeam::runDetection {} {
             set ui(status) [::SolidSeam::txt "正在执行第 $index / [llength $plans] 组..." "Executing pair $index / [llength $plans]..."]
             update idletasks
             if {$ui(input_type) eq "AUTO_GROUP"} {
-                ::SolidSeam::groupProgress [expr {50.0+50.0*($index-1)/max(1,[llength $plans])}] $ui(status)
+                ::SolidSeam::groupProgress [expr {50.0+50.0*($index-1)/max(1,[llength $plans])}] $ui(status) 1
             }
             if {[::SolidSeam::executeSelectionPlan $plan]} { incr completed } else { incr failed }
         }
@@ -134,7 +153,7 @@ proc ::SolidSeam::runDetection {} {
             "Batch complete: $completed successful pairs, $failed failed pairs. Adjust settings and start again."]
         if {$ui(input_type) eq "AUTO_GROUP"} {
             append ui(status) " " $::SolidSeam::autoGroupSummary
-            ::SolidSeam::groupProgress 100 $ui(status)
+            ::SolidSeam::groupProgress 100 $ui(status) 1
         }
     } err opts]
     ::SolidSeam::clearInputSelection

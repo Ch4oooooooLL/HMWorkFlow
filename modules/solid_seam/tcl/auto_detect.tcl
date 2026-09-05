@@ -13,6 +13,7 @@ source -encoding utf-8 [file join [file dirname [info script]] spatial_index.tcl
 source -encoding utf-8 [file join [file dirname [info script]] closed_boundary.tcl]
 source -encoding utf-8 [file join [file dirname [info script]] automatic_mode.tcl]
 source -encoding utf-8 [file join [file dirname [info script]] boundary_refinement.tcl]
+source -encoding utf-8 [file join [file dirname [info script]] diagnostics.tcl]
 
 # Internal selection marks must not survive a query, including on failure.
 proc ::SolidSeam::queryMarkedIds {entityType slot args} {
@@ -80,14 +81,21 @@ proc ::SolidSeam::nativeDeleteComponent {componentId} {
 proc ::SolidSeam::nativeBoundaryData {componentId kind {withEdges 0}} {
     variable detectionCacheActive
     variable detectionReadCache
-    if {![info exists detectionCacheActive] || !$detectionCacheActive} {
-        return [::SolidSeam::nativeBoundaryDataImpl $componentId $kind $withEdges]
-    }
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache
+    set groupCache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupRecognitionComponents] && $componentId in $groupRecognitionComponents}]
     set key [list nativeBoundary $componentId $kind]
+    if {$groupCache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
+    if {![info exists detectionCacheActive] || !$detectionCacheActive} {
+        set result [::SolidSeam::nativeBoundaryDataImpl $componentId $kind [expr {$groupCache ? 1 : $withEdges}]]
+        if {$groupCache && $result ne ""} { set groupReadCache($key) $result }
+        return $result
+    }
     if {[info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
     # Read edge connectivity during the first extraction, so node-only and
     # graph callers share one native temporary collector. Never cache failure.
     set result [::SolidSeam::nativeBoundaryDataImpl $componentId $kind 1]
+    if {$groupCache && $result ne ""} { set groupReadCache($key) $result }
     if {$result ne ""} { set detectionReadCache($key) $result }
     return $result
 }
@@ -184,18 +192,73 @@ proc ::SolidSeam::surfaceNodeIdsOfComponent {componentId isSolid} {
 # Node helpers
 # ---------------------------------------------------------------------------
 proc ::SolidSeam::componentNodeIds {componentId} {
-    return [::SolidSeam::detectionComponentValue $componentId nodes]
+    set nodes [::SolidSeam::detectionComponentValue $componentId nodes]
+    ::SolidSeam::prefetchCoordinates $nodes
+    return $nodes
+}
+
+# Bound both argument length and entity count; query returned IDs as well so
+# database ordering never silently changes the node-to-value mapping.
+proc ::SolidSeam::queryChunks {ids} {
+    set chunks {}; set chunk {}; set size 0
+    foreach id $ids {
+        set length [expr {[string length $id]+1}]
+        if {[llength $chunk] >= 256 || $size+$length > 3000} {
+            lappend chunks $chunk; set chunk {}; set size 0
+        }
+        lappend chunk $id; incr size $length
+    }
+    if {[llength $chunk]} { lappend chunks $chunk }
+    return $chunks
+}
+
+proc ::SolidSeam::prefetchCoordinates {nodes} {
+    variable groupRecognitionActive; variable groupCoordinates
+    variable detectionCacheActive; variable detectionCoordinates
+    set group [expr {[info exists groupRecognitionActive] && $groupRecognitionActive}]
+    set detection [expr {[info exists detectionCacheActive] && $detectionCacheActive}]
+    if {!$group && !$detection} { return }
+    set missing {}
+    foreach node [lsort -integer -unique $nodes] {
+        if {$group && [info exists groupCoordinates($node)]} { continue }
+        if {$detection && [info exists detectionCoordinates($node)]} { continue }
+        lappend missing $node
+    }
+    foreach chunk [::SolidSeam::queryChunks $missing] {
+        if {[catch {
+            set ids [hm_getvalue nodes "user_ids=$chunk" dataname=id]
+            if {[lsort -integer $ids] ne $chunk} { error "Batch IDs differ" }
+            foreach axis {x y z} {
+                set $axis [hm_getvalue nodes "user_ids=$chunk" dataname=$axis]
+                if {[llength [set $axis]] != [llength $ids]} { error "Batch length differs" }
+                foreach value [set $axis] { if {![string is double -strict $value]} { error "Invalid coordinate" } }
+            }
+        }]} { continue }
+        foreach id $ids a $x b $y c $z {
+            set xyz [list $a $b $c]
+            if {$group} { set groupCoordinates($id) $xyz }
+            if {$detection} { set detectionCoordinates($id) $xyz }
+        }
+    }
 }
 
 # Only source/target IDs are stable during detection. Native extraction creates
 # and deletes temporary collectors, whose IDs can be reused within the call.
 proc ::SolidSeam::detectionComponentValue {componentId field} {
     variable detectionCacheActive; variable detectionComponents; variable detectionReadCache
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache; variable groupStableElements
+    set groupCache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupRecognitionComponents] && $componentId in $groupRecognitionComponents}]
+    set key [list component $componentId $field]
+    if {$groupCache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
     set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive &&
         [info exists detectionComponents] && $componentId in $detectionComponents}]
-    set key [list component $componentId $field]
     if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
     set result [hm_getvalue comps id=$componentId dataname=$field]
+    if {$groupCache} {
+        set groupReadCache($key) $result
+        if {$field eq "elements"} { foreach element $result { dict set groupStableElements $element 1 } }
+    }
     if {$cache} { set detectionReadCache($key) $result }
     return $result
 }
@@ -203,13 +266,20 @@ proc ::SolidSeam::detectionComponentValue {componentId field} {
 proc ::SolidSeam::nodeXYZ {nodeId} {
     variable detectionCacheActive
     variable detectionCoordinates
+    variable groupRecognitionActive; variable groupCoordinates
     if {[info exists detectionCacheActive] && $detectionCacheActive && [info exists detectionCoordinates($nodeId)]} {
         return $detectionCoordinates($nodeId)
+    }
+    if {[info exists groupRecognitionActive] && $groupRecognitionActive && [info exists groupCoordinates($nodeId)]} {
+        set xyz $groupCoordinates($nodeId)
+        if {[info exists detectionCacheActive] && $detectionCacheActive} { set detectionCoordinates($nodeId) $xyz }
+        return $xyz
     }
     set x [hm_getvalue nodes id=$nodeId dataname=x]
     set y [hm_getvalue nodes id=$nodeId dataname=y]
     set z [hm_getvalue nodes id=$nodeId dataname=z]
     set xyz [list $x $y $z]
+    if {[info exists groupRecognitionActive] && $groupRecognitionActive} { set groupCoordinates($nodeId) $xyz }
     if {[info exists detectionCacheActive] && $detectionCacheActive} { set detectionCoordinates($nodeId) $xyz }
     return $xyz
 }
@@ -242,12 +312,57 @@ proc ::SolidSeam::componentElementIds {componentId} {
 }
 
 proc ::SolidSeam::elementConfig {elementId} {
+    variable groupRecognitionActive; variable groupStableElements; variable groupElementConfigs
+    set cache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupStableElements] && [dict exists $groupStableElements $elementId]}]
+    if {$cache && [info exists groupElementConfigs($elementId)]} { return $groupElementConfigs($elementId) }
     set config {}
     catch {set config [hm_getvalue elems id=$elementId dataname=config]}
-    return [string trim $config]
+    set config [string trim $config]
+    if {$cache} { set groupElementConfigs($elementId) $config }
+    return $config
 }
 
 proc ::SolidSeam::elementNodes {elementId} {
+    variable groupRecognitionActive; variable groupStableElements; variable groupElementNodes
+    set cache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupStableElements] && [dict exists $groupStableElements $elementId]}]
+    if {$cache && [info exists groupElementNodes($elementId)]} { return $groupElementNodes($elementId) }
+    set result [::SolidSeam::elementNodesImpl $elementId]
+    if {$cache} { set groupElementNodes($elementId) $result }
+    return $result
+}
+
+proc ::SolidSeam::prefetchElementNodes {elements} {
+    variable groupRecognitionActive; variable groupStableElements; variable groupElementNodes
+    if {![info exists groupRecognitionActive] || !$groupRecognitionActive} { return }
+    set missing {}
+    foreach element [lsort -integer -unique $elements] {
+        if {[dict exists $groupStableElements $element] && ![info exists groupElementNodes($element)]} { lappend missing $element }
+    }
+    foreach chunk [::SolidSeam::queryChunks $missing] {
+        if {[catch {
+            set ids [hm_getvalue elems "user_ids=$chunk" dataname=id]
+            if {[lsort -integer $ids] ne $chunk} { error "Batch element IDs differ" }
+            set rows {}; set done {}
+            foreach id $ids { dict set rows $id {} }
+            for {set i 1} {$i <= 20} {incr i} {
+                set values [hm_getvalue elems "user_ids=$chunk" dataname=node$i]
+                if {[llength $values] != [llength $ids]} { error "Batch connectivity differs" }
+                foreach id $ids node $values {
+                    if {[dict exists $done $id]} { continue }
+                    if {$node eq "" || $node eq "0"} { dict set done $id 1; continue }
+                    if {![string is integer -strict $node]} { error "Invalid node ID" }
+                    dict lappend rows $id $node
+                }
+                if {[dict size $done] == [llength $ids]} { break }
+            }
+        }]} { continue }
+        dict for {id nodes} $rows { set groupElementNodes($id) $nodes }
+    }
+}
+
+proc ::SolidSeam::elementNodesImpl {elementId} {
     set nodes {}
     for {set i 1} {$i <= 20} {incr i} {
         set rc [catch {set n [hm_getvalue elems id=$elementId dataname=node$i]}]
@@ -265,10 +380,15 @@ proc ::SolidSeam::elementNodes {elementId} {
 # Shells (never solids): 103 tria3, 104 quad4, 106 tria6, 108 quad8.
 proc ::SolidSeam::componentIsSolid {componentId} {
     variable detectionCacheActive; variable detectionReadCache
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache
     set key [list solid $componentId]
+    set groupCache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupRecognitionComponents] && $componentId in $groupRecognitionComponents}]
+    if {$groupCache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
     set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive}]
     if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
     set result [::SolidSeam::componentIsSolidImpl $componentId]
+    if {$groupCache} { set groupReadCache($key) $result }
     if {$cache} { set detectionReadCache($key) $result }
     return $result
 }
@@ -1028,7 +1148,11 @@ proc ::SolidSeam::autoDetectSeams {sourceComponentId targetComponentId settings}
     array unset autoNormalCache
     set detectionCacheActive 1
     array unset detectionCoordinates
+    set started [clock milliseconds]
     set code [catch {::SolidSeam::detectSeamsImpl $sourceComponentId $targetComponentId $settings} result opts]
+    variable lastDetectionStages
+    if {![info exists lastDetectionStages]} { set lastDetectionStages [dict create] }
+    dict set lastDetectionStages total_ms [expr {[clock milliseconds]-$started}]
     set detectionCacheActive 0
     set detectionAutoMode 0
     array unset detectionCoordinates
@@ -1040,6 +1164,9 @@ proc ::SolidSeam::autoDetectSeams {sourceComponentId targetComponentId settings}
 }
 
 proc ::SolidSeam::detectSeamsImpl {sourceComponentId targetComponentId settings} {
+    variable lastDetectionStages
+    set stageStarted [clock milliseconds]
+    set lastDetectionStages [dict create]
     set searchDistance [dict get $settings search_distance]
     set maxSearchDistance [dict get $settings max_search_distance]
     set minWeldLength [dict get $settings min_weld_length]
@@ -1057,6 +1184,8 @@ proc ::SolidSeam::detectSeamsImpl {sourceComponentId targetComponentId settings}
     # source to its boundary nodes: free-edge nodes for shells, the boundary
     # of the outer face that faces the target for solids.
     set pairs [::SolidSeam::detectJunctionNodes $sourceComponentId $targetComponentId $searchDistance]
+    dict set lastDetectionStages matching_ms [expr {[clock milliseconds]-$stageStarted}]
+    set stageStarted [clock milliseconds]
     set sourceNodeIds {}
     set sourceSeen [dict create]
     foreach pair $pairs {
@@ -1066,7 +1195,11 @@ proc ::SolidSeam::detectSeamsImpl {sourceComponentId targetComponentId settings}
             lappend sourceNodeIds $node
         }
     }
-    if {[llength $sourceNodeIds] == 0} { return {} }
+    if {[llength $sourceNodeIds] == 0} {
+        dict set lastDetectionStages topology_ms 0
+        dict set lastDetectionStages classification_ms 0
+        return {}
+    }
 
     # Estimate the local node spacing from the junction nodes themselves so
     # the chain gap limit is always >= the mesh pitch: with a 10 mm mesh the
@@ -1107,6 +1240,8 @@ proc ::SolidSeam::detectSeamsImpl {sourceComponentId targetComponentId settings}
             lappend pathRecords [dict create node_ids $chain is_closed 0]
         }
     }
+    dict set lastDetectionStages topology_ms [expr {[clock milliseconds]-$stageStarted}]
+    set stageStarted [clock milliseconds]
     set sourceNormal {0 0 0}; set targetNormal {0 0 0}
     if {!$automatic} {
         set sourceNormal [::SolidSeam::componentAverageNormal $sourceComponentId]
@@ -1157,5 +1292,6 @@ proc ::SolidSeam::detectSeamsImpl {sourceComponentId targetComponentId settings}
         }
         lappend candidates $candidate
     }
+    dict set lastDetectionStages classification_ms [expr {[clock milliseconds]-$stageStarted}]
     return $candidates
 }

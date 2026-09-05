@@ -128,8 +128,19 @@ proc ::SolidSeam::retainBoundaryInteriors {component pairs closest} {
 }
 
 proc ::SolidSeam::componentMeshPitch {componentId} {
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache
+    set cache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive && $componentId in $groupRecognitionComponents}]
+    set key [list meshPitch $componentId]
+    if {$cache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
+    set elements [::SolidSeam::sampleEvenly [::SolidSeam::componentElementIds $componentId] 128]
+    if {$cache} {
+        ::SolidSeam::prefetchElementNodes $elements
+        set nodes {}
+        foreach element $elements { set nodes [concat $nodes [::SolidSeam::elementNodes $element]] }
+        ::SolidSeam::prefetchCoordinates $nodes
+    }
     set lengths {}
-    foreach element [::SolidSeam::sampleEvenly [::SolidSeam::componentElementIds $componentId] 128] {
+    foreach element $elements {
         foreach face [::SolidSeam::elementFaces $element] {
             # Corner triangle edges give a robust mesh scale without an
             # all-node nearest-neighbour sweep of the component.
@@ -143,6 +154,7 @@ proc ::SolidSeam::componentMeshPitch {componentId} {
     }
     set pitch [::SolidSeam::median $lengths]
     if {$pitch <= 0} { error "Component $componentId has no usable mesh scale for Auto" }
+    if {$cache} { set groupReadCache($key) $pitch }
     return $pitch
 }
 

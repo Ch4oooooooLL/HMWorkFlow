@@ -12,6 +12,7 @@ proc ::SolidSeam::updateCandidate {candidateId field value} {
     if {$index < 0} { error "Unknown candidate: $candidateId" }
     set row [lindex $candidateRows $index]
     dict set row $field $value
+    set row [::SolidSeam::finalizeCandidateDiagnostics $row]
     set candidateRows [lreplace $candidateRows $index $index $row]
     ::SolidSeam::log INFO "candidate updated $field=$value" $candidateId
     catch {::SolidSeam::refreshCandidateList}

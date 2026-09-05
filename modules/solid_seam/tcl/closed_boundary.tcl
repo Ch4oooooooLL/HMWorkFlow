@@ -3,10 +3,15 @@
 # Work on source topology only. Distances must never close an open boundary.
 proc ::SolidSeam::freeBoundaryGraph {componentId} {
     variable detectionCacheActive; variable detectionReadCache
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache
     set key [list freeGraph $componentId]
+    set groupCache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupRecognitionComponents] && $componentId in $groupRecognitionComponents}]
+    if {$groupCache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
     set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive}]
     if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
     set result [::SolidSeam::freeBoundaryGraphImpl $componentId]
+    if {$groupCache} { set groupReadCache($key) $result }
     if {$cache} { set detectionReadCache($key) $result }
     return $result
 }
