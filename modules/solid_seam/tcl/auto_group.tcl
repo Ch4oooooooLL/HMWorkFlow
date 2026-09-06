@@ -115,6 +115,17 @@ proc ::SolidSeam::groupDirectionScore {rows} {
     return [expr {$score/max(1,[llength $rows])}]
 }
 
+# Rows short enough to be layer-split debris cannot argue for a direction; a
+# 2-node fragment otherwise outscored a real seam on a coarse target.  Debris
+# is only kept when neither direction offers a real chain.
+proc ::SolidSeam::groupUsableRows {rows} {
+    set usable {}
+    foreach row $rows {
+        if {![dict exists $row node_ids] || [llength [dict get $row node_ids]] >= 3} { lappend usable $row }
+    }
+    return $usable
+}
+
 proc ::SolidSeam::beginGroupRecognitionCache {components} {
     variable groupRecognitionActive 1
     variable groupRecognitionComponents [lsort -integer -unique $components]
@@ -189,16 +200,22 @@ proc ::SolidSeam::prepareAutoGroupImpl {components} {
             set pitch [expr {max($pitchA,$pitchB)}]; set radius [expr {1.5*$pitch}]
             set settings [dict create automatic 1 search_distance $radius max_search_distance $radius \
                 min_weld_length 0.0 gap_jump_limit 0.0 default_width [expr {0.6*$pitch}] default_spacing [expr {0.6*$pitch}]]
-            set best {}; set bestScore Inf; set bestTimings {}; set pairError 0
+            set best {}; set bestScore Inf; set bestUsable -1; set bestTimings {}; set pairError 0
             foreach direction [list [list $a $b] [list $b $a]] {
                 lassign $direction source target
                 ::SolidSeam::groupProgress $percent "detect $source -> $target"
                 if {[catch {
                     set rows [::SolidSeam::autoDetectSeams $source $target $settings]
                     if {[llength $rows]} {
-                        set score [::SolidSeam::groupDirectionScore $rows]
-                        if {$score < $bestScore} {
-                            set best $rows; set bestScore $score; set bestTimings {}
+                        set usableRows [::SolidSeam::groupUsableRows $rows]
+                        if {[llength $usableRows]} { set scored $usableRows; set usableFlag 1 } else { set scored $rows; set usableFlag 0 }
+                        set score [::SolidSeam::groupDirectionScore $scored]
+                        # Directions with a real chain beat debris-only ones;
+                        # equal standing keeps the strict score comparison and
+                        # the legacy first-direction tie-break.
+                        if {$best eq "" || $usableFlag > $bestUsable ||
+                            ($usableFlag == $bestUsable && $score < $bestScore)} {
+                            set best $scored; set bestScore $score; set bestUsable $usableFlag; set bestTimings {}
                             if {[info exists ::SolidSeam::lastDetectionStages]} { set bestTimings $::SolidSeam::lastDetectionStages }
                         }
                     }

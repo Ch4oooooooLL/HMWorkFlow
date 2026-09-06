@@ -658,6 +658,12 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targe
         }
     }
     if {[llength $targetNodes] == 0} { return {} }
+    # Face-distance geometry when available: node-to-node distances and
+    # directions scatter at the target's mesh pitch, which fragments the
+    # facing band on coarse targets (a 4:1 density mismatch cut one contact
+    # face into 2-node slivers).  Falls back to the node queries.
+    set faceTree ""
+    catch {set faceTree [::SolidSeam::targetFaceDistanceTree $targetComponentId]}
     set elementIds {}
     set nativeFaces [::SolidSeam::nativeBoundaryData $componentId faces]
     set nativeSurface [expr {$nativeFaces ne "" && [llength [dict get $nativeFaces faces]] > 0}]
@@ -738,16 +744,38 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targe
         }
         set n [llength $face]
         set centroid [list [expr {$cx / $n}] [expr {$cy / $n}] [expr {$cz / $n}]]
-        lassign [::SolidSeam::nearestNode $targetIndex $centroid] targetNode nearest
-        lassign [::SolidSeam::nodeXYZ $targetNode] tx ty tz
-        set dx [expr {$tx - [lindex $centroid 0]}]
-        set dy [expr {$ty - [lindex $centroid 1]}]
-        set dz [expr {$tz - [lindex $centroid 2]}]
-        set dlen [expr {sqrt($dx * $dx + $dy * $dy + $dz * $dz)}]
-        if {$dlen > 1.0e-12} {
-            set dx [expr {$dx / $dlen}]; set dy [expr {$dy / $dlen}]; set dz [expr {$dz / $dlen}]
-        } else {
-            set dx 0.0; set dy 0.0; set dz 0.0
+        set nearest ""
+        set dx 0.0; set dy 0.0; set dz 0.0
+        if {$faceTree ne ""} {
+            lassign [::SolidSeam::shadowNearestFacePoint $faceTree $centroid] nearest facePoint
+            if {$nearest < 1.0e100} {
+                set dlen 0.0
+                set raw {}
+                foreach axis {0 1 2} {
+                    set part [expr {[lindex $facePoint $axis]-[lindex $centroid $axis]}]
+                    lappend raw $part
+                    set dlen [expr {$dlen+$part*$part}]
+                }
+                set dlen [expr {sqrt($dlen)}]
+                if {$dlen > 1.0e-12} {
+                    set dx [expr {[lindex $raw 0]/$dlen}]; set dy [expr {[lindex $raw 1]/$dlen}]; set dz [expr {[lindex $raw 2]/$dlen}]
+                }
+            } else {
+                set nearest ""
+            }
+        }
+        if {$nearest eq ""} {
+            lassign [::SolidSeam::nearestNode $targetIndex $centroid] targetNode nearest
+            lassign [::SolidSeam::nodeXYZ $targetNode] tx ty tz
+            set dx [expr {$tx - [lindex $centroid 0]}]
+            set dy [expr {$ty - [lindex $centroid 1]}]
+            set dz [expr {$tz - [lindex $centroid 2]}]
+            set dlen [expr {sqrt($dx * $dx + $dy * $dy + $dz * $dz)}]
+            if {$dlen > 1.0e-12} {
+                set dx [expr {$dx / $dlen}]; set dy [expr {$dy / $dlen}]; set dz [expr {$dz / $dlen}]
+            } else {
+                set dx 0.0; set dy 0.0; set dz 0.0
+            }
         }
         if {$nativeSurface} {
             lassign [::SolidSeam::faceUnitNormal $face] ox oy oz
@@ -814,7 +842,14 @@ proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targe
     set nodeDistances {}
     foreach nodeId $boundary {
         set p [::SolidSeam::nodeXYZ $nodeId]
-        lassign [::SolidSeam::nearestNode $targetIndex $p] targetNode nearest
+        set nearest ""
+        if {$faceTree ne ""} {
+            set nearest [::SolidSeam::shadowNearestFaceDistance $faceTree $p]
+            if {$nearest >= 1.0e100} { set nearest "" }
+        }
+        if {$nearest eq ""} {
+            lassign [::SolidSeam::nearestNode $targetIndex $p] targetNode nearest
+        }
         lappend nodeDistances [list $nearest $nodeId]
     }
     set sortedNodes [lsort -real -index 0 $nodeDistances]
@@ -917,8 +952,60 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     # biggest gap is sub-pitch the whole set is one layer and nothing is cut.
     set meshPitch [::SolidSeam::median [::SolidSeam::chainSpacings [::SolidSeam::pairSourceIds $pairs]]]
     if {$meshPitch <= 0.0} { set meshPitch 10.0 }
+    variable detectionAutoMode
+    variable ui
+    if {[info exists detectionAutoMode] && $detectionAutoMode} {
+        # A coarse target scatters node-to-node distances at its own pitch;
+        # the layer cut must not fire on target-induced jumps (a 4:1 density
+        # mismatch shredded one real seam into 2-node fragments).
+        set targetPitch 0.0
+        catch {set targetPitch [::SolidSeam::componentMeshPitch $targetComponentId]}
+        if {$targetPitch > $meshPitch} { set meshPitch $targetPitch }
+    }
     if {$biggestGap < 0.5 * $meshPitch} {
         set splitDistance 1.0e12
+    }
+    # Face-distance layering (auto mode): the geometric gap separates the real
+    # contact layer from farther rows regardless of target mesh density, where
+    # node-to-node jumps are indistinguishable from layer jumps.  Any failure
+    # falls back to the node-distance split above.
+    if {[info exists detectionAutoMode] && $detectionAutoMode
+        && (![info exists ui(automatic_face_layering)] || $ui(automatic_face_layering))} {
+        set tree ""
+        catch {set tree [::SolidSeam::targetFaceDistanceTree $targetComponentId]}
+        if {$tree ne ""} {
+            set facePairs {}
+            set faceOk 1
+            foreach pair $pairs {
+                set faceDistance [::SolidSeam::shadowNearestFaceDistance $tree [::SolidSeam::nodeXYZ [lindex $pair 0]]]
+                if {$faceDistance >= 1.0e100} { set faceOk 0; break }
+                lappend facePairs [list [lindex $pair 0] [lindex $pair 1] $faceDistance]
+            }
+            if {$faceOk && [llength $facePairs]} {
+                set sortedFaces [lsort -real -index 2 $facePairs]
+                set firstFace [lindex [lindex $sortedFaces 0] 2]
+                set faceSplit [expr {$firstFace * 1.5 + 0.5}]
+                set faceJump 0.0
+                for {set i 0} {$i < [llength $sortedFaces] - 1} {incr i} {
+                    set gap [expr {[lindex [lindex $sortedFaces [expr {$i + 1}]] 2] - [lindex [lindex $sortedFaces $i] 2]}]
+                    if {$gap > $faceJump} {
+                        set faceJump $gap
+                        set faceSplit [expr {0.5 * ([lindex [lindex $sortedFaces [expr {$i + 1}]] 2] + [lindex [lindex $sortedFaces $i] 2])}]
+                    }
+                }
+                if {$faceJump < 0.5 * $meshPitch} {
+                    set faceSplit 1.0e12
+                }
+                set closest {}
+                foreach facePair $facePairs {
+                    if {[lindex $facePair 2] <= $faceSplit} { lappend closest $facePair }
+                }
+                if {!$sourceSolid && [llength $closest] < [llength $pairs]} {
+                    set closest [::SolidSeam::retainBoundaryInteriors $sourceComponentId $pairs $closest]
+                }
+                return $closest
+            }
+        }
     }
     set closest {}
     foreach pair $pairs {

@@ -90,6 +90,80 @@ proc ::SolidSeam::pointSegmentDistance {point a b} {
     return [::SolidSeam::nodeDistance $point [::SolidSeam::shadowAddScaled $a $ab $t]]
 }
 
+# Closest-point variants for callers that need the contact point itself (the
+# facing direction on coarse targets), sharing the same region math.
+proc ::SolidSeam::closestPointOnSegment {point a b} {
+    set ab [::SolidSeam::shadowSub $b $a]
+    set denominator [::SolidSeam::shadowDot $ab $ab]
+    if {$denominator <= 1.0e-24} { return $a }
+    set t [expr {max(0.0,min(1.0,1.0*[::SolidSeam::shadowDot [::SolidSeam::shadowSub $point $a] $ab]/$denominator))}]
+    return [::SolidSeam::shadowAddScaled $a $ab $t]
+}
+proc ::SolidSeam::closestPointOnTriangle {point a b c} {
+    set ab [::SolidSeam::shadowSub $b $a]; set ac [::SolidSeam::shadowSub $c $a]
+    set cross [list \
+        [expr {[lindex $ab 1]*[lindex $ac 2]-[lindex $ab 2]*[lindex $ac 1]}] \
+        [expr {[lindex $ab 2]*[lindex $ac 0]-[lindex $ab 0]*[lindex $ac 2]}] \
+        [expr {[lindex $ab 0]*[lindex $ac 1]-[lindex $ab 1]*[lindex $ac 0]}]]
+    if {[::SolidSeam::shadowDot $cross $cross] <= 1.0e-24} {
+        set best [::SolidSeam::closestPointOnSegment $point $a $b]
+        foreach edge [list [list $b $c] [list $c $a]] {
+            set candidate [::SolidSeam::closestPointOnSegment $point [lindex $edge 0] [lindex $edge 1]]
+            if {[::SolidSeam::nodeDistance $point $candidate] < [::SolidSeam::nodeDistance $point $best]} { set best $candidate }
+        }
+        return $best
+    }
+    set ap [::SolidSeam::shadowSub $point $a]
+    set d1 [::SolidSeam::shadowDot $ab $ap]; set d2 [::SolidSeam::shadowDot $ac $ap]
+    if {$d1 <= 0.0 && $d2 <= 0.0} { return $a }
+    set bp [::SolidSeam::shadowSub $point $b]
+    set d3 [::SolidSeam::shadowDot $ab $bp]; set d4 [::SolidSeam::shadowDot $ac $bp]
+    if {$d3 >= 0.0 && $d4 <= $d3} { return $b }
+    set vc [expr {$d1*$d4-$d3*$d2}]
+    if {$vc <= 0.0 && $d1 >= 0.0 && $d3 <= 0.0} {
+        return [::SolidSeam::shadowAddScaled $a $ab [expr {1.0*$d1/($d1-$d3)}]]
+    }
+    set cp [::SolidSeam::shadowSub $point $c]
+    set d5 [::SolidSeam::shadowDot $ab $cp]; set d6 [::SolidSeam::shadowDot $ac $cp]
+    if {$d6 >= 0.0 && $d5 <= $d6} { return $c }
+    set vb [expr {$d5*$d2-$d1*$d6}]
+    if {$vb <= 0.0 && $d2 >= 0.0 && $d6 <= 0.0} {
+        return [::SolidSeam::shadowAddScaled $a $ac [expr {1.0*$d2/($d2-$d6)}]]
+    }
+    set va [expr {$d3*$d6-$d5*$d4}]
+    if {$va <= 0.0 && $d4-$d3 >= 0.0 && $d5-$d6 >= 0.0} {
+        set bc [::SolidSeam::shadowSub $c $b]
+        return [::SolidSeam::shadowAddScaled $b $bc [expr {1.0*($d4-$d3)/(($d4-$d3)+($d5-$d6))}]]
+    }
+    set denominator [expr {1.0/($va+$vb+$vc)}]
+    return [::SolidSeam::shadowAddScaled [::SolidSeam::shadowAddScaled $a $ab [expr {$vb*$denominator}]] $ac [expr {$vc*$denominator}]]
+}
+proc ::SolidSeam::shadowNearestVisitPoint {tree point bestVar pointVar} {
+    upvar 1 $bestVar best $pointVar bestPoint
+    if {$tree eq "" || [::SolidSeam::shadowPointBBoxSquared $point [dict get $tree bbox]] > $best*$best} { return }
+    if {[dict exists $tree triangles]} {
+        foreach triangle [dict get $tree triangles] {
+            set candidate [::SolidSeam::closestPointOnTriangle $point [lindex $triangle 3] [lindex $triangle 4] [lindex $triangle 5]]
+            set distance [::SolidSeam::nodeDistance $point $candidate]
+            if {$distance < $best} { set best $distance; set bestPoint $candidate }
+        }
+        return
+    }
+    set left [dict get $tree left]; set right [dict get $tree right]
+    if {[::SolidSeam::shadowPointBBoxSquared $point [dict get $right bbox]] < [::SolidSeam::shadowPointBBoxSquared $point [dict get $left bbox]]} {
+        set swap $left; set left $right; set right $swap
+    }
+    ::SolidSeam::shadowNearestVisitPoint $left $point best bestPoint
+    ::SolidSeam::shadowNearestVisitPoint $right $point best bestPoint
+}
+
+# Returns {distance closestPoint}; distance 1e100 when nothing was hit.
+proc ::SolidSeam::shadowNearestFacePoint {tree point} {
+    set best 1.0e100; set bestPoint {}
+    ::SolidSeam::shadowNearestVisitPoint $tree $point best bestPoint
+    return [list $best $bestPoint]
+}
+
 proc ::SolidSeam::shadowTriangleRecord {a b c} {
     set low {}; set high {}; set center {}
     for {set axis 0} {$axis < 3} {incr axis} {
@@ -210,6 +284,28 @@ proc ::SolidSeam::shadowQuantile {sortedValues fraction} {
     if {![llength $sortedValues]} { return 0.0 }
     set index [expr {int($fraction*([llength $sortedValues]-1))}]
     return [lindex $sortedValues $index]
+}
+
+# Cached point-to-face distance BVH for a component's exterior/shell faces.
+# Node-to-node distances scatter at the target's own mesh pitch, which shreds
+# the closest-layer cut on coarse targets; the face distance is the geometric
+# gap and stays mesh-density independent.  Group/detection cache scope.
+proc ::SolidSeam::targetFaceDistanceTree {componentId} {
+    variable detectionCacheActive; variable detectionReadCache
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache
+    set groupCache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupRecognitionComponents] && $componentId in $groupRecognitionComponents}]
+    set key [list faceTree $componentId]
+    if {$groupCache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
+    set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive}]
+    if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
+    set triangles ""
+    catch {set triangles [::SolidSeam::shadowTargetTriangles $componentId]}
+    set tree ""
+    if {[llength $triangles]} { set tree [::SolidSeam::shadowBuildBVH $triangles] }
+    if {$groupCache && $tree ne ""} { set groupReadCache($key) $tree }
+    if {$cache && $tree ne ""} { set detectionReadCache($key) $tree }
+    return $tree
 }
 
 proc ::SolidSeam::shadowFaceDistanceAudit {source target legacyRows radius} {

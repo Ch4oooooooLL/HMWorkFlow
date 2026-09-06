@@ -116,3 +116,21 @@
 | KD 树构建/批 | 72 | **18** | 72 | **18** |
 
 10 接头模型（两版本）与 4 个密度对照模型的指纹全部一致。剩余性能空间：meshPitch（约 208 ms）与 `*findfaces` 本体（约 380-470 ms/批），以及创建阶段与 GUI 开销（需 GUI 实测）。准确性项（F1-F5）未在本批改动，仍按"影子先行"路线推进。
+
+## 已实施的准确性修复（2026-09-06，分支 `feature/solid-seam-auto-accuracy`）
+
+基于性能分支 `optimize/solid-seam-auto-batch-prefetch`，三项修复（开关 `ui(automatic_solid_normals)`、`ui(automatic_face_layering)`，默认开）：
+
+- **F1 实体分类**：`localShellPatch` 按实体组件分派到 `solidSeamPatch`——原生外表面按组件建立面记录（外向法向/中心/面积）与节点邻接；面积分桶主导轴（1.2×门禁）选出"壳等效"宽面方向，块状实体安全降级 NATIVE；焊缝节点处无对齐宽面（接触面内部节点）时回退组件主导轴——修复 T 接头混票（{T:2,L:3}→NATIVE）的根因。
+- **F2 面距分层**：`detectJunctionNodes` 的最近距离分层与 `solidFacingBoundaryNodes` 的面向判定/接触带在 Auto 模式下改用点到目标面距离与最近面点方向（`targetFaceDistanceTree` 缓存 BVH，复用 shadow 三角化），节点距离方案保留为回退。pair 第三元改为面间隙，`maximum_gap` 从此是真实几何间隙。
+- **F3 方向门禁**：`groupUsableRows`（≥3 节点）过滤碎片行后再比较方向评分；一方有真实链即胜出，双方碎片保持旧行为。
+
+实机验收（HM2019 + HM2022，`temp/solid_seam_research_20260906/` 日志）：
+
+- 10 接头类型全部对齐地面真值：J01-03→T/PENTA_MIG_T、J04-05→LAP/PENTA_MIG_L、J06-07→BUTT/PENTA_MIG_B（跨接头伪对无真值；J08/J09 的 LAP 是几何正确的——生成器从未应用 30°/40° 旋转，README 预期与实际几何不符，属模型问题）。
+- t6_24（4:1）真实焊缝从 3×2 节点碎片恢复为 18 节点/104 mm 环链，且与 control（6/6）结果逐字一致——密度与重划分不变性达成；碎片方向被 F3 门禁压制。
+- T/L/B 新实现路径（feType 118/117/119）双版本创建全部 PASS（顺带修复 HM2022 J04 搭接链原生 FAILED——新 57 节点链创建成功）。
+- 性能保持：10 接头整批中位数 1.378 s（性能分支为 1.355 s）。
+- 离线回归：`classification_offline.tcl`（主导轴、patch 排序、T/L/B 投票、块状降级、中面回退、可用性门禁）+ 既有 7 套全部通过。
+
+F4（跨接头伪链的链级质量门禁）与 F5 的 partner 映射切换仍按影子路线推进；`gen_solid_seam.py` 的 J08/J09 旋转缺失建议修正后重生成模型。

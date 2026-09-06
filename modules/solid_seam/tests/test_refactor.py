@@ -19,6 +19,7 @@ class RefactorTests(unittest.TestCase):
                                  ("auto_group_offline.tcl", "PASS AutoGroup checks"),
                                  ("cache_offline.tcl", "PASS detection cache checks"),
                                  ("prefetch_offline.tcl", "PASS prefetch checks"),
+                                 ("classification_offline.tcl", "PASS classification checks"),
                                  ("speed_offline.tcl", "PASS speed checks"),
                                  ("diagnostics_offline.tcl", "PASS solid seam diagnostics checks"),
                                  ("face_distance_parameterized_benchmark.tcl", "PASS parameterized face-distance benchmark")):

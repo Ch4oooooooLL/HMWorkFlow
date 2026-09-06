@@ -3,6 +3,8 @@
 
 ## Unreleased - platform stabilization
 
+- 实体焊缝 Auto/AutoGroup 识别准确性修复（10 接头验证模型 + 4 个网格密度对照模型实机验证，HM2019/HM2022 双版本）：① 实体组件接头分类从未生效——`localShellPatch` 只认壳单元导致 32 样本投票永远 NATIVE；现在从原生外表面提取实体焊缝节点法向（面积加权主导轴门禁 1.2×，块状实体安全降级 NATIVE，接触面内部节点回退组件主导轴），J01-03→PENTA_MIG_T、J04-05→PENTA_MIG_L、J06-07→PENTA_MIG_B 全部与地面真值一致；② 最近距离分层改用点到目标面距离（BVH），面向判定与接触带同步升级最近面点方向——4:1 网格密度失配下真实焊缝从 3×2 节点碎片恢复为 18 节点完整环链，且与均匀网格对照模型结果逐字一致（密度/重划分不变性）；③ AutoGroup 方向选择新增退化门禁（<3 节点碎片链不能作为方向证据）。T/L/B 新实现路径（feType 118/117/119）在双版本创建全部 PASS，并顺带修复 HM2022 上 J04 搭接链原生 FAILED 的问题。整批性能保持 1.378 s（优化前 5.573 s）。新增 `classification_offline.tcl` 回归。开关：`ui(automatic_solid_normals)`、`ui(automatic_face_layering)`（默认开）。
+
 - 实体焊缝 Auto/AutoGroup 预计算性能重构（候选指纹与两版实机验证零变化）：① 识别批次开始前对全部选中组件做一次分块 connectivity 批量预取，消除逐单元查询；② `^faces`/`^edges` 临时组件回读改为分块批量读取（失败自动回退逐实体）；③ 目标表面最近邻 KD 树按组件缓存并在面向边界判定、junction 检测与 shadow 审计间复用，不再每方向重建。10 接头验证模型（20 组件/21,400 HEXA/12 对）实测：HM2019 整批中位数 5.573 s → 1.355 s（-75.7%）、HM2022 6.032 s → 1.282 s（-78.7%），`hm_getvalue` 129,967 → 4,729 次/批，KD 树构建 72 → 18；10 接头与 4 个网格密度对照模型的候选指纹及规范化文本与改动前逐字节一致。新增 `prefetch_offline.tcl` 离线回归并纳入 `test_refactor.py`。
 
 - 实体焊缝实机研究补充：本机 hmbatch 的 OptiStruct 导入读取器只接受每行 ≤10 个逗号字段的自由场卡，单行 CHEXA（11 字段）被静默丢弃（导入返回成功但 0 单元），须写为 `+C` 续行；reader 名需用 `#optistruct`（`#optistruct\optistruct` 在新安装上报 "The translator does not exist"）。`femlib.write_fem` 对超长节点列表卡自动输出续行；`hm_speed_research.tcl` 导入增加 reader 名回退。详见 `docs/solid_seam_auto_speed_accuracy_2026-09-06.md`。

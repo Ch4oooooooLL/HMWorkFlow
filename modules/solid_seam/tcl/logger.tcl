@@ -22,6 +22,7 @@ namespace eval ::SolidSeam {
         default_realization PENTA_MIG_T auto_accept_high 1 status "Ready"
         default_width 6.0 default_spacing 6.0 tolerance 15.0
         input_type NODES_COMPS weld_type T side_mode POSITIVE shadow_face_distance 0
+        automatic_solid_normals 1 automatic_face_layering 1
     }
 }
 
