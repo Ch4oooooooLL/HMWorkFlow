@@ -223,7 +223,7 @@ proc ::SolidSeam::shadowFaceDistanceAudit {source target legacyRows radius} {
     set legacy [dict create]
     foreach row $legacyRows { foreach node [dict get $row node_ids] { dict set legacy $node 1 } }
     set within 0; set misses {}; set faceDistances {}
-    set targetIndex [::SolidSeam::spatialIndex [::SolidSeam::surfaceNodeIdsOfComponent $target [::SolidSeam::componentIsSolid $target]]]
+    lassign [::SolidSeam::surfaceNodeSpatialIndex $target [::SolidSeam::componentIsSolid $target]] targetIndex targetSurfaceNodes
     set deltaRatios {}
     foreach node $sourceNodes {
         set point [::SolidSeam::nodeXYZ $node]

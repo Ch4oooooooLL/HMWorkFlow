@@ -3,6 +3,10 @@
 
 ## Unreleased - platform stabilization
 
+- 实体焊缝 Auto/AutoGroup 预计算性能重构（候选指纹与两版实机验证零变化）：① 识别批次开始前对全部选中组件做一次分块 connectivity 批量预取，消除逐单元查询；② `^faces`/`^edges` 临时组件回读改为分块批量读取（失败自动回退逐实体）；③ 目标表面最近邻 KD 树按组件缓存并在面向边界判定、junction 检测与 shadow 审计间复用，不再每方向重建。10 接头验证模型（20 组件/21,400 HEXA/12 对）实测：HM2019 整批中位数 5.573 s → 1.355 s（-75.7%）、HM2022 6.032 s → 1.282 s（-78.7%），`hm_getvalue` 129,967 → 4,729 次/批，KD 树构建 72 → 18；10 接头与 4 个网格密度对照模型的候选指纹及规范化文本与改动前逐字节一致。新增 `prefetch_offline.tcl` 离线回归并纳入 `test_refactor.py`。
+
+- 实体焊缝实机研究补充：本机 hmbatch 的 OptiStruct 导入读取器只接受每行 ≤10 个逗号字段的自由场卡，单行 CHEXA（11 字段）被静默丢弃（导入返回成功但 0 单元），须写为 `+C` 续行；reader 名需用 `#optistruct`（`#optistruct\optistruct` 在新安装上报 "The translator does not exist"）。`femlib.write_fem` 对超长节点列表卡自动输出续行；`hm_speed_research.tcl` 导入增加 reader 名回退。详见 `docs/solid_seam_auto_speed_accuracy_2026-09-06.md`。
+
 - 实体焊缝 Auto/AutoGroup 新增稳定候选指纹和分阶段识别计时；实现可选的点到目标外表面 BVH 距离 shadow 检测，只记录潜在漏识别节点和点/面距离偏差，不改变配对、路径、类型、侧向、参数或创建。增加粗/细目标网格参数化基准及指纹基线迁移校验。
 
 - AutoGroup 预计算新增操作级只读缓存，跨有向识别和多个 pair 复用用户所选组件的坐标、原始 connectivity、element config、边界和拓扑；临时组件不缓存，创建前或异常时统一清理。HM2019 六组件基准的 `hm_getvalue` 从 38,647 降至 16,310（7 次合计），候选指纹及创建结果不变。

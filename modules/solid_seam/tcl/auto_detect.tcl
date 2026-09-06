@@ -139,15 +139,15 @@ proc ::SolidSeam::nativeBoundaryDataImpl {componentId kind {withEdges 0}} {
         set faces {}
         set edges {}
         if {$kind eq "edges" && $withEdges} {
-            foreach elementId [::SolidSeam::componentElementIds $temporaryId] {
-                set a [hm_getvalue elems id=$elementId dataname=node1]
-                set b [hm_getvalue elems id=$elementId dataname=node2]
-                if {$a > 0 && $b > 0 && $a != $b} { lappend edges [list $a $b] }
+            foreach ring [::SolidSeam::batchedElementRings [::SolidSeam::componentElementIds $temporaryId] 2] {
+                if {[llength $ring] >= 2} {
+                    lassign $ring a b
+                    if {$a > 0 && $b > 0 && $a != $b} { lappend edges [list $a $b] }
+                }
             }
         }
         if {$kind eq "faces"} {
-            foreach elementId [::SolidSeam::componentElementIds $temporaryId] {
-                set ring [::SolidSeam::elementNodes $elementId]
+            foreach ring [::SolidSeam::batchedElementRings [::SolidSeam::componentElementIds $temporaryId] 8] {
                 if {[llength $ring] >= 3} { lappend faces $ring }
             }
         }
@@ -186,6 +186,69 @@ proc ::SolidSeam::surfaceNodeIdsOfComponent {componentId isSolid} {
         if {$native ne ""} { return [dict get $native node_ids] }
     }
     return [::SolidSeam::componentNodeIds $componentId]
+}
+
+# One chunked connectivity read per selected component before recognition:
+# later elementNodes calls resolve from the group cache instead of issuing
+# per-element queries.  No-op outside a group recognition cache.
+proc ::SolidSeam::prefetchComponentConnectivity {components} {
+    variable groupRecognitionActive
+    if {![info exists groupRecognitionActive] || !$groupRecognitionActive} { return }
+    foreach componentId $components {
+        if {[catch {set elementIds [::SolidSeam::componentElementIds $componentId]}]} { continue }
+        ::SolidSeam::prefetchElementNodes $elementIds
+    }
+}
+
+# Cached nearest-neighbour index over a component's surface nodes.  The node
+# set depends only on the component (native faces / component nodes are
+# component-scoped caches), so one tree is shared across detection directions
+# and component pairs within a recognition cache.  Returns tree + node ids.
+proc ::SolidSeam::surfaceNodeSpatialIndex {componentId isSolid} {
+    variable detectionCacheActive; variable detectionReadCache
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache
+    set groupCache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupRecognitionComponents] && $componentId in $groupRecognitionComponents}]
+    set key [list surfaceIndex $componentId]
+    if {$groupCache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
+    set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive}]
+    if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
+    set nodes [::SolidSeam::surfaceNodeIdsOfComponent $componentId $isSolid]
+    if {[llength $nodes] == 0} { return [list {} {}] }
+    set result [list [::SolidSeam::spatialIndex $nodes] $nodes]
+    if {$groupCache} { set groupReadCache($key) $result }
+    if {$cache} { set detectionReadCache($key) $result }
+    return $result
+}
+
+# Chunked connectivity read for transient (^edges/^faces) elements.  Their ids
+# are not stable-cache members, so elementNodes would fall back to one query
+# per element; read the whole collector in bounded chunks instead.  Rings keep
+# the caller's element order; a failed chunk falls back to scalar reads.
+proc ::SolidSeam::batchedElementRings {elementIds maxNodes} {
+    set rings {}
+    foreach chunk [::SolidSeam::queryChunks $elementIds] {
+        if {[catch {
+            set ids [hm_getvalue elems "user_ids=$chunk" dataname=id]
+            if {[lsort -integer $ids] ne $chunk} { error "Batch element IDs differ" }
+            array set rows {}
+            foreach id $ids { set rows($id) {} }
+            array set done {}
+            for {set i 1} {$i <= $maxNodes} {incr i} {
+                set values [hm_getvalue elems "user_ids=$chunk" dataname=node$i]
+                if {[llength $values] != [llength $ids]} { error "Batch connectivity differs" }
+                foreach id $ids node $values {
+                    if {[info exists done($id)]} { continue }
+                    if {$node eq "" || $node eq "0"} { set done($id) 1; continue }
+                    lappend rows($id) $node
+                }
+            }
+            foreach id $chunk { lappend rings $rows($id) }
+        }]} {
+            foreach id $chunk { lappend rings [::SolidSeam::elementNodesImpl $id] }
+        }
+    }
+    return $rings
 }
 
 # ---------------------------------------------------------------------------
@@ -585,13 +648,16 @@ proc ::SolidSeam::faceUnitNormal {face} {
     return [list [expr {$nx/$length}] [expr {$ny/$length}] [expr {$nz/$length}]]
 }
 
-proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targetNodes ""}} {
-    if {$targetNodes eq ""} {
-        set targetSolid [::SolidSeam::componentIsSolid $targetComponentId]
-        set targetNodes [::SolidSeam::surfaceNodeIdsOfComponent $targetComponentId $targetSolid]
+proc ::SolidSeam::solidFacingBoundaryNodes {componentId targetComponentId {targetNodes ""} {targetIndex ""}} {
+    if {$targetIndex eq ""} {
+        if {$targetNodes eq ""} {
+            set targetSolid [::SolidSeam::componentIsSolid $targetComponentId]
+            lassign [::SolidSeam::surfaceNodeSpatialIndex $targetComponentId $targetSolid] targetIndex targetNodes
+        } else {
+            set targetIndex [::SolidSeam::spatialIndex $targetNodes]
+        }
     }
     if {[llength $targetNodes] == 0} { return {} }
-    set targetIndex [::SolidSeam::spatialIndex $targetNodes]
     set elementIds {}
     set nativeFaces [::SolidSeam::nativeBoundaryData $componentId faces]
     set nativeSurface [expr {$nativeFaces ne "" && [llength [dict get $nativeFaces faces]] > 0}]
@@ -788,12 +854,12 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     # locations and would only distort the chain.
     set sourceSolid [::SolidSeam::componentIsSolid $sourceComponentId]
     set targetSolid [::SolidSeam::componentIsSolid $targetComponentId]
-    set targetNodes [::SolidSeam::surfaceNodeIdsOfComponent $targetComponentId $targetSolid]
+    lassign [::SolidSeam::surfaceNodeSpatialIndex $targetComponentId $targetSolid] targetIndex targetNodes
     if {$sourceSolid} {
         # Do not first rebuild the entire solid boundary: the native free-face
         # path normally returns the exact facing outline directly.
         set sourceNodes [::SolidSeam::solidFacingBoundaryNodes \
-            $sourceComponentId $targetComponentId $targetNodes]
+            $sourceComponentId $targetComponentId $targetNodes $targetIndex]
         if {[llength $sourceNodes] == 0} {
             set sourceNodes [::SolidSeam::boundaryNodesOfComponent $sourceComponentId]
         }
@@ -804,7 +870,6 @@ proc ::SolidSeam::detectJunctionNodes {sourceComponentId targetComponentId searc
     foreach nodeId $sourceNodes {
         set sourceXYZ($nodeId) [::SolidSeam::nodeXYZ $nodeId]
     }
-    set targetIndex [::SolidSeam::spatialIndex $targetNodes]
 
     # nearest compB node for every compA node inside the search distance
     set pairs {}

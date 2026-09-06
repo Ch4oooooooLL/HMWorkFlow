@@ -43,7 +43,10 @@ class SolidSeamTests(unittest.TestCase):
         self.assertIn("*findfaces components 1", source)
         self.assertIn("nativeBoundaryData $componentId edges", source)
         self.assertIn("nativeBoundaryData $componentId faces", source)
-        self.assertIn("surfaceNodeIdsOfComponent $targetComponentId $targetSolid", source)
+        # The junction path resolves the target surface through the cached
+        # index helper, which itself still prefers the native face extraction.
+        self.assertIn("surfaceNodeSpatialIndex $targetComponentId $targetSolid", source)
+        self.assertIn("surfaceNodeIdsOfComponent $componentId $isSolid", source)
         self.assertIn("if {[llength $sourceNodes] == 0}", source)
 
     def write_mesh(self, payload):

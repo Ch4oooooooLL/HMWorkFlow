@@ -137,7 +137,10 @@ proc ::SolidSeam::endGroupRecognitionCache {} {
 
 proc ::SolidSeam::prepareAutoGroup {components} {
     ::SolidSeam::beginGroupRecognitionCache $components
-    set code [catch {::SolidSeam::prepareAutoGroupImpl $components} result opts]
+    set code [catch {
+        ::SolidSeam::prefetchComponentConnectivity $components
+        ::SolidSeam::prepareAutoGroupImpl $components
+    } result opts]
     ::SolidSeam::endGroupRecognitionCache
     if {$code} { return -options $opts $result }
     return $result
