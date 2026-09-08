@@ -167,7 +167,15 @@ proc ::SolidSeam::automaticSettings {source target} {
 
 # Shared incident-shell query: normals, material support and notch filtering
 # reuse one cache entry. The cache is cleared at each detection boundary.
+# Solid components resolve their patch from the exterior faces instead: the
+# shell mark query would find no shell elements and classification would
+# always fall back to NATIVE (measured on the 10-joints solid model).
 proc ::SolidSeam::localShellPatch {node component} {
+    if {[::SolidSeam::componentIsSolid $component]} {
+        variable ui
+        if {[info exists ui(automatic_solid_normals)] && !$ui(automatic_solid_normals)} { return {} }
+        return [::SolidSeam::solidSeamPatch $node $component]
+    }
     variable autoNormalCache
     set key "patch,$component,$node"
     if {[info exists autoNormalCache($key)]} { return $autoNormalCache($key) }
@@ -192,9 +200,150 @@ proc ::SolidSeam::localShellPatch {node component} {
     set autoNormalCache($key) $patch
     return $patch
 }
+
+# Exterior structure of a solid component: native exterior faces with outward
+# normal, centre and area, a node -> face adjacency, and the dominant
+# broad-face direction (hemisphere-folded, area-weighted average of the
+# outward normals - the shell-equivalent surface of a plate-like solid).
+# Returns "" when the native faces are unavailable or no direction clearly
+# dominates (chunky solids keep the legacy NATIVE classification).
+proc ::SolidSeam::solidExteriorStructure {componentId} {
+    variable detectionCacheActive; variable detectionReadCache
+    variable groupRecognitionActive; variable groupRecognitionComponents; variable groupReadCache
+    set groupCache [expr {[info exists groupRecognitionActive] && $groupRecognitionActive &&
+        [info exists groupRecognitionComponents] && $componentId in $groupRecognitionComponents}]
+    set key [list solidExterior $componentId]
+    if {$groupCache && [info exists groupReadCache($key)]} { return $groupReadCache($key) }
+    set cache [expr {[info exists detectionCacheActive] && $detectionCacheActive}]
+    if {$cache && [info exists detectionReadCache($key)]} { return $detectionReadCache($key) }
+    set result [::SolidSeam::solidExteriorStructureImpl $componentId]
+    if {$groupCache && $result ne ""} { set groupReadCache($key) $result }
+    if {$cache && $result ne ""} { set detectionReadCache($key) $result }
+    return $result
+}
+
+proc ::SolidSeam::solidExteriorStructureImpl {componentId} {
+    set native [::SolidSeam::nativeBoundaryData $componentId faces]
+    if {$native eq "" || ![llength [dict get $native faces]]} { return "" }
+    set nodes [::SolidSeam::componentNodeIds $componentId]
+    if {![llength $nodes]} { return "" }
+    set sx 0.0; set sy 0.0; set sz 0.0
+    foreach node $nodes {
+        lassign [::SolidSeam::nodeXYZ $node] x y z
+        set sx [expr {$sx+$x}]; set sy [expr {$sy+$y}]; set sz [expr {$sz+$z}]
+    }
+    set count [llength $nodes]
+    set centroid [list [expr {$sx/$count}] [expr {$sy/$count}] [expr {$sz/$count}]]
+    set records {}; set adjacency [dict create]
+    set sumX 0.0; set sumY 0.0; set sumZ 0.0
+    set index 0
+    foreach ring [dict get $native faces] {
+        if {[llength $ring] < 3} { continue }
+        # Newell vector: direction is the face normal, length twice the area.
+        set rx 0.0; set ry 0.0; set rz 0.0
+        set cx 0.0; set cy 0.0; set cz 0.0
+        set corners [llength $ring]
+        for {set i 0} {$i < $corners} {incr i} {
+            lassign [::SolidSeam::nodeXYZ [lindex $ring $i]] ax ay az
+            lassign [::SolidSeam::nodeXYZ [lindex $ring [expr {($i+1) % $corners}]]] bx by bz
+            set rx [expr {$rx+($ay-$by)*($az+$bz)}]
+            set ry [expr {$ry+($az-$bz)*($ax+$bx)}]
+            set rz [expr {$rz+($ax-$bx)*($ay+$by)}]
+            set cx [expr {$cx+$ax}]; set cy [expr {$cy+$ay}]; set cz [expr {$cz+$bz}]
+        }
+        set area [expr {0.5*sqrt($rx*$rx+$ry*$ry+$rz*$rz)}]
+        if {$area <= 1.0e-12} { continue }
+        set normal [list [expr {$rx/(2.0*$area)}] [expr {$ry/(2.0*$area)}] [expr {$rz/(2.0*$area)}]]
+        set center [list [expr {$cx/$corners}] [expr {$cy/$corners}] [expr {$cz/$corners}]]
+        # Native face winding is not reliably outward; sign against the
+        # component centroid fixes it for plate-like parts.
+        if {[::SolidSeam::vdot $normal [::SolidSeam::vsub $center $centroid]] < 0.0} {
+            set normal [list [expr {-[lindex $normal 0]}] [expr {-[lindex $normal 1]}] [expr {-[lindex $normal 2]}]]
+        }
+        lappend records [dict create normal $normal center $center area $area]
+        foreach node $ring { dict lappend adjacency $node $index }
+        incr index
+    }
+    if {![llength $records]} { return "" }
+    # Broad-face direction: bucket |area * normal component| per axis.  A
+    # plate-like solid puts one axis clearly ahead (1.2x the runner-up); a
+    # chunky solid ties across axes and degrades to the legacy NATIVE vote
+    # instead of fabricating a classification from an arbitrary axis.
+    set axisArea {0.0 0.0 0.0}
+    foreach item $records {
+        set normal [dict get $item normal]
+        set area [dict get $item area]
+        set axisArea [list \
+            [expr {[lindex $axisArea 0]+$area*abs([lindex $normal 0])}] \
+            [expr {[lindex $axisArea 1]+$area*abs([lindex $normal 1])}] \
+            [expr {[lindex $axisArea 2]+$area*abs([lindex $normal 2])}]]
+    }
+    set sorted [lsort -real $axisArea]
+    if {[lindex $sorted 2] <= 1.0e-12 || [lindex $sorted 2] < 1.2*[lindex $sorted 1]} { return "" }
+    set bestAxis 0
+    if {[lindex $axisArea 1] > [lindex $axisArea $bestAxis]} { set bestAxis 1 }
+    if {[lindex $axisArea 2] > [lindex $axisArea $bestAxis]} { set bestAxis 2 }
+    set dominant [list 0.0 0.0 0.0]
+    lset dominant $bestAxis 1.0
+    return [dict create records $records adjacency $adjacency dominant $dominant]
+}
+
+# Incident exterior faces of a seam node, dominant-aligned face first: joint
+# classification reads its normal (the shell-equivalent broad face), side
+# voting reads its centre as the in-material reference.
+proc ::SolidSeam::solidSeamPatch {node componentId} {
+    variable autoNormalCache
+    set structureKey "solidStructure,$componentId"
+    if {![info exists autoNormalCache($structureKey)]} {
+        set autoNormalCache($structureKey) [::SolidSeam::solidExteriorStructure $componentId]
+    }
+    set structure $autoNormalCache($structureKey)
+    set key "solidPatch,$componentId,$node"
+    if {[info exists autoNormalCache($key)]} { return $autoNormalCache($key) }
+    set patch {}
+    if {$structure ne ""} {
+        set adjacency [dict get $structure adjacency]
+        if {[dict exists $adjacency $node]} {
+            set records [dict get $structure records]
+            set dominant [dict get $structure dominant]
+            set incident {}
+            foreach index [dict get $adjacency $node] { lappend incident [lindex $records $index] }
+            set best 0; set bestScore -2.0; set bestArea -1.0; set position 0
+            foreach item $incident {
+                set score [expr {abs([::SolidSeam::vdot [dict get $item normal] $dominant])}]
+                set area [dict get $item area]
+                if {$score > $bestScore + 1.0e-9 || ($score > $bestScore - 1.0e-9 && $area > $bestArea)} {
+                    set best $position; set bestScore $score; set bestArea $area
+                }
+                incr position
+            }
+            set patch [linsert [lreplace $incident $best $best] 0 [lindex $incident $best]]
+        }
+    }
+    set autoNormalCache($key) $patch
+    return $patch
+}
+
 proc ::SolidSeam::localShellNormal {node component} {
     set patch [::SolidSeam::localShellPatch $node $component]
     if {![llength $patch]} { return {} }
+    set solid 0
+    catch {set solid [::SolidSeam::componentIsSolid $component]}
+    if {$solid} {
+        set structure ""
+        catch {set structure [::SolidSeam::solidExteriorStructure $component]}
+        if {$structure ne ""} {
+            set normal [dict get [lindex $patch 0] normal]
+            if {[expr {abs([::SolidSeam::vdot $normal [dict get $structure dominant]])}] < 0.7} {
+                # Mid-face contact nodes only offer the contact face, whose
+                # normal is anti-parallel to the partner's for every T joint
+                # and would flip the vote to L.  Fall back to the component's
+                # representative broad-face direction instead.
+                return [dict get $structure dominant]
+            }
+            return $normal
+        }
+    }
     return [dict get [lindex $patch 0] normal]
 }
 

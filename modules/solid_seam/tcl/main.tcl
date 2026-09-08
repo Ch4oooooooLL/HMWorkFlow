@@ -44,6 +44,7 @@ proc ::SolidSeam::prepareSelectionPairs {pairs} {
             if {[dict exists $selection component_ids]} { set components [concat $components [dict get $selection component_ids]] }
         }
         ::SolidSeam::beginGroupRecognitionCache $components
+        ::SolidSeam::prefetchComponentConnectivity $components
     }
     set code [catch {::SolidSeam::prepareSelectionPairsImpl $pairs} result opts]
     if {$ownsCache} { ::SolidSeam::endGroupRecognitionCache }

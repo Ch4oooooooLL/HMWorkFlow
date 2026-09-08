@@ -35,7 +35,11 @@ set rc [catch {
     set femPath [file join $root examples AutoShellSeamBackend test_fem combined_all_cases.fem]
     *feinputpreserveincludefiles
     *createstringarray 10 "OptiStruct " " " "ANSA " "PATRAN " "EXPAND_IDS_FOR_FORMULA_SETS " "ASSIGNPROP_BYHMCOMMENTS" "LOADCOLS_DISPLAY_SKIP " "VECTORCOLS_DISPLAY_SKIP " "SYSTCOLS_DISPLAY_SKIP " "CONTACTSURF_DISPLAY_SKIP "
-    *feinputwithdata2 "#optistruct\\optistruct" $femPath 0 0 0 0 0 1 10 1 0
+    if {[catch {*feinputwithdata2 "#optistruct\\optistruct" $femPath 0 0 0 0 0 1 10 1 0}]} {
+        # Newer installs register only the short reader name ("The translator
+        # does not exist"); retry with it before giving up.
+        *feinputwithdata2 "#optistruct" $femPath 0 0 0 0 0 1 10 1 0
+    }
     set comps {}
     foreach name {
         F01_CASE_01_STRAIGHT_T__WEB_T1 F01_CASE_01_STRAIGHT_T__BASE_T2
