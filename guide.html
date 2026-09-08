@@ -1121,7 +1121,7 @@
                             <span class="card-badge mesh">网格</span>
                         </div>
                         <div class="card-path">mesh_seam_weld.tcl</div>
-                        <div class="card-desc">支持自动识别并复核壳焊缝候选，利用现有目标网格边直接创建壳焊缝；保留手动 imprint/ruled 兼容流程。</div>
+                        <div class="card-desc">支持自动识别并复核壳焊缝候选；手动模式使用局部 Mesh Edit Create Patch 直接创建焊缝壳，并只重绘新增 patch。</div>
                         <a href="#mod-mesh-seam-weld" class="card-btn">
                             <svg viewBox="0 0 24 24"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/></svg>
                             查看详情 & 参数
@@ -1513,13 +1513,13 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             该模块主要用于处理车身结构件之间的焊缝面（Seam Surface）网格创建。它打破了传统几何 Ruled 面划分网格的低效率，采用了在已有网格上直接投影的流程：
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
-                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理。单点及不连续边界种子通过 HyperMesh 2019 原生 <code>*findedges</code> 为每个源 component 创建临时隐藏 PLOTEL 自由边组件；自由边点只提取包含该节点的闭环，内部点提取其所属整个 component 的全部闭合自由边。路径提取完成后临时组件立即清理，原有 <code>^edges</code> 会被保留和恢复。运行流程不导出 FEM，也不调用 Python。</li>
+                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理。单点及不连续边界种子通过 HyperMesh 2019 原生 <code>*findedges</code> 为每个源 component 创建临时隐藏 PLOTEL 自由边组件；单个自由边点按目标组件最近壳单元的局部法向筛选边图，提取经过该点且与目标平面平行的完整开放或闭合直线/曲线，内部点仍提取其所属整个 component 的全部闭合自由边。路径提取完成后临时组件立即清理，原有 <code>^edges</code> 会被保留和恢复。运行流程不导出 FEM，也不调用 Python。</li>
                             <li><strong>印记区网格重构 (Remeshing)</strong>：将原始节点路径作为 Nodes 输入，将该路径投影到所选目标 components 后最近的几层单元作为 Elements 输入，调用 Mesh Edit imprint。与目标 patch 共节点、但不属于目标 patch 的平面外单元只记录诊断数量，不会混入 Elements 输入。</li>
-                            <li><strong>自动生成 Ruled 连接带</strong>：imprint 后重新取得位置已调整的目标节点；Ruled 第一侧始终使用原始 Nodes 输入，第二侧使用 imprint 后目标节点。两侧节点数量不必一一对应，并将新生成的焊缝网格归类至指定组件。</li>
-                            <li><strong>局部失败隔离</strong>：每个闭环都在独立撤销事务中完成即时目标 patch、imprint、后置节点验证和连接带创建。任一阶段失败会回滚并跳过当前闭环，不会退化为整个目标 component 的 imprint，也不会保留部分焊缝。</li>
-                            <li><strong>批量性能与可靠性</strong>：原生自由边 PLOTEL 连接关系通过一次 mark 批量读取；每条路径执行前才统一投影全部源节点、一次反查所附着的目标壳单元并扩展两到三层 Elements，避免前一条路径重网格后留下过期目标单元 ID。imprint 后优先采用 HyperMesh 提供的结果节点列表；列表不可用时，通过当前局部 patch 的有界拓扑追踪恢复目标路径。恢复出的整条目标路径直接作为 Ruled 第二侧，不因与源侧节点数不同而拆段。边界遍历、投影与验证等长循环会按固定批次处理界面事件。</li>
+                            <li><strong>原生 Create Patch</strong>：以源 Nodes 和局部目标 Elements 调用 <code>imprint_nodelist</code> 的 <code>create_joint_elems=1</code> 模式，直接在按板厚选定的 <code>SEAM_*</code> component 中创建焊缝壳，不再以 Ruled 作为手动主路径。</li>
+                            <li><strong>局部失败隔离</strong>：每条路径都在独立撤销事务中完成即时目标 patch、imprint、后置节点验证和连接带创建。任一阶段失败会回滚并跳过当前路径，不会退化为整个目标 component 的 imprint，也不会保留部分焊缝。</li>
+                            <li><strong>批量性能与可靠性</strong>：原生自由边图按源 component 在批次内缓存；单边界点只读取其所在连通轮廓，内部点在边界分类后跳过目标法向查询。每条路径执行前才统一投影全部源节点、一次反查目标壳单元并扩展两到三层 Elements，避免前一路径重网格后留下过期 ID。仅本次 Create Patch 新增的单元进入 mixed remesh，所有连接边节点固定，重绘前后边界必须一致。</li>
                             <li><strong>FAST_AUTO</strong>：自动识别 T、CONNECT 和搭接候选，用户明确接受后优先通过 <code>EXISTING_EDGE_PATH</code> 直接导入 CQUAD4/CTRIA3；显式开启后可使用受控节点微调或单母单元保守切分。该路径禁止 imprint、ruled 和 automesh，并在任务及每个候选应用前保存恢复快照。</li>
-                            <li><strong>LEGACY_MANUAL</strong>：保留原手动节点路径、局部 imprint 和 ruled/automesh 行为，只有用户明确选择兼容模式时执行。</li>
+                            <li><strong>LEGACY_MANUAL</strong>：保留手动节点选择交互，但创建阶段使用局部 Mesh Edit Create Patch 和新增 patch 的边界固定 mixed remesh。</li>
                             <li><strong>批次撤回</strong>：成功完成的手动或自动批次会保存一次批次前快照。回到工具箱，在“网格焊缝”行点击 <strong>“撤回”</strong> 可一次恢复该批次开始前的模型状态；撤回会覆盖该批次之后对模型所做的修改。</li>
                             <li><strong>可反馈诊断</strong>：失败会按目标准备、imprint、目标匹配、目标连续性、automesh 或撤销事务分类，显示原因和检查建议，并在任务目录写出 UTF-8 纯文本 <code>mesh_seam_weld_failure_report.txt</code>。反馈问题时同时提供该文件和 <code>operation.log</code> 即可。</li>
                             <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
@@ -1537,7 +1537,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">2</span>
                                 <div class="step-title">选择源 node path</div>
-                                <div class="step-detail">多选连续节点时使用所选开放路径。单点及不连续种子由原生 <code>*findedges</code> 创建一一对应的临时自由边组件：自由边点只选择所在闭环；内部点选择该源 component 的全部闭合自由边。开放、分叉或非流形边界会直接拒绝。</div>
+                                <div class="step-detail">多选连续节点时使用所选开放路径。单点及不连续种子由原生 <code>*findedges</code> 创建一一对应的临时自由边组件：单个自由边点选择与目标局部平面平行的所在开放/闭合线，内部点选择该源 component 的全部闭合自由边；分叉、非流形或方向不匹配的边界会拒绝。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">3</span>
@@ -1547,7 +1547,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">4</span>
                                 <div class="step-title">配置生成参数</div>
-                                <div class="step-detail">填写焊缝尺寸、网格面形与平滑参数，点击 <strong>“生成”</strong>。程序逐路径准备当前目标网格的两到三层局部 Elements patch，以原始节点列表和该 patch 执行 <code>imprint_nodelist</code>；随后重新获取 imprint 后目标节点并校正方向与闭环起点。最后把原始节点列表作为 Ruled 第一侧、目标节点作为第二侧直接建带。两侧节点数允许不同；闭合路径会显式创建首尾封口。</div>
+                                <div class="step-detail">填写焊缝尺寸并点击 <strong>“生成”</strong>。程序逐路径准备当前目标网格的两到三层局部 Elements，以原始节点列表和该局部范围执行 Mesh Edit Create Patch；随后只对新增焊缝 patch 做 mixed remesh，并固定全部连接边节点。若未创建 patch、缺少源侧连接节点或重绘改变连接边，当前路径会整体回滚。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">5</span>

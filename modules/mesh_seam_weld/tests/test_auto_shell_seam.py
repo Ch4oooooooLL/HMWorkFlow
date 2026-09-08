@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "python"))
 
 from hmworkflow.core.mesh_model import Component, Element, MeshModel
-from hmworkflow.mesh_seam_weld.auto_workflow import detect, plan_candidates
+from hmworkflow.mesh_seam_weld.auto_workflow import _output_component, detect, plan_candidates
 from hmworkflow.mesh_seam_weld.element_projection import project_point_to_element, project_point_to_triangle
 from hmworkflow.mesh_seam_weld.local_split_planner import plan_local_split
 from hmworkflow.mesh_seam_weld.quality_guard import element_metrics
@@ -49,6 +49,13 @@ def t_model(target_row_y=0.0):
 
 
 class AutomaticShellSeamTests(unittest.TestCase):
+    def test_output_component_uses_thinner_canonical_component_marker(self):
+        model=t_model()
+        model.components[10]=Component(10,"V01_ST3000_PLATE_T8.5","SHELL")
+        model.components[20]=Component(20,"WEB_T6.5","SHELL")
+        candidate={"source_component_id":10,"target_component_id":20}
+        self.assertEqual("SEAM_T6.5",_output_component(candidate,model,SETTINGS))
+
     def test_fast_tcl_path_has_explicit_mode_and_no_legacy_realization(self):
         loader=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         self.assertIn("FAST_AUTO",loader); self.assertIn("LEGACY_MANUAL",loader); self.assertIn("runAutoWorkflow",loader)

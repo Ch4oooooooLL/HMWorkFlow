@@ -1,28 +1,32 @@
-# Native patch validation route. The caller owns the per-path history action.
 proc ::MeshSeamWeld::patchBoundaryEdges {elemIds} {
-    set counts {}
+    set counts [dict create]
     set connectivity [::MeshSeamWeld::readShellElementConnectivityBulk $elemIds 1]
-    foreach id $elemIds {
-        if {![dict exists $connectivity $id]} { error "Cannot read patch element $id." }
-        set nodes [dict get $connectivity $id]
-        set n [llength $nodes]
-        if {$n != 3 && $n != 4} { error "Patch contains a non-linear-shell element $id." }
-        for {set i 0} {$i < $n} {incr i} {
-            set edge [lsort -integer [list [lindex $nodes $i] [lindex $nodes [expr {($i+1)%$n}]]]]
+    foreach elemId $elemIds {
+        if {![dict exists $connectivity $elemId]} {
+            error "Cannot read native patch element $elemId."
+        }
+        set nodes [dict get $connectivity $elemId]
+        set count [llength $nodes]
+        if {$count ni {3 4}} {
+            error "Native patch contains a non-linear-shell element $elemId."
+        }
+        for {set index 0} {$index < $count} {incr index} {
+            set edge [lsort -integer [list [lindex $nodes $index] \
+                [lindex $nodes [expr {($index + 1) % $count}]]]]
             dict incr counts $edge
         }
     }
     set boundary {}
-    dict for {edge count} $counts {
-        if {$count > 2} { error "Patch contains a non-manifold edge: $edge." }
-        if {$count == 1} { lappend boundary $edge }
+    dict for {edge ownerCount} $counts {
+        if {$ownerCount > 2} { error "Native patch contains a non-manifold edge: $edge." }
+        if {$ownerCount == 1} { lappend boundary $edge }
     }
     return $boundary
 }
 
 proc ::MeshSeamWeld::processWeldPathNativePatch {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1} {sourceCompIds {}} {seamComp ""} {targetElemIds {}} {imprintClosedLoop ""}} {
     variable cfg
-    set started [clock milliseconds]
+    set totalStarted [clock milliseconds]
     if {$imprintClosedLoop eq ""} { set imprintClosedLoop $closedLoop }
     if {[llength $sourceCompIds] == 0} {
         set sourceCompIds [::MeshSeamWeld::componentIdsFromNodes $sourceNodes]
@@ -31,55 +35,89 @@ proc ::MeshSeamWeld::processWeldPathNativePatch {sourceNodes targetComps closedL
         set seamComp [::MeshSeamWeld::seamComponentForRelatedComps \
             [::MeshSeamWeld::uniq [concat $sourceCompIds $targetComps]]]
     }
+
+    set reportProgress [expr {$progressOpened &&
+        [::MeshSeamWeld::shouldUpdatePathProgress $pathIndex $pathTotal]}]
+    set pathBase [expr {10.0 + 80.0*($pathIndex - 1)/double(max(1,$pathTotal))}]
+    set pathSpan [expr {80.0/double(max(1,$pathTotal))}]
+    if {$reportProgress} {
+        ::HybridCore::progressUpdate $pathBase "Mesh Seam Weld" \
+            "Creating native imprint patch $pathIndex/$pathTotal..." 1
+    }
+
+    set imprintStarted [clock milliseconds]
     if {[catch {
-        set compId [::MeshSeamWeld::ensureOutputComponent $seamComp 11]
-        if {$compId eq ""} { error "Cannot resolve patch output component." }
-        # ensureOutputComponent tolerates selector errors; this switch must succeed.
+        set outputCompId [::MeshSeamWeld::ensureOutputComponent $seamComp 11]
+        if {$outputCompId eq ""} { error "Cannot resolve native patch output component." }
+        # Create Patch writes its joint elements to the current component.
         *currentcollector component $seamComp
-        set beforeElems [::MeshSeamWeld::componentElementIds $compId]
-        ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps $imprintClosedLoop $targetElemIds 1
-        set patchElems [::MeshSeamWeld::idsAddedToCollection $beforeElems \
-            [::MeshSeamWeld::componentElementIds $compId]]
-        if {[llength $patchElems] == 0} { error "Native imprint did not create patch elements in $seamComp." }
-    } err]} { ::MeshSeamWeld::stageError IMPRINT $err }
-    set imprintMs [expr {[clock milliseconds]-$started}]
-    if {$progressOpened} {
-        ::HybridCore::progressUpdate [expr {10.0+80.0*($pathIndex-0.3)/max(1,$pathTotal)}] \
-            "Mesh Seam Weld" "Optimizing native patch $pathIndex/$pathTotal (mixed)..." 1
+        set beforeOutputElems [::MeshSeamWeld::componentElementIds $outputCompId]
+        ::MeshSeamWeld::runImprintNodeList $sourceNodes $targetComps \
+            $imprintClosedLoop $targetElemIds 1
+        set patchElems [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
+            [::MeshSeamWeld::componentElementIds $outputCompId]]
+        if {[llength $patchElems] == 0} {
+            error "Native imprint did not create patch elements in $seamComp."
+        }
+    } imprintErr]} {
+        ::MeshSeamWeld::stageError IMPRINT $imprintErr
+    }
+    set imprintMs [expr {[clock milliseconds] - $imprintStarted}]
+
+    if {$reportProgress} {
+        ::HybridCore::progressUpdate [expr {$pathBase + 0.65*$pathSpan}] \
+            "Mesh Seam Weld" \
+            "Remeshing native patch $pathIndex/$pathTotal..." 1
     }
     set meshStarted [clock milliseconds]
     if {[catch {
-        set boundary [::MeshSeamWeld::patchBoundaryEdges $patchElems]
-        if {[llength $boundary] == 0} { error "Native patch has no boundary." }
-        set fixedNodes [::MeshSeamWeld::uniq [concat {*}$boundary]]
-        foreach node $sourceNodes {
-            if {[lsearch -exact $fixedNodes $node] < 0} { error "Native patch misses source boundary node $node." }
+        set boundaryBefore [::MeshSeamWeld::patchBoundaryEdges $patchElems]
+        if {[llength $boundaryBefore] == 0} { error "Native patch has no boundary." }
+        set fixedNodes [::MeshSeamWeld::uniq [concat {*}$boundaryBefore]]
+        foreach sourceNode $sourceNodes {
+            if {[lsearch -exact $fixedNodes $sourceNode] < 0} {
+                error "Native patch misses source boundary node $sourceNode."
+            }
         }
         set targetNodes {}
-        foreach node $fixedNodes {
-            if {[lsearch -exact $sourceNodes $node] < 0} { lappend targetNodes $node }
+        foreach nodeId $fixedNodes {
+            if {[lsearch -exact $sourceNodes $nodeId] < 0} { lappend targetNodes $nodeId }
         }
-        # Automesh by elements, mixed for mapped and free regions. Preserve
-        # attachment boundaries and scope the remesh to this path's new patch.
+        if {[llength $targetNodes] < 2} {
+            error "Native patch has fewer than two target-side boundary nodes."
+        }
+
+        # Remesh only the new patch and keep every attachment-boundary node
+        # fixed.  Mixed mode supports both mapped strips and curved/free areas.
         eval *createmark elems 1 $patchElems
         eval *createmark nodes 2 $fixedNodes
         *elementsaddnodesfixed 1 2
         *defaultremeshelems 1 $cfg(weld_mesh_size) 2 2 1 1 1 1 0 0 0 0 2 30
         ::MeshSeamWeld::clearLocalTopologyCaches $patchElems $fixedNodes
-        set weldElems [::MeshSeamWeld::idsAddedToCollection $beforeElems \
-            [::MeshSeamWeld::componentElementIds $compId]]
-        if {[llength $weldElems] == 0} { error "Automesh produced no weld elements." }
-        set afterBoundary [::MeshSeamWeld::patchBoundaryEdges $weldElems]
-        if {[lsort $boundary] ne [lsort $afterBoundary]} {
-            error "Automesh changed patch attachment edges."
+        set weldElems [::MeshSeamWeld::idsAddedToCollection $beforeOutputElems \
+            [::MeshSeamWeld::componentElementIds $outputCompId]]
+        if {[llength $weldElems] == 0} { error "Native patch remesh produced no weld elements." }
+        set boundaryAfter [::MeshSeamWeld::patchBoundaryEdges $weldElems]
+        if {[lsort $boundaryBefore] ne [lsort $boundaryAfter]} {
+            error "Native patch remesh changed its attachment edges."
         }
-    } err]} { ::MeshSeamWeld::stageError AUTOMESH $err }
-    set meshMs [expr {[clock milliseconds]-$meshStarted}]
-    set totalMs [expr {[clock milliseconds]-$started}]
-    ::HybridCore::log INFO "PERF mesh_seam_weld creation_mode=native_imprint_patch path=$pathIndex/$pathTotal component=$seamComp patch_elements=[llength $patchElems] weld_elements=[llength $weldElems] mesh_type=mixed mesh_size=$cfg(weld_mesh_size) imprint_ms=$imprintMs mesh_create_ms=$meshMs total_ms=$totalMs"
-    return [list sourceNodes $sourceNodes sourceCompIds $sourceCompIds seamCompName $seamComp \
-        imprintNodes $targetNodes targetNodes $targetNodes weldElems $weldElems \
-        timings [list imprint_ms $imprintMs target_match_ms 0 mesh_create_ms $meshMs total_ms $totalMs]]
+    } meshErr]} {
+        ::MeshSeamWeld::stageError AUTOMESH $meshErr
+    }
+    set meshMs [expr {[clock milliseconds] - $meshStarted}]
+    set totalMs [expr {[clock milliseconds] - $totalStarted}]
+    ::HybridCore::log INFO \
+        "PERF mesh_seam_weld creation_mode=native_imprint_patch path=$pathIndex/$pathTotal component=$seamComp source_nodes=[llength $sourceNodes] patch_elements=[llength $patchElems] weld_elements=[llength $weldElems] mesh_type=mixed mesh_size=$cfg(weld_mesh_size) imprint_ms=$imprintMs mesh_create_ms=$meshMs total_ms=$totalMs"
+
+    if {$reportProgress || $pathIndex == $pathTotal} {
+        ::HybridCore::progressUpdate \
+            [expr {10.0 + 80.0*$pathIndex/double(max(1,$pathTotal))}] \
+            "Mesh Seam Weld" "Path $pathIndex/$pathTotal complete" 1
+    }
+    return [list sourceNodes $sourceNodes sourceCompIds $sourceCompIds \
+        seamCompName $seamComp imprintNodes $targetNodes targetNodes $targetNodes \
+        weldElems $weldElems timings [list imprint_ms $imprintMs \
+            target_match_ms 0 mesh_create_ms $meshMs total_ms $totalMs]]
 }
 
 proc ::MeshSeamWeld::shouldUpdatePathProgress {pathIndex pathTotal} {

@@ -24,7 +24,10 @@ def prepare(output, combined=False):
         combined_row = generate_combined(output / "fixtures")
         mesh_manifest = Path(combined_row["manifest"]).resolve()
     else:
-        selected = next(row for row in generated if row["name"] == "case_02_angled_t")
+        # The conversation-rule detector intentionally treats the 60-degree
+        # fixture as potential under the default 70-degree trusted gate.  Keep
+        # this legacy realization smoke on the complete 90-degree seed.
+        selected = next(row for row in generated if row["name"] == "case_01_straight_t")
         mesh_manifest = Path(selected["manifest"]).resolve()
     model = read_shell_fem_bundle(mesh_manifest)
     candidates = [row for row in detect_candidates(model) if row.get("auto_eligible")]
@@ -90,7 +93,7 @@ def prepare(output, combined=False):
         "remesh_plan": str((output / "remesh_plan.json").resolve()),
         "criteria": str(criteria),
         "candidate_count": len(candidates),
-        "fixture": "combined_all_cases" if combined else "case_02_angled_t",
+        "fixture": "combined_all_cases" if combined else "case_01_straight_t",
     }
     (output / "pipeline_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return manifest

@@ -45,7 +45,7 @@ def _output_component(candidate, model, settings):
     for name in names:
         match = re.search(r"_T(\d+(?:\.\d+)?)", name, re.IGNORECASE)
         if match: thicknesses.append(float(match.group(1)))
-    thickness = candidate.get("thickness") or (thicknesses[0] if thicknesses else None)
+    thickness = candidate.get("thickness") or (min(thicknesses) if thicknesses else None)
     if thickness is None:
         element_properties = getattr(model, "element_properties", {})
         pshell = getattr(model, "pshell", {})

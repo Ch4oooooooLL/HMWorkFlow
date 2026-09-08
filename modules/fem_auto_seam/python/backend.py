@@ -50,9 +50,12 @@ except ImportError:
 
 DEFAULT_SETTINGS = {
     "search_distance": 10.0,
+    "potential_search_multiplier": 1.25,
+    "potential_angle_margin": 10.0,
+    "potential_length_ratio": 0.75,
     "minimum_t_length": 15.0,
     "minimum_patch_length": 15.0,
-    "minimum_t_normal_angle": 30.0,
+    "minimum_t_normal_angle": 70.0,
     "maximum_patch_normal_angle": 15.0,
     "maximum_distance_variation_ratio": 0.35,
     "ray_tolerance": 1.0e-7,
@@ -63,6 +66,7 @@ DEFAULT_SETTINGS = {
     "maximum_weld_aspect_ratio": 100.0,
     "maximum_weld_triangle_ratio": 0.75,
     "python_workers": 0,
+    "include_legacy_near_edges": False,
 }
 
 
@@ -353,9 +357,14 @@ def _edge_hit_intervals(first, second, direction, target_elements, nodes, maximu
 
 
 def _t_candidates(model, settings, topologies, source_ids=None):
-    maximum = float(settings["search_distance"])
+    strict_maximum = float(settings["search_distance"])
+    maximum = strict_maximum * float(settings.get("potential_search_multiplier", 1.25))
     tolerance = float(settings["ray_tolerance"])
-    minimum_angle = float(settings["minimum_t_normal_angle"])
+    strict_minimum_angle = float(settings["minimum_t_normal_angle"])
+    minimum_angle = max(
+        0.0,
+        strict_minimum_angle - float(settings.get("potential_angle_margin", 10.0)),
+    )
     by_component = {component_id: sorted(model.elements_for_components([component_id]), key=lambda row: row.element_id) for component_id in topologies}
     element_indexes = _component_element_indexes(by_component, model.nodes, maximum)
     global_element_index = _global_element_index(by_component, model.nodes, maximum)
@@ -481,11 +490,28 @@ def _t_candidates(model, settings, topologies, source_ids=None):
                     if not valid or len(source_path) < 2:
                         continue
                     length = sum(_distance(tuple(source_path[index]["coordinates"]), tuple(source_path[index + 1]["coordinates"])) for index in range(len(source_path) - 1))
+                    if length < float(settings["minimum_t_length"]) * float(settings.get("potential_length_ratio", 0.75)):
+                        continue
                     average = sum(distances) / len(distances)
                     variation = (max(distances) - min(distances)) / max(average, 1.0e-9)
                     angles = [contexts[index]["angle"] for index in {source_point(value)[2] for value in values} if index in contexts]
                     angle = sum(angles) / len(angles) if angles else minimum_angle
-                    auto = length >= float(settings["minimum_t_length"]) and variation <= float(settings["maximum_distance_variation_ratio"])
+                    # A trusted T seed must represent one or more complete
+                    # source free edges.  A clipped interval is deliberately
+                    # retained as a potential relation, but must never be sent
+                    # to the automatic mesh-weld executor.
+                    complete_edges = all(
+                        abs(interval["start"] - round(interval["start"])) <= 2.0e-6
+                        and abs(interval["end"] - round(interval["end"])) <= 2.0e-6
+                        for interval in group["intervals"]
+                    )
+                    strict_geometry = (
+                        complete_edges
+                        and length >= float(settings["minimum_t_length"])
+                        and variation <= float(settings["maximum_distance_variation_ratio"])
+                        and angle >= strict_minimum_angle
+                        and max(distances) <= strict_maximum + tolerance
+                    )
                     involved_edges = []
                     for interval in group["intervals"]:
                         context = contexts[interval["edge_index"]]
@@ -503,12 +529,19 @@ def _t_candidates(model, settings, topologies, source_ids=None):
                         "closed": False,
                         "length": round(length, 9),
                         "confidence": _candidate_confidence(1.0, variation, min(1.0, angle / 90.0)),
-                        "auto_eligible": auto,
-                        "status": "AUTO_READY" if auto else "REVIEW_REQUIRED",
+                        "projection_coverage": round(
+                            sum(interval["end"] - interval["start"] for interval in group["intervals"])
+                            / max(float(len(group["intervals"])), 1.0),
+                            6,
+                        ),
+                        "complete_source_edges": bool(complete_edges),
+                        "auto_eligible": strict_geometry,
+                        "recognition_status": "TRUSTED" if strict_geometry else "POTENTIAL",
+                        "status": "AUTO_READY" if strict_geometry else "REVIEW_REQUIRED",
                         "distance": {"minimum": min(distances), "average": average, "maximum": max(distances)},
                         "normal_angle": round(angle, 6),
                         "reasons": ["source free-edge extension intersects a continuous target shell region"],
-                        "warnings": [] if auto else ["T candidate does not pass automatic hard gates"],
+                        "warnings": [] if strict_geometry else ["T relation is partial, ambiguous, or outside a trusted tolerance gate"],
                     })
     return rows
 
@@ -527,9 +560,11 @@ def _bidirectional_hit(point, normal, elements, nodes, maximum, tolerance, eleme
 
 
 def _patch_candidates(model, settings, topologies):
-    maximum = float(settings["search_distance"])
+    strict_maximum = float(settings["search_distance"])
+    maximum = strict_maximum * float(settings.get("potential_search_multiplier", 1.25))
     tolerance = float(settings["ray_tolerance"])
-    maximum_angle = float(settings["maximum_patch_normal_angle"])
+    strict_maximum_angle = float(settings["maximum_patch_normal_angle"])
+    maximum_angle = strict_maximum_angle + float(settings.get("potential_angle_margin", 10.0))
     by_component = {component_id: sorted(model.elements_for_components([component_id]), key=lambda row: row.element_id) for component_id in topologies}
     element_indexes = _component_element_indexes(by_component, model.nodes, maximum)
     component_normals = {component_id: _component_normal(elements, model.nodes) for component_id, elements in by_component.items()}
@@ -550,9 +585,8 @@ def _patch_candidates(model, settings, topologies):
             if angle > maximum_angle:
                 continue
             first_area, second_area = component_areas[first_id], component_areas[second_id]
-            if abs(first_area - second_area) <= max(first_area, second_area) * 0.02:
-                continue
-            source_id, target_id = (first_id, second_id) if first_area < second_area else (second_id, first_id)
+            strictly_smaller = abs(first_area - second_area) > max(first_area, second_area) * 0.02
+            source_id, target_id = (first_id, second_id) if first_area <= second_area else (second_id, first_id)
             source_elements, target_elements = by_component[source_id], by_component[target_id]
             target_index = element_indexes.get(target_id)
             target_normal = component_normals[target_id]
@@ -562,10 +596,13 @@ def _patch_candidates(model, settings, topologies):
             containment_points.extend(_midpoint(model.nodes[first], model.nodes[second]) for first, second, _ in topologies[source_id].free_edges)
             containment_points.extend(tuple(sum(model.nodes[node_id][axis] for node_id in element.node_ids) / len(element.node_ids) for axis in range(3)) for element in source_elements)
             hits = [_bidirectional_hit(point, target_normal, target_elements, model.nodes, maximum, tolerance, target_index) for point in containment_points]
-            if any(hit is None for hit in hits) or any(hit is None for hit in node_hits):
+            hit_count = sum(hit is not None for hit in hits)
+            if hit_count == 0:
                 continue
-            distances = [hit["distance"] for hit in hits]
-            hit_by_node = {node_id: hit for node_id, hit in zip(source_nodes, node_hits)}
+            distances = [hit["distance"] for hit in hits if hit is not None]
+            hit_by_node = {node_id: hit for node_id, hit in zip(source_nodes, node_hits) if hit is not None}
+            coverage = hit_count / float(len(hits))
+            fully_contained = coverage >= 1.0 - 1.0e-9 and len(hit_by_node) == len(source_nodes)
             average = sum(distances) / len(distances)
             variation = (max(distances) - min(distances)) / max(average, 1.0e-9)
             paths = connected_edge_paths(topologies[source_id].free_edges, model.nodes)
@@ -577,9 +614,18 @@ def _patch_candidates(model, settings, topologies):
             hole_rows = [{"length": path["length"], "equivalent_diameter": path["length"] / math.pi, "node_ids": path["node_ids"]} for path in inner]
             small_holes = [row for row in hole_rows if row["equivalent_diameter"] < float(settings["small_hole_diameter"])]
             group_id = "PATCH_{}_{}".format(source_id, target_id)
-            group_auto = not small_holes and variation <= float(settings["maximum_distance_variation_ratio"])
+            group_auto = (
+                fully_contained
+                and strictly_smaller
+                and not small_holes
+                and variation <= float(settings["maximum_distance_variation_ratio"])
+                and angle <= strict_maximum_angle
+                and max(distances) <= strict_maximum + tolerance
+            )
             for path_index, path in enumerate(closed_paths, 1):
                 length = _path_length(path["node_ids"], model.nodes, True)
+                if length < float(settings["minimum_patch_length"]) * float(settings.get("potential_length_ratio", 0.75)):
+                    continue
                 auto = group_auto and length >= float(settings["minimum_patch_length"])
                 confidence = _candidate_confidence(1.0, variation, max(0.0, 1.0 - angle / max(maximum_angle, 1.0)))
                 warnings = []
@@ -594,18 +640,24 @@ def _patch_candidates(model, settings, topologies):
                     "target_component_id": target_id,
                     "source_node_ids": path["node_ids"],
                     "source_edge_pairs": path["edge_pairs"],
-                    "target_hint_element_ids": sorted({hit["element_id"] for hit in hits}),
-                    "target_projection_points": [list(hit_by_node[node_id]["point"]) for node_id in path["node_ids"]],
+                    "target_hint_element_ids": sorted({hit["element_id"] for hit in hits if hit is not None}),
+                    "target_projection_points": [
+                        list(hit_by_node[node_id]["point"])
+                        for node_id in path["node_ids"] if node_id in hit_by_node
+                    ],
                     "closed": True,
                     "length": round(length, 9),
                     "confidence": confidence,
+                    "projection_coverage": round(coverage, 6),
+                    "fully_contained": bool(fully_contained),
                     "auto_eligible": auto,
+                    "recognition_status": "TRUSTED" if auto else "POTENTIAL",
                     "status": "AUTO_READY" if auto else "REVIEW_REQUIRED",
                     "distance": {"minimum": min(distances), "average": average, "maximum": max(distances)},
                     "normal_angle": round(angle, 6),
                     "hole_summary": hole_rows,
                     "reasons": ["smaller parallel shell is fully projected inside a larger target shell"],
-                    "warnings": warnings if warnings else ([] if auto else ["patch candidate does not pass automatic hard gates"]),
+                    "warnings": warnings if warnings else ([] if auto else ["parallel components overlap only partially or miss a trusted tolerance gate"]),
                 })
     return rows
 
@@ -723,6 +775,146 @@ def resolved_worker_count_for_model(model, settings):
     return _resolved_worker_count(settings, len(component_ids), len(model.elements))
 
 
+def _t_relation_key(candidate):
+    edges = tuple(sorted(tuple(sorted(int(value) for value in pair)) for pair in candidate.get("source_edge_pairs", [])))
+    return int(candidate["source_component_id"]), edges
+
+
+def _apply_relation_ambiguity(candidates):
+    """Downgrade relations that cannot select one unambiguous target.
+
+    Geometry detection intentionally keeps every plausible hit.  Trust is a
+    separate, conservative decision: one source T edge may land on only one
+    target, and a patch component participating in a multi-component parallel
+    cluster requires manual review.
+    """
+    t_targets = defaultdict(set)
+    patch_partners = defaultdict(set)
+    for row in candidates:
+        if row["candidate_type"] == "T_SEAM":
+            t_targets[_t_relation_key(row)].add(int(row["target_component_id"]))
+        elif row["candidate_type"] == "PATCH_SEAM":
+            source = int(row["source_component_id"])
+            target = int(row["target_component_id"])
+            patch_partners[source].add(target)
+            patch_partners[target].add(source)
+
+    for row in candidates:
+        reason = ""
+        if row["candidate_type"] == "T_SEAM" and len(t_targets[_t_relation_key(row)]) > 1:
+            reason = "one source edge extension intersects multiple target components"
+        elif row["candidate_type"] == "PATCH_SEAM":
+            source = int(row["source_component_id"])
+            target = int(row["target_component_id"])
+            if len(patch_partners[source]) > 1 or len(patch_partners[target]) > 1:
+                reason = "parallel overlap belongs to a multi-component patch cluster"
+        if reason:
+            row["auto_eligible"] = False
+            row["recognition_status"] = "POTENTIAL"
+            row["status"] = "REVIEW_REQUIRED"
+            row.setdefault("warnings", []).append(reason)
+            row["ambiguous_relation"] = True
+        else:
+            row.setdefault("ambiguous_relation", False)
+    return candidates
+
+
+def build_recognition_plan(candidates):
+    """Return trusted seed jobs and component-only potential review groups."""
+    trusted = []
+    potential_rows = []
+    for row in candidates:
+        if row.get("recognition_status") == "TRUSTED" and row.get("auto_eligible"):
+            seed = {
+                "candidate_id": str(row["candidate_id"]),
+                "weld_type": "T" if row["candidate_type"] == "T_SEAM" else "PATCH",
+                "source_component_id": int(row["source_component_id"]),
+                "target_component_ids": [int(row["target_component_id"])],
+                "source_node_ids": [int(value) for value in row.get("source_node_ids", []) if int(value) > 0],
+                "closed_loop": bool(row.get("closed", False)),
+                "confidence": float(row.get("confidence", 0.0)),
+            }
+            if seed["source_node_ids"]:
+                trusted.append(seed)
+        else:
+            potential_rows.append(row)
+
+    # T relations are grouped only when they describe the same source edge;
+    # unrelated weld locations on one component remain separate review sets.
+    grouped = {}
+    patch_rows = []
+    for row in potential_rows:
+        if row["candidate_type"] == "T_SEAM":
+            key = ("T",) + _t_relation_key(row)
+            group = grouped.setdefault(key, {"candidate_ids": [], "component_ids": set(), "weld_types": set(), "reasons": set()})
+            group["candidate_ids"].append(str(row["candidate_id"]))
+            group["component_ids"].update((int(row["source_component_id"]), int(row["target_component_id"])))
+            group["weld_types"].add("T")
+            group["reasons"].update(str(value) for value in row.get("warnings", []))
+        elif row["candidate_type"] == "PATCH_SEAM":
+            patch_rows.append(row)
+
+    # Parallel patch relations form connected component clusters.  This makes
+    # a three-plate stack one set while keeping spatially unrelated pairs apart.
+    remaining = list(patch_rows)
+    patch_serial = 0
+    while remaining:
+        patch_serial += 1
+        cluster = [remaining.pop(0)]
+        component_ids = {
+            int(cluster[0]["source_component_id"]),
+            int(cluster[0]["target_component_id"]),
+        }
+        changed = True
+        while changed:
+            changed = False
+            keep = []
+            for row in remaining:
+                ids = {int(row["source_component_id"]), int(row["target_component_id"])}
+                if component_ids & ids:
+                    cluster.append(row)
+                    component_ids.update(ids)
+                    changed = True
+                else:
+                    keep.append(row)
+            remaining = keep
+        grouped[("PATCH", patch_serial)] = {
+            "candidate_ids": [str(row["candidate_id"]) for row in cluster],
+            "component_ids": component_ids,
+            "weld_types": {"PATCH"},
+            "reasons": {str(value) for row in cluster for value in row.get("warnings", [])},
+        }
+
+    merged_groups = []
+    for key in sorted(grouped, key=str):
+        incoming = grouped[key]
+        matches = [group for group in merged_groups if len(group["component_ids"] & incoming["component_ids"]) >= 2]
+        if not matches:
+            merged_groups.append(incoming)
+            continue
+        primary = matches[0]
+        for field in ("component_ids", "weld_types", "reasons"):
+            primary[field].update(incoming[field])
+        primary["candidate_ids"].extend(incoming["candidate_ids"])
+        for redundant in matches[1:]:
+            for field in ("component_ids", "weld_types", "reasons"):
+                primary[field].update(redundant[field])
+            primary["candidate_ids"].extend(redundant["candidate_ids"])
+            merged_groups.remove(redundant)
+
+    potential_groups = []
+    for serial, group in enumerate(merged_groups, 1):
+        potential_groups.append({
+            "group_id": "POTENTIAL_{:04d}".format(serial),
+            "set_name": "FEM_SEAM_REVIEW_{:04d}".format(serial),
+            "component_ids": sorted(group["component_ids"]),
+            "candidate_ids": sorted(set(group["candidate_ids"])),
+            "weld_types": sorted(group["weld_types"]),
+            "reasons": sorted(group["reasons"]),
+        })
+    return {"trusted_seeds": trusted, "potential_groups": potential_groups}
+
+
 def detect_candidates(model, settings=None):
     resolved = dict(DEFAULT_SETTINGS)
     if settings:
@@ -746,7 +938,9 @@ def detect_candidates(model, settings=None):
         t_partitions = max(1, worker_count - 2)
         source_groups = [component_ids[index::t_partitions] for index in range(t_partitions)]
         tasks = [("T", group) for group in source_groups if group]
-        tasks.extend((("PATCH", ()), ("NEAR", ())))
+        tasks.append(("PATCH", ()))
+        if bool(resolved.get("include_legacy_near_edges", False)):
+            tasks.append(("NEAR", ()))
         try:
             context = multiprocessing.get_context("spawn")
             original_executable = sys.executable
@@ -773,11 +967,14 @@ def detect_candidates(model, settings=None):
             # engineering task solely because parallel startup was unavailable.
             candidates = _t_candidates(model, resolved, topologies)
             candidates.extend(_patch_candidates(model, resolved, topologies))
-            candidates.extend(_near_edge_candidates(model, resolved, topologies))
+            if bool(resolved.get("include_legacy_near_edges", False)):
+                candidates.extend(_near_edge_candidates(model, resolved, topologies))
     else:
         candidates = _t_candidates(model, resolved, topologies)
         candidates.extend(_patch_candidates(model, resolved, topologies))
-        candidates.extend(_near_edge_candidates(model, resolved, topologies))
+        if bool(resolved.get("include_legacy_near_edges", False)):
+            candidates.extend(_near_edge_candidates(model, resolved, topologies))
+    candidates = _apply_relation_ambiguity(candidates)
     candidates.sort(key=lambda row: (row["candidate_type"], row["source_component_id"], row["target_component_id"], tuple(row["source_node_ids"])))
     if selected:
         candidates = [

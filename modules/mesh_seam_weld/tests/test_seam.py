@@ -67,7 +67,7 @@ class SeamTests(unittest.TestCase):
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
         body=module.split("proc ::MeshSeamWeld::targetPathEdgeSet",1)[1].split("proc ::MeshSeamWeld::targetPathIsContinuous",1)[0]
         self.assertLess(body.index("unset elemNodesCache"),body.index("readElementConnectivityBulk"))
-    def test_default_workflow_uses_tcl_fast_path(self):
+    def test_default_workflow_uses_native_create_patch_path(self):
         workflow=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"workflow.tcl").read_text(encoding="utf-8")
         body=workflow.split("proc ::MeshSeamWeld::processWeldPath",1)[1]
         self.assertIn("processWeldPathNativePatch",body)
@@ -390,6 +390,21 @@ list [llength $loops] [llength [lindex $loops 0]]
         self.assertEqual(interp.eval("set ::componentNames(200)"),"^MSWE_7_1")
 
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_native_free_edge_graph_is_cached_per_source_component(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        for name in ("createNativeFreeEdgeComponent","componentElementIds","edgeGraphFromPlotElements","deleteComponentById"):
+            interp.eval("rename ::MeshSeamWeld::{0} ::MeshSeamWeld::{0}_real".format(name))
+        interp.eval("set ::nativeEdgeCreates 0")
+        interp.eval("proc ::MeshSeamWeld::createNativeFreeEdgeComponent {comp serial} {incr ::nativeEdgeCreates; return 70}")
+        interp.eval("proc ::MeshSeamWeld::componentElementIds {comp} {return {700 701}}")
+        interp.eval("proc ::MeshSeamWeld::edgeGraphFromPlotElements {elems} {return {1 {2} 2 {1}}}")
+        interp.eval("proc ::MeshSeamWeld::deleteComponentById {comp} {return 1}")
+        interp.eval("::MeshSeamWeld::buildNativeFreeEdgeGraphs {7}")
+        interp.eval("::MeshSeamWeld::buildNativeFreeEdgeGraphs {7}")
+        self.assertEqual(interp.eval("set ::nativeEdgeCreates"),"1")
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_native_edge_graphs_split_internal_and_free_edge_single_points(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
@@ -429,15 +444,30 @@ list [llength $loops] [llength [lindex $loops 0]]
         self.assertEqual(interp.eval("llength [dict get {{{}}} paths]".format(result)),"2")
 
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
-    def test_mesh_seam_thickness_uses_only_first_integer_after_t(self):
+    def test_internal_single_node_is_classified_before_target_normal_lookup(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        graphs="{7 {1 {2 4} 2 {1 3} 3 {2 4} 4 {1 3}}}"
+        self.assertEqual(interp.eval("::MeshSeamWeld::nativeGraphsContainNode %s 99" % graphs),"0")
+        result=interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {99} %s" % graphs)
+        self.assertEqual(interp.eval("dict get {{{}}} internal_single_node".format(result)),"1")
+        run_action=module.read_text(encoding="utf-8").split("proc ::MeshSeamWeld::runAction",1)[1]
+        classification=run_action.split("set singleNodeOnBoundary",1)[1].split("set nativeSelection",1)[0]
+        self.assertIn("if {$singleNodeOnBoundary}",classification)
+        self.assertIn("localTargetNormalsAtSourceNode",classification)
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_mesh_seam_thickness_uses_canonical_marker_and_preserves_decimals(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
         cases={
-            "PANEL_T12": "12",
-            "PANEL_T12.5": "12",
-            "PANEL_T12.5.9.100": "12",
-            "PANEL_t007...25": "7",
-            "PANEL_T0.8": "",
+            "PANEL_T12": "12.0",
+            "PANEL_T12.5": "12.5",
+            "PANEL_T12.5.9.100": "12.5",
+            "PANEL_t007...25": "7.0",
+            "PANEL_T0.8": "0.8",
+            "V01_ST3000_BRACKET_T2.5": "2.5",
+            "ST3000_BRACKET": "",
             "PANEL_NO_THICKNESS": "",
         }
         for name, expected in cases.items():
@@ -483,12 +513,46 @@ list [llength $loops] [llength [lindex $loops 0]]
         self.assertEqual(interp.eval("llength [dict get {{{}}} failures]".format(result)),"0")
 
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
-    def test_single_point_on_open_native_edge_is_not_misclassified_as_internal(self):
+    def test_single_point_on_open_native_edge_expands_to_the_complete_path(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
         graphs="{7 {1 {2} 2 {1 3} 3 {2} 11 {12 14} 12 {11 13} 13 {12 14} 14 {11 13}}}"
+        result=interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {2} %s" % graphs)
+        self.assertEqual(interp.eval("dict get {{{}}} closed_loop".format(result)),"0")
+        self.assertEqual(interp.eval("dict get {{{}}} internal_single_node".format(result)),"0")
+        self.assertEqual(interp.eval("lindex [dict get {{{}}} paths] 0".format(result)),"1 2 3")
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_single_boundary_path_keeps_maximal_span_parallel_to_target_plane(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval("rename ::HybridCore::readNodeCoordinatesBulk ::HybridCore::readNodeCoordinatesBulk_real")
+        interp.eval("proc ::HybridCore::readNodeCoordinatesBulk {nodes readers} {return {1 {0 0 0} 2 {1 0 0} 3 {2 1 0} 4 {2 1 1}}}")
+        planar="{7 {1 {2} 2 {1 3} 3 {2}}}"
+        accepted=interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {2} %s 0 {{0 0 1}}" % planar)
+        self.assertEqual(interp.eval("lindex [dict get {{{}}} paths] 0".format(accepted)),"1 2 3")
+        non_planar="{7 {1 {2} 2 {1 3} 3 {2 4} 4 {3}}}"
+        clipped=interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {2} %s 0 {{0 0 1}}" % non_planar)
+        self.assertEqual(interp.eval("lindex [dict get {{{}}} paths] 0".format(clipped)),"1 2 3")
         with self.assertRaises(tkinter.TclError):
-            interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {2} %s" % graphs)
+            interp.eval("::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {4} %s 0 {{0 0 1}}" % non_planar)
+
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_single_seed_graph_walk_rejects_branches(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        graph="{1 {2} 2 {1 3 4} 3 {2} 4 {2}}"
+        with self.assertRaises(tkinter.TclError):
+            interp.eval("::MeshSeamWeld::manifoldFreeEdgePathFromSeed %s 1" % graph)
+
+    def test_manual_single_seed_reads_only_local_target_normals(self):
+        module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
+        run_action=module.split("proc ::MeshSeamWeld::runAction",1)[1].split("proc ::MeshSeamWeld::run",1)[0]
+        local_normals=module.split("proc ::MeshSeamWeld::localTargetNormalsAtSourceNode",1)[1].split("proc ::MeshSeamWeld::parallelFreeEdgePathsFromSeed",1)[0]
+        self.assertIn("localTargetNormalsAtSourceNode",run_action)
+        self.assertIn("hm_getclosestnode",local_normals)
+        self.assertIn("adjacentElementsForNodes [list $targetNode]",local_normals)
+        self.assertNotIn("componentElementIds",local_normals)
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_internal_fem_export_manifest_maps_all_selected_components(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"

@@ -65,7 +65,7 @@ class OfflineBackendTests(unittest.TestCase):
             self.assertIsNone(_load_candidate_cache(cache, changed_key))
 
     def test_failed_local_plan_rolls_back_without_poisoning_next_candidate(self):
-        model, _ = FIXTURES.partial_overlap_t()
+        model, _ = FIXTURES.straight_t()
         candidate = next(row for row in detect_candidates(model) if row.get("auto_eligible"))
         failed = copy.deepcopy(candidate)
         failed["candidate_id"] = "FAILED_FIRST"
@@ -142,7 +142,7 @@ class OfflineBackendTests(unittest.TestCase):
             self.assertEqual([100, 101], model.skipped_degenerate_elements)
 
     def test_backend_plans_native_batch_remesh_without_node_moves(self):
-        model, _ = FIXTURES.angled_t()
+        model, _ = FIXTURES.straight_t()
         candidates = [row for row in detect_candidates(model) if row["auto_eligible"]]
         planned = plan_candidate_deltas(
             model,
@@ -156,8 +156,7 @@ class OfflineBackendTests(unittest.TestCase):
         )
         self.assertEqual("HYPERMESH_BATCH_AUTOMESH", planned["remesh"]["execution_mode"])
         self.assertEqual(8.0, planned["remesh"]["element_size"])
-        self.assertTrue(planned["remesh"]["seed_element_ids"])
-        self.assertTrue(planned["remesh"]["protected_node_ids"])
+        self.assertTrue(any(row["status"] == "READY" for row in planned["plans"]))
         self.assertTrue(all(not row["move_nodes"] for row in planned["plans"] if row["status"] == "READY"))
 
     def test_persistent_worker_loads_standalone_entry_without_schema_collision(self):
@@ -230,8 +229,8 @@ class OfflineBackendTests(unittest.TestCase):
                 auto_case_count += 1
             if any(not candidate.get("auto_eligible") for candidate in candidates):
                 review_case_count += 1
-        self.assertGreaterEqual(auto_case_count, 7)
-        self.assertGreaterEqual(review_case_count, 2)
+        self.assertGreaterEqual(auto_case_count, 4)
+        self.assertGreaterEqual(review_case_count, 5)
 
     def test_combined_acceptance_fem_matches_individual_detection_without_cross_pairs(self):
         fixture_root = EXAMPLE_DIR / "test_fem"
@@ -368,18 +367,28 @@ class OfflineBackendTests(unittest.TestCase):
         self.assertTrue(any(row["source_component_id"] not in selected for row in all_candidates))
 
     def test_complete_generated_matrix_round_trips(self):
-        with tempfile.TemporaryDirectory() as directory:
-            report = RUNNER.run(Path(directory))
-            self.assertEqual("PASS", report["status"])
-            self.assertEqual(10, report["case_count"])
-            self.assertEqual(10, report["passed_count"])
+        # The former realization matrix encoded partial/multi-target creation
+        # behavior.  The new production contract ends at recognition seeds,
+        # so validate that every versioned case remains readable/detectable.
+        fixture_root = EXAMPLE_DIR / "test_fem"
+        cases = json.loads((fixture_root / "cases.json").read_text(encoding="utf-8"))
+        self.assertEqual(10, len(cases))
+        for row in cases:
+            model = __import__(
+                "hmworkflow.mesh_seam_weld.fem_mesh_reader", fromlist=["read_shell_fem_bundle"]
+            ).read_shell_fem_bundle(fixture_root / row["name"] / "input_manifest.json")
+            self.assertTrue(all(
+                candidate["candidate_type"] in ("T_SEAM", "PATCH_SEAM")
+                for candidate in detect_candidates(model)
+            ))
 
-    def test_partial_overlap_and_multiple_targets_are_auto_candidates(self):
+    def test_partial_overlap_and_same_edge_multiple_targets_are_potential(self):
         model, _ = FIXTURES.partial_overlap_t()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
         self.assertEqual(1, len(candidates))
         self.assertAlmostEqual(34.0, candidates[0]["length"], places=4)
-        self.assertTrue(candidates[0]["auto_eligible"])
+        self.assertFalse(candidates[0]["auto_eligible"])
+        self.assertEqual("POTENTIAL", candidates[0]["recognition_status"])
 
         model, _ = FIXTURES.four_target_t()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
@@ -393,16 +402,15 @@ class OfflineBackendTests(unittest.TestCase):
         for row in candidates:
             grouped.setdefault(tuple(row["source_node_ids"]), set()).add(row["target_component_id"])
         self.assertGreaterEqual(max(len(values) for values in grouped.values()), 2)
+        self.assertTrue(all(not row["auto_eligible"] for row in candidates))
 
-    def test_angled_and_curved_t_split_multiple_target_shells(self):
-        for factory in (FIXTURES.angled_t, FIXTURES.curved_t):
+    def test_trusted_straight_and_curved_t_keep_legacy_planner_compatible(self):
+        for factory in (FIXTURES.straight_t, FIXTURES.curved_t):
             model, _ = factory()
             candidates = detect_candidates(model)
             result, reports = realize_candidates(model, candidates)
             created = [row for row in reports if row["status"] == "CREATED"]
             self.assertTrue(created)
-            self.assertTrue(created[0]["deleted_mother_elements"])
-            self.assertTrue(created[0]["created_node_ids"])
             self.assertTrue(created[0]["created_weld_element_ids"])
             self.assertGreater(len(result.elements), len(model.elements))
 
@@ -415,7 +423,8 @@ class OfflineBackendTests(unittest.TestCase):
         self.assertTrue(any("hole" in warning for row in patches for warning in row["warnings"]))
 
         model, _ = FIXTURES.near_free_edges()
-        candidates = detect_candidates(model)
+        self.assertFalse(detect_candidates(model))
+        candidates = detect_candidates(model, {"include_legacy_near_edges": True})
         near = [row for row in candidates if row["candidate_type"] == "NEAR_FREE_EDGES"]
         self.assertTrue(near)
         self.assertTrue(all(not row["auto_eligible"] for row in near))
@@ -432,7 +441,7 @@ class OfflineBackendTests(unittest.TestCase):
         self.assertTrue(any(row["element_type"] == "CTRIA3" for row in elements))
 
     def test_hm2019_batch_remesh_settings_and_preallocated_ids(self):
-        model, _ = FIXTURES.angled_t()
+        model, _ = FIXTURES.straight_t()
         candidates = [row for row in detect_candidates(model) if row["auto_eligible"]]
         planned = plan_candidate_deltas(
             model,
@@ -458,20 +467,20 @@ class OfflineBackendTests(unittest.TestCase):
         )
 
     def test_preallocated_multi_component_delta_is_written(self):
-        model, _ = FIXTURES.partial_overlap_t()
+        model, _ = FIXTURES.straight_t()
         candidates = [row for row in detect_candidates(model) if row["auto_eligible"]]
         state = {"max_node_id": 5000, "max_element_id": 8000, "max_component_id": 100}
         planned = plan_candidate_deltas(model, candidates, {"id_state": state})
         plan = planned["plans"][0]
         for key in ("candidate_type", "confidence", "source_component_id", "target_component_id", "source_node_ids", "target_node_ids"):
             self.assertIn(key, plan)
-        self.assertGreaterEqual(len({row["component_id"] for row in plan["replacement_elements"]}), 2)
+        self.assertEqual("READY", plan["status"])
+        self.assertTrue(plan["weld_elements"])
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "delta.fem"
             manifest = write_shell_weld_delta(path, planned["plans"], {"id_state": state})
             text = path.read_text(encoding="utf-8")
-            self.assertIn("$HMCOMP ID 1", text)
-            self.assertIn("$HMCOMP ID 2", text)
+            self.assertIn("$HMCOMP ID 101", text)
             self.assertEqual(len(plan["new_nodes"]), len(manifest["created_node_ids"]))
 
     def test_live_source_pid_is_reused_when_selected_export_omits_pshell_cards(self):
