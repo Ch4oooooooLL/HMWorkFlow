@@ -6,7 +6,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::FemAutoSeam {
-    variable VERSION "0.19"
+    variable VERSION "0.20"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] fem_auto_seam]
     variable cfg
     array set cfg {

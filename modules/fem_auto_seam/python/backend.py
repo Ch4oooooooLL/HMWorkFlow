@@ -31,6 +31,7 @@ try:
     from hmworkflow.mesh_seam_weld.element_projection import angle_degrees, cross, dot, norm, unit
     from hmworkflow.mesh_seam_weld.local_split_planner import _plane, _project, _triangulate
     from .multi_element_split_planner import plan_multi_element_split
+    from .recognition_v2 import build_physical_geometry_context, detect_t_candidates as detect_t_candidates_v2, enrich_non_t_candidate
     from hmworkflow.mesh_seam_weld.quality_guard import element_metrics, validate_strip_connectivity, validate_weld_elements
     from hmworkflow.mesh_seam_weld.shell_topology import build as build_topology
     from hmworkflow.mesh_seam_weld.weld_strip_planner import plan_zipper
@@ -38,6 +39,7 @@ except ImportError:
     from element_projection import angle_degrees, cross, dot, norm, unit
     from local_split_planner import _plane, _project, _triangulate
     from multi_element_split_planner import plan_multi_element_split
+    from recognition_v2 import build_physical_geometry_context, detect_t_candidates as detect_t_candidates_v2, enrich_non_t_candidate
     from quality_guard import element_metrics, validate_strip_connectivity, validate_weld_elements
     from shell_topology import build as build_topology
     from weld_strip_planner import plan_zipper
@@ -67,6 +69,26 @@ DEFAULT_SETTINGS = {
     "maximum_weld_triangle_ratio": 0.75,
     "python_workers": 0,
     "include_legacy_near_edges": False,
+    # V2 recognition gates.  They remain request-overridable and are kept in
+    # one settings table so geometry code contains no decision magic numbers.
+    "boundary_split_turn_angle_deg": 30.0,
+    "boundary_split_source_normal_change_deg": 20.0,
+    "t_angle_auto_min_deg": 80.0,
+    "t_angle_auto_max_deg": 100.0,
+    "t_angle_review_min_deg": 65.0,
+    "t_angle_review_max_deg": 115.0,
+    "t_coverage_auto": 0.98,
+    "geometry_abs_floor_mm": 0.5,
+    "geometry_mesh_ratio_auto": 0.35,
+    "geometry_thickness_ratio_auto": 0.15,
+    "geometry_review_multiplier": 3.0,
+    "ambiguity_auto_min_score_margin": 0.50,
+    "ambiguity_sample_ratio": 0.25,
+    "curved_target_auto_max_normal_variation_deg": 12.0,
+    "projection_jump_ratio": 2.5,
+    "small_gap_auto_length_over_h": 0.25,
+    "patch_inner_loop_policy": "review",
+    "review_multi_target_realization": False,
 }
 
 
@@ -163,6 +185,7 @@ def _detection_context(model, topologies, maximum):
         "areas": {},
         "closed_loops": {},
         "edge_owners": {},
+        "physical_geometry": None,
     }
 
 
@@ -191,8 +214,17 @@ def _context_index(shared, component_id):
             nodes = shared["model"].nodes
             rows = []
             all_points = []
+            if shared["physical_geometry"] is None:
+                _, shared["physical_geometry"] = build_physical_geometry_context(shared["model"], shared["topologies"])
+            physical_facets = shared["physical_geometry"]["facets"].get(component_id, [])
+            facets_by_element = defaultdict(list)
+            for facet in physical_facets:
+                facets_by_element[int(facet["element_id"])].append(facet)
             for element in elements:
-                points = [nodes[node_id] for node_id in element.node_ids]
+                element_facets = facets_by_element.get(element.element_id, [])
+                points = [point for facet in element_facets for point in facet["points"]]
+                if not points:
+                    points = [nodes[node_id] for node_id in element.node_ids]
                 all_points.extend(points)
                 rows.append((element.element_id, _bounds_for_points(points), element))
             bounds = _bounds_for_points(all_points)
@@ -205,7 +237,20 @@ def _context_index(shared, component_id):
             # into one near-global bucket while avoiding millions of cells.
             cell_size = max(shared["maximum"], diagonal / max(math.sqrt(len(elements)), 1.0), 1.0e-6)
             index = _AabbGrid(rows, cell_size)
-            index.triangles = {element.element_id: _element_triangles(element, nodes) for element in elements}
+            index.triangles = {}
+            for element in elements:
+                element_facets = facets_by_element.get(element.element_id, [])
+                if not element_facets:
+                    index.triangles[element.element_id] = _element_triangles(element, nodes)
+                    continue
+                cached = []
+                for facet in element_facets:
+                    a, second, third = facet["points"]
+                    edge1, edge2 = _sub(second, a), _sub(third, a)
+                    normal = cross(edge1, edge2)
+                    d00, d01, d11 = dot(edge1, edge1), dot(edge1, edge2), dot(edge2, edge2)
+                    cached.append((a, edge1, edge2, normal, d00, d01, d11, d00 * d11 - d01 * d01))
+                index.triangles[element.element_id] = tuple(cached)
         shared["element_indexes"][component_id] = index
     return index or None
 
@@ -274,8 +319,10 @@ def _context_weld_loops(shared, component_id):
     model = shared["model"]
     loops = []
     for entry in _context_closed_loops(shared, component_id):
+        entry["path"]["boundary_class"] = "OUTER"
         loops.append(entry)
         for hole in entry["holes"]:
+            hole["boundary_class"] = "INNER"
             loops.append({
                 "path": hole,
                 "holes": [],
@@ -1074,6 +1121,7 @@ def _patch_row(source_id, target_id, group_id, loop_index, path, hole_rows, smal
             list(hit["point"]) for hit in node_hits if hit is not None
         ],
         "closed": True,
+        "boundary_class": str(path.get("boundary_class", "OUTER")),
         "length": round(length, 9),
         "confidence": confidence,
         "projection_coverage": round(coverage, 6),
@@ -1325,7 +1373,7 @@ def _parallel_detection_task(task):
     topologies = _DETECTION_CONTEXT["topologies"]
     shared = _DETECTION_CONTEXT["context"]
     if kind == "T":
-        return _t_candidates(model, settings, topologies, set(source_ids), shared)
+        return detect_t_candidates_v2(model, settings, topologies, set(source_ids))
     if kind == "PATCH":
         return _patch_candidates(model, settings, topologies, shared)
     if kind == "NEAR":
@@ -1408,10 +1456,15 @@ def build_recognition_plan(candidates):
                 "candidate_id": str(row["candidate_id"]),
                 "weld_type": "T" if row["candidate_type"] == "T_SEAM" else "PATCH",
                 "source_component_id": int(row["source_component_id"]),
-                "target_component_ids": [int(row["target_component_id"])],
+                "target_component_ids": [
+                    int(value) for value in row.get("target_component_ids", [row["target_component_id"]])
+                    if int(value) > 0
+                ],
                 "source_node_ids": [int(value) for value in row.get("source_node_ids", []) if int(value) > 0],
                 "closed_loop": bool(row.get("closed", False)),
                 "confidence": float(row.get("confidence", 0.0)),
+                "support_runs": list(row.get("support_runs", [])),
+                "reason_codes": list(row.get("reason_codes", [])),
             }
             if seed["source_node_ids"]:
                 trusted.append(seed)
@@ -1427,9 +1480,18 @@ def build_recognition_plan(candidates):
             key = ("T",) + _t_relation_key(row)
             group = grouped.setdefault(key, {"candidate_ids": [], "component_ids": set(), "weld_types": set(), "reasons": set()})
             group["candidate_ids"].append(str(row["candidate_id"]))
-            group["component_ids"].update((int(row["source_component_id"]), int(row["target_component_id"])))
+            group["component_ids"].add(int(row["source_component_id"]))
+            group["component_ids"].update(
+                int(value) for value in row.get("target_component_ids", [row["target_component_id"]])
+                if int(value) > 0
+            )
+            group["component_ids"].update(
+                int(value["component_id"])
+                for value in row.get("review", {}).get("alternative_targets", [])
+                if int(value.get("component_id", 0)) > 0
+            )
             group["weld_types"].add("T")
-            group["reasons"].update(str(value) for value in row.get("warnings", []))
+            group["reasons"].update(str(value) for value in row.get("reason_codes", row.get("warnings", [])))
         elif row["candidate_type"] == "PATCH_SEAM":
             patch_rows.append(row)
 
@@ -1546,17 +1608,21 @@ def detect_candidates(model, settings=None):
             # processes. Preserve the exact serial path instead of failing the
             # engineering task solely because parallel startup was unavailable.
             shared = _detection_context(model, topologies, detection_maximum)
-            candidates = _t_candidates(model, resolved, topologies, None, shared)
+            candidates = detect_t_candidates_v2(model, resolved, topologies)
             candidates.extend(_patch_candidates(model, resolved, topologies, shared))
             if bool(resolved.get("include_legacy_near_edges", False)):
                 candidates.extend(_near_edge_candidates(model, resolved, topologies))
     else:
         shared = _detection_context(model, topologies, detection_maximum)
-        candidates = _t_candidates(model, resolved, topologies, None, shared)
+        candidates = detect_t_candidates_v2(model, resolved, topologies)
         candidates.extend(_patch_candidates(model, resolved, topologies, shared))
         if bool(resolved.get("include_legacy_near_edges", False)):
             candidates.extend(_near_edge_candidates(model, resolved, topologies))
     candidates = _apply_relation_ambiguity(candidates)
+    candidates = [
+        row if row.get("candidate_type") == "T_SEAM" else enrich_non_t_candidate(row, model, resolved, topologies)
+        for row in candidates
+    ]
     candidates.sort(key=lambda row: (row["candidate_type"], row["source_component_id"], row["target_component_id"], tuple(row["source_node_ids"])))
     if selected:
         candidates = [
@@ -1778,6 +1844,8 @@ def realize_candidates(model, candidates, settings=None):
     elements = dict(model.elements)
     result = MeshModel(components, nodes, elements)
     result.element_properties = dict(getattr(model, "element_properties", {}))
+    result.element_zoffs = dict(getattr(model, "element_zoffs", {}))
+    result.element_nodal_thicknesses = dict(getattr(model, "element_nodal_thicknesses", {}))
     result.pshell = dict(getattr(model, "pshell", {}))
     result.materials = dict(getattr(model, "materials", {}))
     # Maintain this index incrementally during planning. Rebuilding it by
@@ -2083,7 +2151,25 @@ def write_fem_bundle(model, fem_path, manifest_path=None):
         element_ids = []
         for element in sorted(by_component.get(component_id, []), key=lambda row: row.element_id):
             property_id = int(getattr(model, "element_properties", {}).get(element.element_id, 1))
-            lines.append("{},{},{},{}".format(element.element_type, element.element_id, property_id, ",".join(str(value) for value in element.node_ids)))
+            zoffs = getattr(model, "element_zoffs", {}).get(element.element_id)
+            nodal = getattr(model, "element_nodal_thicknesses", {}).get(element.element_id)
+            if zoffs is None and not nodal:
+                lines.append("{},{},{},{}".format(element.element_type, element.element_id, property_id, ",".join(str(value) for value in element.node_ids)))
+            else:
+                zoffs_text = "" if zoffs is None else (str(zoffs) if isinstance(zoffs, str) else "{:.12g}".format(float(zoffs)))
+                values = [element.element_type, str(element.element_id), str(property_id)]
+                values.extend(str(value) for value in element.node_ids)
+                values.extend(("", zoffs_text))
+                # Fill the first Bulk Data row through column 10, then put Ti
+                # in columns 4 onward of the continuation row.
+                values.extend("" for _ in range(10 - len(values)))
+                lines.append(",".join(values))
+                thickness_values = tuple(nodal or ())
+                if thickness_values:
+                    lines.append("+,,,{}".format(",".join(
+                        "" if value is None else "{:.12g}".format(float(value))
+                        for value in thickness_values
+                    )))
             element_ids.append(element.element_id)
         for group in passthrough.get(component_id, []):
             lines.extend(group)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import math
@@ -198,6 +199,56 @@ def _write_transfer_manifest(path, request, artifacts, plans):
     return payload
 
 
+def _recognition_document(candidates, source_fem, settings):
+    auto = [row for row in candidates if row.get("decision") == "AUTO"]
+    review = [row for row in candidates if row.get("decision") != "AUTO"]
+    return {
+        "schema_version": "2.0",
+        "source_fem": str(source_fem),
+        "config": dict(settings),
+        "summary": {
+            "candidate_count": len(candidates),
+            "auto_count": len(auto),
+            "review_count": len(review),
+            "reject_count": 0,
+        },
+        "auto": auto,
+        "review": review,
+        "reject_log": [],
+    }
+
+
+def _write_recognition_debug(path, candidates):
+    fields = (
+        "candidate_id", "decision", "type", "source_component",
+        "source_node_begin", "source_node_end", "target_components",
+        "coverage", "skin_error_p95", "skin_error_max", "angle_mean",
+        "max_gap", "ambiguity_margin", "reason_codes",
+    )
+    with Path(path).open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        for row in candidates:
+            nodes = row.get("source_node_ids", [])
+            geometry = row.get("geometry", {})
+            writer.writerow({
+                "candidate_id": row.get("candidate_id", ""),
+                "decision": row.get("decision", "REVIEW"),
+                "type": row.get("candidate_type", ""),
+                "source_component": row.get("source_component_id", ""),
+                "source_node_begin": nodes[0] if nodes else "",
+                "source_node_end": nodes[-1] if nodes else "",
+                "target_components": "|".join(str(value) for value in row.get("target_component_ids", [])),
+                "coverage": geometry.get("coverage_ratio", row.get("projection_coverage", "")),
+                "skin_error_p95": geometry.get("skin_error_p95", ""),
+                "skin_error_max": geometry.get("skin_error_max", ""),
+                "angle_mean": geometry.get("angle_mean_deg", row.get("normal_angle", "")),
+                "max_gap": geometry.get("max_internal_gap", ""),
+                "ambiguity_margin": geometry.get("ambiguity_margin", ""),
+                "reason_codes": "|".join(str(value) for value in row.get("reason_codes", [])),
+            })
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     for name in ("request", "mesh", "existing", "output", "tcl-output", "log"):
@@ -240,6 +291,19 @@ def main(argv=None):
                 "candidate_count": len(result["candidates"]),
                 "trusted_seed_count": len(result["trusted_seeds"]),
                 "potential_group_count": len(result["potential_groups"]),
+            }
+            recognition_v2 = _recognition_document(result["candidates"], args.mesh, request["settings"])
+            recognition_path = args.output.parent / "weld_recognition.json"
+            summary_path = args.output.parent / "recognition_summary.json"
+            debug_path = args.output.parent / "recognition_debug.csv"
+            recognition_path.write_text(json.dumps(recognition_v2, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            summary_path.write_text(json.dumps(recognition_v2["summary"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_recognition_debug(debug_path, result["candidates"])
+            result["recognition_v2"] = recognition_v2
+            result["recognition_artifacts"] = {
+                "weld_recognition": str(recognition_path.resolve()),
+                "recognition_summary": str(summary_path.resolve()),
+                "recognition_debug": str(debug_path.resolve()),
             }
             cache_payload = {
                 "cache_version": 1,

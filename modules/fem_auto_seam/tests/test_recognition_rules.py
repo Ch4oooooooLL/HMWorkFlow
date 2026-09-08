@@ -157,10 +157,9 @@ class RecognitionRuleTests(unittest.TestCase):
         self.assertFalse(plan["potential_groups"])
 
 
-    def test_patch_opening_edge_is_welded_like_the_outer_boundary(self):
-        # A patch with an internal opening: the opening's free edge lies on the
-        # base exactly like the outer boundary and must produce its own weld
-        # instead of being dropped as a hole.
+    def test_patch_opening_edge_is_reviewed_while_outer_boundary_stays_trusted(self):
+        # V2 defaults inner loops to REVIEW because they can represent either
+        # ring welds or fastener openings.
         builder = FIXTURES.MeshBuilder()
         base = builder.grid("BASE_T2", (0, 0, 0), (10, 0, 0), (0, 10, 0), 7, 7, 2.0)
         patch = builder.grid(
@@ -170,15 +169,17 @@ class RecognitionRuleTests(unittest.TestCase):
         candidates = detect_candidates(builder.model())
         patch_rows = [row for row in candidates if row["candidate_type"] == "PATCH_SEAM"]
         self.assertEqual(2, len(patch_rows))
-        for row in patch_rows:
-            self.assertEqual(patch, row["source_component_id"])
-            self.assertEqual(base, row["target_component_id"])
-            self.assertTrue(row["auto_eligible"], row.get("warnings"))
-            self.assertEqual("TRUSTED", row["recognition_status"])
+        outer = next(row for row in patch_rows if row.get("boundary_class") == "OUTER")
+        inner = next(row for row in patch_rows if row.get("boundary_class") == "INNER")
+        self.assertEqual(patch, outer["source_component_id"])
+        self.assertEqual(base, outer["target_component_id"])
+        self.assertTrue(outer["auto_eligible"], outer.get("warnings"))
+        self.assertFalse(inner["auto_eligible"])
+        self.assertIn("INNER_BOUNDARY_SOURCE", inner["reason_codes"])
         lengths = sorted(row["length"] for row in patch_rows)
         self.assertAlmostEqual(120.0, lengths[0], places=6)
         self.assertAlmostEqual(200.0, lengths[1], places=6)
-        self.assertEqual(2, len(build_recognition_plan(candidates)["trusted_seeds"]))
+        self.assertEqual(1, len(build_recognition_plan(candidates)["trusted_seeds"]))
 
 
 if __name__ == "__main__":

@@ -73,6 +73,40 @@ def _element_property_id(value, element_id, card, line_number):
     return result
 
 
+def _optional_number(value, label, line_number):
+    """Parse an optional shell field without turning a blank into zero."""
+    if value is None or not str(value).strip():
+        return None
+    return _compact_number(str(value), label, line_number)
+
+
+def _shell_physical_fields(fields, card, line_number):
+    """Return ZOFFS/Ti from first-order OptiStruct shell cards.
+
+    Both cards place Ti on the continuation line (fields 12 onward in the
+    normalized logical card).  Keeping these values on ``MeshModel`` avoids
+    widening the shared immutable ``Element`` record used by other modules.
+    """
+    node_count = 3 if card == "CTRIA3" else 4
+    theta_index = 3 + node_count
+    zoffs_index = theta_index + 1
+    thickness_index = 12
+    raw_zoffs = fields[zoffs_index].strip() if len(fields) > zoffs_index else ""
+    if raw_zoffs.upper() in ("TOP", "BOTTOM"):
+        zoffs = raw_zoffs.upper()
+    else:
+        zoffs = _optional_number(raw_zoffs, "{} ZOFFS".format(card), line_number)
+    nodal = tuple(
+        _optional_number(
+            fields[index] if len(fields) > index else "",
+            "{} T{}".format(card, index - thickness_index + 1),
+            line_number,
+        )
+        for index in range(thickness_index, thickness_index + node_count)
+    )
+    return zoffs, nodal
+
+
 def _fixed_fields(raw):
     line = raw.rstrip("\r\n")
     large = len(line) >= 8 and "*" in line[:8]
@@ -112,6 +146,11 @@ def _raw_cards(path):
             continuation = marker == "" or marker == "*" or marker == "+" or marker.startswith("+")
             if continuation:
                 if current is not None:
+                    # A small-field Bulk Data row always has ten columns.  A
+                    # free-field row may omit its trailing empty columns, so
+                    # restore them before appending continuation fields.
+                    if len(current) < 10:
+                        current.extend([""] * (10 - len(current)))
                     current.extend(fields[1:])
                     current_lines.append(raw.rstrip("\r\n"))
                 continue
@@ -133,6 +172,7 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
     materials = {}
     skipped_element_cards = {}
     skipped_degenerate_elements = []
+    pending_physical_fields = {}
     # Cards outside the shell topology are preserved verbatim so the whole
     # model can be rebuilt after Python modifies the shell seams.  Each group
     # keeps the $HMCOMP/$HMNAME component context that was active when the
@@ -192,6 +232,7 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
             if len(set(node_ids)) != len(node_ids):
                 skipped_degenerate_elements.append(element_id)
                 continue
+            pending_physical_fields[element_id] = _shell_physical_fields(fields, card, line_number)
             pending_elements.append((line_number, element_id, property_id, card, node_ids))
         elif card == "PSHELL":
             if len(fields) >= 4:
@@ -230,6 +271,16 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
     component = Component(component_id, str(component_name), "SHELL")
     model = MeshModel({component_id: component}, nodes, elements)
     model.element_properties = element_properties
+    model.element_zoffs = {
+        element_id: values[0]
+        for element_id, values in pending_physical_fields.items()
+        if element_id in elements and values[0] is not None
+    }
+    model.element_nodal_thicknesses = {
+        element_id: values[1]
+        for element_id, values in pending_physical_fields.items()
+        if element_id in elements and any(value is not None for value in values[1])
+    }
     model.pshell = properties
     model.materials = materials
     model.skipped_element_cards = skipped_element_cards
@@ -284,6 +335,8 @@ def read_shell_fem_bundle(manifest_path):
         )
     model = MeshModel(components, raw_model.nodes, elements)
     model.element_properties = dict(getattr(raw_model, "element_properties", {}))
+    model.element_zoffs = dict(getattr(raw_model, "element_zoffs", {}))
+    model.element_nodal_thicknesses = dict(getattr(raw_model, "element_nodal_thicknesses", {}))
     model.pshell = dict(getattr(raw_model, "pshell", {}))
     model.materials = dict(getattr(raw_model, "materials", {}))
     model.skipped_element_cards = dict(getattr(raw_model, "skipped_element_cards", {}))

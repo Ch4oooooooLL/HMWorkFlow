@@ -263,8 +263,9 @@ class OfflineBackendTests(unittest.TestCase):
                 auto_case_count += 1
             if any(not candidate.get("auto_eligible") for candidate in candidates):
                 review_case_count += 1
-        self.assertGreaterEqual(auto_case_count, 4)
-        self.assertGreaterEqual(review_case_count, 5)
+        # V2 conservatively demotes the angled T and inner patch boundary.
+        self.assertGreaterEqual(auto_case_count, 3)
+        self.assertGreaterEqual(review_case_count, 4)
 
     def test_combined_acceptance_fem_matches_individual_detection_without_cross_pairs(self):
         fixture_root = EXAMPLE_DIR / "test_fem"
@@ -420,23 +421,25 @@ class OfflineBackendTests(unittest.TestCase):
         model, _ = FIXTURES.partial_overlap_t()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
         self.assertEqual(1, len(candidates))
-        self.assertAlmostEqual(34.0, candidates[0]["length"], places=4)
+        # V2 sends an ordered chain of existing source nodes downstream; it no
+        # longer invents legacy interpolation nodes at x=23/x=57 for REVIEW.
+        self.assertAlmostEqual(20.0, candidates[0]["length"], places=4)
         self.assertFalse(candidates[0]["auto_eligible"])
         self.assertEqual("POTENTIAL", candidates[0]["recognition_status"])
 
         model, _ = FIXTURES.four_target_t()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
-        self.assertEqual(4, len(candidates))
-        self.assertEqual(4, len({row["target_component_id"] for row in candidates}))
-        self.assertTrue(all(row["auto_eligible"] for row in candidates))
+        self.assertEqual(1, len(candidates))
+        self.assertEqual([1, 2, 3, 4], candidates[0]["target_component_ids"])
+        self.assertEqual(4, len(candidates[0]["support_runs"]))
+        self.assertTrue(candidates[0]["auto_eligible"])
 
         model, _ = FIXTURES.multi_target_same_edge()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
-        grouped = {}
-        for row in candidates:
-            grouped.setdefault(tuple(row["source_node_ids"]), set()).add(row["target_component_id"])
-        self.assertGreaterEqual(max(len(values) for values in grouped.values()), 2)
-        self.assertTrue(all(not row["auto_eligible"] for row in candidates))
+        self.assertEqual(1, len(candidates))
+        self.assertFalse(candidates[0]["auto_eligible"])
+        self.assertIn("TARGET_AMBIGUITY", candidates[0]["reason_codes"])
+        self.assertTrue(candidates[0]["review"]["alternative_targets"])
 
     def test_trusted_straight_and_curved_t_keep_legacy_planner_compatible(self):
         for factory in (FIXTURES.straight_t, FIXTURES.curved_t):
