@@ -88,3 +88,14 @@ LocalMeshOptimizer_Report_*/
 !/examples/AutoShellSeamBackend/test_fem/
 !/examples/AutoShellSeamBackend/test_fem/**/*.fem
 !/examples/AutoShellSeamBackend/test_fem/**/*_manifest.json
+
+# Versioned FEM Weld Recognition V2 acceptance fixtures (deterministic corpus;
+# regenerable from tools/weld_recognition_fixtures/, versioned so a fresh clone
+# can run the regression without re-generating).
+!/examples/validation_weld_recognition_v2/
+!/examples/validation_weld_recognition_v2/**/*.fem
+!/examples/validation_weld_recognition_v2/**/*_manifest.json
+
+# Generated validation-model output copies (tools/model_generation writes here)
+/tools/generated_models/
+/tools/model_generation/_smoke_out/

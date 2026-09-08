@@ -10,8 +10,12 @@ from typing import List
 ROOT = Path(__file__).resolve().parents[1]
 
 # Versioned acceptance fixtures that .gitignore intentionally tracks
-# (see the !/examples/AutoShellSeamBackend/test_fem/ negation rules).
-VERSIONED_EXAMPLE_FIXTURES = "examples/autoshellseambackend/test_fem/"
+# (see the !/examples/AutoShellSeamBackend/test_fem/ and
+#  !/examples/validation_weld_recognition_v2/ negation rules).
+VERSIONED_EXAMPLE_FIXTURES = (
+    "examples/autoshellseambackend/test_fem/",
+    "examples/validation_weld_recognition_v2/",
+)
 
 
 def tracked_paths() -> List[str]:
@@ -41,8 +45,7 @@ def violation(path: str) -> str:
     ):
         if lower.startswith(VERSIONED_EXAMPLE_FIXTURES):
             return ""  # versioned acceptance fixtures (see .gitignore)
-        return "generated example model"
-    if lower.startswith("runtime/") and not lower.startswith("runtime/python/"):
+        return "generated example model"    if lower.startswith("runtime/") and not lower.startswith("runtime/python/"):
         return "non-distributable runtime data"
     if lower.startswith("runtime/python/"):
         parts = pure.parts
