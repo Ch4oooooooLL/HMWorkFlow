@@ -45,7 +45,8 @@ def violation(path: str) -> str:
     ):
         if lower.startswith(VERSIONED_EXAMPLE_FIXTURES):
             return ""  # versioned acceptance fixtures (see .gitignore)
-        return "generated example model"    if lower.startswith("runtime/") and not lower.startswith("runtime/python/"):
+        return "generated example model"
+    if lower.startswith("runtime/") and not lower.startswith("runtime/python/"):
         return "non-distributable runtime data"
     if lower.startswith("runtime/python/"):
         parts = pure.parts
