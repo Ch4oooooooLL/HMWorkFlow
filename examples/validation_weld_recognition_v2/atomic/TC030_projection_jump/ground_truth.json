@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC030",
+  "case_kind": "atomic",
+  "purpose": "projection jump at a target transition",
+  "failure_mode": "a discontinuous projected path must be REVIEW, not a continuous AUTO",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC030_W01",
+      "weld_type": "T",
+      "source_component": "TC030_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_GAP",
+        "PROJECTION_JUMP"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC030_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC030_SRC_WEB",
+        "expected_node_ids": [
+          30242,
+          30244,
+          30246,
+          30248,
+          30250,
+          30252,
+          30254,
+          30256,
+          30258,
+          30260,
+          30262,
+          30264,
+          30266,
+          30268,
+          30270
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          190.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint.",
+      "note": "B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190"
+    },
+    {
+      "semantic_id": "TC030_W02",
+      "weld_type": "T",
+      "source_component": "TC030_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "PARTIAL_COVERAGE",
+        "PROJECTION_JUMP"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC030_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC030_SRC_WEB",
+        "expected_node_ids": [
+          30274,
+          30276,
+          30278,
+          30280,
+          30282,
+          30284,
+          30286,
+          30288,
+          30290,
+          30292,
+          30294,
+          30296,
+          30298,
+          30300,
+          30302
+        ],
+        "start_xyz": [
+          210.0,
+          0.0,
+          15.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          15.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "zone_notes": {
+      "B_skin_z": 5.0,
+      "C_skin_z": 15.0,
+      "dead_gap_x": [
+        190.0,
+        210.0
+      ],
+      "source_z": {
+        "x<=195": 5.0,
+        "x>=205": 15.0
+      }
+    },
+    "component_names": {
+      "TC030_B": 50000,
+      "TC030_C": 50001,
+      "TC030_SRC_WEB": 50002
+    }
+  }
+}

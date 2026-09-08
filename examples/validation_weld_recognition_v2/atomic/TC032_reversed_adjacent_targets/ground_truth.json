@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC032",
+  "case_kind": "atomic",
+  "purpose": "reversed-normal strip inside one target plane",
+  "failure_mode": "a physical skin is a plane; its mesh winding must not change the weld",
+  "decision_policy": {
+    "reversed_normal": "same_decision"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC032_W01",
+      "weld_type": "T",
+      "source_component": "TC032_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC032_TGT_PLANE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC032_SRC_WEB",
+        "expected_node_ids": [
+          32297,
+          32298,
+          32299,
+          32300,
+          32301,
+          32302,
+          32303,
+          32304,
+          32305,
+          32306,
+          32307,
+          32308,
+          32309,
+          32310,
+          32311,
+          32312,
+          32313,
+          32314,
+          32315,
+          32316,
+          32317,
+          32318,
+          32319,
+          32320,
+          32321,
+          32322,
+          32323,
+          32324,
+          32325,
+          32326,
+          32327
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the plane is one component whose Y=40..80 strip is wound -Z while the weld samples (Y=0) stay on +Z facets; one continuous flush seam"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC032_SRC_WEB": 52001,
+      "TC032_TGT_PLANE": 52000
+    }
+  }
+}

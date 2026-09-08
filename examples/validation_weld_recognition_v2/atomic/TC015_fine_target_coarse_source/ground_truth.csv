@@ -1,0 +1,2 @@
+﻿case_id,case_kind,semantic_id,weld_type,source_component,expected_decision,target_components,required_reason_codes,required_reason_any,forbidden_reason_codes,forbidden_targets,allow_extra_targets,overlap_axis,allowed_realization_segments,geometry_parallel,source_path_node_ids,source_path_start_xyz,source_path_end_xyz,source_path_length,known_gap_note,note
+TC015,atomic,TC015_W01,T,TC015_SRC_WEB,AUTO,TC015_TGT_BASE,,,,,0,X,1,1,15861 15862 15863 15864 15865 15866,"50,0,5","350,0,5",300,,long source edges must be re-sampled internally

@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC009",
+  "case_kind": "atomic",
+  "purpose": "40 mm real fracture must prevent a false AUTO",
+  "failure_mode": "overall coverage averaging must not mask a real target gap",
+  "decision_policy": {
+    "large_gap_auto_bridge": false
+  },
+  "welds": [
+    {
+      "semantic_id": "TC009_W01",
+      "weld_type": "T",
+      "source_component": "TC009_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_GAP"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC009_TGT_B_B",
+        "TC009_TGT_B_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC009_SRC_WEB",
+        "expected_node_ids": [
+          9220,
+          9221,
+          9222,
+          9223,
+          9224,
+          9225,
+          9226,
+          9227,
+          9228,
+          9229,
+          9230,
+          9231,
+          9232,
+          9233,
+          9234,
+          9235,
+          9236,
+          9237,
+          9238,
+          9239,
+          9240,
+          9241,
+          9242,
+          9243,
+          9244,
+          9245,
+          9246,
+          9247,
+          9248,
+          9249,
+          9250
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "gap 180..220 = 40 mm; two REVIEW runs must not merge into AUTO"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC009_SRC_WEB": 29002,
+      "TC009_TGT_B_B": 29000,
+      "TC009_TGT_B_C": 29001
+    }
+  }
+}

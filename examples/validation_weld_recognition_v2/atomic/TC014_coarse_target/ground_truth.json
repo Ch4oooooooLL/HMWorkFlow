@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC014",
+  "case_kind": "atomic",
+  "purpose": "very coarse target, fine source: projection must be facet-based",
+  "failure_mode": "nearest-target-node logic would fail when source nodes are far from any target node",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC014_W01",
+      "weld_type": "T",
+      "source_component": "TC014_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC014_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC014_SRC_WEB",
+        "expected_node_ids": [
+          14015,
+          14016,
+          14017,
+          14018,
+          14019,
+          14020,
+          14021,
+          14022,
+          14023,
+          14024,
+          14025,
+          14026,
+          14027,
+          14028,
+          14029,
+          14030,
+          14031,
+          14032,
+          14033,
+          14034,
+          14035,
+          14036,
+          14037,
+          14038,
+          14039,
+          14040,
+          14041,
+          14042,
+          14043,
+          14044,
+          14045
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "many source samples fall inside 100x100 target quads away from nodes"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC014_SRC_WEB": 34001,
+      "TC014_TGT_BASE": 34000
+    }
+  }
+}

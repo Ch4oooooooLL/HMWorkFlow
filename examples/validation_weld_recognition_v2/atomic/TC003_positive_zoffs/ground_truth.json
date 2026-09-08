@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC003",
+  "case_kind": "atomic",
+  "purpose": "positive ZOFFS places the physical skin off the node plane",
+  "failure_mode": "skin offset must follow ZOFFS sign toward the +normal side",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC003_W01",
+      "weld_type": "T",
+      "source_component": "TC003_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC003_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC003_SRC_WEB",
+        "expected_node_ids": [
+          3231,
+          3232,
+          3233,
+          3234,
+          3235,
+          3236,
+          3237,
+          3238,
+          3239,
+          3240,
+          3241,
+          3242,
+          3243,
+          3244,
+          3245,
+          3246,
+          3247,
+          3248,
+          3249,
+          3250,
+          3251,
+          3252,
+          3253,
+          3254,
+          3255,
+          3256,
+          3257,
+          3258,
+          3259,
+          3260,
+          3261
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          7.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          7.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "top skin = node 0 + ZOFFS 2 + t/2 5 = 7"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "target_top_skin_z": 7.0,
+    "component_names": {
+      "TC003_SRC_WEB": 23001,
+      "TC003_TGT_BASE": 23000
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC029",
+  "case_kind": "atomic",
+  "purpose": "very short weld (14 mm)",
+  "failure_mode": "mesh notches and tiny edges must be REVIEW, not AUTO",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC029_W01",
+      "weld_type": "T",
+      "source_component": "TC029_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "SHORT_WELD"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC029_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC029_SRC_WEB",
+        "expected_node_ids": [
+          29231,
+          29232
+        ],
+        "start_xyz": [
+          100.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          114.0,
+          0.0,
+          5.0
+        ],
+        "length": 14.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "a 14 mm perfect edge is below the minimum automatic seam length but above the review floor"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC029_SRC_WEB": 49001,
+      "TC029_TGT_BASE": 49000
+    }
+  }
+}

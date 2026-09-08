@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC019",
+  "case_kind": "atomic",
+  "purpose": "strongly curved target (~20 deg normal swing) is review",
+  "failure_mode": "a large cumulative normal change along the weld must downgrade AUTO",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC019_W01",
+      "weld_type": "T",
+      "source_component": "TC019_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "CURVED_TARGET"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC019_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC019_SRC_WEB",
+        "expected_node_ids": [
+          19231,
+          19232,
+          19233,
+          19234,
+          19235,
+          19236,
+          19237,
+          19238,
+          19239,
+          19240,
+          19241,
+          19242,
+          19243,
+          19244,
+          19245,
+          19246,
+          19247,
+          19248,
+          19249,
+          19250,
+          19251,
+          19252,
+          19253,
+          19254,
+          19255,
+          19256,
+          19257,
+          19258,
+          19259,
+          19260,
+          19261,
+          19262
+        ],
+        "start_xyz": [
+          45.0,
+          0.0,
+          14.055872182145663
+        ],
+        "end_xyz": [
+          355.0,
+          0.0,
+          14.055872182145663
+        ],
+        "length": 311.551663
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "R=900 arc; cumulative normal change ~20 deg; skin error stays small"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC019_SRC_WEB": 39001,
+      "TC019_TGT_BASE": 39000
+    }
+  }
+}

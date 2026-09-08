@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC031",
+  "case_kind": "atomic",
+  "purpose": "within-source element normal disorder",
+  "failure_mode": "a normal-inconsistent source shell must still produce its real weld",
+  "decision_policy": {
+    "normal_disorder": "recover"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC031_W01",
+      "weld_type": "T",
+      "source_component": "TC031_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC031_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC031_SRC_WEB",
+        "expected_node_ids": [
+          31231,
+          31232,
+          31233,
+          31234,
+          31235,
+          31236,
+          31237,
+          31238,
+          31239,
+          31240,
+          31241,
+          31242,
+          31243,
+          31244,
+          31245,
+          31246,
+          31247,
+          31248,
+          31249,
+          31250,
+          31251,
+          31252,
+          31253,
+          31254,
+          31255,
+          31256,
+          31257,
+          31258,
+          31259,
+          31260,
+          31261
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the top band is wound with reversed normals; the flush bottom run at z=5 is a perfect T and the recognizer's orientation recovery must keep it AUTO"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC031_SRC_WEB": 51001,
+      "TC031_TGT_BASE": 51000
+    }
+  }
+}

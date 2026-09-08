@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC016",
+  "case_kind": "atomic",
+  "purpose": "element-type transition under the weld path must not fake a gap",
+  "failure_mode": "a quad-to-tria switch is a mesh artifact, not a missing-target discontinuity",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC016_W01",
+      "weld_type": "T",
+      "source_component": "TC016_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC016_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC016_SRC_WEB",
+        "expected_node_ids": [
+          16231,
+          16232,
+          16233,
+          16234,
+          16235,
+          16236,
+          16237,
+          16238,
+          16239,
+          16240,
+          16241,
+          16242,
+          16243,
+          16244,
+          16245,
+          16246,
+          16247,
+          16248,
+          16249,
+          16250,
+          16251,
+          16252,
+          16253,
+          16254,
+          16255,
+          16256,
+          16257,
+          16258,
+          16259,
+          16260,
+          16261
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "rows 10..12 (X 200..260) are split into CTRIA3 across the full width"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC016_SRC_WEB": 36001,
+      "TC016_TGT_BASE": 36000
+    }
+  }
+}

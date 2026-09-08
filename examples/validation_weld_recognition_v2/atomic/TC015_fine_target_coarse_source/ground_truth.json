@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC015",
+  "case_kind": "atomic",
+  "purpose": "coarse source edge over a fine target: interior sampling required",
+  "failure_mode": "endpoint-only checks would miss an unsupported middle of a long source edge",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC015_W01",
+      "weld_type": "T",
+      "source_component": "TC015_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC015_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC015_SRC_WEB",
+        "expected_node_ids": [
+          15861,
+          15862,
+          15863,
+          15864,
+          15865,
+          15866
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "long source edges must be re-sampled internally"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC015_SRC_WEB": 35001,
+      "TC015_TGT_BASE": 35000
+    }
+  }
+}

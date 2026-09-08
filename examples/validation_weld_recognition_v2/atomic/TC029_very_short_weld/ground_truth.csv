@@ -1,0 +1,2 @@
+﻿case_id,case_kind,semantic_id,weld_type,source_component,expected_decision,target_components,required_reason_codes,required_reason_any,forbidden_reason_codes,forbidden_targets,allow_extra_targets,overlap_axis,allowed_realization_segments,geometry_parallel,source_path_node_ids,source_path_start_xyz,source_path_end_xyz,source_path_length,known_gap_note,note
+TC029,atomic,TC029_W01,T,TC029_SRC_WEB,REVIEW,TC029_TGT_BASE,SHORT_WELD,,,,0,X,1,1,29231 29232,"100,0,5","114,0,5",14,,a 14 mm perfect edge is below the minimum automatic seam length but above the review floor

@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC038",
+  "case_kind": "atomic",
+  "purpose": "patch partially outside the target footprint",
+  "failure_mode": "a loop that extends beyond the target footprint is not proven contained",
+  "decision_policy": {
+    "patch": "review_when_partial"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC038_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC038_PATCH",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC038_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC038_PATCH",
+        "expected_node_ids": [
+          38099,
+          38100,
+          38101,
+          38102,
+          38103,
+          38104,
+          38105,
+          38106,
+          38107,
+          38108,
+          38109,
+          38110,
+          38111,
+          38112,
+          38113,
+          38114,
+          38115,
+          38116,
+          38117,
+          38118,
+          38119,
+          38120,
+          38121,
+          38144,
+          38167,
+          38190,
+          38213,
+          38236,
+          38259,
+          38282,
+          38305,
+          38304,
+          38303,
+          38302,
+          38301,
+          38300,
+          38299,
+          38298,
+          38297,
+          38296,
+          38295,
+          38294,
+          38293,
+          38292,
+          38291,
+          38290,
+          38289,
+          38288,
+          38287,
+          38286,
+          38285,
+          38284,
+          38283,
+          38260,
+          38237,
+          38214,
+          38191,
+          38168,
+          38145,
+          38122
+        ],
+        "start_xyz": [
+          100.0,
+          -40.0,
+          10.0
+        ],
+        "end_xyz": [
+          100.0,
+          -30.0,
+          10.0
+        ],
+        "length": 590.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "patch x=100..320 extends past the base x=200 edge; partial containment must review"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC038_BASE": 58000,
+      "TC038_PATCH": 58001
+    }
+  }
+}

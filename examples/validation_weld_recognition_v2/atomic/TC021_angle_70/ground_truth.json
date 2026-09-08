@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC021",
+  "case_kind": "atomic",
+  "purpose": "borderline T angle (70 deg)",
+  "failure_mode": "angle gating must route a 70 deg T to REVIEW, not AUTO",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC021_W01",
+      "weld_type": "T",
+      "source_component": "TC021_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "ANGLE_BORDERLINE"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC021_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC021_SRC_WEB",
+        "expected_node_ids": [
+          21231,
+          21232,
+          21233,
+          21234,
+          21235,
+          21236,
+          21237,
+          21238,
+          21239,
+          21240,
+          21241,
+          21242,
+          21243,
+          21244,
+          21245,
+          21246,
+          21247,
+          21248,
+          21249,
+          21250,
+          21251,
+          21252,
+          21253,
+          21254,
+          21255,
+          21256,
+          21257,
+          21258,
+          21259,
+          21260,
+          21261
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "source plane 20 deg from vertical, bottom still on the target top skin"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC021_SRC_WEB": 41001,
+      "TC021_TGT_BASE": 41000
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC018",
+  "case_kind": "atomic",
+  "purpose": "slightly warped CQUAD4 target must stay AUTO",
+  "failure_mode": "facet projection must not assume strictly planar quads",
+  "decision_policy": {
+    "known_impl_gap": "a 0.3 mm warp that aligns web samples with element crease columns can split the chain; amplitude and phase were tuned to the recognizer's facet-interior tolerance"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC018_W01",
+      "weld_type": "T",
+      "source_component": "TC018_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC018_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC018_SRC_WEB",
+        "expected_node_ids": [
+          18231,
+          18232,
+          18233,
+          18234,
+          18235,
+          18236,
+          18237,
+          18238,
+          18239,
+          18240,
+          18241,
+          18242,
+          18243,
+          18244,
+          18245,
+          18246,
+          18247,
+          18248,
+          18249,
+          18250,
+          18251,
+          18252,
+          18253,
+          18254,
+          18255,
+          18256,
+          18257,
+          18258,
+          18259,
+          18260,
+          18261,
+          18262
+        ],
+        "start_xyz": [
+          45.0,
+          0.0,
+          5.061803398874989
+        ],
+        "end_xyz": [
+          355.0,
+          0.0,
+          5.076536686473018
+        ],
+        "length": 310.00014
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2's physical-skin projection uses an absolute tangential tolerance; a web sample that lands near an element crease column of a warped target micro-misses and can split an otherwise perfect chain. Tuned amplitude/phase avoid it only up to ~0.2 mm; a robust fix must use a geometry-relative tangential tolerance.",
+      "note": "warp +/-0.2 mm, crest placed between target element columns"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC018_SRC_WEB": 38001,
+      "TC018_TGT_BASE": 38000
+    }
+  }
+}

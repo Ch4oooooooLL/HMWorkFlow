@@ -1,0 +1,170 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC040",
+  "case_kind": "atomic",
+  "purpose": "nested patch hierarchy",
+  "failure_mode": "a 3-plate stack has two real interfaces; the recognizer must not skip a level nor collapse the stack into one ambiguous weld",
+  "decision_policy": {
+    "nested_patch": "per_interface"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC040_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC040_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC040_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC040_PATCH",
+        "expected_node_ids": [
+          40099,
+          40100,
+          40101,
+          40102,
+          40103,
+          40104,
+          40105,
+          40106,
+          40107,
+          40108,
+          40109,
+          40110,
+          40111,
+          40112,
+          40113,
+          40114,
+          40115,
+          40132,
+          40149,
+          40166,
+          40183,
+          40200,
+          40217,
+          40234,
+          40251,
+          40268,
+          40285,
+          40302,
+          40319,
+          40318,
+          40317,
+          40316,
+          40315,
+          40314,
+          40313,
+          40312,
+          40311,
+          40310,
+          40309,
+          40308,
+          40307,
+          40306,
+          40305,
+          40304,
+          40303,
+          40286,
+          40269,
+          40252,
+          40235,
+          40218,
+          40201,
+          40184,
+          40167,
+          40150,
+          40133,
+          40116
+        ],
+        "start_xyz": [
+          -80.0,
+          -60.0,
+          10.0
+        ],
+        "end_xyz": [
+          -80.0,
+          -50.0,
+          10.0
+        ],
+        "length": 550.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "medium plate 160x120 fully inside the base at 2 mm skin gap: clean patch"
+    },
+    {
+      "semantic_id": "TC040_W02",
+      "weld_type": "PATCH",
+      "source_component": "TC040_L1_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC040_PATCH"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC040_L1_PATCH",
+        "expected_node_ids": [
+          40320,
+          40321,
+          40322,
+          40323,
+          40324,
+          40325,
+          40326,
+          40333,
+          40340,
+          40347,
+          40354,
+          40361,
+          40360,
+          40359,
+          40358,
+          40357,
+          40356,
+          40355,
+          40348,
+          40341,
+          40334,
+          40327
+        ],
+        "start_xyz": [
+          -30.0,
+          -25.0,
+          20.0
+        ],
+        "end_xyz": [
+          -30.0,
+          -15.0,
+          20.0
+        ],
+        "length": 210.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "small plate 60x50 fully inside the medium plate: its nearest skin is the medium plate, so the base must not steal this interface"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC040_BASE": 60000,
+      "TC040_L1_PATCH": 60002,
+      "TC040_PATCH": 60001
+    }
+  }
+}

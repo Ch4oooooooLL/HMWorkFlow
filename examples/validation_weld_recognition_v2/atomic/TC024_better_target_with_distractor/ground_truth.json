@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC024",
+  "case_kind": "atomic",
+  "purpose": "a clearly better target must win over a weak distractor",
+  "failure_mode": "over-conservative ambiguity must not downgrade an unambiguous best target",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC024_W01",
+      "weld_type": "T",
+      "source_component": "TC024_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC024_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC024_SRC_WEB",
+        "expected_node_ids": [
+          24462,
+          24463,
+          24464,
+          24465,
+          24466,
+          24467,
+          24468,
+          24469,
+          24470,
+          24471,
+          24472,
+          24473,
+          24474,
+          24475,
+          24476,
+          24477,
+          24478,
+          24479,
+          24480,
+          24481,
+          24482,
+          24483,
+          24484,
+          24485,
+          24486,
+          24487,
+          24488,
+          24489,
+          24490,
+          24491,
+          24492
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2 REVIEWs when any sample also sees the 8 mm distractor inside the broad search radius (ambiguity margin). Spec expects AUTO on B.",
+      "note": "B error ~0; C error ~8 mm but still inside the broad search radius"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC024_B": 44000,
+      "TC024_C": 44001,
+      "TC024_SRC_WEB": 44002
+    }
+  }
+}

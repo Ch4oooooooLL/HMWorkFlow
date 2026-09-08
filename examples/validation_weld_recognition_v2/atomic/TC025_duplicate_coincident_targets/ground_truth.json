@@ -1,0 +1,89 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC025",
+  "case_kind": "atomic",
+  "purpose": "fully coincident duplicate target plates are ambiguous",
+  "failure_mode": "two identical physical targets under one weld line must go to REVIEW",
+  "decision_policy": {
+    "order_independent": true
+  },
+  "welds": [
+    {
+      "semantic_id": "TC025_W01",
+      "weld_type": "T",
+      "source_component": "TC025_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_AMBIGUITY"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC025_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC025_SRC_WEB",
+        "expected_node_ids": [
+          25462,
+          25463,
+          25464,
+          25465,
+          25466,
+          25467,
+          25468,
+          25469,
+          25470,
+          25471,
+          25472,
+          25473,
+          25474,
+          25475,
+          25476,
+          25477,
+          25478,
+          25479,
+          25480,
+          25481,
+          25482,
+          25483,
+          25484,
+          25485,
+          25486,
+          25487,
+          25488,
+          25489,
+          25490,
+          25491,
+          25492
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "B and C coincide exactly; V2 REVIEWs the seam toward B and lists the coincident duplicate C only in a separate PATCH_SEAM REVIEW row, so the physical stack is never AUTO-welded even though one T row names a single target"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC025_B": 45000,
+      "TC025_C": 45001,
+      "TC025_SRC_WEB": 45002
+    }
+  }
+}

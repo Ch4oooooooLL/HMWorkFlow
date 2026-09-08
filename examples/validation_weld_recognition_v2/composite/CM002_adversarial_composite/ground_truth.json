@@ -1,0 +1,581 @@
+{
+  "schema_version": "1.0",
+  "case_id": "CM002",
+  "case_kind": "composite",
+  "purpose": "adversarial junction composite",
+  "failure_mode": "interaction of the known failure modes in one model",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC027_W01",
+      "weld_type": "T",
+      "source_component": "TC027_SRC_PLATE",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "INNER_BOUNDARY_SOURCE"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC027_TGT_SHELF"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC027_SRC_PLATE",
+        "expected_node_ids": [
+          464,
+          465,
+          466,
+          467,
+          468,
+          469,
+          470,
+          471,
+          472,
+          473,
+          474,
+          475,
+          476,
+          477,
+          478,
+          479,
+          480
+        ],
+        "start_xyz": [
+          120.0,
+          0.0,
+          55.0
+        ],
+        "end_xyz": [
+          280.0,
+          0.0,
+          55.0
+        ],
+        "length": 160.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "top slot rim at z=55 lies exactly on the shelf top skin.  The edge is an inner boundary of a closed slot, so it must not be AUTO welded."
+    },
+    {
+      "semantic_id": "TC027_W02",
+      "weld_type": "T",
+      "source_component": "TC027_SRC_PLATE",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "INNER_BOUNDARY_SOURCE"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC027_TGT_SHELF"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC027_SRC_PLATE",
+        "expected_node_ids": [
+          382,
+          383,
+          384,
+          385,
+          386,
+          387,
+          388,
+          389,
+          390,
+          391,
+          392,
+          393,
+          394,
+          395,
+          396,
+          397,
+          398
+        ],
+        "start_xyz": [
+          120.0,
+          0.0,
+          45.0
+        ],
+        "end_xyz": [
+          280.0,
+          0.0,
+          45.0
+        ],
+        "length": 160.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "bottom slot rim at z=45 lies exactly on the shelf bottom skin; same inner-boundary policy."
+    },
+    {
+      "semantic_id": "TC042_W01",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_LONG",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_LONG",
+        "expected_node_ids": [
+          2152,
+          2153,
+          2154,
+          2155,
+          2156,
+          2157,
+          2158,
+          2159,
+          2160,
+          2161,
+          2162,
+          2163,
+          2164,
+          2165,
+          2166,
+          2167,
+          2168,
+          2169,
+          2170,
+          2171,
+          2172,
+          2173,
+          2174,
+          2175,
+          2176,
+          2177,
+          2178,
+          2179,
+          2180
+        ],
+        "start_xyz": [
+          4060.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          4340.0,
+          0.0,
+          5.0
+        ],
+        "length": 280.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "full-length x chain, flush on the base"
+    },
+    {
+      "semantic_id": "TC042_W02",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_CROSS",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_CROSS",
+        "expected_node_ids": [
+          2210,
+          2211,
+          2212,
+          2213,
+          2214,
+          2215,
+          2216,
+          2217,
+          2218,
+          2219
+        ],
+        "start_xyz": [
+          4240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          4240.0,
+          96.0,
+          5.0
+        ],
+        "length": 90.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "y-direction chain starting 6 mm clear of the long web, flush on the base"
+    },
+    {
+      "semantic_id": "TC042_W03",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_CROSS",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "MULTI_TARGET_CONTINUOUS",
+        "TARGET_AMBIGUITY",
+        "CURVED_TARGET"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE",
+        "TC042_SRC_LONG"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_CROSS",
+        "expected_node_ids": [
+          2210,
+          2220
+        ],
+        "start_xyz": [
+          4240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          4240.0,
+          6.0,
+          105.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "the cross web's 6 mm-short end edge stands against the long web side: a junction edge whose support is genuinely split between the long web and the base, so it must REVIEW and must not be fused into either straight leg"
+    },
+    {
+      "semantic_id": "TC030_W01",
+      "weld_type": "T",
+      "source_component": "TC030_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_GAP",
+        "PROJECTION_JUMP"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC030_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC030_SRC_WEB",
+        "expected_node_ids": [
+          2728,
+          2730,
+          2732,
+          2734,
+          2736,
+          2738,
+          2740,
+          2742,
+          2744,
+          2746,
+          2748,
+          2750,
+          2752,
+          2754,
+          2756
+        ],
+        "start_xyz": [
+          6050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          6190.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint.",
+      "note": "B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190"
+    },
+    {
+      "semantic_id": "TC030_W02",
+      "weld_type": "T",
+      "source_component": "TC030_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "PARTIAL_COVERAGE",
+        "PROJECTION_JUMP"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC030_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC030_SRC_WEB",
+        "expected_node_ids": [
+          2760,
+          2762,
+          2764,
+          2766,
+          2768,
+          2770,
+          2772,
+          2774,
+          2776,
+          2778,
+          2780,
+          2782,
+          2784,
+          2786,
+          2788
+        ],
+        "start_xyz": [
+          6210.0,
+          0.0,
+          15.0
+        ],
+        "end_xyz": [
+          6350.0,
+          0.0,
+          15.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350"
+    },
+    {
+      "semantic_id": "TC010_W01",
+      "weld_type": "T",
+      "source_component": "TC010_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "HOLE_INTERRUPTION"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC010_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC010_SRC_WEB",
+        "expected_node_ids": [
+          3266,
+          3267,
+          3268,
+          3269,
+          3270,
+          3271,
+          3272,
+          3273,
+          3274,
+          3275,
+          3276,
+          3277,
+          3278,
+          3279,
+          3280,
+          3281,
+          3282,
+          3283,
+          3284,
+          3285,
+          3286,
+          3287,
+          3288,
+          3289,
+          3290,
+          3291,
+          3292,
+          3293,
+          3294,
+          3295,
+          3296
+        ],
+        "start_xyz": [
+          8050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          8350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "40 mm element-free full-width void splits one component into two islands; current V2 labels it HOLE_INTERRUPTION (taxonomy note, decision REVIEW is the gate)"
+    },
+    {
+      "semantic_id": "TC021_W01",
+      "weld_type": "T",
+      "source_component": "TC021_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "ANGLE_BORDERLINE"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC021_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC021_SRC_WEB",
+        "expected_node_ids": [
+          4094,
+          4095,
+          4096,
+          4097,
+          4098,
+          4099,
+          4100,
+          4101,
+          4102,
+          4103,
+          4104,
+          4105,
+          4106,
+          4107,
+          4108,
+          4109,
+          4110,
+          4111,
+          4112,
+          4113,
+          4114,
+          4115,
+          4116,
+          4117,
+          4118,
+          4119,
+          4120,
+          4121,
+          4122,
+          4123,
+          4124
+        ],
+        "start_xyz": [
+          10050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          10350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "source plane 20 deg from vertical, bottom still on the target top skin"
+    }
+  ],
+  "forbidden_candidates": [
+    {
+      "source_component": "TC043_PLATE0",
+      "target_component": "TC043_PLATE1",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    },
+    {
+      "source_component": "TC043_PLATE1",
+      "target_component": "TC043_PLATE2",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    },
+    {
+      "source_component": "TC043_PLATE0",
+      "target_component": "TC043_PLATE2",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    }
+  ],
+  "analytic": {
+    "TC027_source_inner_boundary.rim_z": {
+      "top": 55.0,
+      "bottom": 45.0,
+      "slot_x": [
+        120.0,
+        280.0
+      ]
+    },
+    "TC046_coplanar_butt.butt": {
+      "rule": "no AUTO and no REVIEW candidate is expected between the two coplanar sheets"
+    },
+    "TC030_projection_jump.zone_notes": {
+      "B_skin_z": 5.0,
+      "C_skin_z": 15.0,
+      "dead_gap_x": [
+        190.0,
+        210.0
+      ],
+      "source_z": {
+        "x<=195": 5.0,
+        "x>=205": 15.0
+      }
+    },
+    "TC043_dependency_cycle.cycle": {
+      "plates": [
+        "TC043_PLATE0",
+        "TC043_PLATE1",
+        "TC043_PLATE2"
+      ],
+      "rule": "no AUTO may be emitted inside the loop; REVIEW rows are acceptable and expected because each interface is genuinely uncertain"
+    }
+  }
+}

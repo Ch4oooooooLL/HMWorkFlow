@@ -1,0 +1,174 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC042",
+  "case_kind": "atomic",
+  "purpose": "two perpendicular webs over one base",
+  "failure_mode": "each web's own bottom chain is an independent T; the junction clearance must not fuse or interrupt either chain",
+  "decision_policy": {
+    "junction": "per_web"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC042_W01",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_LONG",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_LONG",
+        "expected_node_ids": [
+          42273,
+          42274,
+          42275,
+          42276,
+          42277,
+          42278,
+          42279,
+          42280,
+          42281,
+          42282,
+          42283,
+          42284,
+          42285,
+          42286,
+          42287,
+          42288,
+          42289,
+          42290,
+          42291,
+          42292,
+          42293,
+          42294,
+          42295,
+          42296,
+          42297,
+          42298,
+          42299,
+          42300,
+          42301
+        ],
+        "start_xyz": [
+          60.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          340.0,
+          0.0,
+          5.0
+        ],
+        "length": 280.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "full-length x chain, flush on the base"
+    },
+    {
+      "semantic_id": "TC042_W02",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_CROSS",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_CROSS",
+        "expected_node_ids": [
+          42331,
+          42332,
+          42333,
+          42334,
+          42335,
+          42336,
+          42337,
+          42338,
+          42339,
+          42340
+        ],
+        "start_xyz": [
+          240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          240.0,
+          96.0,
+          5.0
+        ],
+        "length": 90.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "y-direction chain starting 6 mm clear of the long web, flush on the base"
+    },
+    {
+      "semantic_id": "TC042_W03",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_CROSS",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "MULTI_TARGET_CONTINUOUS",
+        "TARGET_AMBIGUITY",
+        "CURVED_TARGET"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE",
+        "TC042_SRC_LONG"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_CROSS",
+        "expected_node_ids": [
+          42331,
+          42341
+        ],
+        "start_xyz": [
+          240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          240.0,
+          6.0,
+          105.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "the cross web's 6 mm-short end edge stands against the long web side: a junction edge whose support is genuinely split between the long web and the base, so it must REVIEW and must not be fused into either straight leg"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC042_SRC_CROSS": 62002,
+      "TC042_SRC_LONG": 62001,
+      "TC042_TGT_BASE": 62000
+    }
+  }
+}

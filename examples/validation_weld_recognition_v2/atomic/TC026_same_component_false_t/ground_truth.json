@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC026",
+  "case_kind": "atomic",
+  "purpose": "source and target islands inside one component",
+  "failure_mode": "allow_self_component_target=false: no AUTO for a same-component T",
+  "decision_policy": {
+    "allow_self_component_target": false
+  },
+  "welds": [
+    {
+      "semantic_id": "TC026_W01",
+      "weld_type": "T",
+      "source_component": "TC026_SAME",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC026_SAME"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "web island and target island share one component; the recognizer must not AUTO a self-T"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC026_SAME": 46000
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC022",
+  "case_kind": "atomic",
+  "purpose": "unsupported shallow T angle (55 deg)",
+  "failure_mode": "a near-parallel, physically-close edge must not be welded as a T",
+  "decision_policy": {
+    "expected_candidate_count": 0
+  },
+  "welds": [
+    {
+      "semantic_id": "TC022_W01",
+      "weld_type": "T",
+      "source_component": "TC022_SRC_WEB",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC022_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "55 deg is outside the review band; no T candidate should be emitted"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC022_SRC_WEB": 42001,
+      "TC022_TGT_BASE": 42000
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC017",
+  "case_kind": "atomic",
+  "purpose": "variable nodal thickness (T1..T4) drives the physical skin",
+  "failure_mode": "physical-skin evaluation must interpolate Ti; PSHELL-only thickness would weld at the wrong height",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC017_W01",
+      "weld_type": "T",
+      "source_component": "TC017_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "VARIABLE_THICKNESS_UNCERTAIN"
+      ],
+      "target_components": [
+        "TC017_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC017_SRC_WEB",
+        "expected_node_ids": [
+          17231,
+          17232,
+          17233,
+          17234,
+          17235,
+          17236,
+          17237,
+          17238,
+          17239,
+          17240,
+          17241,
+          17242,
+          17243,
+          17244,
+          17245,
+          17246,
+          17247,
+          17248,
+          17249,
+          17250,
+          17251,
+          17252,
+          17253,
+          17254,
+          17255,
+          17256,
+          17257,
+          17258,
+          17259,
+          17260,
+          17261,
+          17262
+        ],
+        "start_xyz": [
+          45.0,
+          0.0,
+          4.45
+        ],
+        "end_xyz": [
+          355.0,
+          0.0,
+          7.55
+        ],
+        "length": 310.0155
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "target top skin rises 4 mm (X=0) to 8 mm (X=400); web bottom follows exactly"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC017_SRC_WEB": 37001,
+      "TC017_TGT_BASE": 37000
+    }
+  }
+}

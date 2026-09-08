@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC028",
+  "case_kind": "atomic",
+  "purpose": "branching source free-edge chain near a target",
+  "failure_mode": "a branched boundary must not be fused into one straight T chain",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC028_W01",
+      "weld_type": "T",
+      "source_component": "TC028_SRC_BRANCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC028_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC028_SRC_BRANCH",
+        "expected_node_ids": [
+          28231,
+          28232,
+          28233,
+          28234,
+          28235,
+          28236,
+          28237,
+          28238,
+          28239,
+          28240,
+          28241,
+          28242,
+          28243,
+          28244,
+          28245
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          190.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "clean run x=50..190 ending at the folded-fin zone; the boundary forks there so the run is a legitimate independent weld, not part of one long chain"
+    },
+    {
+      "semantic_id": "TC028_W02",
+      "weld_type": "T",
+      "source_component": "TC028_SRC_BRANCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC028_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC028_SRC_BRANCH",
+        "expected_node_ids": [
+          28247,
+          28248,
+          28249,
+          28250,
+          28251,
+          28252,
+          28253,
+          28254,
+          28255,
+          28256,
+          28257,
+          28258,
+          28259,
+          28260,
+          28261
+        ],
+        "start_xyz": [
+          210.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "clean run x=210..350 after the branch zone; same reasoning as W01"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "zone_notes": {
+      "branch_fork_x": 200.0,
+      "occupied_zone_x": [
+        190.0,
+        210.0
+      ],
+      "expected_candidate_gap": "no candidate may span across x=190..210 where the folded fin occupies the base",
+      "branch_reason": "V2 has no NON_MANIFOLD_REGION/BOUNDARY_BRANCH reason on T rows; the seam is instead split into two independent AUTO runs"
+    },
+    "component_names": {
+      "TC028_SRC_BRANCH": 48001,
+      "TC028_TGT_BASE": 48000
+    }
+  }
+}

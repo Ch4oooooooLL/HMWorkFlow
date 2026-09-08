@@ -1,0 +1,89 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC011",
+  "case_kind": "atomic",
+  "purpose": "rectangular hole crossing the weld path interrupts support",
+  "failure_mode": "an explicit target hole must not be bridged across as if the target were continuous",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC011_W01",
+      "weld_type": "T",
+      "source_component": "TC011_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "HOLE_INTERRUPTION",
+        "TARGET_GAP"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC011_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC011_SRC_WEB",
+        "expected_node_ids": [
+          11231,
+          11232,
+          11233,
+          11234,
+          11235,
+          11236,
+          11237,
+          11238,
+          11239,
+          11240,
+          11241,
+          11242,
+          11243,
+          11244,
+          11245,
+          11246,
+          11247,
+          11248,
+          11249,
+          11250,
+          11251,
+          11252,
+          11253,
+          11254,
+          11255,
+          11256,
+          11257,
+          11258,
+          11259,
+          11260,
+          11261
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "hole X=180..220, Y=-25..25; two supported runs with an explicit hole between"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC011_SRC_WEB": 31001,
+      "TC011_TGT_BASE": 31000
+    }
+  }
+}

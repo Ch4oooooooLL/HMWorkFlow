@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC012",
+  "case_kind": "atomic",
+  "purpose": "an explicit topological slot is not a small bridgable gap",
+  "failure_mode": "a topological hole must be classified HOLE_INTERRUPTION even when its width is small",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC012_W01",
+      "weld_type": "T",
+      "source_component": "TC012_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "HOLE_INTERRUPTION",
+        "TARGET_GAP"
+      ],
+      "forbidden_reason_codes": [
+        "BRIDGED_SMALL_GAP",
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC012_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC012_SRC_WEB",
+        "expected_node_ids": [
+          12861,
+          12862,
+          12863,
+          12864,
+          12865,
+          12866,
+          12867,
+          12868,
+          12869,
+          12870,
+          12871,
+          12872,
+          12873,
+          12874,
+          12875,
+          12876,
+          12877,
+          12878,
+          12879,
+          12880,
+          12881,
+          12882,
+          12883,
+          12884,
+          12885,
+          12886,
+          12887,
+          12888,
+          12889,
+          12890,
+          12891
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "slot X=195..205 across Y=-80..80; the recognizer must not bridge a hole like a 1 mm component gap"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC012_SRC_WEB": 32001,
+      "TC012_TGT_BASE": 32000
+    }
+  }
+}

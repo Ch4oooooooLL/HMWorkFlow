@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC045",
+  "case_kind": "atomic",
+  "purpose": "oblique (diagonal) weld line",
+  "failure_mode": "a weld line slanted across the base plane is a normal T and must AUTO",
+  "decision_policy": {
+    "oblique": "auto"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC045_W01",
+      "weld_type": "T",
+      "source_component": "TC045_SRC_DIAG",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC045_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC045_SRC_DIAG",
+        "expected_node_ids": [
+          45325,
+          45326,
+          45327,
+          45328,
+          45329,
+          45330,
+          45331,
+          45332,
+          45333,
+          45334,
+          45335,
+          45336,
+          45337,
+          45338,
+          45339,
+          45340,
+          45341,
+          45342,
+          45343,
+          45344,
+          45345
+        ],
+        "start_xyz": [
+          120.0,
+          -40.0,
+          5.0
+        ],
+        "end_xyz": [
+          280.0,
+          40.0,
+          5.0
+        ],
+        "length": 178.885438
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "diagonal bottom chain along y = 0.5x - 100, flush on the base skin"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC045_SRC_DIAG": 65001,
+      "TC045_TGT_BASE": 65000
+    }
+  }
+}

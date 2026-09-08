@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC046",
+  "case_kind": "atomic",
+  "purpose": "coplanar butt joint",
+  "failure_mode": "two coplanar skins meeting at an edge are one surface, not a weld; the recognizer must not emit a T or PATCH between them",
+  "decision_policy": {
+    "butt": "no_candidate",
+    "expected_candidate_count": 0
+  },
+  "welds": [],
+  "forbidden_candidates": [],
+  "analytic": {
+    "butt": {
+      "rule": "no AUTO and no REVIEW candidate is expected between the two coplanar sheets"
+    },
+    "component_names": {
+      "TC046_SHEET_LEFT": 66000,
+      "TC046_SHEET_RIGHT": 66001
+    }
+  }
+}

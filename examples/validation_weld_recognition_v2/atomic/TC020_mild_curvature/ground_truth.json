@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC020",
+  "case_kind": "atomic",
+  "purpose": "mildly curved target (~6 deg normal swing) stays AUTO",
+  "failure_mode": "curvature handling must not downgrade every non-flat target",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC020_W01",
+      "weld_type": "T",
+      "source_component": "TC020_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "CURVED_TARGET"
+      ],
+      "target_components": [
+        "TC020_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC020_SRC_WEB",
+        "expected_node_ids": [
+          20231,
+          20232,
+          20233,
+          20234,
+          20235,
+          20236,
+          20237,
+          20238,
+          20239,
+          20240,
+          20241,
+          20242,
+          20243,
+          20244,
+          20245,
+          20246,
+          20247,
+          20248,
+          20249,
+          20250,
+          20251,
+          20252,
+          20253,
+          20254,
+          20255,
+          20256,
+          20257,
+          20258,
+          20259,
+          20260,
+          20261,
+          20262
+        ],
+        "start_xyz": [
+          45.0,
+          0.0,
+          7.424020184761957
+        ],
+        "end_xyz": [
+          355.0,
+          0.0,
+          7.424020184761957
+        ],
+        "length": 310.113979
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "R=3300 arc; cumulative normal change ~6 deg, inside the AUTO curvature band"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC020_SRC_WEB": 40001,
+      "TC020_TGT_BASE": 40000
+    }
+  }
+}

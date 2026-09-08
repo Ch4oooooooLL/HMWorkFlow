@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC044",
+  "case_kind": "atomic",
+  "purpose": "near parallel plate offset in plan",
+  "failure_mode": "a sliding parallel plate is not a contained patch; it must REVIEW when its footprint hangs over the target edge",
+  "decision_policy": {
+    "parallel_near": "review_unless_contained"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC044_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC044_SRC_LAP",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "WELD_TYPE_AMBIGUITY",
+        "PARTIAL_COVERAGE",
+        "HOLE_INTERRUPTION"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC044_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC044_SRC_LAP",
+        "expected_node_ids": [
+          44231,
+          44232,
+          44233,
+          44234,
+          44235,
+          44236,
+          44237,
+          44238,
+          44239,
+          44240,
+          44241,
+          44242,
+          44243,
+          44244,
+          44245,
+          44260,
+          44275,
+          44290,
+          44305,
+          44320,
+          44335,
+          44350,
+          44365,
+          44380,
+          44379,
+          44378,
+          44377,
+          44376,
+          44375,
+          44374,
+          44373,
+          44372,
+          44371,
+          44370,
+          44369,
+          44368,
+          44367,
+          44366,
+          44351,
+          44336,
+          44321,
+          44306,
+          44291,
+          44276,
+          44261,
+          44246
+        ],
+        "start_xyz": [
+          60.0,
+          -40.0,
+          10.0
+        ],
+        "end_xyz": [
+          60.0,
+          -20.0,
+          10.0
+        ],
+        "length": 900.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "same gap class as a real patch but the plan offset makes every loop hang outside the base footprint: never a confident AUTO"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC044_SRC_LAP": 64001,
+      "TC044_TGT_BASE": 64000
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC034",
+  "case_kind": "atomic",
+  "purpose": "strongly non-uniform source mesh on a coarse target",
+  "failure_mode": "edge-length variation inside one chain must not fragment a clean seam",
+  "decision_policy": {
+    "nonuniform_mesh": "whole_chain"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC034_W01",
+      "weld_type": "T",
+      "source_component": "TC034_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC034_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC034_SRC_WEB",
+        "expected_node_ids": [
+          34066,
+          34067,
+          34068,
+          34069,
+          34070,
+          34071,
+          34072,
+          34073,
+          34074,
+          34075,
+          34076,
+          34077,
+          34078,
+          34079,
+          34080,
+          34081,
+          34082,
+          34083,
+          34084,
+          34085,
+          34086,
+          34087,
+          34088,
+          34089,
+          34090,
+          34091,
+          34092,
+          34093,
+          34094,
+          34095,
+          34096
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "x spacings alternate 5/15 mm while the target uses h=40; the chain is one continuous flush seam and must stay one AUTO row"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC034_SRC_WEB": 54001,
+      "TC034_TGT_BASE": 54000
+    }
+  }
+}

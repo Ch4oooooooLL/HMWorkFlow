@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC041",
+  "case_kind": "atomic",
+  "purpose": "weld-on-weld doubler dependency",
+  "failure_mode": "seam 2 (doubler) is only realisable after seam 1 (stiffener); the detector must see both physical edges but never a phantom doubler->base weld through 100 mm of air",
+  "decision_policy": {
+    "dependency": "two_physical_seams"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC041_W01",
+      "weld_type": "T",
+      "source_component": "TC041_SRC_STIFF",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC041_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC041_SRC_STIFF",
+        "expected_node_ids": [
+          41231,
+          41232,
+          41233,
+          41234,
+          41235,
+          41236,
+          41237,
+          41238,
+          41239,
+          41240,
+          41241,
+          41242,
+          41243,
+          41244,
+          41245
+        ],
+        "start_xyz": [
+          80.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          220.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the stiffener's bottom chain is a clean flush T on the base"
+    },
+    {
+      "semantic_id": "TC041_W02",
+      "weld_type": "T",
+      "source_component": "TC041_SRC_STIFF",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC041_SRC_DOUBLER"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC041_SRC_STIFF",
+        "expected_node_ids": [
+          41246,
+          41247,
+          41248,
+          41249,
+          41250,
+          41251,
+          41252,
+          41253,
+          41254,
+          41255,
+          41256,
+          41257,
+          41258,
+          41259,
+          41260
+        ],
+        "start_xyz": [
+          80.0,
+          0.0,
+          105.0
+        ],
+        "end_xyz": [
+          220.0,
+          0.0,
+          105.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the stiffener's top edge (z=105) stands 2 mm under the doubler bottom skin (z=107): a genuine weld-on-weld seam whose realisation depends on W01"
+    },
+    {
+      "semantic_id": "TC041_W03",
+      "weld_type": "PATCH",
+      "source_component": "TC041_SRC_DOUBLER",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC041_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "doubler bottom skin z=107, base top skin z=5: ~102 mm of air.  Nothing in the raw input supports a doubler->base seam, so the detector must not emit one"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "dependencies": {
+      "TC041_W02": [
+        "TC041_W01"
+      ],
+      "note": "the doubler seam is only realisable once the stiffener seam is welded and the zone trimmed; detection still reports both physical edge-to-skin pairs"
+    },
+    "component_names": {
+      "TC041_SRC_DOUBLER": 61002,
+      "TC041_SRC_STIFF": 61001,
+      "TC041_TGT_BASE": 61000
+    }
+  }
+}

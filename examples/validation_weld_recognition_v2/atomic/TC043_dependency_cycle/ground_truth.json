@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC043",
+  "case_kind": "atomic",
+  "purpose": "dependency-cycle trap",
+  "failure_mode": "a closed loop of mutually-supporting plates must never produce an AUTO weld for any pair",
+  "decision_policy": {
+    "cycle": "no_auto",
+    "allow_review_leak": true
+  },
+  "welds": [],
+  "forbidden_candidates": [
+    {
+      "source_component": "TC043_PLATE0",
+      "target_component": "TC043_PLATE1",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    },
+    {
+      "source_component": "TC043_PLATE1",
+      "target_component": "TC043_PLATE2",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    },
+    {
+      "source_component": "TC043_PLATE0",
+      "target_component": "TC043_PLATE2",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    }
+  ],
+  "analytic": {
+    "cycle": {
+      "plates": [
+        "TC043_PLATE0",
+        "TC043_PLATE1",
+        "TC043_PLATE2"
+      ],
+      "rule": "no AUTO may be emitted inside the loop; REVIEW rows are acceptable and expected because each interface is genuinely uncertain"
+    },
+    "component_names": {
+      "TC043_PLATE0": 63000,
+      "TC043_PLATE1": 63001,
+      "TC043_PLATE2": 63002
+    }
+  }
+}

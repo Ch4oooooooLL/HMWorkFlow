@@ -1,0 +1,10 @@
+﻿case_id,source_component,target_component,severity,note
+TC043,TC043_PLATE0,TC043_PLATE1,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+TC043,TC043_PLATE1,TC043_PLATE2,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+TC043,TC043_PLATE0,TC043_PLATE2,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+CM002,TC043_PLATE0,TC043_PLATE1,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+CM002,TC043_PLATE1,TC043_PLATE2,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+CM002,TC043_PLATE0,TC043_PLATE2,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+CM003,TC043_PLATE0,TC043_PLATE1,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+CM003,TC043_PLATE1,TC043_PLATE2,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO
+CM003,TC043_PLATE0,TC043_PLATE2,FALSE_AUTO_CRITICAL,closed dependency cycle: no pair in the loop may AUTO

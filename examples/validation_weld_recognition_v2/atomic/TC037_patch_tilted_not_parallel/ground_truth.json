@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC037",
+  "case_kind": "atomic",
+  "purpose": "tilted plate over a base",
+  "failure_mode": "35 deg tilt is outside both the parallel patch band and the T band",
+  "decision_policy": {
+    "expected_candidate_count": 0
+  },
+  "welds": [
+    {
+      "semantic_id": "TC037_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC037_TILT",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC037_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "plate 35 deg from parallel and from perpendicular: no patch, no T"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC037_BASE": 57000,
+      "TC037_TILT": 57001
+    }
+  }
+}

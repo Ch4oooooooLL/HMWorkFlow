@@ -1,0 +1,3530 @@
+{
+  "schema_version": "1.0",
+  "case_id": "CM003",
+  "case_kind": "composite",
+  "purpose": "full-corpus composite",
+  "failure_mode": "every atomic case merged into one FEM; the recognizer must reproduce every expected weld and every forbidden relation in a single detection pass",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC001_W01",
+      "weld_type": "T",
+      "source_component": "TC001_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC001_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC001_SRC_WEB",
+        "expected_node_ids": [
+          232,
+          233,
+          234,
+          235,
+          236,
+          237,
+          238,
+          239,
+          240,
+          241,
+          242,
+          243,
+          244,
+          245,
+          246,
+          247,
+          248,
+          249,
+          250,
+          251,
+          252,
+          253,
+          254,
+          255,
+          256,
+          257,
+          258,
+          259,
+          260,
+          261,
+          262
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "single continuous target support"
+    },
+    {
+      "semantic_id": "TC002_W01",
+      "weld_type": "T",
+      "source_component": "TC002_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC002_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC002_SRC_WEB",
+        "expected_node_ids": [
+          1060,
+          1061,
+          1062,
+          1063,
+          1064,
+          1065,
+          1066,
+          1067,
+          1068,
+          1069,
+          1070,
+          1071,
+          1072,
+          1073,
+          1074,
+          1075,
+          1076,
+          1077,
+          1078,
+          1079,
+          1080,
+          1081,
+          1082,
+          1083,
+          1084,
+          1085,
+          1086,
+          1087,
+          1088,
+          1089,
+          1090
+        ],
+        "start_xyz": [
+          2050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          2350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "midsurface gap 5 mm; physical gap 0"
+    },
+    {
+      "semantic_id": "TC003_W01",
+      "weld_type": "T",
+      "source_component": "TC003_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC003_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC003_SRC_WEB",
+        "expected_node_ids": [
+          1888,
+          1889,
+          1890,
+          1891,
+          1892,
+          1893,
+          1894,
+          1895,
+          1896,
+          1897,
+          1898,
+          1899,
+          1900,
+          1901,
+          1902,
+          1903,
+          1904,
+          1905,
+          1906,
+          1907,
+          1908,
+          1909,
+          1910,
+          1911,
+          1912,
+          1913,
+          1914,
+          1915,
+          1916,
+          1917,
+          1918
+        ],
+        "start_xyz": [
+          4050.0,
+          0.0,
+          7.0
+        ],
+        "end_xyz": [
+          4350.0,
+          0.0,
+          7.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "top skin = node 0 + ZOFFS 2 + t/2 5 = 7"
+    },
+    {
+      "semantic_id": "TC004_W01",
+      "weld_type": "T",
+      "source_component": "TC004_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC004_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC004_SRC_WEB",
+        "expected_node_ids": [
+          2716,
+          2717,
+          2718,
+          2719,
+          2720,
+          2721,
+          2722,
+          2723,
+          2724,
+          2725,
+          2726,
+          2727,
+          2728,
+          2729,
+          2730,
+          2731,
+          2732,
+          2733,
+          2734,
+          2735,
+          2736,
+          2737,
+          2738,
+          2739,
+          2740,
+          2741,
+          2742,
+          2743,
+          2744,
+          2745,
+          2746
+        ],
+        "start_xyz": [
+          6050.0,
+          0.0,
+          3.0
+        ],
+        "end_xyz": [
+          6350.0,
+          0.0,
+          3.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "top skin = node 0 - 2 + 5 = 3"
+    },
+    {
+      "semantic_id": "TC005_W01",
+      "weld_type": "T",
+      "source_component": "TC005_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC005_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC005_SRC_WEB",
+        "expected_node_ids": [
+          3544,
+          3545,
+          3546,
+          3547,
+          3548,
+          3549,
+          3550,
+          3551,
+          3552,
+          3553,
+          3554,
+          3555,
+          3556,
+          3557,
+          3558,
+          3559,
+          3560,
+          3561,
+          3562,
+          3563,
+          3564,
+          3565,
+          3566,
+          3567,
+          3568,
+          3569,
+          3570,
+          3571,
+          3572,
+          3573,
+          3574
+        ],
+        "start_xyz": [
+          8050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          8350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "normal sign is irrelevant for the 90 deg T"
+    },
+    {
+      "semantic_id": "TC006_W01",
+      "weld_type": "T",
+      "source_component": "TC006_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC006_TGT_B_A",
+        "TC006_TGT_B_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [
+        {
+          "component": "TC006_TGT_B_A",
+          "s0": 0.0,
+          "s1": 150.0
+        },
+        {
+          "component": "TC006_TGT_B_B",
+          "s0": 150.0,
+          "s1": 300.0
+        }
+      ],
+      "source_path": {
+        "component": "TC006_SRC_WEB",
+        "expected_node_ids": [
+          4383,
+          4384,
+          4385,
+          4386,
+          4387,
+          4388,
+          4389,
+          4390,
+          4391,
+          4392,
+          4393,
+          4394,
+          4395,
+          4396,
+          4397,
+          4398,
+          4399,
+          4400,
+          4401,
+          4402,
+          4403,
+          4404,
+          4405,
+          4406,
+          4407,
+          4408,
+          4409,
+          4410,
+          4411,
+          4412,
+          4413
+        ],
+        "start_xyz": [
+          10050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          10350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "B 0-200, C 200-400, shared boundary at X=200"
+    },
+    {
+      "semantic_id": "TC007_W01",
+      "weld_type": "T",
+      "source_component": "TC007_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC007_TGT_B_A",
+        "TC007_TGT_B_B",
+        "TC007_TGT_B_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [
+        {
+          "component": "TC007_TGT_B_A",
+          "s0": 0.0,
+          "s1": 100.0
+        },
+        {
+          "component": "TC007_TGT_B_B",
+          "s0": 100.0,
+          "s1": 220.0
+        },
+        {
+          "component": "TC007_TGT_B_C",
+          "s0": 220.0,
+          "s1": 320.0
+        }
+      ],
+      "source_path": {
+        "component": "TC007_SRC_WEB",
+        "expected_node_ids": [
+          5233,
+          5234,
+          5235,
+          5236,
+          5237,
+          5238,
+          5239,
+          5240,
+          5241,
+          5242,
+          5243,
+          5244,
+          5245,
+          5246,
+          5247,
+          5248,
+          5249,
+          5250,
+          5251,
+          5252,
+          5253,
+          5254,
+          5255,
+          5256,
+          5257,
+          5258,
+          5259,
+          5260,
+          5261,
+          5262,
+          5263,
+          5264,
+          5265
+        ],
+        "start_xyz": [
+          12040.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          12360.0,
+          0.0,
+          5.0
+        ],
+        "length": 320.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "targets 0-140 / 140-260 / 260-400; web 40-360"
+    },
+    {
+      "semantic_id": "TC008_W01",
+      "weld_type": "T",
+      "source_component": "TC008_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "PARTIAL_COVERAGE"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS",
+        "BRIDGED_SMALL_GAP"
+      ],
+      "target_components": [
+        "TC008_TGT_B_B",
+        "TC008_TGT_B_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC008_SRC_WEB",
+        "expected_node_ids": [
+          6094,
+          6095,
+          6096,
+          6097,
+          6098,
+          6099,
+          6100,
+          6101,
+          6102,
+          6103,
+          6104,
+          6105,
+          6106,
+          6107,
+          6108,
+          6109,
+          6110,
+          6111,
+          6112,
+          6113,
+          6114,
+          6115,
+          6116,
+          6117,
+          6118,
+          6119,
+          6120,
+          6121,
+          6122,
+          6123,
+          6124
+        ],
+        "start_xyz": [
+          14050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          14350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "1.0 mm element-free void splits the path into two partial REVIEW runs"
+    },
+    {
+      "semantic_id": "TC009_W01",
+      "weld_type": "T",
+      "source_component": "TC009_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_GAP"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC009_TGT_B_B",
+        "TC009_TGT_B_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC009_SRC_WEB",
+        "expected_node_ids": [
+          6911,
+          6912,
+          6913,
+          6914,
+          6915,
+          6916,
+          6917,
+          6918,
+          6919,
+          6920,
+          6921,
+          6922,
+          6923,
+          6924,
+          6925,
+          6926,
+          6927,
+          6928,
+          6929,
+          6930,
+          6931,
+          6932,
+          6933,
+          6934,
+          6935,
+          6936,
+          6937,
+          6938,
+          6939,
+          6940,
+          6941
+        ],
+        "start_xyz": [
+          16050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          16350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "gap 180..220 = 40 mm; two REVIEW runs must not merge into AUTO"
+    },
+    {
+      "semantic_id": "TC010_W01",
+      "weld_type": "T",
+      "source_component": "TC010_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "HOLE_INTERRUPTION"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC010_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC010_SRC_WEB",
+        "expected_node_ids": [
+          7728,
+          7729,
+          7730,
+          7731,
+          7732,
+          7733,
+          7734,
+          7735,
+          7736,
+          7737,
+          7738,
+          7739,
+          7740,
+          7741,
+          7742,
+          7743,
+          7744,
+          7745,
+          7746,
+          7747,
+          7748,
+          7749,
+          7750,
+          7751,
+          7752,
+          7753,
+          7754,
+          7755,
+          7756,
+          7757,
+          7758
+        ],
+        "start_xyz": [
+          18050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          18350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "40 mm element-free full-width void splits one component into two islands; current V2 labels it HOLE_INTERRUPTION (taxonomy note, decision REVIEW is the gate)"
+    },
+    {
+      "semantic_id": "TC011_W01",
+      "weld_type": "T",
+      "source_component": "TC011_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "HOLE_INTERRUPTION",
+        "TARGET_GAP"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC011_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC011_SRC_WEB",
+        "expected_node_ids": [
+          8556,
+          8557,
+          8558,
+          8559,
+          8560,
+          8561,
+          8562,
+          8563,
+          8564,
+          8565,
+          8566,
+          8567,
+          8568,
+          8569,
+          8570,
+          8571,
+          8572,
+          8573,
+          8574,
+          8575,
+          8576,
+          8577,
+          8578,
+          8579,
+          8580,
+          8581,
+          8582,
+          8583,
+          8584,
+          8585,
+          8586
+        ],
+        "start_xyz": [
+          20050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          20350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "hole X=180..220, Y=-25..25; two supported runs with an explicit hole between"
+    },
+    {
+      "semantic_id": "TC012_W01",
+      "weld_type": "T",
+      "source_component": "TC012_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "HOLE_INTERRUPTION",
+        "TARGET_GAP"
+      ],
+      "forbidden_reason_codes": [
+        "BRIDGED_SMALL_GAP",
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC012_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC012_SRC_WEB",
+        "expected_node_ids": [
+          10014,
+          10015,
+          10016,
+          10017,
+          10018,
+          10019,
+          10020,
+          10021,
+          10022,
+          10023,
+          10024,
+          10025,
+          10026,
+          10027,
+          10028,
+          10029,
+          10030,
+          10031,
+          10032,
+          10033,
+          10034,
+          10035,
+          10036,
+          10037,
+          10038,
+          10039,
+          10040,
+          10041,
+          10042,
+          10043,
+          10044
+        ],
+        "start_xyz": [
+          22050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          22350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "slot X=195..205 across Y=-80..80; the recognizer must not bridge a hole like a 1 mm component gap"
+    },
+    {
+      "semantic_id": "TC013_W01",
+      "weld_type": "T",
+      "source_component": "TC013_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC013_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC013_SRC_WEB",
+        "expected_node_ids": [
+          10732,
+          10733,
+          10734,
+          10735,
+          10736,
+          10737,
+          10738,
+          10739,
+          10740,
+          10741,
+          10742,
+          10743,
+          10744,
+          10745,
+          10746,
+          10747,
+          10748,
+          10749,
+          10750,
+          10751,
+          10752,
+          10753,
+          10754,
+          10755,
+          10756,
+          10757,
+          10758,
+          10759,
+          10760,
+          10761,
+          10762,
+          10763,
+          10764,
+          10765,
+          10766,
+          10767,
+          10768,
+          10769,
+          10770,
+          10771,
+          10772
+        ],
+        "start_xyz": [
+          24000.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          24400.0,
+          0.0,
+          5.0
+        ],
+        "length": 400.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2 extracts the correct X=100..300 subchain but downgrades it to REVIEW/PARTIAL_COVERAGE because parent-chain coverage is gated before subchain selection. Spec expects the perfect middle to AUTO.",
+      "note": "subchain X=100..300 is geometrically perfect; endpoint discretization tolerance allowed"
+    },
+    {
+      "semantic_id": "TC014_W01",
+      "weld_type": "T",
+      "source_component": "TC014_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC014_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC014_SRC_WEB",
+        "expected_node_ids": [
+          11454,
+          11455,
+          11456,
+          11457,
+          11458,
+          11459,
+          11460,
+          11461,
+          11462,
+          11463,
+          11464,
+          11465,
+          11466,
+          11467,
+          11468,
+          11469,
+          11470,
+          11471,
+          11472,
+          11473,
+          11474,
+          11475,
+          11476,
+          11477,
+          11478,
+          11479,
+          11480,
+          11481,
+          11482,
+          11483,
+          11484
+        ],
+        "start_xyz": [
+          26050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          26350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "many source samples fall inside 100x100 target quads away from nodes"
+    },
+    {
+      "semantic_id": "TC015_W01",
+      "weld_type": "T",
+      "source_component": "TC015_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC015_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC015_SRC_WEB",
+        "expected_node_ids": [
+          12912,
+          12913,
+          12914,
+          12915,
+          12916,
+          12917
+        ],
+        "start_xyz": [
+          28050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          28350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "long source edges must be re-sampled internally"
+    },
+    {
+      "semantic_id": "TC016_W01",
+      "weld_type": "T",
+      "source_component": "TC016_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC016_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC016_SRC_WEB",
+        "expected_node_ids": [
+          13417,
+          13418,
+          13419,
+          13420,
+          13421,
+          13422,
+          13423,
+          13424,
+          13425,
+          13426,
+          13427,
+          13428,
+          13429,
+          13430,
+          13431,
+          13432,
+          13433,
+          13434,
+          13435,
+          13436,
+          13437,
+          13438,
+          13439,
+          13440,
+          13441,
+          13442,
+          13443,
+          13444,
+          13445,
+          13446,
+          13447
+        ],
+        "start_xyz": [
+          30050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          30350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "rows 10..12 (X 200..260) are split into CTRIA3 across the full width"
+    },
+    {
+      "semantic_id": "TC017_W01",
+      "weld_type": "T",
+      "source_component": "TC017_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "VARIABLE_THICKNESS_UNCERTAIN"
+      ],
+      "target_components": [
+        "TC017_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC017_SRC_WEB",
+        "expected_node_ids": [
+          14245,
+          14246,
+          14247,
+          14248,
+          14249,
+          14250,
+          14251,
+          14252,
+          14253,
+          14254,
+          14255,
+          14256,
+          14257,
+          14258,
+          14259,
+          14260,
+          14261,
+          14262,
+          14263,
+          14264,
+          14265,
+          14266,
+          14267,
+          14268,
+          14269,
+          14270,
+          14271,
+          14272,
+          14273,
+          14274,
+          14275,
+          14276
+        ],
+        "start_xyz": [
+          32045.0,
+          0.0,
+          4.45
+        ],
+        "end_xyz": [
+          32355.0,
+          0.0,
+          7.55
+        ],
+        "length": 310.0155
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "target top skin rises 4 mm (X=0) to 8 mm (X=400); web bottom follows exactly"
+    },
+    {
+      "semantic_id": "TC018_W01",
+      "weld_type": "T",
+      "source_component": "TC018_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC018_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC018_SRC_WEB",
+        "expected_node_ids": [
+          15148,
+          15149,
+          15150,
+          15151,
+          15152,
+          15153,
+          15154,
+          15155,
+          15156,
+          15157,
+          15158,
+          15159,
+          15160,
+          15161,
+          15162,
+          15163,
+          15164,
+          15165,
+          15166,
+          15167,
+          15168,
+          15169,
+          15170,
+          15171,
+          15172,
+          15173,
+          15174,
+          15175,
+          15176,
+          15177,
+          15178,
+          15179
+        ],
+        "start_xyz": [
+          34045.0,
+          0.0,
+          5.061803398874989
+        ],
+        "end_xyz": [
+          34355.0,
+          0.0,
+          5.076536686473018
+        ],
+        "length": 310.00014
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2's physical-skin projection uses an absolute tangential tolerance; a web sample that lands near an element crease column of a warped target micro-misses and can split an otherwise perfect chain. Tuned amplitude/phase avoid it only up to ~0.2 mm; a robust fix must use a geometry-relative tangential tolerance.",
+      "note": "warp +/-0.2 mm, crest placed between target element columns"
+    },
+    {
+      "semantic_id": "TC019_W01",
+      "weld_type": "T",
+      "source_component": "TC019_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "CURVED_TARGET"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC019_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC019_SRC_WEB",
+        "expected_node_ids": [
+          16019,
+          16020,
+          16021,
+          16022,
+          16023,
+          16024,
+          16025,
+          16026,
+          16027,
+          16028,
+          16029,
+          16030,
+          16031,
+          16032,
+          16033,
+          16034,
+          16035,
+          16036,
+          16037,
+          16038,
+          16039,
+          16040,
+          16041,
+          16042,
+          16043,
+          16044,
+          16045,
+          16046,
+          16047,
+          16048,
+          16049,
+          16050
+        ],
+        "start_xyz": [
+          36045.0,
+          0.0,
+          14.055872182145663
+        ],
+        "end_xyz": [
+          36355.0,
+          0.0,
+          14.055872182145663
+        ],
+        "length": 311.551663
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "R=900 arc; cumulative normal change ~20 deg; skin error stays small"
+    },
+    {
+      "semantic_id": "TC020_W01",
+      "weld_type": "T",
+      "source_component": "TC020_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "CURVED_TARGET"
+      ],
+      "target_components": [
+        "TC020_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC020_SRC_WEB",
+        "expected_node_ids": [
+          16986,
+          16987,
+          16988,
+          16989,
+          16990,
+          16991,
+          16992,
+          16993,
+          16994,
+          16995,
+          16996,
+          16997,
+          16998,
+          16999,
+          17000,
+          17001,
+          17002,
+          17003,
+          17004,
+          17005,
+          17006,
+          17007,
+          17008,
+          17009,
+          17010,
+          17011,
+          17012,
+          17013,
+          17014,
+          17015,
+          17016,
+          17017
+        ],
+        "start_xyz": [
+          38045.0,
+          0.0,
+          7.424020184761957
+        ],
+        "end_xyz": [
+          38355.0,
+          0.0,
+          7.424020184761957
+        ],
+        "length": 310.113979
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "R=3300 arc; cumulative normal change ~6 deg, inside the AUTO curvature band"
+    },
+    {
+      "semantic_id": "TC021_W01",
+      "weld_type": "T",
+      "source_component": "TC021_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "ANGLE_BORDERLINE"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC021_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC021_SRC_WEB",
+        "expected_node_ids": [
+          17857,
+          17858,
+          17859,
+          17860,
+          17861,
+          17862,
+          17863,
+          17864,
+          17865,
+          17866,
+          17867,
+          17868,
+          17869,
+          17870,
+          17871,
+          17872,
+          17873,
+          17874,
+          17875,
+          17876,
+          17877,
+          17878,
+          17879,
+          17880,
+          17881,
+          17882,
+          17883,
+          17884,
+          17885,
+          17886,
+          17887
+        ],
+        "start_xyz": [
+          40050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          40350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "source plane 20 deg from vertical, bottom still on the target top skin"
+    },
+    {
+      "semantic_id": "TC022_W01",
+      "weld_type": "T",
+      "source_component": "TC022_SRC_WEB",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC022_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "55 deg is outside the review band; no T candidate should be emitted"
+    },
+    {
+      "semantic_id": "TC023_W01",
+      "weld_type": "T",
+      "source_component": "TC023_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_AMBIGUITY"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC023_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC023_SRC_WEB",
+        "expected_node_ids": [
+          19744,
+          19745,
+          19746,
+          19747,
+          19748,
+          19749,
+          19750,
+          19751,
+          19752,
+          19753,
+          19754,
+          19755,
+          19756,
+          19757,
+          19758,
+          19759,
+          19760,
+          19761,
+          19762,
+          19763,
+          19764,
+          19765,
+          19766,
+          19767,
+          19768,
+          19769,
+          19770,
+          19771,
+          19772,
+          19773,
+          19774
+        ],
+        "start_xyz": [
+          44050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          44350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "B top skin 5.0, C top skin 5.4; both within the search radius"
+    },
+    {
+      "semantic_id": "TC024_W01",
+      "weld_type": "T",
+      "source_component": "TC024_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC024_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC024_SRC_WEB",
+        "expected_node_ids": [
+          20803,
+          20804,
+          20805,
+          20806,
+          20807,
+          20808,
+          20809,
+          20810,
+          20811,
+          20812,
+          20813,
+          20814,
+          20815,
+          20816,
+          20817,
+          20818,
+          20819,
+          20820,
+          20821,
+          20822,
+          20823,
+          20824,
+          20825,
+          20826,
+          20827,
+          20828,
+          20829,
+          20830,
+          20831,
+          20832,
+          20833
+        ],
+        "start_xyz": [
+          46050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          46350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2 REVIEWs when any sample also sees the 8 mm distractor inside the broad search radius (ambiguity margin). Spec expects AUTO on B.",
+      "note": "B error ~0; C error ~8 mm but still inside the broad search radius"
+    },
+    {
+      "semantic_id": "TC025_W01",
+      "weld_type": "T",
+      "source_component": "TC025_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_AMBIGUITY"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC025_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC025_SRC_WEB",
+        "expected_node_ids": [
+          21862,
+          21863,
+          21864,
+          21865,
+          21866,
+          21867,
+          21868,
+          21869,
+          21870,
+          21871,
+          21872,
+          21873,
+          21874,
+          21875,
+          21876,
+          21877,
+          21878,
+          21879,
+          21880,
+          21881,
+          21882,
+          21883,
+          21884,
+          21885,
+          21886,
+          21887,
+          21888,
+          21889,
+          21890,
+          21891,
+          21892
+        ],
+        "start_xyz": [
+          48050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          48350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "B and C coincide exactly; V2 REVIEWs the seam toward B and lists the coincident duplicate C only in a separate PATCH_SEAM REVIEW row, so the physical stack is never AUTO-welded even though one T row names a single target"
+    },
+    {
+      "semantic_id": "TC026_W01",
+      "weld_type": "T",
+      "source_component": "TC026_SAME",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC026_SAME"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "web island and target island share one component; the recognizer must not AUTO a self-T"
+    },
+    {
+      "semantic_id": "TC027_W01",
+      "weld_type": "T",
+      "source_component": "TC027_SRC_PLATE",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "INNER_BOUNDARY_SOURCE"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC027_TGT_SHELF"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC027_SRC_PLATE",
+        "expected_node_ids": [
+          23471,
+          23472,
+          23473,
+          23474,
+          23475,
+          23476,
+          23477,
+          23478,
+          23479,
+          23480,
+          23481,
+          23482,
+          23483,
+          23484,
+          23485,
+          23486,
+          23487
+        ],
+        "start_xyz": [
+          52120.0,
+          0.0,
+          55.0
+        ],
+        "end_xyz": [
+          52280.0,
+          0.0,
+          55.0
+        ],
+        "length": 160.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "top slot rim at z=55 lies exactly on the shelf top skin.  The edge is an inner boundary of a closed slot, so it must not be AUTO welded."
+    },
+    {
+      "semantic_id": "TC027_W02",
+      "weld_type": "T",
+      "source_component": "TC027_SRC_PLATE",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "INNER_BOUNDARY_SOURCE"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC027_TGT_SHELF"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC027_SRC_PLATE",
+        "expected_node_ids": [
+          23389,
+          23390,
+          23391,
+          23392,
+          23393,
+          23394,
+          23395,
+          23396,
+          23397,
+          23398,
+          23399,
+          23400,
+          23401,
+          23402,
+          23403,
+          23404,
+          23405
+        ],
+        "start_xyz": [
+          52120.0,
+          0.0,
+          45.0
+        ],
+        "end_xyz": [
+          52280.0,
+          0.0,
+          45.0
+        ],
+        "length": 160.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "bottom slot rim at z=45 lies exactly on the shelf bottom skin; same inner-boundary policy."
+    },
+    {
+      "semantic_id": "TC028_W01",
+      "weld_type": "T",
+      "source_component": "TC028_SRC_BRANCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC028_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC028_SRC_BRANCH",
+        "expected_node_ids": [
+          24619,
+          24620,
+          24621,
+          24622,
+          24623,
+          24624,
+          24625,
+          24626,
+          24627,
+          24628,
+          24629,
+          24630,
+          24631,
+          24632,
+          24633
+        ],
+        "start_xyz": [
+          54050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          54190.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "clean run x=50..190 ending at the folded-fin zone; the boundary forks there so the run is a legitimate independent weld, not part of one long chain"
+    },
+    {
+      "semantic_id": "TC028_W02",
+      "weld_type": "T",
+      "source_component": "TC028_SRC_BRANCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC028_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC028_SRC_BRANCH",
+        "expected_node_ids": [
+          24635,
+          24636,
+          24637,
+          24638,
+          24639,
+          24640,
+          24641,
+          24642,
+          24643,
+          24644,
+          24645,
+          24646,
+          24647,
+          24648,
+          24649
+        ],
+        "start_xyz": [
+          54210.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          54350.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "clean run x=210..350 after the branch zone; same reasoning as W01"
+    },
+    {
+      "semantic_id": "TC029_W01",
+      "weld_type": "T",
+      "source_component": "TC029_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "SHORT_WELD"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC029_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC029_SRC_WEB",
+        "expected_node_ids": [
+          25170,
+          25171
+        ],
+        "start_xyz": [
+          56100.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          56114.0,
+          0.0,
+          5.0
+        ],
+        "length": 14.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "a 14 mm perfect edge is below the minimum automatic seam length but above the review floor"
+    },
+    {
+      "semantic_id": "TC030_W01",
+      "weld_type": "T",
+      "source_component": "TC030_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_GAP",
+        "PROJECTION_JUMP"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC030_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC030_SRC_WEB",
+        "expected_node_ids": [
+          25690,
+          25692,
+          25694,
+          25696,
+          25698,
+          25700,
+          25702,
+          25704,
+          25706,
+          25708,
+          25710,
+          25712,
+          25714,
+          25716,
+          25718
+        ],
+        "start_xyz": [
+          58050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          58190.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint.",
+      "note": "B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190"
+    },
+    {
+      "semantic_id": "TC030_W02",
+      "weld_type": "T",
+      "source_component": "TC030_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "PARTIAL_COVERAGE",
+        "PROJECTION_JUMP"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC030_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC030_SRC_WEB",
+        "expected_node_ids": [
+          25722,
+          25724,
+          25726,
+          25728,
+          25730,
+          25732,
+          25734,
+          25736,
+          25738,
+          25740,
+          25742,
+          25744,
+          25746,
+          25748,
+          25750
+        ],
+        "start_xyz": [
+          58210.0,
+          0.0,
+          15.0
+        ],
+        "end_xyz": [
+          58350.0,
+          0.0,
+          15.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350"
+    },
+    {
+      "semantic_id": "TC031_W01",
+      "weld_type": "T",
+      "source_component": "TC031_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC031_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC031_SRC_WEB",
+        "expected_node_ids": [
+          26239,
+          26240,
+          26241,
+          26242,
+          26243,
+          26244,
+          26245,
+          26246,
+          26247,
+          26248,
+          26249,
+          26250,
+          26251,
+          26252,
+          26253,
+          26254,
+          26255,
+          26256,
+          26257,
+          26258,
+          26259,
+          26260,
+          26261,
+          26262,
+          26263,
+          26264,
+          26265,
+          26266,
+          26267,
+          26268,
+          26269
+        ],
+        "start_xyz": [
+          60050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          60350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the top band is wound with reversed normals; the flush bottom run at z=5 is a perfect T and the recognizer's orientation recovery must keep it AUTO"
+    },
+    {
+      "semantic_id": "TC032_W01",
+      "weld_type": "T",
+      "source_component": "TC032_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC032_TGT_PLANE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC032_SRC_WEB",
+        "expected_node_ids": [
+          26885,
+          26886,
+          26887,
+          26888,
+          26889,
+          26890,
+          26891,
+          26892,
+          26893,
+          26894,
+          26895,
+          26896,
+          26897,
+          26898,
+          26899,
+          26900,
+          26901,
+          26902,
+          26903,
+          26904,
+          26905,
+          26906,
+          26907,
+          26908,
+          26909,
+          26910,
+          26911,
+          26912,
+          26913,
+          26914,
+          26915
+        ],
+        "start_xyz": [
+          62050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          62350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the plane is one component whose Y=40..80 strip is wound -Z while the weld samples (Y=0) stay on +Z facets; one continuous flush seam"
+    },
+    {
+      "semantic_id": "TC033_W01",
+      "weld_type": "T",
+      "source_component": "TC033_SRC_FLUSH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC033_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC033_SRC_FLUSH",
+        "expected_node_ids": [
+          27434,
+          27435,
+          27436,
+          27437,
+          27438,
+          27439,
+          27440,
+          27441,
+          27442,
+          27443,
+          27444,
+          27445,
+          27446,
+          27447
+        ],
+        "start_xyz": [
+          64050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          64180.0,
+          0.0,
+          5.0
+        ],
+        "length": 130.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush bottom run, perfect T"
+    },
+    {
+      "semantic_id": "TC033_W02",
+      "weld_type": "T",
+      "source_component": "TC033_SRC_PROUD",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "SKIN_ERROR_BORDERLINE"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC033_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC033_SRC_PROUD",
+        "expected_node_ids": [
+          27462,
+          27463,
+          27464,
+          27465,
+          27466,
+          27467,
+          27468,
+          27469,
+          27470,
+          27471,
+          27472,
+          27473,
+          27474,
+          27475
+        ],
+        "start_xyz": [
+          64220.0,
+          0.0,
+          9.0
+        ],
+        "end_xyz": [
+          64350.0,
+          0.0,
+          9.0
+        ],
+        "length": 130.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "bottom 4 mm above the skin: physically not a weld, must be routed to REVIEW (SKIN_ERROR_BORDERLINE) at most, never AUTO"
+    },
+    {
+      "semantic_id": "TC034_W01",
+      "weld_type": "T",
+      "source_component": "TC034_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC034_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC034_SRC_WEB",
+        "expected_node_ids": [
+          27812,
+          27813,
+          27814,
+          27815,
+          27816,
+          27817,
+          27818,
+          27819,
+          27820,
+          27821,
+          27822,
+          27823,
+          27824,
+          27825,
+          27826,
+          27827,
+          27828,
+          27829,
+          27830,
+          27831,
+          27832,
+          27833,
+          27834,
+          27835,
+          27836,
+          27837,
+          27838,
+          27839,
+          27840,
+          27841,
+          27842
+        ],
+        "start_xyz": [
+          66050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          66350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "x spacings alternate 5/15 mm while the target uses h=40; the chain is one continuous flush seam and must stay one AUTO row"
+    },
+    {
+      "semantic_id": "TC035_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC035_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC035_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC035_PATCH",
+        "expected_node_ids": [
+          28229,
+          28230,
+          28231,
+          28232,
+          28233,
+          28238,
+          28243,
+          28248,
+          28247,
+          28246,
+          28245,
+          28244,
+          28239,
+          28234
+        ],
+        "start_xyz": [
+          68080.0,
+          -15.0,
+          10.0
+        ],
+        "end_xyz": [
+          68080.0,
+          -5.0,
+          10.0
+        ],
+        "length": 130.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "40x30 patch plate 2 mm above the base top skin, fully inside its footprint"
+    },
+    {
+      "semantic_id": "TC036_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC036_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC036_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC036_PATCH",
+        "expected_node_ids": [
+          28604,
+          28605,
+          28606,
+          28607,
+          28608,
+          28609,
+          28610,
+          28611,
+          28612,
+          28621,
+          28630,
+          28639,
+          28648,
+          28657,
+          28666,
+          28675,
+          28684,
+          28683,
+          28682,
+          28681,
+          28680,
+          28679,
+          28678,
+          28677,
+          28676,
+          28667,
+          28658,
+          28649,
+          28640,
+          28631,
+          28622,
+          28613
+        ],
+        "start_xyz": [
+          70060.0,
+          -40.0,
+          10.0
+        ],
+        "end_xyz": [
+          70060.0,
+          -30.0,
+          10.0
+        ],
+        "length": 310.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "outer 80x80 frame ring fully inside the base footprint: its perimeter is the real patch seam and may AUTO"
+    },
+    {
+      "semantic_id": "TC037_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC037_TILT",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC037_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "plate 35 deg from parallel and from perpendicular: no patch, no T"
+    },
+    {
+      "semantic_id": "TC038_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC038_PATCH",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC038_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC038_PATCH",
+        "expected_node_ids": [
+          29415,
+          29416,
+          29417,
+          29418,
+          29419,
+          29420,
+          29421,
+          29422,
+          29423,
+          29424,
+          29425,
+          29426,
+          29427,
+          29428,
+          29429,
+          29430,
+          29431,
+          29432,
+          29433,
+          29434,
+          29435,
+          29436,
+          29437,
+          29460,
+          29483,
+          29506,
+          29529,
+          29552,
+          29575,
+          29598,
+          29621,
+          29620,
+          29619,
+          29618,
+          29617,
+          29616,
+          29615,
+          29614,
+          29613,
+          29612,
+          29611,
+          29610,
+          29609,
+          29608,
+          29607,
+          29606,
+          29605,
+          29604,
+          29603,
+          29602,
+          29601,
+          29600,
+          29599,
+          29576,
+          29553,
+          29530,
+          29507,
+          29484,
+          29461,
+          29438
+        ],
+        "start_xyz": [
+          74100.0,
+          -40.0,
+          10.0
+        ],
+        "end_xyz": [
+          74100.0,
+          -30.0,
+          10.0
+        ],
+        "length": 590.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "patch x=100..320 extends past the base x=200 edge; partial containment must review"
+    },
+    {
+      "semantic_id": "TC039_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC039_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC039_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC039_PATCH",
+        "expected_node_ids": [
+          29977,
+          29978,
+          29979,
+          29980,
+          29981,
+          29986,
+          29991,
+          29996,
+          29995,
+          29994,
+          29993,
+          29992,
+          29987,
+          29982
+        ],
+        "start_xyz": [
+          76080.0,
+          -15.0,
+          10.0
+        ],
+        "end_xyz": [
+          76080.0,
+          -5.0,
+          10.0
+        ],
+        "length": 130.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "same physical stack as TC035 but the patch is wound -Z; orientation recovery must treat the parallel contained plate as the real seam it is"
+    },
+    {
+      "semantic_id": "TC040_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC040_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC040_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC040_PATCH",
+        "expected_node_ids": [
+          30352,
+          30353,
+          30354,
+          30355,
+          30356,
+          30357,
+          30358,
+          30359,
+          30360,
+          30361,
+          30362,
+          30363,
+          30364,
+          30365,
+          30366,
+          30367,
+          30368,
+          30385,
+          30402,
+          30419,
+          30436,
+          30453,
+          30470,
+          30487,
+          30504,
+          30521,
+          30538,
+          30555,
+          30572,
+          30571,
+          30570,
+          30569,
+          30568,
+          30567,
+          30566,
+          30565,
+          30564,
+          30563,
+          30562,
+          30561,
+          30560,
+          30559,
+          30558,
+          30557,
+          30556,
+          30539,
+          30522,
+          30505,
+          30488,
+          30471,
+          30454,
+          30437,
+          30420,
+          30403,
+          30386,
+          30369
+        ],
+        "start_xyz": [
+          77920.0,
+          -60.0,
+          10.0
+        ],
+        "end_xyz": [
+          77920.0,
+          -50.0,
+          10.0
+        ],
+        "length": 550.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "medium plate 160x120 fully inside the base at 2 mm skin gap: clean patch"
+    },
+    {
+      "semantic_id": "TC040_W02",
+      "weld_type": "PATCH",
+      "source_component": "TC040_L1_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC040_PATCH"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC040_L1_PATCH",
+        "expected_node_ids": [
+          30573,
+          30574,
+          30575,
+          30576,
+          30577,
+          30578,
+          30579,
+          30586,
+          30593,
+          30600,
+          30607,
+          30614,
+          30613,
+          30612,
+          30611,
+          30610,
+          30609,
+          30608,
+          30601,
+          30594,
+          30587,
+          30580
+        ],
+        "start_xyz": [
+          77970.0,
+          -25.0,
+          20.0
+        ],
+        "end_xyz": [
+          77970.0,
+          -15.0,
+          20.0
+        ],
+        "length": 210.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "small plate 60x50 fully inside the medium plate: its nearest skin is the medium plate, so the base must not steal this interface"
+    },
+    {
+      "semantic_id": "TC041_W01",
+      "weld_type": "T",
+      "source_component": "TC041_SRC_STIFF",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC041_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC041_SRC_STIFF",
+        "expected_node_ids": [
+          31102,
+          31103,
+          31104,
+          31105,
+          31106,
+          31107,
+          31108,
+          31109,
+          31110,
+          31111,
+          31112,
+          31113,
+          31114,
+          31115,
+          31116
+        ],
+        "start_xyz": [
+          80080.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          80220.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the stiffener's bottom chain is a clean flush T on the base"
+    },
+    {
+      "semantic_id": "TC041_W02",
+      "weld_type": "T",
+      "source_component": "TC041_SRC_STIFF",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC041_SRC_DOUBLER"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC041_SRC_STIFF",
+        "expected_node_ids": [
+          31117,
+          31118,
+          31119,
+          31120,
+          31121,
+          31122,
+          31123,
+          31124,
+          31125,
+          31126,
+          31127,
+          31128,
+          31129,
+          31130,
+          31131
+        ],
+        "start_xyz": [
+          80080.0,
+          0.0,
+          105.0
+        ],
+        "end_xyz": [
+          80220.0,
+          0.0,
+          105.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the stiffener's top edge (z=105) stands 2 mm under the doubler bottom skin (z=107): a genuine weld-on-weld seam whose realisation depends on W01"
+    },
+    {
+      "semantic_id": "TC041_W03",
+      "weld_type": "PATCH",
+      "source_component": "TC041_SRC_DOUBLER",
+      "expected_decision": "REJECT",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC041_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": null,
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "doubler bottom skin z=107, base top skin z=5: ~102 mm of air.  Nothing in the raw input supports a doubler->base seam, so the detector must not emit one"
+    },
+    {
+      "semantic_id": "TC042_W01",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_LONG",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_LONG",
+        "expected_node_ids": [
+          31775,
+          31776,
+          31777,
+          31778,
+          31779,
+          31780,
+          31781,
+          31782,
+          31783,
+          31784,
+          31785,
+          31786,
+          31787,
+          31788,
+          31789,
+          31790,
+          31791,
+          31792,
+          31793,
+          31794,
+          31795,
+          31796,
+          31797,
+          31798,
+          31799,
+          31800,
+          31801,
+          31802,
+          31803
+        ],
+        "start_xyz": [
+          82060.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          82340.0,
+          0.0,
+          5.0
+        ],
+        "length": 280.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "full-length x chain, flush on the base"
+    },
+    {
+      "semantic_id": "TC042_W02",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_CROSS",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_CROSS",
+        "expected_node_ids": [
+          31833,
+          31834,
+          31835,
+          31836,
+          31837,
+          31838,
+          31839,
+          31840,
+          31841,
+          31842
+        ],
+        "start_xyz": [
+          82240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          82240.0,
+          96.0,
+          5.0
+        ],
+        "length": 90.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "y-direction chain starting 6 mm clear of the long web, flush on the base"
+    },
+    {
+      "semantic_id": "TC042_W03",
+      "weld_type": "T",
+      "source_component": "TC042_SRC_CROSS",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "MULTI_TARGET_CONTINUOUS",
+        "TARGET_AMBIGUITY",
+        "CURVED_TARGET"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC042_TGT_BASE",
+        "TC042_SRC_LONG"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC042_SRC_CROSS",
+        "expected_node_ids": [
+          31833,
+          31843
+        ],
+        "start_xyz": [
+          82240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          82240.0,
+          6.0,
+          105.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": false,
+      "known_gap_note": "",
+      "note": "the cross web's 6 mm-short end edge stands against the long web side: a junction edge whose support is genuinely split between the long web and the base, so it must REVIEW and must not be fused into either straight leg"
+    },
+    {
+      "semantic_id": "TC044_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC044_SRC_LAP",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "WELD_TYPE_AMBIGUITY",
+        "PARTIAL_COVERAGE",
+        "HOLE_INTERRUPTION"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC044_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC044_SRC_LAP",
+        "expected_node_ids": [
+          33028,
+          33029,
+          33030,
+          33031,
+          33032,
+          33033,
+          33034,
+          33035,
+          33036,
+          33037,
+          33038,
+          33039,
+          33040,
+          33041,
+          33042,
+          33057,
+          33072,
+          33087,
+          33102,
+          33117,
+          33132,
+          33147,
+          33162,
+          33177,
+          33176,
+          33175,
+          33174,
+          33173,
+          33172,
+          33171,
+          33170,
+          33169,
+          33168,
+          33167,
+          33166,
+          33165,
+          33164,
+          33163,
+          33148,
+          33133,
+          33118,
+          33103,
+          33088,
+          33073,
+          33058,
+          33043
+        ],
+        "start_xyz": [
+          86060.0,
+          -40.0,
+          10.0
+        ],
+        "end_xyz": [
+          86060.0,
+          -20.0,
+          10.0
+        ],
+        "length": 900.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "same gap class as a real patch but the plan offset makes every loop hang outside the base footprint: never a confident AUTO"
+    },
+    {
+      "semantic_id": "TC045_W01",
+      "weld_type": "T",
+      "source_component": "TC045_SRC_DIAG",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC045_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC045_SRC_DIAG",
+        "expected_node_ids": [
+          33759,
+          33760,
+          33761,
+          33762,
+          33763,
+          33764,
+          33765,
+          33766,
+          33767,
+          33768,
+          33769,
+          33770,
+          33771,
+          33772,
+          33773,
+          33774,
+          33775,
+          33776,
+          33777,
+          33778,
+          33779
+        ],
+        "start_xyz": [
+          88120.0,
+          -40.0,
+          5.0
+        ],
+        "end_xyz": [
+          88280.0,
+          40.0,
+          5.0
+        ],
+        "length": 178.885438
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "diagonal bottom chain along y = 0.5x - 100, flush on the base skin"
+    },
+    {
+      "semantic_id": "TC047_W01",
+      "weld_type": "T",
+      "source_component": "TC047_SRC_WALL",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC047_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC047_SRC_WALL",
+        "expected_node_ids": [
+          35185,
+          35186,
+          35187,
+          35188,
+          35189,
+          35190,
+          35191,
+          35192,
+          35193,
+          35194,
+          35195,
+          35196,
+          35197,
+          35198,
+          35199
+        ],
+        "start_xyz": [
+          92060.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          92200.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "front leg along y=0, x=60..200"
+    },
+    {
+      "semantic_id": "TC047_W02",
+      "weld_type": "T",
+      "source_component": "TC047_SRC_WALL",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC047_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC047_SRC_WALL",
+        "expected_node_ids": [
+          35215,
+          35216,
+          35217,
+          35218,
+          35219,
+          35220,
+          35221,
+          35222,
+          35223,
+          35224,
+          35225,
+          35226
+        ],
+        "start_xyz": [
+          92200.0,
+          10.0,
+          5.0
+        ],
+        "end_xyz": [
+          92200.0,
+          120.0,
+          5.0
+        ],
+        "length": 110.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "side leg along x=200, y=10..120"
+    },
+    {
+      "semantic_id": "TC048_W01",
+      "weld_type": "T",
+      "source_component": "TC048_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC048_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC048_SRC_WEB",
+        "expected_node_ids": [
+          35726,
+          35727,
+          35728,
+          35729,
+          35730,
+          35731,
+          35732,
+          35733,
+          35734,
+          35735,
+          35736
+        ],
+        "start_xyz": [
+          94050.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          94150.0,
+          0.0,
+          5.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "real flush weld x=50..150"
+    },
+    {
+      "semantic_id": "TC048_W02",
+      "weld_type": "T",
+      "source_component": "TC048_SRC_BRACKET",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "SKIN_ERROR_BORDERLINE"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC048_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC048_SRC_BRACKET",
+        "expected_node_ids": [
+          35748,
+          35749,
+          35750,
+          35751,
+          35752,
+          35753,
+          35754
+        ],
+        "start_xyz": [
+          94230.0,
+          0.0,
+          9.0
+        ],
+        "end_xyz": [
+          94290.0,
+          0.0,
+          9.0
+        ],
+        "length": 60.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "bottom 4 mm above the skin, short height: a phantom 'weld' the recognizer must route to REVIEW at most"
+    }
+  ],
+  "forbidden_candidates": [
+    {
+      "source_component": "TC043_PLATE0",
+      "target_component": "TC043_PLATE1",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    },
+    {
+      "source_component": "TC043_PLATE1",
+      "target_component": "TC043_PLATE2",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    },
+    {
+      "source_component": "TC043_PLATE0",
+      "target_component": "TC043_PLATE2",
+      "severity": "FALSE_AUTO_CRITICAL",
+      "note": "closed dependency cycle: no pair in the loop may AUTO"
+    }
+  ],
+  "analytic": {
+    "TC001_standard_t.target_top_skin_z": 5.0,
+    "TC001_standard_t.source_bottom_z": 5.0,
+    "TC001_standard_t.expected_physical_gap": 0.0,
+    "TC003_positive_zoffs.target_top_skin_z": 7.0,
+    "TC004_negative_zoffs.target_top_skin_z": 3.0,
+    "TC027_source_inner_boundary.rim_z": {
+      "top": 55.0,
+      "bottom": 45.0,
+      "slot_x": [
+        120.0,
+        280.0
+      ]
+    },
+    "TC028_non_manifold_branch.zone_notes": {
+      "branch_fork_x": 200.0,
+      "occupied_zone_x": [
+        190.0,
+        210.0
+      ],
+      "expected_candidate_gap": "no candidate may span across x=190..210 where the folded fin occupies the base",
+      "branch_reason": "V2 has no NON_MANIFOLD_REGION/BOUNDARY_BRANCH reason on T rows; the seam is instead split into two independent AUTO runs"
+    },
+    "TC030_projection_jump.zone_notes": {
+      "B_skin_z": 5.0,
+      "C_skin_z": 15.0,
+      "dead_gap_x": [
+        190.0,
+        210.0
+      ],
+      "source_z": {
+        "x<=195": 5.0,
+        "x>=205": 15.0
+      }
+    },
+    "TC036_patch_small_window.inner_window": {
+      "x": [
+        80.0,
+        120.0
+      ],
+      "y": [
+        -20.0,
+        20.0
+      ],
+      "span": 40.0,
+      "expected_decision": "REVIEW",
+      "expected_reasons": [
+        "INNER_BOUNDARY_SOURCE",
+        "HOLE_INTERRUPTION"
+      ],
+      "never_auto": true,
+      "verified": "V2 emits the inner loop as a separate REVIEW row (patch_inner_loop_policy review); the runner matches the outer ring only because span grouping cannot separate concentric loops of one source component."
+    },
+    "TC041_weld_on_weld.dependencies": {
+      "TC041_W02": [
+        "TC041_W01"
+      ],
+      "note": "the doubler seam is only realisable once the stiffener seam is welded and the zone trimmed; detection still reports both physical edge-to-skin pairs"
+    },
+    "TC043_dependency_cycle.cycle": {
+      "plates": [
+        "TC043_PLATE0",
+        "TC043_PLATE1",
+        "TC043_PLATE2"
+      ],
+      "rule": "no AUTO may be emitted inside the loop; REVIEW rows are acceptable and expected because each interface is genuinely uncertain"
+    },
+    "TC046_coplanar_butt.butt": {
+      "rule": "no AUTO and no REVIEW candidate is expected between the two coplanar sheets"
+    }
+  }
+}

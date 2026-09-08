@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC013",
+  "case_kind": "atomic",
+  "purpose": "source edge overhanging the target must only use the effective middle",
+  "failure_mode": "a recognizer that welds the whole 400 mm free edge would fabricate weld in the void",
+  "decision_policy": {
+    "known_impl_gap": "parent-coverage penalty downgrades the correct subchain to REVIEW"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC013_W01",
+      "weld_type": "T",
+      "source_component": "TC013_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC013_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC013_SRC_WEB",
+        "expected_node_ids": [
+          13121,
+          13122,
+          13123,
+          13124,
+          13125,
+          13126,
+          13127,
+          13128,
+          13129,
+          13130,
+          13131,
+          13132,
+          13133,
+          13134,
+          13135,
+          13136,
+          13137,
+          13138,
+          13139,
+          13140,
+          13141,
+          13142,
+          13143,
+          13144,
+          13145,
+          13146,
+          13147,
+          13148,
+          13149,
+          13150,
+          13151,
+          13152,
+          13153,
+          13154,
+          13155,
+          13156,
+          13157,
+          13158,
+          13159,
+          13160,
+          13161
+        ],
+        "start_xyz": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          400.0,
+          0.0,
+          5.0
+        ],
+        "length": 400.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "V2 extracts the correct X=100..300 subchain but downgrades it to REVIEW/PARTIAL_COVERAGE because parent-chain coverage is gated before subchain selection. Spec expects the perfect middle to AUTO.",
+      "note": "subchain X=100..300 is geometrically perfect; endpoint discretization tolerance allowed"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC013_SRC_WEB": 33001,
+      "TC013_TGT_BASE": 33000
+    }
+  }
+}

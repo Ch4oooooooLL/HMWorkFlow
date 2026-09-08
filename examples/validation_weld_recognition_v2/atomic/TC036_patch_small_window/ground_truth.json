@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC036",
+  "case_kind": "atomic",
+  "purpose": "patch plate with a small central window",
+  "failure_mode": "a fastener-sized opening must keep its inner rim in REVIEW, never AUTO",
+  "decision_policy": {
+    "patch_small_window": "outer_ring_auto_inner_review"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC036_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC036_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC036_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC036_PATCH",
+        "expected_node_ids": [
+          36099,
+          36100,
+          36101,
+          36102,
+          36103,
+          36104,
+          36105,
+          36106,
+          36107,
+          36116,
+          36125,
+          36134,
+          36143,
+          36152,
+          36161,
+          36170,
+          36179,
+          36178,
+          36177,
+          36176,
+          36175,
+          36174,
+          36173,
+          36172,
+          36171,
+          36162,
+          36153,
+          36144,
+          36135,
+          36126,
+          36117,
+          36108
+        ],
+        "start_xyz": [
+          60.0,
+          -40.0,
+          10.0
+        ],
+        "end_xyz": [
+          60.0,
+          -30.0,
+          10.0
+        ],
+        "length": 310.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "outer 80x80 frame ring fully inside the base footprint: its perimeter is the real patch seam and may AUTO"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "inner_window": {
+      "x": [
+        80.0,
+        120.0
+      ],
+      "y": [
+        -20.0,
+        20.0
+      ],
+      "span": 40.0,
+      "expected_decision": "REVIEW",
+      "expected_reasons": [
+        "INNER_BOUNDARY_SOURCE",
+        "HOLE_INTERRUPTION"
+      ],
+      "never_auto": true,
+      "verified": "V2 emits the inner loop as a separate REVIEW row (patch_inner_loop_policy review); the runner matches the outer ring only because span grouping cannot separate concentric loops of one source component."
+    },
+    "component_names": {
+      "TC036_BASE": 56000,
+      "TC036_PATCH": 56001
+    }
+  }
+}

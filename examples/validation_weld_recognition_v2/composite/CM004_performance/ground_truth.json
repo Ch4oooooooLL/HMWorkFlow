@@ -1,0 +1,1245 @@
+{
+  "schema_version": "1.0",
+  "case_id": "CM004",
+  "case_kind": "composite",
+  "purpose": "performance strip of flush T welds",
+  "failure_mode": "30 identical flush T welds over one long base: detection must return all of them without spurious rows, in bounded time",
+  "decision_policy": {
+    "performance": true,
+    "expected_min_auto": 30
+  },
+  "welds": [
+    {
+      "semantic_id": "CM004_W_00",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_00",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          212991,
+          212992,
+          212993,
+          212994,
+          212995
+        ],
+        "component": "CM004_WEB_00",
+        "start_xyz": [
+          20.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          60.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 0"
+    },
+    {
+      "semantic_id": "CM004_W_01",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_01",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213046,
+          213047,
+          213048,
+          213049,
+          213050
+        ],
+        "component": "CM004_WEB_01",
+        "start_xyz": [
+          92.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          132.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 1"
+    },
+    {
+      "semantic_id": "CM004_W_02",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_02",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213101,
+          213102,
+          213103,
+          213104,
+          213105
+        ],
+        "component": "CM004_WEB_02",
+        "start_xyz": [
+          164.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          204.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 2"
+    },
+    {
+      "semantic_id": "CM004_W_03",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_03",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213156,
+          213157,
+          213158,
+          213159,
+          213160
+        ],
+        "component": "CM004_WEB_03",
+        "start_xyz": [
+          236.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          276.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 3"
+    },
+    {
+      "semantic_id": "CM004_W_04",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_04",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213211,
+          213212,
+          213213,
+          213214,
+          213215
+        ],
+        "component": "CM004_WEB_04",
+        "start_xyz": [
+          308.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          348.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 4"
+    },
+    {
+      "semantic_id": "CM004_W_05",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_05",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213266,
+          213267,
+          213268,
+          213269,
+          213270
+        ],
+        "component": "CM004_WEB_05",
+        "start_xyz": [
+          380.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          420.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 5"
+    },
+    {
+      "semantic_id": "CM004_W_06",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_06",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213321,
+          213322,
+          213323,
+          213324,
+          213325
+        ],
+        "component": "CM004_WEB_06",
+        "start_xyz": [
+          452.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          492.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 6"
+    },
+    {
+      "semantic_id": "CM004_W_07",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_07",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213376,
+          213377,
+          213378,
+          213379,
+          213380
+        ],
+        "component": "CM004_WEB_07",
+        "start_xyz": [
+          524.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          564.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 7"
+    },
+    {
+      "semantic_id": "CM004_W_08",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_08",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213431,
+          213432,
+          213433,
+          213434,
+          213435
+        ],
+        "component": "CM004_WEB_08",
+        "start_xyz": [
+          596.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          636.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 8"
+    },
+    {
+      "semantic_id": "CM004_W_09",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_09",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213486,
+          213487,
+          213488,
+          213489,
+          213490
+        ],
+        "component": "CM004_WEB_09",
+        "start_xyz": [
+          668.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          708.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 9"
+    },
+    {
+      "semantic_id": "CM004_W_10",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_10",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213541,
+          213542,
+          213543,
+          213544,
+          213545
+        ],
+        "component": "CM004_WEB_10",
+        "start_xyz": [
+          740.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          780.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 10"
+    },
+    {
+      "semantic_id": "CM004_W_11",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_11",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213596,
+          213597,
+          213598,
+          213599,
+          213600
+        ],
+        "component": "CM004_WEB_11",
+        "start_xyz": [
+          812.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          852.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 11"
+    },
+    {
+      "semantic_id": "CM004_W_12",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_12",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213651,
+          213652,
+          213653,
+          213654,
+          213655
+        ],
+        "component": "CM004_WEB_12",
+        "start_xyz": [
+          884.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          924.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 12"
+    },
+    {
+      "semantic_id": "CM004_W_13",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_13",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213706,
+          213707,
+          213708,
+          213709,
+          213710
+        ],
+        "component": "CM004_WEB_13",
+        "start_xyz": [
+          956.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          996.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 13"
+    },
+    {
+      "semantic_id": "CM004_W_14",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_14",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213761,
+          213762,
+          213763,
+          213764,
+          213765
+        ],
+        "component": "CM004_WEB_14",
+        "start_xyz": [
+          1028.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          1068.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 14"
+    },
+    {
+      "semantic_id": "CM004_W_15",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_15",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213816,
+          213817,
+          213818,
+          213819,
+          213820
+        ],
+        "component": "CM004_WEB_15",
+        "start_xyz": [
+          1100.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          1140.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 15"
+    },
+    {
+      "semantic_id": "CM004_W_16",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_16",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213871,
+          213872,
+          213873,
+          213874,
+          213875
+        ],
+        "component": "CM004_WEB_16",
+        "start_xyz": [
+          1172.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          1212.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 16"
+    },
+    {
+      "semantic_id": "CM004_W_17",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_17",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213926,
+          213927,
+          213928,
+          213929,
+          213930
+        ],
+        "component": "CM004_WEB_17",
+        "start_xyz": [
+          1244.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          1284.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 17"
+    },
+    {
+      "semantic_id": "CM004_W_18",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_18",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          213981,
+          213982,
+          213983,
+          213984,
+          213985
+        ],
+        "component": "CM004_WEB_18",
+        "start_xyz": [
+          1316.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          1356.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 18"
+    },
+    {
+      "semantic_id": "CM004_W_19",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_19",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214036,
+          214037,
+          214038,
+          214039,
+          214040
+        ],
+        "component": "CM004_WEB_19",
+        "start_xyz": [
+          1388.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          1428.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 19"
+    },
+    {
+      "semantic_id": "CM004_W_20",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_20",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214091,
+          214092,
+          214093,
+          214094,
+          214095
+        ],
+        "component": "CM004_WEB_20",
+        "start_xyz": [
+          1460.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          1500.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 20"
+    },
+    {
+      "semantic_id": "CM004_W_21",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_21",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214146,
+          214147,
+          214148,
+          214149,
+          214150
+        ],
+        "component": "CM004_WEB_21",
+        "start_xyz": [
+          1532.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          1572.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 21"
+    },
+    {
+      "semantic_id": "CM004_W_22",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_22",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214201,
+          214202,
+          214203,
+          214204,
+          214205
+        ],
+        "component": "CM004_WEB_22",
+        "start_xyz": [
+          1604.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          1644.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 22"
+    },
+    {
+      "semantic_id": "CM004_W_23",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_23",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214256,
+          214257,
+          214258,
+          214259,
+          214260
+        ],
+        "component": "CM004_WEB_23",
+        "start_xyz": [
+          1676.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          1716.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 23"
+    },
+    {
+      "semantic_id": "CM004_W_24",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_24",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214311,
+          214312,
+          214313,
+          214314,
+          214315
+        ],
+        "component": "CM004_WEB_24",
+        "start_xyz": [
+          1748.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          1788.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 24"
+    },
+    {
+      "semantic_id": "CM004_W_25",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_25",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214366,
+          214367,
+          214368,
+          214369,
+          214370
+        ],
+        "component": "CM004_WEB_25",
+        "start_xyz": [
+          1820.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          1860.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 25"
+    },
+    {
+      "semantic_id": "CM004_W_26",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_26",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214421,
+          214422,
+          214423,
+          214424,
+          214425
+        ],
+        "component": "CM004_WEB_26",
+        "start_xyz": [
+          1892.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          1932.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 26"
+    },
+    {
+      "semantic_id": "CM004_W_27",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_27",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214476,
+          214477,
+          214478,
+          214479,
+          214480
+        ],
+        "component": "CM004_WEB_27",
+        "start_xyz": [
+          1964.0,
+          -700.0,
+          5.0
+        ],
+        "end_xyz": [
+          2004.0,
+          -700.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 27"
+    },
+    {
+      "semantic_id": "CM004_W_28",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_28",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214531,
+          214532,
+          214533,
+          214534,
+          214535
+        ],
+        "component": "CM004_WEB_28",
+        "start_xyz": [
+          2036.0,
+          -500.0,
+          5.0
+        ],
+        "end_xyz": [
+          2076.0,
+          -500.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 28"
+    },
+    {
+      "semantic_id": "CM004_W_29",
+      "weld_type": "T",
+      "source_component": "CM004_WEB_29",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "CM004_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "expected_node_ids": [
+          214586,
+          214587,
+          214588,
+          214589,
+          214590
+        ],
+        "component": "CM004_WEB_29",
+        "start_xyz": [
+          2108.0,
+          -300.0,
+          5.0
+        ],
+        "end_xyz": [
+          2148.0,
+          -300.0,
+          5.0
+        ],
+        "length": 40.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush T strip 29"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {}
+}

@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC047",
+  "case_kind": "atomic",
+  "purpose": "wrap-around L corner weld path",
+  "failure_mode": "a weld path that turns 90 deg in plan is two straight legs of one physical wall; each leg is a clean T on the base",
+  "decision_policy": {
+    "corner_legs": "per_leg_auto"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC047_W01",
+      "weld_type": "T",
+      "source_component": "TC047_SRC_WALL",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC047_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC047_SRC_WALL",
+        "expected_node_ids": [
+          47231,
+          47232,
+          47233,
+          47234,
+          47235,
+          47236,
+          47237,
+          47238,
+          47239,
+          47240,
+          47241,
+          47242,
+          47243,
+          47244,
+          47245
+        ],
+        "start_xyz": [
+          60.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          200.0,
+          0.0,
+          5.0
+        ],
+        "length": 140.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "front leg along y=0, x=60..200"
+    },
+    {
+      "semantic_id": "TC047_W02",
+      "weld_type": "T",
+      "source_component": "TC047_SRC_WALL",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC047_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC047_SRC_WALL",
+        "expected_node_ids": [
+          47261,
+          47262,
+          47263,
+          47264,
+          47265,
+          47266,
+          47267,
+          47268,
+          47269,
+          47270,
+          47271,
+          47272
+        ],
+        "start_xyz": [
+          200.0,
+          10.0,
+          5.0
+        ],
+        "end_xyz": [
+          200.0,
+          120.0,
+          5.0
+        ],
+        "length": 110.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "side leg along x=200, y=10..120"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC047_SRC_WALL": 67001,
+      "TC047_TGT_BASE": 67000
+    }
+  }
+}

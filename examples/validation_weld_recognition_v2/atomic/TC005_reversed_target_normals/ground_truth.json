@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC005",
+  "case_kind": "atomic",
+  "purpose": "all target element normals reversed",
+  "failure_mode": "T angle uses abs normal dot; reversed normals must not flip the decision",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC005_W01",
+      "weld_type": "T",
+      "source_component": "TC005_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC005_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC005_SRC_WEB",
+        "expected_node_ids": [
+          5231,
+          5232,
+          5233,
+          5234,
+          5235,
+          5236,
+          5237,
+          5238,
+          5239,
+          5240,
+          5241,
+          5242,
+          5243,
+          5244,
+          5245,
+          5246,
+          5247,
+          5248,
+          5249,
+          5250,
+          5251,
+          5252,
+          5253,
+          5254,
+          5255,
+          5256,
+          5257,
+          5258,
+          5259,
+          5260,
+          5261
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "normal sign is irrelevant for the 90 deg T"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC005_SRC_WEB": 25001,
+      "TC005_TGT_BASE": 25000
+    }
+  }
+}

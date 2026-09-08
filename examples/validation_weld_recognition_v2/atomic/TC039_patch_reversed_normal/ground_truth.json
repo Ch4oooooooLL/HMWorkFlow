@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC039",
+  "case_kind": "atomic",
+  "purpose": "parallel patch with reversed mesh winding",
+  "failure_mode": "winding is a modelling accident and must not change the physical seam",
+  "decision_policy": {
+    "reversed_normal_patch": "recover_to_auto"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC039_W01",
+      "weld_type": "PATCH",
+      "source_component": "TC039_PATCH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC039_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC039_PATCH",
+        "expected_node_ids": [
+          39099,
+          39100,
+          39101,
+          39102,
+          39103,
+          39108,
+          39113,
+          39118,
+          39117,
+          39116,
+          39115,
+          39114,
+          39109,
+          39104
+        ],
+        "start_xyz": [
+          80.0,
+          -15.0,
+          10.0
+        ],
+        "end_xyz": [
+          80.0,
+          -5.0,
+          10.0
+        ],
+        "length": 130.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "same physical stack as TC035 but the patch is wound -Z; orientation recovery must treat the parallel contained plate as the real seam it is"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC039_BASE": 59000,
+      "TC039_PATCH": 59001
+    }
+  }
+}

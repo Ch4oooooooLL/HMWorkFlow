@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC033",
+  "case_kind": "atomic",
+  "purpose": "near-skin counterfeit web",
+  "failure_mode": "an edge 4 mm proud of the target skin must never be AUTO",
+  "decision_policy": {
+    "false_weld_never_auto": true
+  },
+  "welds": [
+    {
+      "semantic_id": "TC033_W01",
+      "weld_type": "T",
+      "source_component": "TC033_SRC_FLUSH",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC033_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC033_SRC_FLUSH",
+        "expected_node_ids": [
+          33231,
+          33232,
+          33233,
+          33234,
+          33235,
+          33236,
+          33237,
+          33238,
+          33239,
+          33240,
+          33241,
+          33242,
+          33243,
+          33244
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          180.0,
+          0.0,
+          5.0
+        ],
+        "length": 130.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "flush bottom run, perfect T"
+    },
+    {
+      "semantic_id": "TC033_W02",
+      "weld_type": "T",
+      "source_component": "TC033_SRC_PROUD",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "SKIN_ERROR_BORDERLINE"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC033_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC033_SRC_PROUD",
+        "expected_node_ids": [
+          33259,
+          33260,
+          33261,
+          33262,
+          33263,
+          33264,
+          33265,
+          33266,
+          33267,
+          33268,
+          33269,
+          33270,
+          33271,
+          33272
+        ],
+        "start_xyz": [
+          220.0,
+          0.0,
+          9.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          9.0
+        ],
+        "length": 130.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "bottom 4 mm above the skin: physically not a weld, must be routed to REVIEW (SKIN_ERROR_BORDERLINE) at most, never AUTO"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC033_SRC_FLUSH": 53001,
+      "TC033_SRC_PROUD": 53002,
+      "TC033_TGT_BASE": 53000
+    }
+  }
+}

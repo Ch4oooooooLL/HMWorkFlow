@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC007",
+  "case_kind": "atomic",
+  "purpose": "one physical weld across three continuous target components",
+  "failure_mode": "must not assume at most two targets per source chain",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC007_W01",
+      "weld_type": "T",
+      "source_component": "TC007_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC007_TGT_B_A",
+        "TC007_TGT_B_B",
+        "TC007_TGT_B_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [
+        {
+          "component": "TC007_TGT_B_A",
+          "s0": 0.0,
+          "s1": 100.0
+        },
+        {
+          "component": "TC007_TGT_B_B",
+          "s0": 100.0,
+          "s1": 220.0
+        },
+        {
+          "component": "TC007_TGT_B_C",
+          "s0": 220.0,
+          "s1": 320.0
+        }
+      ],
+      "source_path": {
+        "component": "TC007_SRC_WEB",
+        "expected_node_ids": [
+          7253,
+          7254,
+          7255,
+          7256,
+          7257,
+          7258,
+          7259,
+          7260,
+          7261,
+          7262,
+          7263,
+          7264,
+          7265,
+          7266,
+          7267,
+          7268,
+          7269,
+          7270,
+          7271,
+          7272,
+          7273,
+          7274,
+          7275,
+          7276,
+          7277,
+          7278,
+          7279,
+          7280,
+          7281,
+          7282,
+          7283,
+          7284,
+          7285
+        ],
+        "start_xyz": [
+          40.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          360.0,
+          0.0,
+          5.0
+        ],
+        "length": 320.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "targets 0-140 / 140-260 / 260-400; web 40-360"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC007_SRC_WEB": 27003,
+      "TC007_TGT_B_A": 27000,
+      "TC007_TGT_B_B": 27001,
+      "TC007_TGT_B_C": 27002
+    }
+  }
+}

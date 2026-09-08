@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC008",
+  "case_kind": "atomic",
+  "purpose": "1 mm inter-target gap must not merge into a false AUTO",
+  "failure_mode": "distance rules must not bridge an element-free void without an explicit policy",
+  "decision_policy": {
+    "small_gap_auto_bridge": false,
+    "small_gap_auto_max_mm": 1.0,
+    "note": "V2 does not emit BRIDGED_SMALL_GAP yet; flip to AUTO once implemented"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC008_W01",
+      "weld_type": "T",
+      "source_component": "TC008_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "PARTIAL_COVERAGE"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS",
+        "BRIDGED_SMALL_GAP"
+      ],
+      "target_components": [
+        "TC008_TGT_B_B",
+        "TC008_TGT_B_C"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC008_SRC_WEB",
+        "expected_node_ids": [
+          8242,
+          8243,
+          8244,
+          8245,
+          8246,
+          8247,
+          8248,
+          8249,
+          8250,
+          8251,
+          8252,
+          8253,
+          8254,
+          8255,
+          8256,
+          8257,
+          8258,
+          8259,
+          8260,
+          8261,
+          8262,
+          8263,
+          8264,
+          8265,
+          8266,
+          8267,
+          8268,
+          8269,
+          8270,
+          8271,
+          8272
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "1.0 mm element-free void splits the path into two partial REVIEW runs"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC008_SRC_WEB": 28002,
+      "TC008_TGT_B_B": 28000,
+      "TC008_TGT_B_C": 28001
+    }
+  }
+}

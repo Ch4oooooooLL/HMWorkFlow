@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC001",
+  "case_kind": "atomic",
+  "purpose": "baseline single-target T",
+  "failure_mode": "regression canary; the V2 recognizer must auto one clean T",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC001_W01",
+      "weld_type": "T",
+      "source_component": "TC001_SRC_WEB",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC001_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC001_SRC_WEB",
+        "expected_node_ids": [
+          1231,
+          1232,
+          1233,
+          1234,
+          1235,
+          1236,
+          1237,
+          1238,
+          1239,
+          1240,
+          1241,
+          1242,
+          1243,
+          1244,
+          1245,
+          1246,
+          1247,
+          1248,
+          1249,
+          1250,
+          1251,
+          1252,
+          1253,
+          1254,
+          1255,
+          1256,
+          1257,
+          1258,
+          1259,
+          1260,
+          1261
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "single continuous target support"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "target_top_skin_z": 5.0,
+    "source_bottom_z": 5.0,
+    "expected_physical_gap": 0.0,
+    "component_names": {
+      "TC001_SRC_WEB": 21001,
+      "TC001_TGT_BASE": 21000
+    }
+  }
+}

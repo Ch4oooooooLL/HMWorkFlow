@@ -1,0 +1,89 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC010",
+  "case_kind": "atomic",
+  "purpose": "two shell islands in one component are not one continuous surface",
+  "failure_mode": "same-component != continuous surface; spatial continuity is what matters",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC010_W01",
+      "weld_type": "T",
+      "source_component": "TC010_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "TARGET_GAP",
+        "HOLE_INTERRUPTION"
+      ],
+      "forbidden_reason_codes": [
+        "MULTI_TARGET_CONTINUOUS"
+      ],
+      "target_components": [
+        "TC010_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC010_SRC_WEB",
+        "expected_node_ids": [
+          10220,
+          10221,
+          10222,
+          10223,
+          10224,
+          10225,
+          10226,
+          10227,
+          10228,
+          10229,
+          10230,
+          10231,
+          10232,
+          10233,
+          10234,
+          10235,
+          10236,
+          10237,
+          10238,
+          10239,
+          10240,
+          10241,
+          10242,
+          10243,
+          10244,
+          10245,
+          10246,
+          10247,
+          10248,
+          10249,
+          10250
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "40 mm element-free full-width void splits one component into two islands; current V2 labels it HOLE_INTERRUPTION (taxonomy note, decision REVIEW is the gate)"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC010_SRC_WEB": 30001,
+      "TC010_TGT_BASE": 30000
+    }
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC027",
+  "case_kind": "atomic",
+  "purpose": "source inner boundary (closed slot rim) flush with a target",
+  "failure_mode": "an inner source boundary must be REVIEW INNER_BOUNDARY_SOURCE, never AUTO",
+  "decision_policy": {
+    "closed_loop_inner_rim": "never_auto"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC027_W01",
+      "weld_type": "T",
+      "source_component": "TC027_SRC_PLATE",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "INNER_BOUNDARY_SOURCE"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC027_TGT_SHELF"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC027_SRC_PLATE",
+        "expected_node_ids": [
+          27463,
+          27464,
+          27465,
+          27466,
+          27467,
+          27468,
+          27469,
+          27470,
+          27471,
+          27472,
+          27473,
+          27474,
+          27475,
+          27476,
+          27477,
+          27478,
+          27479
+        ],
+        "start_xyz": [
+          120.0,
+          0.0,
+          55.0
+        ],
+        "end_xyz": [
+          280.0,
+          0.0,
+          55.0
+        ],
+        "length": 160.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "top slot rim at z=55 lies exactly on the shelf top skin.  The edge is an inner boundary of a closed slot, so it must not be AUTO welded."
+    },
+    {
+      "semantic_id": "TC027_W02",
+      "weld_type": "T",
+      "source_component": "TC027_SRC_PLATE",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "INNER_BOUNDARY_SOURCE"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC027_TGT_SHELF"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC027_SRC_PLATE",
+        "expected_node_ids": [
+          27381,
+          27382,
+          27383,
+          27384,
+          27385,
+          27386,
+          27387,
+          27388,
+          27389,
+          27390,
+          27391,
+          27392,
+          27393,
+          27394,
+          27395,
+          27396,
+          27397
+        ],
+        "start_xyz": [
+          120.0,
+          0.0,
+          45.0
+        ],
+        "end_xyz": [
+          280.0,
+          0.0,
+          45.0
+        ],
+        "length": 160.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "bottom slot rim at z=45 lies exactly on the shelf bottom skin; same inner-boundary policy."
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "rim_z": {
+      "top": 55.0,
+      "bottom": 45.0,
+      "slot_x": [
+        120.0,
+        280.0
+      ]
+    },
+    "component_names": {
+      "TC027_SRC_PLATE": 47000,
+      "TC027_TGT_SHELF": 47001
+    }
+  }
+}

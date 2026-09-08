@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC023",
+  "case_kind": "atomic",
+  "purpose": "two stacked targets are both plausible",
+  "failure_mode": "ambiguity gating must not weld the nearest layer without review",
+  "decision_policy": {},
+  "welds": [
+    {
+      "semantic_id": "TC023_W01",
+      "weld_type": "T",
+      "source_component": "TC023_SRC_WEB",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "TARGET_AMBIGUITY"
+      ],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC023_B"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC023_SRC_WEB",
+        "expected_node_ids": [
+          23462,
+          23463,
+          23464,
+          23465,
+          23466,
+          23467,
+          23468,
+          23469,
+          23470,
+          23471,
+          23472,
+          23473,
+          23474,
+          23475,
+          23476,
+          23477,
+          23478,
+          23479,
+          23480,
+          23481,
+          23482,
+          23483,
+          23484,
+          23485,
+          23486,
+          23487,
+          23488,
+          23489,
+          23490,
+          23491,
+          23492
+        ],
+        "start_xyz": [
+          50.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          350.0,
+          0.0,
+          5.0
+        ],
+        "length": 300.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "B top skin 5.0, C top skin 5.4; both within the search radius"
+    }
+  ],
+  "forbidden_candidates": [],
+  "analytic": {
+    "component_names": {
+      "TC023_B": 43000,
+      "TC023_C": 43001,
+      "TC023_SRC_WEB": 43002
+    }
+  }
+}
