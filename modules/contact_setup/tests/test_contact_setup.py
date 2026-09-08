@@ -113,13 +113,79 @@ class ContactSetupTclTests(unittest.TestCase):
         self.assertIn("SLIDE STICK FREEZE", menu_line)
         self.assertNotIn("TIE", menu_line)
 
-    def test_quick_action_waits_for_async_second_face_before_create(self):
+    def test_both_entries_open_the_shared_panel_with_the_expected_source(self):
         source = MODULE.read_text(encoding="utf-8")
         body = source.split("proc ::ContactSetup::runAction {}", 1)[1].split(
+            "proc ::ContactSetup::runSurfaceAction", 1
+        )[0]
+        surface_body = source.split("proc ::ContactSetup::runSurfaceAction {}", 1)[1].split(
             "proc ::ContactSetup::runSettings", 1
         )[0]
-        self.assertIn("pickContactFaces 1", body)
-        self.assertNotIn("::ContactSetup::createContact", body)
+        self.assertIn("showPanel 0 COMPONENT", body)
+        self.assertIn("showPanel 0 SURF", surface_body)
+
+    def test_auto_contact_arguments_match_hm2019_base_signature(self):
+        interp = self.interp()
+        interp.eval(
+            "set ::ContactSetup::ui(definition_type) CONTACT;"
+            "set ::ContactSetup::ui(contact_type) FREEZE;"
+            "set ::ContactSetup::ui(property_mode) BUILTIN;"
+            "set ::ContactSetup::ui(tolerance) 2.0;"
+            "set ::ContactSetup::ui(reverse_angle) 15.0;"
+            "set ::ContactSetup::ui(use_shell_thickness) 0;"
+            "set ::ContactSetup::ui(consolidate) 1;"
+            "set ::ContactSetup::ui(intersection_check) 1;"
+            "set ::ContactSetup::ui(main_entity_type) SET_ELEM;"
+            "set ::ContactSetup::ui(secondary_entity_type) SET_GRID;"
+            "set ::ContactSetup::ui(review_mode) 1"
+        )
+        args = interp.splitlist(interp.eval("::ContactSetup::autoContactArguments"))
+        self.assertEqual(len(args), 17)
+        self.assertEqual(
+            args,
+            (
+                "comps", "1", "2.0", "15.0", "0", "1", "1", "0",
+                "0", "0", "2", "0", "0.0", "0", "0", "0", "0",
+            ),
+        )
+
+    def test_component_chain_creates_mark_and_calls_native_autocontact(self):
+        interp = self.interp()
+        interp.eval(
+            "set ::ContactSetup::ui(selectedCompIds) {10 20 30};"
+            "set ::ContactSetup::ui(definition_type) TIE;"
+            "set ::ContactSetup::ui(contact_type) STICK;"
+            "set ::ContactSetup::ui(property_mode) BUILTIN;"
+            "set ::ContactSetup::ui(tolerance) 1.0;"
+            "set ::ContactSetup::ui(reverse_angle) 15.0;"
+            "set ::ContactSetup::ui(use_shell_thickness) 0;"
+            "set ::ContactSetup::ui(consolidate) 0;"
+            "set ::ContactSetup::ui(intersection_check) 1;"
+            "set ::ContactSetup::ui(main_entity_type) SURF;"
+            "set ::ContactSetup::ui(secondary_entity_type) SURF;"
+            "set ::ContactSetup::ui(property_id) 0;"
+            "set ::ContactSetup::ui(friction) 0.0;"
+            "set ::ContactSetup::ui(review_mode) 0;"
+            "rename ::ContactSetup::saveRules ::ContactSetup::saveRules_real;"
+            "rename ::ContactSetup::msg ::ContactSetup::msg_real;"
+            "proc ::ContactSetup::saveRules {} {};"
+            "proc ::ContactSetup::msg {zh {en {}}} {};"
+            "proc *clearmark args {};"
+            "proc *createmark {entity mark args} {set ::created_mark [list $entity $mark $args]};"
+            "proc hm_getmark {entity mark} {return {10 20 30}};"
+            "proc *detectandcreateface2facecontacts args {"
+            "set ::autocontact_mark $::created_mark; set ::autocontact_args $args};"
+            "proc tk_messageBox args {set ::dialog_error $args}"
+        )
+
+        self.assertEqual(interp.eval("::ContactSetup::createAutoContact"), "1")
+        self.assertEqual(interp.eval("set ::autocontact_mark"), "comps 1 {10 20 30}")
+        args = interp.splitlist(interp.eval("set ::autocontact_args"))
+        self.assertEqual(len(args), 17)
+        self.assertEqual(args[7], "1")  # TIE
+        self.assertEqual(args[8:10], ("1", "2"))  # SURF / SURF
+        self.assertEqual(args[-1], "1")  # direct create skips preview
+        self.assertEqual(interp.eval("info exists ::dialog_error"), "0")
 
     def test_overlapping_face_picks_are_rejected(self):
         interp = self.interp()

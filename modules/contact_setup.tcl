@@ -2,11 +2,9 @@
 # Contact Setup
 # HyperMesh 2019 Tcl/Tk
 #
-# Lightweight workflow:
-#   1) pick the two contact regions separately with HyperMesh's face selector
-#   2) create two contact surfaces directly from the selected face elements
-#   3) orient both contact surfaces toward one another
-#   4) create a contact group that references the two surfaces
+# Two workflows share one settings panel:
+#   SURF      - the original two-face workflow retained below
+#   COMPONENT - HyperMesh AutoContact via *detectandcreateface2facecontacts
 # ============================================================================
 
 if {![namespace exists ::HWFlow]} {
@@ -14,13 +12,26 @@ if {![namespace exists ::HWFlow]} {
 }
 
 namespace eval ::ContactSetup {
-    variable VERSION "0.3"
+    variable VERSION "0.4"
     variable RULE_FILE [file join [::HWFlow::configDir] "contact_rules.txt"]
 
     variable cfg
     array set cfg {
+        source_type          COMPONENT
+        definition_type      CONTACT
         contact_type         STICK
         main_side            AUTO
+        tolerance            1.0
+        reverse_angle        15.0
+        use_shell_thickness  0
+        consolidate          0
+        intersection_check   1
+        main_entity_type     SURF
+        secondary_entity_type SURF
+        property_mode        BUILTIN
+        property_id          0
+        friction             0.0
+        review_mode          1
         result_prefix        AUTO_CONTACT
         try_group            1
     }
@@ -29,6 +40,7 @@ namespace eval ::ContactSetup {
     array set ui {
         selectedElemsA ""
         selectedElemsB ""
+        selectedCompIds ""
         selectedText  "No contact faces selected"
         selectionActive 0
         selectionWindows ""
@@ -46,19 +58,41 @@ namespace eval ::ContactSetup {
     array set geometryNodeXYZ {}
 }
 
+# Keep the official component AutoContact chain isolated from the retained
+# SURF implementation in this file.
+source -encoding utf-8 [file join [file dirname [file normalize [info script]]] "contact_setup" "autocontact.tcl"]
+
 proc ::ContactSetup::defaultRuleText {} {
     return [join {
-        {# Lightweight contact setup defaults.}
+        {# Unified SURF / COMPONENT contact setup defaults.}
         {key|value|note}
+        {source_type|COMPONENT|COMPONENT uses native AutoContact; SURF keeps the original two-face workflow}
+        {definition_type|CONTACT|CONTACT or TIE (COMPONENT only)}
         {contact_type|STICK|OptiStruct CONTACT type: SLIDE, STICK or FREEZE}
         {main_side|AUTO|AUTO, FIRST or SECOND}
+        {tolerance|1.0|AutoContact vicinity tolerance}
+        {reverse_angle|15.0|AutoContact reverse angle in degrees}
+        {use_shell_thickness|0|use shell property thickness for detection}
+        {consolidate|0|consolidate patches between component pairs}
+        {intersection_check|1|run intersection check before creation}
+        {main_entity_type|SURF|SET_ELEM or SURF}
+        {secondary_entity_type|SURF|SET_GRID, SET_ELEM or SURF}
+        {property_mode|BUILTIN|BUILTIN, FRICTION or EXISTING_PCONT}
+        {property_id|0|existing PCONT ID}
+        {friction|0.0|static friction coefficient}
+        {review_mode|1|1 keeps AutoContact results under review; 0 confirms directly}
         {result_prefix|AUTO_CONTACT|name prefix for generated contact surfaces/groups}
         {try_group|1|create solver contact group after contact surfaces}
     } "\n"]
 }
 
 proc ::ContactSetup::stateKeys {} {
-    return {contact_type main_side result_prefix try_group}
+    return {
+        source_type definition_type contact_type main_side tolerance reverse_angle
+        use_shell_thickness consolidate intersection_check main_entity_type
+        secondary_entity_type property_mode property_id friction review_mode
+        result_prefix try_group
+    }
 }
 
 proc ::ContactSetup::ensureRuleFile {} {
@@ -94,6 +128,12 @@ proc ::ContactSetup::loadRules {} {
     if {$cfg(contact_type) ni {SLIDE STICK FREEZE}} {
         set cfg(contact_type) STICK
     }
+    if {$cfg(source_type) ni {SURF COMPONENT}} { set cfg(source_type) COMPONENT }
+    if {$cfg(definition_type) ni {CONTACT TIE}} { set cfg(definition_type) CONTACT }
+    if {$cfg(main_side) ni {AUTO FIRST SECOND}} { set cfg(main_side) AUTO }
+    if {$cfg(main_entity_type) ni {SET_ELEM SURF}} { set cfg(main_entity_type) SURF }
+    if {$cfg(secondary_entity_type) ni {SET_GRID SET_ELEM SURF}} { set cfg(secondary_entity_type) SURF }
+    if {$cfg(property_mode) ni {BUILTIN FRICTION EXISTING_PCONT}} { set cfg(property_mode) BUILTIN }
 }
 
 proc ::ContactSetup::saveRules {} {
@@ -106,7 +146,7 @@ proc ::ContactSetup::saveRules {} {
             set cfg($key) $ui($key)
         }
     }
-    set rows [list "# Lightweight contact setup defaults." "key|value|note"]
+    set rows [list "# Unified SURF / COMPONENT contact setup defaults." "key|value|note"]
     foreach key [::ContactSetup::stateKeys] {
         lappend rows "$key|$cfg($key)|"
     }
@@ -146,7 +186,7 @@ proc ::ContactSetup::backToHome {w} {
     }
 }
 
-proc ::ContactSetup::showPanel {{settingsOnly 0}} {
+proc ::ContactSetup::showPanel {{settingsOnly 0} {sourceOverride ""}} {
     variable VERSION
     variable cfg
     variable ui
@@ -155,10 +195,12 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     foreach key [::ContactSetup::stateKeys] {
         set ui($key) $cfg($key)
     }
+    if {$sourceOverride in {SURF COMPONENT}} { set ui(source_type) $sourceOverride }
     set ui(selectedElemsA) ""
     set ui(selectedElemsB) ""
-    set ui(selectedText) [::HWFlow::txt "未选择接触面" "No contact faces selected"]
-    set ui(status) [::HWFlow::txt "依次选择两侧 Face 候选单元，筛选公共区域后创建相向接触。" "Pick both candidate faces; their common region will be used for opposing contact surfaces."]
+    set ui(selectedCompIds) ""
+    set ui(selectedText) [::HWFlow::txt "未选择输入" "No input selected"]
+    set ui(status) [::HWFlow::txt "选择输入来源，然后设置共用的接触定义参数。" "Choose an input source, then configure the shared contact definition."]
 
     catch {destroy .contact_setup}
     set w .contact_setup
@@ -172,26 +214,73 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     label $w.main.title -text [::HWFlow::txt "Contact Setup" "Contact Setup"] -font [::HWFlow::uiFont title]
     grid $w.main.title -row 0 -column 0 -columnspan 4 -sticky w -pady {0 8}
 
-    labelframe $w.main.sel -text [::HWFlow::txt "1. 接触面选择" "1. Contact Face Selection"] -padx 8 -pady 8
+    labelframe $w.main.sel -text [::HWFlow::txt "1. 输入来源" "1. Input Source"] -padx 8 -pady 8
     grid $w.main.sel -row 1 -column 0 -columnspan 4 -sticky ew -pady {0 8}
-    button $w.main.sel.pick -text [::HWFlow::txt "分两次选择 Face" "Pick Two Faces"] -width 18 -command "::ContactSetup::pickContactFaces"
+    radiobutton $w.main.sel.surf -text SURF -variable ::ContactSetup::ui(source_type) -value SURF -command ::ContactSetup::updateSourceUI
+    radiobutton $w.main.sel.comp -text COMPONENT -variable ::ContactSetup::ui(source_type) -value COMPONENT -command ::ContactSetup::updateSourceUI
+    button $w.main.sel.pick -text [::HWFlow::txt "选择输入" "Select Input"] -width 18 -command "::ContactSetup::pickInput"
     label $w.main.sel.info -textvariable ::ContactSetup::ui(selectedText) -width 78 -anchor w
-    grid $w.main.sel.pick -row 0 -column 0 -sticky w -padx {0 8}
-    grid $w.main.sel.info -row 0 -column 1 -sticky w
+    grid $w.main.sel.surf -row 0 -column 0 -sticky w -padx {0 8}
+    grid $w.main.sel.comp -row 0 -column 1 -sticky w -padx {0 16}
+    grid $w.main.sel.pick -row 0 -column 2 -sticky w -padx {0 8}
+    grid $w.main.sel.info -row 1 -column 0 -columnspan 4 -sticky w -pady {6 0}
 
-    labelframe $w.main.type -text [::HWFlow::txt "2. 接触定义" "2. Contact Definition"] -padx 8 -pady 8
-    grid $w.main.type -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
-    label $w.main.type.l_type -text [::HWFlow::txt "接触类型" "Contact type"] -anchor w
+    labelframe $w.main.detect -text [::HWFlow::txt "2. AutoContact 检测" "2. AutoContact Detection"] -padx 8 -pady 8
+    grid $w.main.detect -row 2 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    label $w.main.detect.l_tol -text Tolerance -anchor w
+    entry $w.main.detect.e_tol -textvariable ::ContactSetup::ui(tolerance) -width 10
+    label $w.main.detect.l_angle -text [::HWFlow::txt "反向角" "Reverse angle"] -anchor w
+    entry $w.main.detect.e_angle -textvariable ::ContactSetup::ui(reverse_angle) -width 10
+    checkbutton $w.main.detect.shell -text [::HWFlow::txt "使用壳厚" "Use shell thickness"] -variable ::ContactSetup::ui(use_shell_thickness)
+    checkbutton $w.main.detect.intersection -text [::HWFlow::txt "相交检查" "Intersection check"] -variable ::ContactSetup::ui(intersection_check)
+    checkbutton $w.main.detect.consolidate -text [::HWFlow::txt "合并接触对" "Consolidate pairs"] -variable ::ContactSetup::ui(consolidate)
+    grid $w.main.detect.l_tol -row 0 -column 0 -sticky w -padx {0 6} -pady 2
+    grid $w.main.detect.e_tol -row 0 -column 1 -sticky w -padx {0 16} -pady 2
+    grid $w.main.detect.l_angle -row 0 -column 2 -sticky w -padx {0 6} -pady 2
+    grid $w.main.detect.e_angle -row 0 -column 3 -sticky w -pady 2
+    grid $w.main.detect.shell -row 1 -column 0 -columnspan 2 -sticky w -pady 2
+    grid $w.main.detect.intersection -row 1 -column 2 -sticky w -pady 2
+    grid $w.main.detect.consolidate -row 1 -column 3 -sticky w -pady 2
+
+    labelframe $w.main.type -text [::HWFlow::txt "3. 接触定义" "3. Contact Definition"] -padx 8 -pady 8
+    grid $w.main.type -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    label $w.main.type.l_def -text [::HWFlow::txt "卡片" "Card"] -anchor w
+    tk_optionMenu $w.main.type.m_def ::ContactSetup::ui(definition_type) CONTACT TIE
+    label $w.main.type.l_type -text [::HWFlow::txt "内置类型" "Built-in type"] -anchor w
     tk_optionMenu $w.main.type.m_type ::ContactSetup::ui(contact_type) SLIDE STICK FREEZE
     label $w.main.type.l_side -text [::HWFlow::txt "主面" "Main side"] -anchor w
     tk_optionMenu $w.main.type.m_side ::ContactSetup::ui(main_side) AUTO FIRST SECOND
-    grid $w.main.type.l_type -row 0 -column 0 -sticky w -padx {0 6} -pady 2
-    grid $w.main.type.m_type -row 0 -column 1 -sticky w -padx {0 16} -pady 2
-    grid $w.main.type.l_side -row 0 -column 2 -sticky w -padx {0 6} -pady 2
-    grid $w.main.type.m_side -row 0 -column 3 -sticky w -pady 2
+    label $w.main.type.l_prop -text [::HWFlow::txt "属性模式" "Property mode"] -anchor w
+    tk_optionMenu $w.main.type.m_prop ::ContactSetup::ui(property_mode) BUILTIN FRICTION EXISTING_PCONT
+    label $w.main.type.l_pid -text "PCONT ID" -anchor w
+    entry $w.main.type.e_pid -textvariable ::ContactSetup::ui(property_id) -width 10
+    label $w.main.type.l_mu -text [::HWFlow::txt "摩擦系数" "Friction"] -anchor w
+    entry $w.main.type.e_mu -textvariable ::ContactSetup::ui(friction) -width 10
+    label $w.main.type.l_main -text [::HWFlow::txt "Main 类型" "Main type"] -anchor w
+    tk_optionMenu $w.main.type.m_main ::ContactSetup::ui(main_entity_type) SET_ELEM SURF
+    label $w.main.type.l_secondary -text [::HWFlow::txt "Secondary 类型" "Secondary type"] -anchor w
+    tk_optionMenu $w.main.type.m_secondary ::ContactSetup::ui(secondary_entity_type) SET_GRID SET_ELEM SURF
+    checkbutton $w.main.type.review -text [::HWFlow::txt "创建后保留 Review" "Keep results under review"] -variable ::ContactSetup::ui(review_mode)
+    grid $w.main.type.l_def -row 0 -column 0 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.m_def -row 0 -column 1 -sticky w -padx {0 16} -pady 2
+    grid $w.main.type.l_type -row 0 -column 2 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.m_type -row 0 -column 3 -sticky w -pady 2
+    grid $w.main.type.l_prop -row 1 -column 0 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.m_prop -row 1 -column 1 -sticky w -padx {0 16} -pady 2
+    grid $w.main.type.l_pid -row 1 -column 2 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.e_pid -row 1 -column 3 -sticky w -pady 2
+    grid $w.main.type.l_mu -row 2 -column 0 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.e_mu -row 2 -column 1 -sticky w -padx {0 16} -pady 2
+    grid $w.main.type.l_main -row 2 -column 2 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.m_main -row 2 -column 3 -sticky w -pady 2
+    grid $w.main.type.l_secondary -row 3 -column 0 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.m_secondary -row 3 -column 1 -sticky w -padx {0 16} -pady 2
+    grid $w.main.type.l_side -row 3 -column 2 -sticky w -padx {0 6} -pady 2
+    grid $w.main.type.m_side -row 3 -column 3 -sticky w -pady 2
+    grid $w.main.type.review -row 4 -column 0 -columnspan 2 -sticky w -pady 2
 
-    labelframe $w.main.opt -text [::HWFlow::txt "3. 输出" "3. Output"] -padx 8 -pady 8
-    grid $w.main.opt -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
+    labelframe $w.main.opt -text [::HWFlow::txt "4. SURF 输出" "4. SURF Output"] -padx 8 -pady 8
+    grid $w.main.opt -row 4 -column 0 -columnspan 4 -sticky ew -pady {0 8}
     label $w.main.opt.l_prefix -text [::HWFlow::txt "结果名前缀" "Result prefix"] -anchor w
     entry $w.main.opt.e_prefix -textvariable ::ContactSetup::ui(result_prefix) -width 22
     checkbutton $w.main.opt.group -text [::HWFlow::txt "创建接触 group" "Create contact group"] -variable ::ContactSetup::ui(try_group)
@@ -200,7 +289,7 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     grid $w.main.opt.group -row 1 -column 0 -columnspan 2 -sticky w -pady 2
 
     label $w.main.status -textvariable ::ContactSetup::ui(status) -width 92 -anchor w
-    grid $w.main.status -row 4 -column 0 -columnspan 4 -sticky ew
+    grid $w.main.status -row 5 -column 0 -columnspan 4 -sticky ew
 
     frame $w.btn -padx 12 -pady 10
     pack $w.btn -fill x
@@ -210,7 +299,7 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
     button $w.btn.restore -text [::HWFlow::txt "恢复视图" "Restore View"] -width 12 -command "::ContactSetup::restoreView"
     if {!$settingsOnly} {
         button $w.btn.trim -text [::HWFlow::txt "修改接触" "Trim Contact"] -width 12 -command "::ContactSetup::trimContact"
-        button $w.btn.create -text [::HWFlow::txt "创建接触" "Create Contact"] -width 12 -command "::ContactSetup::createContact"
+        button $w.btn.create -text [::HWFlow::txt "创建接触" "Create Contact"] -width 12 -command "::ContactSetup::createBySource"
     }
     pack $w.btn.back -side right -padx 4
     pack $w.btn.restore -side right -padx 4
@@ -222,8 +311,132 @@ proc ::ContactSetup::showPanel {{settingsOnly 0}} {
 
     bind $w <Escape> "::ContactSetup::savePanelState; ::ContactSetup::restoreView; destroy .contact_setup"
     wm protocol $w WM_DELETE_WINDOW "::ContactSetup::savePanelState; ::ContactSetup::restoreView; destroy .contact_setup"
+    ::ContactSetup::updateSourceUI
+    if {$settingsOnly} {
+        ::ContactSetup::setWidgetState [list $w.main.sel.surf $w.main.sel.comp $w.main.sel.pick] disabled
+    }
     ::ContactSetup::centerWindow $w
     tkwait window $w
+}
+
+proc ::ContactSetup::setWidgetState {widgets state} {
+    foreach widget $widgets {
+        if {[llength [info commands winfo]] > 0 && [winfo exists $widget]} {
+            catch {$widget configure -state $state}
+        }
+    }
+}
+
+# Both chains intentionally use the same panel.  Controls unsupported by the
+# original SURF workflow remain visible so switching source does not change the
+# user's mental model, but they are disabled and ignored by that chain.
+proc ::ContactSetup::updateSourceUI {} {
+    variable ui
+    set w .contact_setup
+    if {[llength [info commands winfo]] == 0 || ![winfo exists $w]} { return }
+
+    set autoWidgets [list \
+        $w.main.detect.e_tol $w.main.detect.e_angle $w.main.detect.shell \
+        $w.main.detect.intersection $w.main.detect.consolidate \
+        $w.main.type.m_def $w.main.type.m_prop $w.main.type.e_pid \
+        $w.main.type.e_mu $w.main.type.m_main $w.main.type.m_secondary \
+        $w.main.type.review]
+    set surfWidgets [list $w.main.type.m_side $w.main.opt.e_prefix $w.main.opt.group]
+    if {$ui(source_type) eq "SURF"} {
+        ::ContactSetup::setWidgetState $autoWidgets disabled
+        ::ContactSetup::setWidgetState $surfWidgets normal
+        catch {$w.btn.trim configure -state normal}
+        set ui(status) [::HWFlow::txt \
+            "SURF：保留原有两次 Face 选择链路；AutoContact 检测、TIE、PCONT 与 Review 参数不可用。" \
+            "SURF: original two-face workflow; AutoContact detection, TIE, PCONT and review options are unavailable."]
+        if {[llength $ui(selectedElemsA)] > 0 && [llength $ui(selectedElemsB)] > 0} {
+            set ui(selectedText) [::HWFlow::txt \
+                "已选择：A=[llength $ui(selectedElemsA)] 个单元，B=[llength $ui(selectedElemsB)] 个单元" \
+                "Selected: A=[llength $ui(selectedElemsA)] elements, B=[llength $ui(selectedElemsB)] elements"]
+        } else {
+            set ui(selectedText) [::HWFlow::txt "未选择接触面" "No contact faces selected"]
+        }
+    } else {
+        ::ContactSetup::setWidgetState $autoWidgets normal
+        ::ContactSetup::setWidgetState $surfWidgets disabled
+        catch {$w.btn.trim configure -state disabled}
+        if {$ui(definition_type) eq "TIE"} {
+            ::ContactSetup::setWidgetState [list \
+                $w.main.type.m_type $w.main.type.m_prop \
+                $w.main.type.e_pid $w.main.type.e_mu] disabled
+        } else {
+            ::ContactSetup::setWidgetState [list $w.main.type.m_prop] normal
+            ::ContactSetup::setWidgetState [list \
+                $w.main.type.m_type $w.main.type.e_pid $w.main.type.e_mu] disabled
+            switch -- $ui(property_mode) {
+                BUILTIN { ::ContactSetup::setWidgetState [list $w.main.type.m_type] normal }
+                FRICTION { ::ContactSetup::setWidgetState [list $w.main.type.e_mu] normal }
+                EXISTING_PCONT { ::ContactSetup::setWidgetState [list $w.main.type.e_pid] normal }
+            }
+        }
+        set ui(status) [::HWFlow::txt \
+            "COMPONENT：选择至少两个组件，调用 HyperMesh 官方 AutoContact 检测与创建命令。" \
+            "COMPONENT: select at least two components and run HyperMesh's native AutoContact command."]
+        if {[llength $ui(selectedCompIds)] > 0} {
+            set ui(selectedText) [::HWFlow::txt \
+                "已选择 [llength $ui(selectedCompIds)] 个组件" \
+                "Selected [llength $ui(selectedCompIds)] components"]
+        } else {
+            set ui(selectedText) [::HWFlow::txt "未选择组件" "No components selected"]
+        }
+    }
+}
+
+proc ::ContactSetup::pickInput {{autoCreate 0}} {
+    variable ui
+    if {$ui(source_type) eq "SURF"} {
+        return [::ContactSetup::pickContactFaces $autoCreate]
+    }
+    return [::ContactSetup::pickComponents $autoCreate]
+}
+
+proc ::ContactSetup::pickComponents {{autoCreate 0}} {
+    variable ui
+    set code [catch {
+        set compIds [::HWFlow::nativeMarkPanel comps 1 [::HWFlow::txt \
+            "选择至少两个 AutoContact 输入组件（中键确认）" \
+            "Select at least two AutoContact input components (middle-click to accept)"]]
+    } err]
+    if {$code} {
+        tk_messageBox -icon error -title [::HWFlow::txt "Contact Setup" "Contact Setup"] -message $err
+        return 0
+    }
+    set compIds [::ContactSetup::uniq $compIds]
+    if {[llength $compIds] == 0} {
+        set ui(selectedCompIds) ""
+        set ui(selectedText) [::HWFlow::txt "未选择组件，操作已取消。" "No components selected; selection cancelled."]
+        return 0
+    }
+    set ui(selectedCompIds) $compIds
+    set ui(selectedText) [::HWFlow::txt \
+        "已选择 [llength $compIds] 个组件" \
+        "Selected [llength $compIds] components"]
+    if {$autoCreate} { after idle ::ContactSetup::createBySource }
+    return 1
+}
+
+proc ::ContactSetup::createBySource {} {
+    variable ui
+    if {$ui(source_type) eq "SURF"} {
+        return [::ContactSetup::createContact]
+    }
+    return [::ContactSetup::createAutoContact]
+}
+
+proc ::ContactSetup::contactOptionChanged {name1 name2 op} {
+    catch {::ContactSetup::updateSourceUI}
+}
+
+# Option menus do not have a common change callback in classic Tk.  Variable
+# traces keep the mutually exclusive CONTACT property fields in sync.
+foreach tracedKey {definition_type property_mode} {
+    catch {trace remove variable ::ContactSetup::ui($tracedKey) write ::ContactSetup::contactOptionChanged}
+    trace add variable ::ContactSetup::ui($tracedKey) write ::ContactSetup::contactOptionChanged
 }
 
 # HyperMesh 2019 supports face_edge_mode=1 and filter=6 on the native element
@@ -1801,19 +2014,13 @@ proc ::ContactSetup::run {} {
 }
 
 proc ::ContactSetup::runAction {} {
-    variable cfg
-    variable ui
+    ::ContactSetup::showPanel 0 COMPONENT
+}
 
-    ::ContactSetup::loadRules
-    foreach key [::ContactSetup::stateKeys] {
-        set ui($key) $cfg($key)
-    }
-    set ui(selectedElemsA) ""
-    set ui(selectedElemsB) ""
-    set ui(selectedText) [::HWFlow::txt "未选择接触面" "No contact faces selected"]
-    set ui(status) ""
-
-    ::ContactSetup::pickContactFaces 1
+# Dedicated legacy entry.  It opens the same panel with SURF preselected and
+# keeps createContact/pickContactFaces as the unchanged execution chain.
+proc ::ContactSetup::runSurfaceAction {} {
+    ::ContactSetup::showPanel 0 SURF
 }
 
 proc ::ContactSetup::runSettings {} {

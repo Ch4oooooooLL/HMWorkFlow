@@ -600,26 +600,27 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 ### Contact Setup
 
-入口：`::ContactSetup::run`
+入口：主面板的 `自动接触` 或 `按面创建接触`；两者共用 `::ContactSetup::showPanel`。
 
-功能：调用 HyperMesh 原生 Face 单元选择器，连续分两次选择候选区域，筛选两侧空间公共部分后创建相向 contact surface 和 OptiStruct `CONTACT` group，并支持按单元修剪多余接触。创建过程不再遍历整个 component。
+功能：统一子界面提供 `COMPONENT` 与 `SURF` 两条链路。`COMPONENT` 调用 HyperMesh 2019 官方 `*detectandcreateface2facecontacts` 自动搜索并创建 `CONTACT/TIE`；`SURF` 完整保留原有双 Face 选择、公共区域筛选、相向 contact surface 与 `CONTACT` group 创建流程。
 
 用法：
 
-1. 在主面板运行 `Contact Setup`。
-2. 点击 `分两次选择 Face`，先选择 A 侧 Face 单元并中键确认，再选择相向的 B 侧 Face 单元。
-3. 选择接触类型：`SLIDE`、`STICK` 或 `FREEZE`；默认值为 `STICK`。
-4. 设置主面：
+1. 从 `自动接触` 进入时默认来源为 `COMPONENT`；从 `按面创建接触` 进入时默认来源为 `SURF`，也可在界面中切换。
+2. `COMPONENT`：选择至少两个组件，设置 tolerance、reverse angle、是否使用壳厚、相交检查和接触对合并。
+3. 设置 `CONTACT/TIE`。`CONTACT` 的属性模式互斥：内置 `SLIDE/STICK/FREEZE`、摩擦系数或已有 `PCONT ID`；同时可设置 Main/Secondary 实体类型和 Review/直接创建。
+4. `SURF`：依次选择 A/B 两侧 Face；该链路不支持的 AutoContact、TIE、PCONT 与 Review 选项在同一界面中禁用。设置主面：
    - `AUTO`：按 contact surface 单元数量自动选择较大侧。
    - `FIRST`：第一次选择的 Face 作为主面。
    - `SECOND`：第二次选择的 Face 作为主面。
-5. 设置结果名前缀和是否创建 contact group。
+5. SURF 模式可设置结果名前缀和是否创建 contact group。
 6. 点击 `创建接触`。
-7. 如需删除多余接触，点击 `修改接触`，连续选择需要从 contact surface 中移除的单元后中键确认。
+7. SURF 模式如需删除多余接触，点击 `修改接触`，连续选择需要从 contact surface 中移除的单元后中键确认。
 8. 修改完成后点击 `恢复视图`。
 
 输出：
 
+- COMPONENT 使用 2019.0/2019.1 均支持的 17 参数基础签名；当前范围固定为 `comps`，不依赖 HyperMesh 内部 GUI Tcl。
 - 对两次选中的 Face 候选集进行双向邻近筛选，仅保留空间公共覆盖区域。
 - 分别创建 `contactsurfs`。
 - 创建 OptiStruct `CONTACT` group，以 contact surface 定义主/从侧，写入 `TYPE=SLIDE/STICK/FREEZE` 后回读校验。

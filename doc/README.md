@@ -373,30 +373,29 @@ SEAM_T2.0
 
 ### 6.8 Contact Setup
 
-入口：`::ContactSetup::run`
+入口：主面板的 `自动接触` 或 `按面创建接触`，共用同一个设置子界面。
 
-功能：选择两个 component，自动识别相对方向，创建 contact surface 和接触 group，并支持按单元修剪多余接触。
+功能：来源可选 `COMPONENT` 或 `SURF`。COMPONENT 使用 HyperMesh 官方 AutoContact API 自动检测并创建 `CONTACT/TIE`；SURF 保留原有双 Face 公共区域筛选、接触面与 group 创建链路。
 
 用法：
 
-1. 在主面板运行 `Contact Setup`。
-2. 点击 `选择两个组件`，在 HyperMesh 中选择需要建立接触关系的两个 component。
-3. 选择接触类型：`SLIDE`、`TIE`、`STICK`、`FREEZE`、`FRICTIONLESS` 或 `FRICTION`。
-4. 设置主面：
+1. 选择来源；两个主面板入口分别预选 COMPONENT 和 SURF，但进入后仍可切换。
+2. COMPONENT 至少选择两个组件，并设置 tolerance、reverse angle、壳厚、相交检查和 consolidate。
+3. 选择 CONTACT 或 TIE；CONTACT 可选内置 `SLIDE/STICK/FREEZE`、摩擦系数或已有 PCONT，三种属性模式互斥。
+4. SURF 依次选择两侧 Face。AutoContact 专属选项在 SURF 模式中显示为禁用；主面可选：
    - `AUTO`：按 contact surface 单元数量自动选择较大侧。
-   - `FIRST`：第一个选择的 component 作为主面。
-   - `SECOND`：第二个选择的 component 作为主面。
-5. 设置结果名前缀、是否创建 contact group、是否保留实体自由面临时组件。
+   - `FIRST`：第一次选择的 Face 作为主面。
+   - `SECOND`：第二次选择的 Face 作为主面。
+5. SURF 可设置结果名前缀和是否创建 contact group；COMPONENT 可设置 Main/Secondary 类型与 Review。
 6. 点击 `创建接触`。
 7. 如需删除多余接触，点击 `修改接触`，连续选择需要从 contact surface 中移除的单元后中键确认。
 8. 修改完成后点击 `恢复视图`。
 
 输出：
 
-- 自动识别两个 component 之间相对的外侧面。
+- COMPONENT 通过 `*detectandcreateface2facecontacts comps 1 ...` 搜索多个 component 间的局部接触 patch。
 - 分别创建 `contactsurfs`。
-- 自动创建接触 group，并尝试写入主/从 contact surface。
-- 实体 component 会先生成自由面临时组件；壳 component 直接使用壳单元。
+- SURF 自动创建接触 group，并写入、回读校验主/从 contact surface。
 - 修改模式只会从当前 contact surface 中移除所选单元，不删除源 component 原始网格。
 
 ### 6.9 Solid Seam Connector

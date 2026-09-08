@@ -70,7 +70,7 @@ class SeamTests(unittest.TestCase):
     def test_default_workflow_uses_tcl_fast_path(self):
         workflow=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"workflow.tcl").read_text(encoding="utf-8")
         body=workflow.split("proc ::MeshSeamWeld::processWeldPath",1)[1]
-        self.assertIn("processWeldPathTcl",body)
+        self.assertIn("processWeldPathNativePatch",body)
         self.assertNotIn("processWeldPathPython",body)
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_tcl_mesh_seam_undo_record_registers_and_restores_one_batch(self):

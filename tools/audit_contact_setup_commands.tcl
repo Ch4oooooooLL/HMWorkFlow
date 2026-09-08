@@ -68,6 +68,7 @@ set auditCommands {
     *createmark *clearmark *deletemark *startnotehistorystate *endnotehistorystate
     *undohistorystate *createnode *createlist *createelement *collectorcreateonly
     *currentcollector *templatefileset *feoutputwithdata *createmarkpanel *editmarkpanel
+    *detectandcreateface2facecontacts
     hm_getvalue hm_getmark hm_entityinfo hm_attributelist hm_attributeidfromname
     hm_marklength hm_nodelist hm_nodevalue hm_redraw hm_usermessage hm_info
     hm_latestentityid hm_getcollectorname

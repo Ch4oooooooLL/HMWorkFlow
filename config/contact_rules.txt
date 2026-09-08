@@ -1,6 +1,19 @@
-# Lightweight contact setup defaults.
+# Unified SURF / COMPONENT contact setup defaults.
 key|value|note
+source_type|COMPONENT|
+definition_type|CONTACT|
 contact_type|STICK|
 main_side|AUTO|
+tolerance|1.0|
+reverse_angle|15.0|
+use_shell_thickness|0|
+consolidate|0|
+intersection_check|1|
+main_entity_type|SURF|
+secondary_entity_type|SURF|
+property_mode|BUILTIN|
+property_id|0|
+friction|0.0|
+review_mode|1|
 result_prefix|AUTO_CONTACT|
 try_group|1|

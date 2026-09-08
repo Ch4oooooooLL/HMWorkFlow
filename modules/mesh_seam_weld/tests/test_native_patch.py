@@ -1,0 +1,63 @@
+import unittest
+from pathlib import Path
+try:
+    import tkinter
+except ImportError:
+    tkinter = None
+
+
+@unittest.skipIf(tkinter is None, 'tkinter Tcl runtime is unavailable')
+class NativePatchTests(unittest.TestCase):
+    def setUp(self):
+        self.tcl = tkinter.Tcl()
+        self.tcl.eval('''
+namespace eval ::MeshSeamWeld { variable cfg; array set cfg {weld_mesh_size 6.5} }
+namespace eval ::HybridCore { proc log args {} }
+''')
+        self.tcl.call('source', str(Path(__file__).parents[1] / 'tcl' / 'executor.tcl'))
+        self.tcl.eval('''
+set events {}; set mesh {90}; set broken 0
+proc ::MeshSeamWeld::uniq {ids} {return [lsort -unique -integer $ids]}
+proc ::MeshSeamWeld::componentIdsFromNodes args {return 10}
+proc ::MeshSeamWeld::seamComponentForRelatedComps args {lappend ::events thickness; return SEAM_T1.2}
+proc ::MeshSeamWeld::ensureOutputComponent args {return 30}
+proc *currentcollector {type name} {lappend ::events [list current $name]}
+proc ::MeshSeamWeld::componentElementIds args {return $::mesh}
+proc ::MeshSeamWeld::idsAddedToCollection {before after} {
+    set result {}; foreach id $after {if {[lsearch -exact $before $id]<0} {lappend result $id}}; return $result
+}
+proc ::MeshSeamWeld::runImprintNodeList args {lappend ::events [linsert $args 0 imprint]; set ::mesh {90 100}}
+proc ::MeshSeamWeld::readShellElementConnectivityBulk {ids mark} {
+    if {$::broken && $ids eq "101"} {return {101 {1 2 4 9}}}
+    set out {}; foreach id $ids {dict set out $id {1 2 4 3}}; return $out
+}
+proc *createmark args {lappend ::events [linsert $args 0 mark]}
+proc *elementsaddnodesfixed args {lappend ::events fixed}
+proc *defaultremeshelems args {lappend ::events [linsert $args 0 automesh]; set ::mesh {90 101}}
+proc ::MeshSeamWeld::clearLocalTopologyCaches args {}
+proc ::MeshSeamWeld::stageError {stage err} {error "$stage:$err"}
+''')
+
+    def run_path(self):
+        return self.tcl.eval('::MeshSeamWeld::processWeldPathNativePatch {1 2} {20} 0 0 1 1 {} {} {200} 0')
+
+    def test_native_patch_order_scope_and_mixed_size(self):
+        self.run_path()
+        events = self.tcl.eval('set events')
+        self.assertLess(events.index('thickness'), events.index('current SEAM_T1.2'))
+        self.assertLess(events.index('current SEAM_T1.2'), events.index('imprint'))
+        self.assertIn('imprint {1 2} 20 0 200 1', events)
+        self.assertIn('mark elems 1 100', events)
+        self.assertIn('automesh 1 6.5 2 2 1 1 1 1 0 0 0 0 2 30', events)
+        self.assertEqual(self.tcl.eval('set mesh'), '90 101')
+
+    def test_rejects_automesh_attachment_change(self):
+        self.tcl.eval('set broken 1')
+        with self.assertRaisesRegex(tkinter.TclError, 'AUTOMESH:Automesh changed'):
+            self.run_path()
+
+    def test_empty_patch_never_remeshes_existing_weld(self):
+        self.tcl.eval('proc ::MeshSeamWeld::runImprintNodeList args {}')
+        with self.assertRaisesRegex(tkinter.TclError, 'IMPRINT:Native imprint did not create'):
+            self.run_path()
+        self.assertNotIn('automesh', self.tcl.eval('set events'))

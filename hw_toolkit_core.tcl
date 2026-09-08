@@ -170,11 +170,21 @@ namespace eval ::HWToolkit {
         }
         contact_setup {
             group    "Connector"
-            label_zh "接触创建"
-            label_en "Contact Setup"
-            desc_zh  "连续两次使用 HyperMesh 原生 Face 选择器选取相向单元：第一次选择确认 A 侧后直接进入 B 侧选择，完成后恢复工具窗口。\n以双向邻近关系筛选空间公共覆盖区域，创建法向相向的接触面与 OptiStruct CONTACT group。\n支持 SLIDE / STICK / FREEZE 类型与主面策略；两次选择不能包含相同单元，创建后可修剪。"
-            desc_en  "Use the native HyperMesh face picker twice in one session: after the A side is confirmed the B side picker opens immediately.\nBidirectional proximity filters the common spatial coverage, then facing contact surfaces and an OptiStruct CONTACT group are created.\nSLIDE/STICK/FREEZE types and master-side strategy are supported; the two passes must not share elements, and trimming is available."
+            label_zh "自动接触"
+            label_en "AutoContact"
+            desc_zh  "打开统一接触子界面，默认以 Component 为来源并调用 HyperMesh 官方 AutoContact API；也可切换到 SURF 来源，沿用原有双 Face 建接触链路。\nComponent 模式支持 tolerance、反向角、壳厚、相交检查、合并、CONTACT/TIE、PCONT 与 Review；SURF 不支持的选项会在同一界面中禁用。"
+            desc_en  "Open the unified contact panel, defaulting to Component input and HyperMesh's official AutoContact API. Switch to SURF to use the retained two-face workflow.\nComponent mode supports tolerance, reverse angle, shell thickness, intersection checks, consolidation, CONTACT/TIE, PCONT and review; unsupported SURF options remain visible but disabled."
             proc     "::ContactSetup::runAction"
+            settings_proc "::ContactSetup::runSettings"
+        }
+        contact_surface_setup {
+            file     contact_setup
+            group    "Connector"
+            label_zh "按面创建接触"
+            label_en "Surface Contact"
+            desc_zh  "原有接触创建入口：在统一接触子界面中预选 SURF 来源，连续选择两侧 Face，筛选空间公共区域后创建相向 SURF 与 OptiStruct CONTACT group。\n保留 SLIDE/STICK/FREEZE、主面策略和接触修剪能力；可在界面中切换为 Component AutoContact。"
+            desc_en  "Legacy contact entry: open the shared panel with SURF selected, pick two opposing faces, filter their common region, and create facing surfaces plus an OptiStruct CONTACT group.\nSLIDE/STICK/FREEZE, main-side selection, and trimming remain available; Component AutoContact can still be selected in the panel."
+            proc     "::ContactSetup::runSurfaceAction"
             settings_proc "::ContactSetup::runSettings"
         }
         adhesive_connector {

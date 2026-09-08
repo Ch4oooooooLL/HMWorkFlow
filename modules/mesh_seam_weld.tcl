@@ -325,8 +325,8 @@ proc ::MeshSeamWeld::updateModeUi {} {
             "Automatic mode exports selected first-order shells and, after explicit review, creates CQUAD4/CTRIA3 directly on existing target edge paths. It never invokes imprint, ruled, automesh, or connectors; unsafe candidates remain manual review."]
     } elseif {[winfo exists .mesh_seam_weld.main.note]} {
         .mesh_seam_weld.main.note configure -text [::HWFlow::txt \
-            "兼容模式保留原有手动源节点路径、局部 Mesh Edit imprint 和 ruled/automesh 创建流程。" \
-            "Compatibility mode retains the original manual source-node path, local Mesh Edit imprint, and ruled/automesh creation workflow."]
+            "手动模式按厚度选择焊缝组件，使用局部 Mesh Edit imprint 创建 patch，再按设置尺寸执行 mixed Automesh。" \
+            "Manual mode selects the weld component by thickness, creates a local Mesh Edit imprint patch, then applies mixed Automesh at the configured weld size."]
     }
 }
 
@@ -2295,7 +2295,7 @@ proc ::MeshSeamWeld::clearLocalTopologyCaches {elemIds nodeIds} {
 # Production imprint is local-only.  A missing/stale patch or an unsupported
 # element-target command is a per-loop failure; it must never trigger a scan or
 # imprint of all elements in the selected components.
-proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 0} {targetElemIds {}}} {
+proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 0} {targetElemIds {}} {createPatch 0}} {
     variable cfg
     variable lastImprintTargetMode
     variable lastImprintTargetElemCount
@@ -2373,6 +2373,10 @@ proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 
     set options [format "remain %s to_dest_component 0 remesh_layers %s remesh_mode %s angle %.6f create_joint_elems 0 close_node_list %d" \
         $cfg(imprint_remain) $cfg(patch_expand_layers) $cfg(imprint_remesh_mode) \
         $cfg(imprint_angle) $closeNodeList]
+    if {$createPatch} {
+        set options [format "remain 3 to_dest_component 0 remesh_layers %s remesh_mode %s angle %.6f create_joint_elems 1 close_node_list %d" \
+            $cfg(patch_expand_layers) $cfg(imprint_remesh_mode) $cfg(imprint_angle) $closeNodeList]
+    }
     set lastErr ""
     foreach entityType {elements elems} {
         if {![catch {*imprint_nodelist 1 $entityType 2 $options} err]} {
@@ -2384,6 +2388,9 @@ proc ::MeshSeamWeld::runImprintNodeList {sourceNodes targetComps {closeNodeList 
             return 1
         }
         set lastErr $err
+        # A failed native patch may already have changed the database. Let the
+        # enclosing path transaction roll back instead of trying it twice.
+        if {$createPatch} { break }
     }
     error "Local-element imprint_nodelist failed; this loop was skipped: $lastErr"
 }
