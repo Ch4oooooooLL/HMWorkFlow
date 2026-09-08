@@ -56,6 +56,7 @@ namespace eval ::MeshSeamWeld {
         imprint_remain         3
         imprint_remesh_mode    2
         imprint_angle          30.0
+        strict_patch_boundary_check 0
         mesh_face_shape        1
         mesh_elem_type         2
         mesh_smooth_method     1
@@ -74,12 +75,13 @@ namespace eval ::MeshSeamWeld {
     variable ui
     array set ui {}
 
-    # The most recent completed weld batch can be restored as one user-facing
-    # operation.  Keep the snapshot outside the model so the native history
-    # entries used for per-path failure isolation remain independent.
-    variable lastUndoSnapshot ""
+    # The most recent completed weld batch is undone through HyperMesh native
+    # history states.  The record below only holds the undo-stack labels that
+    # the batch pushed, so no model snapshot file is written.  Per-path failure
+    # isolation keeps using its own independent history entries.
+    variable lastUndoLabels {}
     variable lastUndoSummary ""
-    variable lastUndoCreatedAt ""
+    variable lastUndoCheckElementIds {}
     variable undoInProgress 0
 
     # Per-run caches.  Large node paths previously repeated the same database
@@ -138,6 +140,7 @@ proc ::MeshSeamWeld::stateKeys {} {
         max_weld_tria_ratio quality_guard_enabled max_new_failed_elements existing_weld_search_distance
         exclude_existing_welds keep_task_files auto_accept_confidence review_confidence execution_batch_size
         output_component weld_mesh_size patch_expand_layers imprint_remain imprint_remesh_mode imprint_angle
+        strict_patch_boundary_check
         mesh_face_shape mesh_elem_type mesh_smooth_method mesh_smooth_tol
         mesh_size_control mesh_skew_control mesh_path_param
         mesh_cross_param mesh_cross_size create_geometry_surf
@@ -209,61 +212,167 @@ proc ::MeshSeamWeld::saveState {} {
     }
 }
 
-proc ::MeshSeamWeld::saveUndoSnapshot {path} {
-    file mkdir [file dirname $path]
-    catch {hm_answernext yes}
-    if {[catch {uplevel #0 [list *writefile [file nativename $path] 1]} err opts]} {
-        return -options $opts $err
+# HyperMesh only records history entries for Tcl-originated commands when the
+# native undo recorder is enabled and the history limit is non-zero.  The same
+# setup is required before undoing, mirroring Altair's own macroAddWasher
+# reject path (enablehistoryfromtcl + *undohistorystate).
+proc ::MeshSeamWeld::enableNativeUndo {} {
+    if {[llength [info commands ::hm_gethistorylimit]] > 0} {
+        set limit ""
+        catch {set limit [hm_gethistorylimit]}
+        if {[string is integer -strict $limit] && $limit == 0} {
+            if {[llength [info commands ::*sethistorylimit]] == 0} {
+                error [::HWFlow::txt \
+                    "HyperMesh 原生撤销容量为 0，且无法启用。" \
+                    "HyperMesh native undo history has a zero limit and cannot be enabled."]
+            }
+            *sethistorylimit 100
+        }
     }
-    if {![file isfile $path] || [file size $path] == 0} {
-        error "HyperMesh did not create a valid mesh-seam undo snapshot"
+    *sethistoryrecord 1
+    if {[llength [info commands ::hm_private_frwk]] > 0} {
+        catch {hm_private_frwk enablehistoryfromtcl 1}
     }
-    return [file normalize $path]
+    return 1
+}
+
+proc ::MeshSeamWeld::nativeUndoActions {} {
+    if {[llength [info commands ::hm_getundoactions]] == 0} { return "" }
+    if {[catch {set actions [hm_getundoactions]}]} { return "" }
+    return $actions
+}
+
+# Undo entries are listed most-recent-first (Altair's undo dropdown and
+# macroAddWasher both rely on index 0 being the newest action).  A batch that
+# pushes entries on top of $beforeActions therefore owns the leading slice of
+# $afterActions, and the boundary is the position where the previous newest
+# entry still sits.  An empty $beforeActions means the whole current stack was
+# captured inside this batch.
+proc ::MeshSeamWeld::newUndoLabels {beforeActions afterActions} {
+    if {$afterActions eq ""} {
+        error [::HWFlow::txt \
+            "当前 HyperMesh 不提供原生撤销动作查询（hm_getundoactions），无法注册可撤回批次。" \
+            "This HyperMesh build does not expose hm_getundoactions; the batch cannot be registered for native undo."]
+    }
+    set boundary [llength $afterActions]
+    set previousNewest [lindex $beforeActions 0]
+    if {$previousNewest ne ""} {
+        set found [lsearch -exact $afterActions $previousNewest]
+        if {$found >= 0} {
+            set boundary $found
+        } else {
+            ::HybridCore::log WARN \
+                "mesh seam weld undo boundary fell back to the full stack; the pre-batch entries were evicted from the history limit"
+        }
+    }
+    if {$boundary == 0} {
+        error [::HWFlow::txt \
+            "HyperMesh 撤销栈未记录本批次任何操作，无法注册可撤回批次。" \
+            "HyperMesh recorded no undo actions for this batch; it cannot be registered for native undo."]
+    }
+    return [lrange $afterActions 0 [expr {$boundary - 1}]]
+}
+
+proc ::MeshSeamWeld::registerUndoBatch {labels summary checkElementIds} {
+    variable lastUndoLabels
+    variable lastUndoSummary
+    variable lastUndoCheckElementIds
+    if {![llength $labels]} {
+        error "Cannot register an empty mesh-seam undo label list"
+    }
+    set lastUndoLabels $labels
+    set lastUndoSummary $summary
+    set lastUndoCheckElementIds $checkElementIds
+    return [llength $labels]
 }
 
 proc ::MeshSeamWeld::undoAvailable {} {
-    variable lastUndoSnapshot
+    variable lastUndoLabels
     variable undoInProgress
-    return [expr {!$undoInProgress && $lastUndoSnapshot ne "" && [file isfile $lastUndoSnapshot] && [file size $lastUndoSnapshot] > 0}]
-}
-
-proc ::MeshSeamWeld::registerUndoSnapshot {path summary} {
-    variable lastUndoSnapshot
-    variable lastUndoSummary
-    variable lastUndoCreatedAt
-    if {![file isfile $path] || [file size $path] == 0} {
-        error "Cannot register missing mesh-seam undo snapshot: $path"
-    }
-    set lastUndoSnapshot [file normalize $path]
-    set lastUndoSummary $summary
-    set lastUndoCreatedAt [clock seconds]
-    return $lastUndoSnapshot
+    if {$undoInProgress || ![llength $lastUndoLabels]} { return 0 }
+    set actions [::MeshSeamWeld::nativeUndoActions]
+    if {$actions eq ""} { return 0 }
+    # The batch is only undoable as a whole while its oldest entry is still on
+    # the stack; once it is evicted by the history limit, a partial undo would
+    # remove unrelated newer work, so the record is treated as unavailable.
+    set deepest [lindex $lastUndoLabels end]
+    return [expr {[lsearch -exact $actions $deepest] >= 0 ? 1 : 0}]
 }
 
 proc ::MeshSeamWeld::clearUndoRecord {} {
-    variable lastUndoSnapshot
+    variable lastUndoLabels
     variable lastUndoSummary
-    variable lastUndoCreatedAt
-    set lastUndoSnapshot ""
+    variable lastUndoCheckElementIds
+    set lastUndoLabels {}
     set lastUndoSummary ""
-    set lastUndoCreatedAt ""
+    set lastUndoCheckElementIds {}
 }
 
-proc ::MeshSeamWeld::restoreUndoSnapshot {} {
-    variable lastUndoSnapshot
-    if {$lastUndoSnapshot eq "" || ![file isfile $lastUndoSnapshot] || [file size $lastUndoSnapshot] == 0} {
-        error [::HWFlow::txt "没有可撤回的网格焊缝操作。" "There is no completed mesh-seam operation to undo."]
+proc ::MeshSeamWeld::performNativeUndo {count} {
+    catch {::MeshSeamWeld::enableNativeUndo}
+    if {[llength [info commands ::*undohistorystate]] == 0} {
+        error "HyperMesh command *undohistorystate is unavailable"
     }
-    catch {hm_answernext yes}
-    if {[catch {uplevel #0 [list *readfile [file nativename $lastUndoSnapshot] 0]} err opts]} {
-        return -options $opts $err
+    if {![catch {*undohistorystate $count}]} { return $count }
+    # Some releases accept single-step undos only; fall back to a loop.
+    for {set index 0} {$index < $count} {incr index} {
+        *undohistorystate 1
     }
-    catch {::HWFlow::refreshBrowser}
-    return $lastUndoSnapshot
+    return $count
+}
+
+# Undo the recorded batch plus everything pushed after it, and verify both the
+# undo stack and the model.  Returns 1 on a verified undo; throws with a
+# diagnosis when the stack query, the undo call, or the model check fails.
+proc ::MeshSeamWeld::restoreUndoBatch {} {
+    variable lastUndoLabels
+    variable lastUndoCheckElementIds
+    set actions [::MeshSeamWeld::nativeUndoActions]
+    if {$actions eq ""} {
+        error [::HWFlow::txt \
+            "当前 HyperMesh 不提供原生撤销动作查询，无法撤回。" \
+            "This HyperMesh build does not expose hm_getundoactions; native undo is unavailable."]
+    }
+    set deepest [lindex $lastUndoLabels end]
+    set deepestIndex [lsearch -exact $actions $deepest]
+    if {$deepestIndex < 0} {
+        error [::HWFlow::txt \
+            "撤销栈中已找不到该批次的撤销项（可能已被手动撤销，或超出撤销容量）。" \
+            "The batch is no longer on the HyperMesh undo stack (it was undone manually or evicted from the history limit)."]
+    }
+    set missing 0
+    foreach label $lastUndoLabels {
+        if {[lsearch -exact $actions $label] < 0} { incr missing }
+    }
+    if {$missing > 0} {
+        error [::HWFlow::txt \
+            "该批次有 $missing 项撤销记录已被 HyperMesh 丢弃，无法完整撤回。" \
+            "$missing of the batch undo entries were evicted by HyperMesh; the batch cannot be undone completely."]
+    }
+    set undoCount [expr {$deepestIndex + 1}]
+    ::MeshSeamWeld::performNativeUndo $undoCount
+    set remaining [::MeshSeamWeld::nativeUndoActions]
+    if {$remaining ne "" && [lsearch -exact $remaining $deepest] >= 0} {
+        error [::HWFlow::txt \
+            "原生撤销已执行，但撤销栈仍包含该批次的记录。" \
+            "Native undo ran, but the undo stack still lists batch entries."]
+    }
+    set surviving [list]
+    foreach elementId $lastUndoCheckElementIds {
+        if {[llength [::HybridCore::existingEntityIds {elems elements} [list $elementId]]] > 0} {
+            lappend surviving $elementId
+        }
+    }
+    if {[llength $surviving]} {
+        error [::HWFlow::txt \
+            "原生撤销已执行，但模型中仍存在本批次创建的焊缝单元 $surviving；当前 HyperMesh 可能无法撤销其中的部分命令。" \
+            "Native undo ran, but weld elements created by the batch still exist: $surviving. This HyperMesh build may be unable to undo some of the commands involved."]
+    }
+    return $undoCount
 }
 
 proc ::MeshSeamWeld::undoLast {} {
-    variable lastUndoSnapshot
+    variable lastUndoLabels
     variable lastUndoSummary
     variable undoInProgress
     if {![::MeshSeamWeld::undoAvailable]} {
@@ -275,21 +384,35 @@ proc ::MeshSeamWeld::undoLast {} {
     if {$detail eq ""} {
         set detail [::HWFlow::txt "最近一次网格焊缝批次" "the most recent mesh-seam batch"]
     }
+    set actions [::MeshSeamWeld::nativeUndoActions]
+    set undoCount [expr {[lsearch -exact $actions [lindex $lastUndoLabels end]] + 1}]
+    set batchDepth [llength $lastUndoLabels]
+    set extraCount [expr {$undoCount - $batchDepth}]
+    if {$extraCount > 0} {
+        set scopeText [::HWFlow::txt \
+            "这将通过 HyperMesh 原生撤销回退 $undoCount 项操作：本批次 $batchDepth 项，以及批次之后的 $extraCount 项其他修改。" \
+            "This undoes $undoCount native HyperMesh actions: the $batchDepth batch entries plus $extraCount later model changes."]
+    } else {
+        set scopeText [::HWFlow::txt \
+            "这将通过 HyperMesh 原生撤销回退该批次的 $batchDepth 项操作。" \
+            "This undoes the $batchDepth native HyperMesh actions of the batch."]
+    }
     set answer [tk_messageBox -type yesno -icon question \
         -title [::HWFlow::txt "撤回网格焊缝" "Undo Mesh Seam Weld"] \
         -message [::HWFlow::txt \
-            "确定撤回$detail吗？这会恢复该批次开始前的模型状态，并覆盖该批次之后对模型所做的修改。" \
-            "Undo $detail? This restores the model state captured before that batch and overwrites model changes made afterwards."]]
+            "确定撤回$detail吗？$scopeText" \
+            "Undo $detail? $scopeText"]]
     if {$answer ne "yes"} { return 0 }
     set undoInProgress 1
-    set code [catch {::MeshSeamWeld::restoreUndoSnapshot} err]
+    set code [catch {::MeshSeamWeld::restoreUndoBatch} err]
     set undoInProgress 0
     if {$code} {
         tk_messageBox -icon error -title [::HWFlow::txt "撤回失败" "Undo Failed"] \
-            -message [::HWFlow::txt "网格焊缝撤回失败，原撤回点仍保留：\n$err" \
-                "Mesh seam weld undo failed; the undo point was retained:\n$err"]
+            -message [::HWFlow::txt "网格焊缝撤回失败：\n$err" \
+                "Mesh seam weld undo failed:\n$err"]
         return 0
     }
+    catch {::HWFlow::refreshBrowser}
     ::MeshSeamWeld::clearUndoRecord
     tk_messageBox -icon info -title [::HWFlow::txt "撤回完成" "Undo Complete"] \
         -message [::HWFlow::txt "最近一次网格焊缝批次已撤回。" "The most recent mesh-seam batch was undone."]
@@ -325,6 +448,11 @@ proc ::MeshSeamWeld::updateModeUi {} {
     }
     foreach widget {exclude_existing keep_tasks local_split node_move} {
         if {[winfo exists $panel.$widget]} { $panel.$widget configure -state $autoState }
+    }
+    # The strict patch-boundary check only applies to the manual native
+    # Create Patch chain, so it follows the manual-mode widgets.
+    foreach widget {strict_boundary} {
+        if {[winfo exists $panel.$widget]} { $panel.$widget configure -state $manualState }
     }
     if {[winfo exists .mesh_seam_weld.main.note] && $ui(run_mode) eq "FAST_AUTO"} {
         .mesh_seam_weld.main.note configure -text [::HWFlow::txt \
@@ -396,14 +524,16 @@ proc ::MeshSeamWeld::showPanel {} {
     checkbutton $w.main.param.keep_tasks -text [::HWFlow::txt "保留任务文件" "Keep task files"] -variable ::MeshSeamWeld::ui(keep_task_files)
     checkbutton $w.main.param.local_split -text [::HWFlow::txt "允许局部切分（未验证，默认关闭）" "Allow local split (unvalidated; off by default)"] -variable ::MeshSeamWeld::ui(allow_local_split)
     checkbutton $w.main.param.node_move -text [::HWFlow::txt "允许受控目标节点微调" "Allow guarded target-node adjustment"] -variable ::MeshSeamWeld::ui(allow_target_node_move)
+    checkbutton $w.main.param.strict_boundary -text [::HWFlow::txt "patch 连接边逐边严格校验（默认允许 remesh 细分边界边）" "Strict per-edge patch boundary check (remesh may subdivide boundary edges by default)"] -variable ::MeshSeamWeld::ui(strict_patch_boundary_check)
     grid $w.main.param.exclude_existing -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid $w.main.param.keep_tasks -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid $w.main.param.node_move -row $row -column 0 -columnspan 2 -sticky w; incr row
-    grid $w.main.param.local_split -row $row -column 0 -columnspan 2 -sticky w
+    grid $w.main.param.local_split -row $row -column 0 -columnspan 2 -sticky w; incr row
+    grid $w.main.param.strict_boundary -row $row -column 0 -columnspan 2 -sticky w
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "连续节点直接作为开放路径执行。单点先由原生自由边图区分边界点和内部点：边界点只批量读取所在连通轮廓，并按目标最近壳单元的局部法向提取与目标平面平行的完整开放/闭合直线或曲线；内部点不查询目标法向，保留原流程，提取所属 component 的全部闭合自由边。不连续边界节点仍按端点对生成较短开放路径。识别结果逐路径投影到目标组件，扩展两到三层局部 Elements patch，再以 create_joint_elems=1 调用 Mesh Edit Create Patch，直接在 SEAM_* component 中创建焊缝壳。仅对本次新增 patch 做边界固定的 mixed remesh；空 patch、边界缺失或重绘改变连接边时整条路径回滚。自由边图按源 component 在本批次缓存，运行流程不导出 FEM，也不调用 Python。" \
-        "Continuous nodes execute directly as open paths. A single node is first classified from the native free-edge graph. For a boundary node, only its connected outline is batch-read and filtered by the nearest target shell's local normal to collect the complete parallel open/closed line or curve. An internal node skips target-normal lookup and retains the existing behavior of selecting all closed free boundaries of its source component. Disconnected boundary nodes still form shorter open endpoint-pair paths. Each result is projected to the target and expanded to a two- or three-layer local Elements patch; Mesh Edit Create Patch is then called with create_joint_elems=1 to create the weld shell directly in SEAM_*. Only the newly created patch receives a boundary-fixed mixed remesh. Empty patches, missing attachment nodes, or changed attachment edges roll back the path. Native edge graphs are cached per source component for the batch; no FEM export or Python planning is used."]
+        "连续节点直接作为开放路径执行。单点先由原生自由边图区分边界点和内部点：边界点只批量读取所在连通轮廓，并按目标最近壳单元的局部法向提取与目标平面平行的完整开放/闭合直线或曲线；内部点不查询目标法向，保留原流程，提取所属 component 的全部闭合自由边。不连续边界节点仍按端点对生成较短开放路径。识别结果逐路径投影到目标组件，扩展两到三层局部 Elements patch，再以 create_joint_elems=1 调用 Mesh Edit Create Patch，直接在 SEAM_* component 中创建焊缝壳。仅对本次新增 patch 做边界固定的 mixed remesh；空 patch、边界缺失或重绘破坏附件边界时整条路径回滚。默认允许 remesh 在原边界边上插入节点细分（长边加密），勾选「patch 连接边逐边严格校验」后恢复重绘前后逐边完全一致的校验。自由边图按源 component 在本批次缓存，运行流程不导出 FEM，也不调用 Python。" \
+        "Continuous nodes execute directly as open paths. A single node is first classified from the native free-edge graph. For a boundary node, only its connected outline is batch-read and filtered by the nearest target shell's local normal to collect the complete parallel open/closed line or curve. An internal node skips target-normal lookup and retains the existing behavior of selecting all closed free boundaries of its source component. Disconnected boundary nodes still form shorter open endpoint-pair paths. Each result is projected to the target and expanded to a two- or three-layer local Elements patch; Mesh Edit Create Patch is then called with create_joint_elems=1 to create the weld shell directly in SEAM_*. Only the newly created patch receives a boundary-fixed mixed remesh. Empty patches, missing attachment nodes, or an attachment boundary broken by the remesh roll back the path. By default the remesh may subdivide boundary edges in place by inserting nodes on them; enable the strict per-edge patch boundary check to restore the previous exact edge-set equality validation. Native edge graphs are cached per source component for the batch; no FEM export or Python planning is used."]
     grid $w.main.note -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -485,7 +615,7 @@ proc ::MeshSeamWeld::acceptPanel {} {
         tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "mesh_smooth_tol 必须为正数。" "mesh_smooth_tol must be positive."]
         return
     }
-    foreach key {imprint_remain imprint_remesh_mode mesh_face_shape mesh_elem_type mesh_smooth_method mesh_size_control mesh_skew_control mesh_path_param mesh_cross_param mesh_cross_size create_geometry_surf} {
+    foreach key {imprint_remain imprint_remesh_mode mesh_face_shape mesh_elem_type mesh_smooth_method mesh_size_control mesh_skew_control mesh_path_param mesh_cross_param mesh_cross_size create_geometry_surf strict_patch_boundary_check} {
         if {![string is integer -strict $ui($key)] || $ui($key) < 0} {
             tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "$key 必须为非负整数。" "$key must be a non-negative integer."]
             return
@@ -5922,10 +6052,10 @@ proc ::MeshSeamWeld::diagnoseFailure {errorText} {
             set actionEn "Check the target surface for cracks, duplicate nodes, disconnected components, or a failed local remesh."
         }
         AUTOMESH {
-            set reasonZh "原生 Create Patch 已执行，但新建 patch 的 mixed 重网格或连接边界校验失败。"
+            set reasonZh "原生 Create Patch 已执行，但新建 patch 的 mixed 重网格或连接-边界校验失败。"
             set reasonEn "Native Create Patch ran, but mixed remeshing or attachment-boundary validation of the new patch failed."
-            set actionZh "检查源路径是否完整投影到目标局部面、patch 边界是否有效，以及焊缝网格尺寸是否适合该局部区域。"
-            set actionEn "Check that the source path projects completely onto the local target surface, that the patch boundary is valid, and that the weld mesh size suits the local region."
+            set actionZh "检查源路径是否完整投影到目标局部面、patch 边界是否有效，以及焊缝网格尺寸是否适合该局部区域。若失败发生在边界校验且已开启严格模式，可在设置中关闭「patch 连接边逐边严格校验」后重试。"
+            set actionEn "Check that the source path projects completely onto the local target surface, that the patch boundary is valid, and that the weld mesh size suits the local region. If the boundary check failed while strict mode was enabled, disable the strict per-edge patch boundary check in settings and retry."
         }
         TRANSACTION {
             set reasonZh "无法启动或回滚该边界/路径的 HyperMesh 撤销事务。"
@@ -5977,7 +6107,7 @@ proc ::MeshSeamWeld::writeFailureReport {taskDir context failureRecords} {
     catch {set hmVersion [hm_info -appinfo VERSION]}
     puts $channel "hypermesh_version=[::MeshSeamWeld::reportLineValue $hmVersion]"
     puts $channel "created_at=[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}]"
-    foreach key {source_mode path_total success_count source_components target_components weld_mesh_size patch_expand_layers imprint_remesh_mode imprint_angle} {
+    foreach key {source_mode path_total success_count source_components target_components weld_mesh_size patch_expand_layers imprint_remesh_mode imprint_angle strict_patch_boundary_check} {
         puts $channel "$key=[::MeshSeamWeld::reportLineValue [::MeshSeamWeld::dictValueOr $context $key {}]]"
     }
     puts $channel "failure_count=[llength $failureRecords]"
@@ -6099,16 +6229,19 @@ proc ::MeshSeamWeld::runAction {} {
     set sourceComponentIds {}
     set batchTaskDir ""
     set batchLogPath ""
-    set undoSnapshot ""
+    set undoBefore ""
     set code [catch {
         set batchStarted [clock milliseconds]
         set batchWorkspace [::HybridCore::createTaskWorkspace mesh_seam_weld]
         set batchTaskDir [dict get $batchWorkspace task_dir]
         set batchLogPath [file join $batchTaskDir operation.log]
-        set undoSnapshot [file join $batchTaskDir state before_manual_mesh_seam_weld.hm]
-        ::MeshSeamWeld::saveUndoSnapshot $undoSnapshot
         ::MeshSeamWeld::clearUndoRecord
+        # No model snapshot file is written.  Every weld path commits as its
+        # own named history action, so undoing the batch means undoing the
+        # native undo entries that were recorded after this baseline.
+        ::MeshSeamWeld::enableNativeUndo
         ::MeshSeamWeld::clearFailureMarkerComponent
+        set undoBefore [::MeshSeamWeld::nativeUndoActions]
         set prepareStarted [clock milliseconds]
         set batchedSourcePaths {}
         set batchedWeldJobs {}
@@ -6360,7 +6493,8 @@ proc ::MeshSeamWeld::runAction {} {
                 weld_mesh_size $cfg(weld_mesh_size) \
                 patch_expand_layers $cfg(patch_expand_layers) \
                 imprint_remesh_mode $cfg(imprint_remesh_mode) \
-                imprint_angle $cfg(imprint_angle)]
+                imprint_angle $cfg(imprint_angle) \
+                strict_patch_boundary_check $cfg(strict_patch_boundary_check)]
             if {[catch {
                 set failureReportPath [::MeshSeamWeld::writeFailureReport \
                     $batchTaskDir $reportContext $failureRecords]
@@ -6395,7 +6529,8 @@ proc ::MeshSeamWeld::runAction {} {
                 target_components $targetComps weld_mesh_size $cfg(weld_mesh_size) \
                 patch_expand_layers $cfg(patch_expand_layers) \
                 imprint_remesh_mode $cfg(imprint_remesh_mode) \
-                imprint_angle $cfg(imprint_angle)]
+                imprint_angle $cfg(imprint_angle) \
+                strict_patch_boundary_check $cfg(strict_patch_boundary_check)]
             catch {set failureReportPath [::MeshSeamWeld::writeFailureReport \
                 $batchTaskDir $fatalContext [list $fatalRecord]]}
         }
@@ -6436,12 +6571,17 @@ proc ::MeshSeamWeld::runAction {} {
     set failedCount [llength $failureRecords]
     set successCount [expr {[llength $sourcePaths] - $failedCount}]
     set undoRegistered 0
-    if {$successCount > 0 && $undoSnapshot ne ""} {
+    if {$successCount > 0 && $undoBefore eq ""} {
+        ::HybridCore::log WARN \
+            "mesh seam weld undo registration skipped: hm_getundoactions is unavailable on this build"
+    } elseif {$successCount > 0} {
         if {![catch {
-            ::MeshSeamWeld::registerUndoSnapshot $undoSnapshot \
+            ::MeshSeamWeld::registerUndoBatch \
+                [::MeshSeamWeld::newUndoLabels $undoBefore [::MeshSeamWeld::nativeUndoActions]] \
                 [::HWFlow::txt \
                     "最近一次网格焊缝批次（成功路径 $successCount）" \
-                    "the most recent mesh-seam batch ($successCount successful paths)"]
+                    "the most recent mesh-seam batch ($successCount successful paths)"] \
+                [lrange [lsort -integer -unique $allWeldElems] 0 4]
         } undoRegisterErr]} {
             set undoRegistered 1
         } else {
@@ -6491,8 +6631,8 @@ proc ::MeshSeamWeld::runAction {} {
         "\nPerformance log: $batchLogPath"]
     if {$undoRegistered} {
         append msg [::HWFlow::txt \
-            "\n可撤回：可在工具箱的“网格焊缝”行点击“撤回”，恢复本次批次开始前的模型状态。" \
-            "\nUndo available: click “Undo” on the Mesh Seam Weld row in the toolkit to restore the state before this batch."]
+            "\n可撤回：可在工具箱的“网格焊缝”行点击“撤回”，或直接使用 HyperMesh 的 Ctrl+Z。" \
+            "\nUndo available: click “Undo” on the Mesh Seam Weld row in the toolkit, or use HyperMesh Ctrl+Z."]
     }
     catch {::HybridCore::closeLog}
     tk_messageBox -icon $completionIcon -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message $msg

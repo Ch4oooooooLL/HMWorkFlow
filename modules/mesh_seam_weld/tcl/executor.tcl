@@ -24,6 +24,142 @@ proc ::MeshSeamWeld::patchBoundaryEdges {elemIds} {
     return $boundary
 }
 
+proc ::MeshSeamWeld::patchBoundaryNodeCoordinates {nodeIds} {
+    set coords [dict create]
+    if {[catch {set coords [::HybridCore::readNodeCoordinatesBulk $nodeIds \
+            [list ::MeshSeamWeld::nodeXYZ]]}]} {
+        set coords [dict create]
+    }
+    foreach nodeId $nodeIds {
+        if {[dict exists $coords $nodeId]} { continue }
+        if {[catch {::MeshSeamWeld::nodeXYZ $nodeId} xyz]} { return [dict create] }
+        dict set coords $nodeId $xyz
+    }
+    return $coords
+}
+
+proc ::MeshSeamWeld::pointSegmentDistance {segmentStart segmentEnd point} {
+    lassign $segmentStart ax ay az
+    lassign $segmentEnd bx by bz
+    lassign $point px py pz
+    set vx [expr {$bx - $ax}]; set vy [expr {$by - $ay}]; set vz [expr {$bz - $az}]
+    set wx [expr {$px - $ax}]; set wy [expr {$py - $ay}]; set wz [expr {$pz - $az}]
+    set vv [expr {$vx*$vx + $vy*$vy + $vz*$vz}]
+    if {$vv <= 0.0} {
+        return [expr {sqrt($wx*$wx + $wy*$wy + $wz*$wz)}]
+    }
+    set t [expr {($wx*$vx + $wy*$vy + $wz*$vz) / $vv}]
+    if {$t < 0.0} { set t 0.0 } elseif {$t > 1.0} { set t 1.0 }
+    set dx [expr {$wx - $t*$vx}]; set dy [expr {$wy - $t*$vy}]; set dz [expr {$wz - $t*$vz}]
+    return [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
+}
+
+proc ::MeshSeamWeld::pointOnBoundarySegment {coords segA segB nodeId} {
+    foreach id [list $segA $segB $nodeId] {
+        if {![dict exists $coords $id]} { return 0 }
+    }
+    set pa [dict get $coords $segA]
+    set pb [dict get $coords $segB]
+    set ax [lindex $pa 0]; set ay [lindex $pa 1]; set az [lindex $pa 2]
+    set bx [lindex $pb 0]; set by [lindex $pb 1]; set bz [lindex $pb 2]
+    set length [expr {sqrt(($bx-$ax)*($bx-$ax) + ($by-$ay)*($by-$ay) + ($bz-$az)*($bz-$az))}]
+    set distance [::MeshSeamWeld::pointSegmentDistance $pa $pb [dict get $coords $nodeId]]
+    return [expr {$distance <= 1.0e-3 * $length + 1.0e-9}]
+}
+
+# Walk the after-remesh boundary graph from $fromNode to $toNode.  Every
+# intermediate node must lie on the straight segment between them, so an
+# in-place subdivision of the original edge is accepted while any sideways
+# reconnection of the boundary fails.
+proc ::MeshSeamWeld::boundaryEdgeChainPreserved {fromNode toNode afterAdjName coords} {
+    upvar 1 $afterAdjName afterAdj
+    if {![info exists afterAdj($fromNode)]} { return 0 }
+    set previous $fromNode
+    set current ""
+    foreach neighbor $afterAdj($fromNode) {
+        if {$neighbor eq $toNode} { set current $toNode; break }
+        if {[::MeshSeamWeld::pointOnBoundarySegment $coords $fromNode $toNode $neighbor]} {
+            set current $neighbor
+            break
+        }
+    }
+    set visited [dict create]
+    set guard 0
+    while {$current ne $toNode} {
+        if {$current eq "" || [dict exists $visited $current] || [incr guard] > 100000} {
+            return 0
+        }
+        dict set visited $current 1
+        set next ""
+        if {[info exists afterAdj($current)]} {
+            foreach neighbor $afterAdj($current) {
+                if {$neighbor eq $previous} { continue }
+                if {$neighbor eq $toNode} { set next $toNode; break }
+                if {[::MeshSeamWeld::pointOnBoundarySegment $coords $fromNode $toNode $neighbor]} {
+                    set next $neighbor
+                    break
+                }
+            }
+        }
+        set previous $current
+        set current $next
+    }
+    return 1
+}
+
+proc ::MeshSeamWeld::afterEdgeOnOriginalBoundary {a b boundaryBefore coords} {
+    if {$a eq $b} { return 0 }
+    foreach edge $boundaryBefore {
+        lassign $edge c d
+        if {$c eq $d} { continue }
+        if {[::MeshSeamWeld::pointOnBoundarySegment $coords $c $d $a] &&
+            [::MeshSeamWeld::pointOnBoundarySegment $coords $c $d $b]} { return 1 }
+    }
+    return 0
+}
+
+# Relaxed attachment validation used instead of the exact boundary-edge-set
+# equality when strict_patch_boundary_check is off.  The remesher legitimately
+# subdivides a long boundary edge by inserting nodes on it while both fixed
+# endpoints stay, which the exact comparison rejected.  The attachment counts
+# as changed when an original boundary edge is neither preserved nor replaced
+# by a collinear subdivided chain, or a new boundary edge leaves the original
+# attachment polyline.  Unreadable coordinates fail closed.
+proc ::MeshSeamWeld::patchBoundaryAttachmentChanged {boundaryBefore boundaryAfter} {
+    array set afterAdj {}
+    foreach edge $boundaryAfter {
+        lassign $edge a b
+        if {$a eq $b} { return 1 }
+        lappend afterAdj($a) $b
+        lappend afterAdj($b) $a
+    }
+    set nodeIds {}
+    foreach edge [concat $boundaryBefore $boundaryAfter] {
+        foreach nodeId $edge { lappend nodeIds $nodeId }
+    }
+    set nodeIds [lsort -integer -unique $nodeIds]
+    if {[llength $nodeIds] == 0} { return 0 }
+    set coords [::MeshSeamWeld::patchBoundaryNodeCoordinates $nodeIds]
+    if {[dict size $coords] == 0} { return 1 }
+
+    foreach edge $boundaryBefore {
+        lassign $edge a b
+        if {$a eq $b} { continue }
+        if {[info exists afterAdj($a)] && [lsearch -exact $afterAdj($a) $b] >= 0} { continue }
+        if {![::MeshSeamWeld::boundaryEdgeChainPreserved $a $b afterAdj $coords]} {
+            return 1
+        }
+    }
+    foreach edge $boundaryAfter {
+        lassign $edge a b
+        if {[::MeshSeamWeld::afterEdgeOnOriginalBoundary $a $b $boundaryBefore $coords]} {
+            continue
+        }
+        return 1
+    }
+    return 0
+}
+
 proc ::MeshSeamWeld::processWeldPathNativePatch {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1} {sourceCompIds {}} {seamComp ""} {targetElemIds {}} {imprintClosedLoop ""}} {
     variable cfg
     set totalStarted [clock milliseconds]
@@ -98,16 +234,25 @@ proc ::MeshSeamWeld::processWeldPathNativePatch {sourceNodes targetComps closedL
             [::MeshSeamWeld::componentElementIds $outputCompId]]
         if {[llength $weldElems] == 0} { error "Native patch remesh produced no weld elements." }
         set boundaryAfter [::MeshSeamWeld::patchBoundaryEdges $weldElems]
-        if {[lsort $boundaryBefore] ne [lsort $boundaryAfter]} {
-            error "Native patch remesh changed its attachment edges."
+        if {[info exists cfg(strict_patch_boundary_check)] && $cfg(strict_patch_boundary_check)} {
+            if {[lsort $boundaryBefore] ne [lsort $boundaryAfter]} {
+                error "Native patch remesh changed its attachment edges."
+            }
+        } elseif {[::MeshSeamWeld::patchBoundaryAttachmentChanged \
+                $boundaryBefore $boundaryAfter]} {
+            error "Native patch remesh moved the patch attachment boundary."
         }
     } meshErr]} {
         ::MeshSeamWeld::stageError AUTOMESH $meshErr
     }
     set meshMs [expr {[clock milliseconds] - $meshStarted}]
     set totalMs [expr {[clock milliseconds] - $totalStarted}]
+    set boundaryCheckMode relaxed
+    if {[info exists cfg(strict_patch_boundary_check)] && $cfg(strict_patch_boundary_check)} {
+        set boundaryCheckMode strict
+    }
     ::HybridCore::log INFO \
-        "PERF mesh_seam_weld creation_mode=native_imprint_patch path=$pathIndex/$pathTotal component=$seamComp source_nodes=[llength $sourceNodes] patch_elements=[llength $patchElems] weld_elements=[llength $weldElems] mesh_type=mixed mesh_size=$cfg(weld_mesh_size) imprint_ms=$imprintMs mesh_create_ms=$meshMs total_ms=$totalMs"
+        "PERF mesh_seam_weld creation_mode=native_imprint_patch path=$pathIndex/$pathTotal component=$seamComp source_nodes=[llength $sourceNodes] patch_elements=[llength $patchElems] weld_elements=[llength $weldElems] mesh_type=mixed mesh_size=$cfg(weld_mesh_size) boundary_check=$boundaryCheckMode imprint_ms=$imprintMs mesh_create_ms=$meshMs total_ms=$totalMs"
 
     if {$reportProgress || $pathIndex == $pathTotal} {
         ::HybridCore::progressUpdate \

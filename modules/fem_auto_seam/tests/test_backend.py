@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "python"))
 from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, realize_candidates, write_fem_bundle
 from hmworkflow.fem_auto_seam.delta_writer import write_shell_weld_delta
 from hmworkflow.fem_auto_seam.main import _candidate_cache_key, _load_candidate_cache, _mark_duplicates
-from hmworkflow.mesh_seam_weld.fem_mesh_reader import read_shell_fem
+from hmworkflow.mesh_seam_weld.fem_mesh_reader import FemMeshError, read_shell_fem
 from hmworkflow.mesh_seam_weld.weld_strip_planner import plan_zipper
 
 
@@ -140,6 +140,40 @@ class OfflineBackendTests(unittest.TestCase):
             model = read_shell_fem(fem, 1)
             self.assertEqual([102], sorted(model.elements))
             self.assertEqual([100, 101], model.skipped_degenerate_elements)
+
+    def test_fem_reader_defaults_blank_or_zero_pid_to_element_id(self):
+        # HyperMesh writes PID 0 for shells whose component has no assigned
+        # property; the bulk-data default for a blank or 0 PID is the EID.
+        # A whole-vehicle export must not abort on such elements.
+        with tempfile.TemporaryDirectory() as directory:
+            fem = Path(directory) / "unassigned_property.fem"
+            fem.write_text(
+                "GRID,1,0,0.0,0.0,0.0\n"
+                "GRID,2,0,1.0,0.0,0.0\n"
+                "GRID,3,0,0.0,1.0,0.0\n"
+                "GRID,4,0,1.0,1.0,0.0\n"
+                "CTRIA3,100,0,1,2,3\n"
+                "CTRIA3,101,,1,2,3\n"
+                "CQUAD4,102,0,1,2,4,3\n"
+                "CTRIA3,103,7,1,2,4\n",
+                encoding="utf-8",
+            )
+            model = read_shell_fem(fem, 1)
+            self.assertEqual([100, 101, 102, 103], sorted(model.elements))
+            self.assertEqual({100: 100, 101: 101, 102: 102, 103: 7}, model.element_properties)
+
+    def test_fem_reader_rejects_negative_shell_pid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fem = Path(directory) / "negative_pid.fem"
+            fem.write_text(
+                "GRID,1,0,0.0,0.0,0.0\n"
+                "GRID,2,0,1.0,0.0,0.0\n"
+                "GRID,3,0,0.0,1.0,0.0\n"
+                "CTRIA3,100,-5,1,2,3\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(FemMeshError):
+                read_shell_fem(fem, 1)
 
     def test_backend_plans_native_batch_remesh_without_node_moves(self):
         model, _ = FIXTURES.straight_t()

@@ -62,10 +62,13 @@ class AutomaticShellSeamTests(unittest.TestCase):
         fast="\n".join((ROOT/"modules"/"mesh_seam_weld"/"tcl"/name).read_text(encoding="utf-8") for name in ("auto_workflow.tcl","fast_executor.tcl","delta_import.tcl"))
         for forbidden in ("*imprint_nodelist","*linearsurfacebetweenlines","*surfacemarksplitwithlines"):
             self.assertNotIn(forbidden,fast)
-        self.assertIn("state checkpoints",fast)
+        self.assertNotIn("saveAutoSnapshot",fast)
+        self.assertNotIn("restoreAutoSnapshot",fast)
+        self.assertNotIn("before_auto_shell_seam",fast)
+        self.assertIn("startnotehistorystate $historyName",fast)
         self.assertIn("applyAutoPlanMoves",fast)
         self.assertIn("autoNativeQualityFailures",fast)
-        self.assertIn("restoreAutoSnapshot $checkpoint",fast)
+        self.assertIn("verifyAutoCandidateRollback",fast)
 
     def test_integrity_review_links_to_auto_creator(self):
         core=(ROOT/"modules"/"weld_integrity_check"/"tcl"/"core.tcl").read_text(encoding="utf-8")
@@ -171,10 +174,11 @@ class AutomaticShellSeamTests(unittest.TestCase):
             text=(Path(temp)/"delta.fem").read_text(encoding="utf-8")
             self.assertIn("$HMCOMP ID 10",text); self.assertIn("CTRIA3,",text); self.assertIn("CQUAD4,",text)
 
-    def test_v3_tcl_deletes_only_after_reference_validation_and_checkpoints(self):
+    def test_v3_tcl_deletes_only_after_reference_validation_and_history_state(self):
         fast=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"fast_executor.tcl").read_text(encoding="utf-8")
         self.assertLess(fast.index("validateAutoPlanReferences"),fast.index("deleteAutoPlanMotherElements"))
-        self.assertLess(fast.index("saveAutoSnapshot $checkpoint"),fast.index("deleteAutoPlanMotherElements"))
+        self.assertLess(fast.index("startnotehistorystate $historyName"),fast.index("deleteAutoPlanMotherElements"))
+        self.assertIn("undohistorystate 1",fast)
         delta=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"delta_import.tcl").read_text(encoding="utf-8")
         self.assertIn("mother shell $elementId connectivity changed",delta)
         self.assertIn("candidate GRID IDs are already occupied",delta)

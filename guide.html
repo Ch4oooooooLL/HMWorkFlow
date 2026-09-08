@@ -1518,9 +1518,9 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <li><strong>原生 Create Patch</strong>：以源 Nodes 和局部目标 Elements 调用 <code>imprint_nodelist</code> 的 <code>create_joint_elems=1</code> 模式，直接在按板厚选定的 <code>SEAM_*</code> component 中创建焊缝壳，不再以 Ruled 作为手动主路径。</li>
                             <li><strong>局部失败隔离</strong>：每条路径都在独立撤销事务中完成即时目标 patch、imprint、后置节点验证和连接带创建。任一阶段失败会回滚并跳过当前路径，不会退化为整个目标 component 的 imprint，也不会保留部分焊缝。</li>
                             <li><strong>批量性能与可靠性</strong>：原生自由边图按源 component 在批次内缓存；单边界点只读取其所在连通轮廓，内部点在边界分类后跳过目标法向查询。每条路径执行前才统一投影全部源节点、一次反查目标壳单元并扩展两到三层 Elements，避免前一路径重网格后留下过期 ID。仅本次 Create Patch 新增的单元进入 mixed remesh，所有连接边节点固定，重绘前后边界必须一致。</li>
-                            <li><strong>FAST_AUTO</strong>：自动识别 T、CONNECT 和搭接候选，用户明确接受后优先通过 <code>EXISTING_EDGE_PATH</code> 直接导入 CQUAD4/CTRIA3；显式开启后可使用受控节点微调或单母单元保守切分。该路径禁止 imprint、ruled 和 automesh，并在任务及每个候选应用前保存恢复快照。</li>
+                            <li><strong>FAST_AUTO</strong>：自动识别 T、CONNECT 和搭接候选，用户明确接受后优先通过 <code>EXISTING_EDGE_PATH</code> 直接导入 CQUAD4/CTRIA3；显式开启后可使用受控节点微调或单母单元保守切分。该路径禁止 imprint、ruled 和 automesh，每个候选在自己的原生撤销事务中执行，失败用 <code>*undohistorystate</code> 回滚，不再写入整模型快照文件。</li>
                             <li><strong>LEGACY_MANUAL</strong>：保留手动节点选择交互，但创建阶段使用局部 Mesh Edit Create Patch 和新增 patch 的边界固定 mixed remesh。</li>
-                            <li><strong>批次撤回</strong>：成功完成的手动或自动批次会保存一次批次前快照。回到工具箱，在“网格焊缝”行点击 <strong>“撤回”</strong> 可一次恢复该批次开始前的模型状态；撤回会覆盖该批次之后对模型所做的修改。</li>
+                            <li><strong>批次撤回</strong>：每条路径/候选都是 HyperMesh 原生撤销栈上的命名动作。成功批次可回到工具箱，在“网格焊缝”行点击 <strong>“撤回”</strong> 一次撤回整批；也可直接用 Ctrl+Z 逐条撤销。若批次之后又做过其他修改，撤回整批会把这些修改一并撤销，确认框会标明数量。</li>
                             <li><strong>可反馈诊断</strong>：失败会按目标准备、imprint、目标匹配、目标连续性、automesh 或撤销事务分类，显示原因和检查建议，并在任务目录写出 UTF-8 纯文本 <code>mesh_seam_weld_failure_report.txt</code>。反馈问题时同时提供该文件和 <code>operation.log</code> 即可。</li>
                             <li><strong>裁剪与回滚兼容</strong>：目标节点通过目标 component 的 element mark 和局部最近节点查询获得，新焊缝单元通过输出 component 操作前后的集合差异识别，不依赖实体 ID 单调增加；模型经过裁剪、删除、导入或撤销后仍可继续执行。</li>
                         </ul>
@@ -1552,7 +1552,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">5</span>
                                 <div class="step-title">需要时撤回最近批次</div>
-                                <div class="step-detail">回到工具箱主面板，在 <strong>“网格焊缝”</strong> 所在行点击 <strong>“撤回”</strong> 并确认。撤回只保留最近一次成功批次，并会恢复该批次前的完整模型状态。</div>
+                                <div class="step-detail">回到工具箱主面板，在 <strong>“网格焊缝”</strong> 所在行点击 <strong>“撤回”</strong> 并确认，撤回通过 HyperMesh 原生撤销一次性回退该批次的全部动作；也可以直接用 Ctrl+Z 逐条撤销。撤回只保留最近一次成功批次；若批次之后又做过其他修改，会被一并撤销。</div>
                             </div>
                         </div>
                     </div>

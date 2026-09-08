@@ -73,36 +73,77 @@ class SeamTests(unittest.TestCase):
         self.assertIn("processWeldPathNativePatch",body)
         self.assertNotIn("processWeldPathPython",body)
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
-    def test_tcl_mesh_seam_undo_record_registers_and_restores_one_batch(self):
+    def test_tcl_mesh_seam_undo_record_uses_native_history_states(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
         interp.eval("source {{{}}}".format(module.as_posix()))
-        interp.eval("proc hm_answernext {args} {}; proc *readfile {path mode} {set ::undoReadPath $path}")
-        with tempfile.TemporaryDirectory() as directory:
-            snapshot=Path(directory)/"before.hm"
-            snapshot.write_text("snapshot",encoding="ascii")
-            script="""
-set snapshot {%s}
-::MeshSeamWeld::registerUndoSnapshot $snapshot {batch summary}
+        interp.eval(r"""
+proc hm_getundoactions {args} {return $::nativeUndoActions}
+proc *undohistorystate {count} {set ::nativeUndoCount $count; set ::nativeUndoActions [lrange $::nativeUndoActions $count end]}
+proc *sethistoryrecord {value} {lappend ::nativeUndoEvents [list record $value]}
+proc hm_gethistorylimit {args} {return 100}
+proc ::HybridCore::existingEntityIds {types ids} {return {}}
+set ::nativeUndoActions [list older action]
+set ::nativeUndoEvents {}
+""")
+        script="""
+set before [::MeshSeamWeld::nativeUndoActions]
+set ::nativeUndoActions [concat [list path3 path2 path1] $::nativeUndoActions]
+set labels [::MeshSeamWeld::newUndoLabels $before $::nativeUndoActions]
+::MeshSeamWeld::registerUndoBatch $labels {batch summary} {501}
 set available_before [::MeshSeamWeld::undoAvailable]
-::MeshSeamWeld::restoreUndoSnapshot
-set available_after_restore [::MeshSeamWeld::undoAvailable]
-""" % snapshot.as_posix()
-            interp.eval(script)
-            self.assertEqual(interp.eval("set available_before"),"1")
-            self.assertEqual(interp.eval("set undoReadPath").replace("\\","/"),snapshot.as_posix())
-            self.assertEqual(interp.eval("set available_after_restore"),"1")
-            interp.eval("::MeshSeamWeld::clearUndoRecord")
-            self.assertEqual(interp.eval("::MeshSeamWeld::undoAvailable"),"0")
+set count [::MeshSeamWeld::restoreUndoBatch]
+set available_after_undo [::MeshSeamWeld::undoAvailable]
+::MeshSeamWeld::clearUndoRecord
+set available_after_clear [::MeshSeamWeld::undoAvailable]
+list $labels $available_before $count $available_after_undo $available_after_clear
+"""
+        values=interp.splitlist(interp.eval(script))
+        self.assertEqual(interp.splitlist(values[0]),("path3","path2","path1"))
+        self.assertEqual(values[1:3],("1","3"))
+        self.assertEqual(interp.eval("set ::nativeUndoCount"),"3")
+        self.assertEqual(values[3],"0")
+        self.assertEqual(values[4],"0")
+        self.assertIn("record 1"," ".join(interp.splitlist(interp.eval("set ::nativeUndoEvents"))))
+    @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
+    def test_tcl_mesh_seam_native_undo_requires_oldest_batch_entry(self):
+        interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"
+        interp.eval("source {{{}}}".format(module.as_posix()))
+        interp.eval(r"""
+proc hm_getundoactions {args} {return $::nativeUndoActions}
+proc *sethistoryrecord {value} {}
+proc hm_gethistorylimit {args} {return 100}
+set ::nativeUndoActions [list older action]
+""")
+        script="""
+set before [::MeshSeamWeld::nativeUndoActions]
+set ::nativeUndoActions [concat [list path3 path2 path1] $::nativeUndoActions]
+::MeshSeamWeld::registerUndoBatch [::MeshSeamWeld::newUndoLabels $before $::nativeUndoActions] {batch summary} {}
+set available_full [::MeshSeamWeld::undoAvailable]
+# The oldest entry was evicted from the history limit: a partial undo would
+# remove unrelated newer work, so the record must be treated as unavailable.
+set ::nativeUndoActions [list path3 path2 older action]
+set available_truncated [::MeshSeamWeld::undoAvailable]
+list $available_full $available_truncated
+"""
+        values=interp.splitlist(interp.eval(script))
+        self.assertEqual(values,("1","0"))
     def test_mesh_seam_toolkit_exposes_batch_undo_entrypoint(self):
         core=(ROOT/"hw_toolkit_core.tcl").read_text(encoding="utf-8")
         self.assertIn('undo_proc "::MeshSeamWeld::undoLast"',core)
         module=(ROOT/"modules"/"mesh_seam_weld.tcl").read_text(encoding="utf-8")
-        self.assertIn("saveUndoSnapshot",module)
-        self.assertIn("registerUndoSnapshot",module)
-        self.assertIn("before_manual_mesh_seam_weld.hm",module)
+        self.assertIn("registerUndoBatch",module)
+        self.assertIn("undohistorystate",module)
+        self.assertNotIn("before_manual_mesh_seam_weld.hm",module)
+        self.assertNotIn("*writefile",module)
         auto=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"auto_workflow.tcl").read_text(encoding="utf-8")
-        self.assertIn("dict get $execution snapshot",auto)
-        self.assertIn("registerUndoSnapshot",auto)
+        self.assertIn("dict get $execution undo_labels",auto)
+        self.assertIn("registerUndoBatch",auto)
+        fast=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"fast_executor.tcl").read_text(encoding="utf-8")
+        self.assertNotIn("saveAutoSnapshot",fast)
+        self.assertNotIn("restoreAutoSnapshot",fast)
+        delta=(ROOT/"modules"/"mesh_seam_weld"/"tcl"/"delta_import.tcl").read_text(encoding="utf-8")
+        self.assertNotIn("saveAutoSnapshot",delta)
+        self.assertNotIn("restoreAutoSnapshot",delta)
     @unittest.skipIf(tkinter is None,"tkinter Tcl runtime is unavailable")
     def test_failed_path_removes_only_its_new_output_component(self):
         interp=tkinter.Tcl(); module=ROOT/"modules"/"mesh_seam_weld.tcl"

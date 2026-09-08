@@ -74,8 +74,8 @@ namespace eval ::HWToolkit {
             group    "Mesh"
             label_zh "网格焊缝"
             label_en "Mesh Seam Weld"
-            desc_zh  "选择已有网格上的节点路径并投影到目标组件：单个边界点可扩展为与目标局部平面平行的完整开放/闭合直线或曲线，内部单点仍处理所属组件的全部闭合自由边。随后以局部目标 Elements 调用 Mesh Edit Create Patch，直接创建焊缝壳并仅重绘新增 patch。\nFAST_AUTO 路径自动识别 T 型/搭接候选，经确认后直接导入现有边创建壳焊缝；LEGACY_MANUAL 使用原生 Create Patch。\n每条路径独立撤销事务，失败回滚并跳过；成功批次可在主面板点击“撤回”一次恢复。"
-            desc_en  "Pick a mesh node path and project it to target components. A single boundary node expands to the complete parallel open/closed line or curve, while an internal node still selects all closed free boundaries of its component. Mesh Edit Create Patch then creates the weld shell directly from a local target Elements scope, and only the new patch is remeshed.\nFAST_AUTO imports accepted existing-edge candidates; LEGACY_MANUAL uses native Create Patch.\nEach path has its own undo transaction; a successful batch can be restored once from the home panel."
+            desc_zh  "选择已有网格上的节点路径并投影到目标组件：单个边界点可扩展为与目标局部平面平行的完整开放/闭合直线或曲线，内部单点仍处理所属组件的全部闭合自由边。随后以局部目标 Elements 调用 Mesh Edit Create Patch，直接创建焊缝壳并仅重绘新增 patch。\nFAST_AUTO 路径自动识别 T 型/搭接候选，经确认后直接导入现有边创建壳焊缝；LEGACY_MANUAL 使用原生 Create Patch。\n每条路径/候选都是原生撤销栈上的独立动作，失败自动回滚；成功批次可在主面板点击“撤回”，或直接 Ctrl+Z 逐步撤销。"
+            desc_en  "Pick a mesh node path and project it to target components. A single boundary node expands to the complete parallel open/closed line or curve, while an internal node still selects all closed free boundaries of its component. Mesh Edit Create Patch then creates the weld shell directly from a local target Elements scope, and only the new patch is remeshed.\nFAST_AUTO imports accepted existing-edge candidates; LEGACY_MANUAL uses native Create Patch.\nEach path/candidate is its own action on the native undo stack and rolls back on failure; a finished batch can be undone from the home panel or step-by-step with Ctrl+Z."
             proc     "::MeshSeamWeld::runAction"
             settings_proc "::MeshSeamWeld::runSettings"
             undo_proc "::MeshSeamWeld::undoLast"
@@ -106,6 +106,14 @@ namespace eval ::HWToolkit {
             desc_en  "Use a HyperMesh criteria file to incrementally optimize only the failing shell elements and their neighborhood: Python plans candidates and pre-simulates quality conservatively; HyperMesh performs the edits, local re-checks, and final verdicts.\nEach region is re-checked right after modification and only that region is restored on failure; continuous narrow strips and weld-side node chains are supported.\nUser-fixed nodes never move; internal ultra-narrow expansion and rigid/weld protection must be explicitly enabled."
             proc     "::LocalMeshOptimizer::runAction"
             settings_proc "::LocalMeshOptimizer::runSettings"
+        }
+        mesh_add_washer {
+            group    "Mesh"
+            label_zh "添加 Washer"
+            label_en "Add Washer"
+            desc_zh  "在纯壳网格（无几何）上为既有 FE 孔创建规则 washer：选择孔边一个节点，自动定位所属 component 并用原生 Find Edges 提取自由边，按纯拓扑连通性回溯完整闭合孔边并统计当前孔周节点数。\n随后直接调用 HyperMesh 原生 *add_multi_washer_elements，按目标 hole_density 重建孔周并创建指定层数与每层径向宽度的 washer；降密度请求按用户指定值透传，不做宏层保留原密度处理。\n开放边、分叉/T 连接与多 component 歧义会拒绝执行且不修改网格；临时 ^edges 自动清理，不创建 rigid 与局部坐标系。holeDensity 与 layerWidths 配置在 modules/mesh_add_washer.tcl 顶部，密度调整结果以创建后的孔周复检输出为准。"
+            desc_en  "Create a regular washer on an existing FE hole of a geometry-free shell mesh: pick one hole-edge node, the tool locates the owning component, extracts native Find Edges free edges, traces the complete closed hole loop by pure topology, and reports the current hole-ring node count.\nIt then calls HyperMesh's native *add_multi_washer_elements to rebuild the hole boundary at the target hole_density and lay the configured washer layers with per-layer radial widths; density requests are passed through verbatim instead of keeping the original density like the GUI macro.\nOpen edges, branching/T-junctions, and multi-component ambiguity are rejected without modifying the mesh; temporary ^edges data is cleaned up, and no rigid or local system is created. holeDensity and layerWidths are configured at the top of modules/mesh_add_washer.tcl; the achieved density is reported by the post-creation re-check."
+            proc     "::WasherTool::run"
         }
         weld_integrity_check {
             group    "Mesh"

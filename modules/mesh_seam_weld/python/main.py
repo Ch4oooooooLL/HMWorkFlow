@@ -80,7 +80,7 @@ def main(argv=None):
         else:model=read_mesh(a.mesh)
         existing=load_json(a.existing); read=time.perf_counter()-t; t=time.perf_counter(); candidate=calculate(req,model,existing); detect_seconds=time.perf_counter()-t
         result=new_result("mesh_seam_weld",req["run_id"])
-        result["performance"].update({"read_seconds":round(read,6),"parse_seconds":round(read,6),"topology_seconds":0.0,"pair_filter_seconds":0.0,"detection_seconds":round(detect_seconds,6) if settings["mode"]=="auto_detect" else 0.0,"classification_seconds":0.0,"planning_seconds":round(detect_seconds,6) if settings["mode"]=="auto_plan" else 0.0,"python_quality_seconds":0.0,"snapshot_seconds":0.0,"node_move_seconds":0.0,"delete_seconds":0.0,"import_seconds":0.0,"hm_quality_seconds":0.0,"rollback_seconds":0.0,"total_seconds":round(read+detect_seconds,6)})
+        result["performance"].update({"read_seconds":round(read,6),"parse_seconds":round(read,6),"topology_seconds":0.0,"pair_filter_seconds":0.0,"detection_seconds":round(detect_seconds,6) if settings["mode"]=="auto_detect" else 0.0,"classification_seconds":0.0,"planning_seconds":round(detect_seconds,6) if settings["mode"]=="auto_plan" else 0.0,"python_quality_seconds":0.0,"history_seconds":0.0,"node_move_seconds":0.0,"delete_seconds":0.0,"import_seconds":0.0,"hm_quality_seconds":0.0,"rollback_seconds":0.0,"total_seconds":round(read+detect_seconds,6)})
         if settings["mode"]=="auto_detect":
             result["candidates"]=candidate["candidates"]
             result["summary"]={"mode":"auto_detect","candidate_count":len(candidate["candidates"])}

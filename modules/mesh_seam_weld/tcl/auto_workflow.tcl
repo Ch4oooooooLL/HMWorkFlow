@@ -110,12 +110,13 @@ proc ::MeshSeamWeld::runAutoWorkflow {{preselectedComponents {}}} {
     ::MeshSeamWeld::writeAutoExecutionReport $taskDir $execution
     set created [dict get $execution created]; set succeeded [dict get $execution succeeded]; set rolledBack [dict get $execution rolled_back]; set moved [dict get $execution moved_nodes]
     set undoRegistered 0
-    if {$succeeded > 0 && [dict exists $execution snapshot]} {
+    if {$succeeded > 0 && [dict exists $execution undo_labels] && [llength [dict get $execution undo_labels]] > 0} {
         if {![catch {
-            ::MeshSeamWeld::registerUndoSnapshot [dict get $execution snapshot] \
+            ::MeshSeamWeld::registerUndoBatch [dict get $execution undo_labels] \
                 [::HWFlow::txt \
                     "最近一次自动网格焊缝批次（成功候选 $succeeded）" \
-                    "the most recent automatic mesh-seam batch ($succeeded successful candidates)"]
+                    "the most recent automatic mesh-seam batch ($succeeded successful candidates)"] \
+                [dict get $execution check_element_ids]
         } undoRegisterErr]} {
             set undoRegistered 1
         } else {
@@ -126,8 +127,8 @@ proc ::MeshSeamWeld::runAutoWorkflow {{preselectedComponents {}}} {
     set completion [::HWFlow::txt "自动壳焊缝完成：成功 $succeeded 项，回滚 $rolledBack 项，移动 $moved 个节点，创建 $created 个壳单元。\n任务目录：$taskDir" "Automatic shell seam finished: $succeeded succeeded, $rolledBack rolled back, $moved nodes moved, $created shell elements created.\nTask: $taskDir"]
     if {$undoRegistered} {
         append completion [::HWFlow::txt \
-            "\n可撤回：可在工具箱的“网格焊缝”行点击“撤回”。" \
-            "\nUndo available: click “Undo” on the Mesh Seam Weld row in the toolkit."]
+            "\n可撤回：可在工具箱的“网格焊缝”行点击“撤回”，或直接使用 HyperMesh 的 Ctrl+Z。" \
+            "\nUndo available: click “Undo” on the Mesh Seam Weld row in the toolkit, or use HyperMesh Ctrl+Z."]
     }
     tk_messageBox -icon $icon -message $completion
 }

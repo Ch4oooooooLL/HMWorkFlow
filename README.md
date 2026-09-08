@@ -457,6 +457,26 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 - `*hm_batchmesh2` 后只要新增了 Elements，任务就视为有可用结果；质量或迭代问题作为警告保留，不会删除网格。成功任务保存原生 HM 作为恢复文件，并按结果 Component 使用 `*feoutputwithdata` 输出包含完整 Elements/依赖的 FE-only FEM。合并 worker 在空白模型中用默认 OptiStruct reader 和 `overwrite_flag=0` 逐个导入 FEM、验证 Element 增量，再保存 `merged_result.hm` 和导出 `batchmesh_result.fem`。主会话优先导入完整原生 FE，跨版本不兼容时回退到唯一的最终合并 FEM。网格状态与结果封装状态相互独立。
 - 报告位于共享任务存储的 `batch_mesher/<run-id>/`，包含汇总状态、`monitor_batchmesher.cmd`、`monitor_status.txt`、各 worker 的 `launch.log`、必要时生成的 `manager_failure.log`、stdout/stderr、`run.json`、`result.json` 和逐任务日志。即使 Altair launcher 没有输出，管理端日志也会记录实际命令、独立工作目录、PID 和启动握手超时诊断。关闭汇总监视窗口不会终止后台任务。
 
+### Mesh Add Washer（添加 Washer）
+
+入口：`::WasherTool::run`（独立测试入口：根目录 `washer_test.tcl`）
+
+功能：在只有壳网格、没有任何几何的模型上，为既有 FE 圆孔自动创建规则 washer。选择孔边一个节点后，模块自动定位所属 component、用原生 Find Edges 提取自由边、按纯拓扑连通性回溯完整闭合孔边并统计当前孔周节点数，然后直接调用 HyperMesh 原生 `*add_multi_washer_elements`（语法经本机 HM2019 `macroAddWasher.tcl` 核实）按目标 `hole_density` 重建孔周并创建指定层数与每层径向宽度的 washer。
+
+用法：
+
+1. 在主面板 Mesh 分组运行 `添加 Washer`（或直接运行 `washer_test.tcl`）。
+2. 在弹出的原生选择面板中只选择孔边自由边界上的一个节点；中键确认，Esc 取消。
+3. 模块自动完成识别、校验、创建与复检，并在结束后弹出结果摘要；需要人工复核的校验项会在摘要中列出。
+4. `holeDensity`（默认 12）与 `layerWidths`（默认 `{5.0 5.0}`，每层径向宽度而非累计半径）在 `modules/mesh_add_washer.tcl` 顶部统一配置；等宽层自动使用 `uniform_layers = 1`。
+
+约束与校验：
+
+- 仅处理 2D 壳网格上的单个闭合 FE 孔；开放边、分叉/T 连接、节点数不足、多 component 歧义都会拒绝执行且不修改网格。
+- 创建前的任何失败都不会修改网格；唯一修改步骤是 washer 命令本身，创建后自动复检新孔周节点数、闭合性、component 归属、rigid/system 未新增与 `^edges` 无残留。
+- 降密度请求（16→8、16→12 等）直接透传 `hole_density`，不复刻 Utility 宏层"原密度大于新密度时保留原密度"的逻辑；8→12、12→12、16→12、16→8 四种组合的实机结论以 HM2019 冒烟验证为准。
+- 临时 `^edges` 自由边数据自动清理；用户已有的 `^edges` 组件会被保留并原样恢复。
+
 ### Shell Washer-Hole RBE2
 
 入口：`::RB2W::run`
@@ -669,7 +689,7 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 `Mesh Seam Weld` 新增 `FAST_AUTO`，与原 `LEGACY_MANUAL` 手动路径并存。自动模式原生导出所选 Shell Component，由便携式 Python 识别并分类 `T_PATH/T_LIST/CONNECT/L_SURF/L_LIST/REVIEW`，用户明确接受后才生成创建计划。自动规划优先复用已有连续目标网格边，也可在显式开启后执行受控节点微调，或对单个 CTRIA3/CQUAD4 母单元执行保守局部切分；快速路径不调用 imprint、ruled surface、automesh 或 connector。
 
-应用前会写入任务安全快照，每个候选还会建立独立检查点；导入后复核新增 ID、connectivity 和相对原始基线新增的 HyperMesh 质量失败，单个候选失败只回滚该候选。结果位于 `runtime/tasks/mesh_seam_weld/<run_id>/output/`，包含 candidate、creation plan、候选独立增量 FEM、manifest、规划 JSON/HTML 报告及执行报告。焊缝 Property 无法可靠复用时会明确标记 `property_assignment_required`，可随后使用批量 Property 模块。受控节点微调和保守单母单元局部切分均已实现但默认关闭；模块状态为 `controlled`，仍需按 [协议与 HM2019 清单](doc/mesh_seam_auto_protocol.md) 完成真实 HyperMesh 验证。
+执行不写入任何整模型快照文件：每个候选在自己的 HyperMesh 原生撤销事务（named history state）中导入和验证，单个候选失败用 `*undohistorystate` 回滚该候选；导入后复核新增 ID、connectivity 和相对原始基线新增的 HyperMesh 质量失败。成功批次通过原生撤销栈整体撤回（工具箱“撤回”或 Ctrl+Z）。结果位于 `runtime/tasks/mesh_seam_weld/<run_id>/output/`，包含 candidate、creation plan、候选独立增量 FEM、manifest、规划 JSON/HTML 报告及执行报告。焊缝 Property 无法可靠复用时会明确标记 `property_assignment_required`，可随后使用批量 Property 模块。受控节点微调和保守单母单元局部切分均已实现但默认关闭；模块状态为 `controlled`，仍需按 [协议与 HM2019 清单](doc/mesh_seam_auto_protocol.md) 完成真实 HyperMesh 验证。
 
 ### FEM 自动焊缝（独立模块）
 

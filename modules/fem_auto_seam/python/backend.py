@@ -79,6 +79,8 @@ class _AabbGrid:
     def __init__(self, rows, cell_size, maximum_cells_per_row=256):
         self.cell_size = max(float(cell_size), 1.0e-9)
         self.rows = {int(row_id): value for row_id, _, value in rows}
+        self.bounds_by_id = {int(row_id): bounds for row_id, bounds, _ in rows}
+        self.triangles = {}
         self.cells = defaultdict(list)
         self.overflow = []
         for row_id, bounds, _ in rows:
@@ -118,48 +120,169 @@ def _bounds_for_points(points):
     )
 
 
-def _component_element_indexes(by_component, nodes, maximum):
-    indexes = {}
-    for component_id, elements in by_component.items():
-        if not elements:
-            continue
-        rows = []
-        component_points = []
-        for element in elements:
-            points = [nodes[node_id] for node_id in element.node_ids]
-            component_points.extend(points)
-            rows.append((element.element_id, _bounds_for_points(points), element))
-        bounds = _bounds_for_points(component_points)
-        diagonal = math.sqrt(
-            (bounds[1] - bounds[0]) ** 2 +
-            (bounds[3] - bounds[2]) ** 2 +
-            (bounds[5] - bounds[4]) ** 2
-        )
-        cell_size = max(float(maximum), diagonal / max(math.sqrt(len(elements)), 1.0), 1.0e-6)
-        indexes[component_id] = _AabbGrid(rows, cell_size)
-    return indexes
+def _bounds_overlap(first, second, maximum):
+    return all(
+        first[axis * 2] - maximum <= second[axis * 2 + 1]
+        and second[axis * 2] - maximum <= first[axis * 2 + 1]
+        for axis in range(3)
+    )
 
 
-def _global_element_index(by_component, nodes, maximum):
-    rows = []
-    all_points = []
-    for elements in by_component.values():
-        for element in elements:
-            points = [nodes[node_id] for node_id in element.node_ids]
-            all_points.extend(points)
-            rows.append((element.element_id, _bounds_for_points(points), element))
-    if not rows:
-        return None
-    bounds = _bounds_for_points(all_points)
-    diagonal = math.sqrt(
+def _bounds_within(inner, outer, maximum):
+    """True when ``inner`` can project onto ``outer`` within ``maximum``."""
+    return all(
+        outer[axis * 2] - maximum <= inner[axis * 2]
+        and inner[axis * 2 + 1] <= outer[axis * 2 + 1] + maximum
+        for axis in range(3)
+    )
+
+
+def _bounds_diagonal(bounds):
+    return math.sqrt(
         (bounds[1] - bounds[0]) ** 2 +
         (bounds[3] - bounds[2]) ** 2 +
         (bounds[5] - bounds[4]) ** 2
     )
-    # Whole-vehicle meshes occupy 3-D space. A cube-root scale avoids both a
-    # near-global bucket and millions of tiny cells for long shell elements.
-    cell_size = max(float(maximum), diagonal / max(len(rows) ** (1.0 / 3.0), 1.0), 1.0e-6)
-    return _AabbGrid(rows, cell_size)
+
+
+def _detection_context(model, topologies, maximum):
+    """Shared lazy per-component caches for one detection pass.
+
+    Every expensive derived structure (element lists, AABB grids, average
+    normals, areas, closed free-edge loops) is built on first use so a worker
+    task only pays for the components its sources actually touch.
+    """
+    return {
+        "model": model,
+        "topologies": topologies,
+        "maximum": float(maximum),
+        "elements": {},
+        "elements_by_id": {},
+        "element_indexes": {},
+        "normals": {},
+        "areas": {},
+        "closed_loops": {},
+        "edge_owners": {},
+    }
+
+
+def _context_elements(shared, component_id):
+    elements = shared["elements"].get(component_id)
+    if elements is None:
+        elements = sorted(shared["model"].elements_for_components([component_id]), key=lambda row: row.element_id)
+        shared["elements"][component_id] = elements
+    return elements
+
+
+def _context_element_map(shared, component_id):
+    mapping = shared["elements_by_id"].get(component_id)
+    if mapping is None:
+        mapping = {element.element_id: element for element in _context_elements(shared, component_id)}
+        shared["elements_by_id"][component_id] = mapping
+    return mapping
+
+
+def _context_index(shared, component_id):
+    index = shared["element_indexes"].get(component_id)
+    if index is None:
+        elements = _context_elements(shared, component_id)
+        index = False
+        if elements:
+            nodes = shared["model"].nodes
+            rows = []
+            all_points = []
+            for element in elements:
+                points = [nodes[node_id] for node_id in element.node_ids]
+                all_points.extend(points)
+                rows.append((element.element_id, _bounds_for_points(points), element))
+            bounds = _bounds_for_points(all_points)
+            diagonal = math.sqrt(
+                (bounds[1] - bounds[0]) ** 2 +
+                (bounds[3] - bounds[2]) ** 2 +
+                (bounds[5] - bounds[4]) ** 2
+            )
+            # Per-component grids keep long shell components from collapsing
+            # into one near-global bucket while avoiding millions of cells.
+            cell_size = max(shared["maximum"], diagonal / max(math.sqrt(len(elements)), 1.0), 1.0e-6)
+            index = _AabbGrid(rows, cell_size)
+            index.triangles = {element.element_id: _element_triangles(element, nodes) for element in elements}
+        shared["element_indexes"][component_id] = index
+    return index or None
+
+
+def _context_normal(shared, component_id):
+    normal = shared["normals"].get(component_id)
+    if normal is None:
+        normal = _component_normal(_context_elements(shared, component_id), shared["model"].nodes)
+        shared["normals"][component_id] = normal
+    return normal
+
+
+def _context_area(shared, component_id):
+    area = shared["areas"].get(component_id)
+    if area is None:
+        area = _component_area(_context_elements(shared, component_id), shared["model"].nodes)
+        shared["areas"][component_id] = area
+    return area
+
+
+def _context_edge_owners(shared, component_id):
+    owners = shared["edge_owners"].get(component_id)
+    if owners is None:
+        owners = {
+            tuple(sorted((first, second))): owner_id
+            for first, second, owner_id in shared["topologies"][component_id].free_edges
+        }
+        shared["edge_owners"][component_id] = owners
+    return owners
+
+
+def _context_closed_loops(shared, component_id):
+    """Outer closed free-edge loops of one component plus their interior holes."""
+    entry = shared["closed_loops"].get(component_id)
+    if entry is None:
+        model = shared["model"]
+        topology = shared["topologies"][component_id]
+        paths = connected_edge_paths(topology.free_edges, model.nodes)
+        closed = [path for path in paths if path["closed"] and not path["branched"]]
+        normal = _context_normal(shared, component_id)
+        if normal is None:
+            outers, holes = list(closed), {}
+        else:
+            outers, holes = _classify_closed_loops(closed, model.nodes, normal)
+        entry = [
+            {
+                "path": path,
+                "holes": holes.get(id(path), []),
+                "bounds": _bounds_for_points([model.nodes[node_id] for node_id in path["node_ids"]]),
+            }
+            for path in outers
+        ]
+        shared["closed_loops"][component_id] = entry
+    return entry
+
+
+def _context_weld_loops(shared, component_id):
+    """Every weldable closed free-edge loop: outer loops and their holes.
+
+    A hole in a patch is still a free edge lying on the target - the base is
+    exposed through the opening and the patch edge around it is a real weld
+    seam.  Hole loops therefore participate in patch detection like any other
+    loop; only fastener-sized openings below the automatic hole diameter are
+    skipped (by the caller).
+    """
+    model = shared["model"]
+    loops = []
+    for entry in _context_closed_loops(shared, component_id):
+        loops.append(entry)
+        for hole in entry["holes"]:
+            loops.append({
+                "path": hole,
+                "holes": [],
+                "bounds": _bounds_for_points([model.nodes[node_id] for node_id in hole["node_ids"]]),
+                "is_hole": True,
+            })
+    return loops
 
 
 def _component_edge_indexes(topologies, nodes, maximum):
@@ -214,9 +337,28 @@ def _element_area(element, nodes):
     return first + 0.5 * norm(cross(_sub(nodes[ids[2]], nodes[ids[0]]), _sub(nodes[ids[3]], nodes[ids[0]])))
 
 
-def _triangle_hit(point, direction, triangle, nodes, maximum, tolerance):
-    a, b, c = (nodes[node_id] for node_id in triangle)
-    normal = cross(_sub(b, a), _sub(c, a))
+def _element_triangles(element, nodes):
+    """Precompute constant triangle data for one shell element.
+
+    Each row carries the first vertex, both edge vectors, the geometric
+    normal, and the barycentric determinant so per-ray tests skip every
+    cross-product and dot-product that does not depend on the ray.
+    """
+    ids = element.node_ids
+    triangles = (ids,) if len(ids) == 3 else ((ids[0], ids[1], ids[2]), (ids[0], ids[2], ids[3]))
+    rows = []
+    for triangle in triangles:
+        a = nodes[triangle[0]]
+        edge1 = _sub(nodes[triangle[1]], a)
+        edge2 = _sub(nodes[triangle[2]], a)
+        normal = cross(edge1, edge2)
+        d00, d01, d11 = dot(edge1, edge1), dot(edge1, edge2), dot(edge2, edge2)
+        rows.append((a, edge1, edge2, normal, d00, d01, d11, d00 * d11 - d01 * d01))
+    return tuple(rows)
+
+
+def _triangle_hit(point, direction, cached, maximum, tolerance):
+    a, edge1, edge2, normal, d00, d01, d11, determinant = cached
     denominator = dot(normal, direction)
     if abs(denominator) <= tolerance:
         return None
@@ -224,25 +366,20 @@ def _triangle_hit(point, direction, triangle, nodes, maximum, tolerance):
     if ray_parameter < -tolerance or ray_parameter > maximum + tolerance:
         return None
     hit = _add(point, _scale(direction, ray_parameter))
-    v0, v1, v2 = _sub(b, a), _sub(c, a), _sub(hit, a)
-    d00, d01, d11 = dot(v0, v0), dot(v0, v1), dot(v1, v1)
-    determinant = d00 * d11 - d01 * d01
-    if abs(determinant) <= tolerance:
+    v2 = _sub(hit, a)
+    u = 1.0 - (d11 * dot(v2, edge1) - d01 * dot(v2, edge2)) / determinant - (d00 * dot(v2, edge2) - d01 * dot(v2, edge1)) / determinant
+    v = (d11 * dot(v2, edge1) - d01 * dot(v2, edge2)) / determinant
+    if min(u, v) < -tolerance or u + v > 1.0 + tolerance:
         return None
-    v = (d11 * dot(v2, v0) - d01 * dot(v2, v1)) / determinant
-    w = (d00 * dot(v2, v1) - d01 * dot(v2, v0)) / determinant
-    u = 1.0 - v - w
-    if min(u, v, w) < -tolerance:
-        return None
-    return {"point": hit, "distance": max(0.0, ray_parameter), "normal": unit(normal)}
+    return {"point": hit, "distance": max(0.0, ray_parameter)}
 
 
-def _ray_hit_element(point, direction, element, nodes, maximum, tolerance):
-    ids = element.node_ids
-    triangles = (ids[:3],) if len(ids) == 3 else ((ids[0], ids[1], ids[2]), (ids[0], ids[2], ids[3]))
+def _ray_hit_element(point, direction, element, nodes, maximum, tolerance, triangles=None):
+    if triangles is None:
+        triangles = _element_triangles(element, nodes)
     hits = []
-    for triangle in triangles:
-        hit = _triangle_hit(point, direction, triangle, nodes, maximum, tolerance)
+    for cached in triangles:
+        hit = _triangle_hit(point, direction, cached, maximum, tolerance)
         if hit is not None:
             hits.append(hit)
     return min(hits, key=lambda row: row["distance"]) if hits else None
@@ -252,16 +389,31 @@ def _ray_hits_component(point, direction, elements, nodes, maximum, tolerance, e
     if element_index is not None:
         endpoint = _add(point, _scale(direction, maximum))
         padding = max(float(tolerance), element_index.cell_size * float(tolerance) * 4.0, 1.0e-9)
-        segment_bounds = _bounds_for_points((point, endpoint))
+        px, py, pz = point
+        ex, ey, ez = endpoint
         query_bounds = (
-            segment_bounds[0] - padding, segment_bounds[1] + padding,
-            segment_bounds[2] - padding, segment_bounds[3] + padding,
-            segment_bounds[4] - padding, segment_bounds[5] + padding,
+            (px if px < ex else ex) - padding, (px if px > ex else ex) + padding,
+            (py if py < ey else ey) - padding, (py if py > ey else ey) + padding,
+            (pz if pz < ez else ez) - padding, (pz if pz > ez else ez) + padding,
         )
         elements = element_index.query_bounds(query_bounds)
+        segment = query_bounds
+    else:
+        segment = None
     hits = []
     for element in elements:
-        hit = _ray_hit_element(point, direction, element, nodes, maximum, tolerance)
+        if segment is not None:
+            bounds = element_index.bounds_by_id.get(element.element_id)
+            if bounds is not None and (
+                bounds[0] > segment[1] or bounds[1] < segment[0] or
+                bounds[2] > segment[3] or bounds[3] < segment[2] or
+                bounds[4] > segment[5] or bounds[5] < segment[4]
+            ):
+                continue
+        hit = _ray_hit_element(
+            point, direction, element, nodes, maximum, tolerance,
+            element_index.triangles.get(element.element_id) if element_index is not None else None,
+        )
         if hit is not None:
             hit = dict(hit)
             hit["element_id"] = element.element_id
@@ -312,9 +464,15 @@ def _candidate_confidence(coverage, distance_variation, angle_score, continuity=
 
 
 def _edge_hit_intervals(first, second, direction, target_elements, nodes, maximum, tolerance, element_index=None, samples=17):
+    memo = {}
+
     def hit_at(parameter):
+        if parameter in memo:
+            return memo[parameter]
         point = _add(nodes[first], _scale(_sub(nodes[second], nodes[first]), parameter))
-        return _ray_hits_component(point, direction, target_elements, nodes, maximum, tolerance, element_index)
+        hit = _ray_hits_component(point, direction, target_elements, nodes, maximum, tolerance, element_index)
+        memo[parameter] = hit
+        return hit
 
     parameters = [index / float(samples - 1) for index in range(samples)]
     hits = [hit_at(parameter) for parameter in parameters]
@@ -356,7 +514,132 @@ def _edge_hit_intervals(first, second, direction, target_elements, nodes, maximu
     return intervals, hit_at
 
 
-def _t_candidates(model, settings, topologies, source_ids=None):
+def _nearest_edge_band(strict_maximum, tolerance):
+    # Edges whose hit distance ties the group minimum within this band count
+    # as the "nearest" edge row of the face (e.g. the whole bottom edge row of
+    # a web standing on a base plate).
+    return max(float(tolerance), 0.1 * float(strict_maximum))
+
+
+def _nearest_edge_intervals(group, contexts, band):
+    """Whole-edge hit intervals of the group's nearest edge row, sorted."""
+    distances = []
+    for interval in group["intervals"]:
+        for boundary_hit in (interval["start_hit"], interval["end_hit"]):
+            if boundary_hit is not None:
+                distances.append(boundary_hit["distance"])
+    if not distances:
+        return []
+    minimum = min(distances)
+    nearest = []
+    for interval in group["intervals"]:
+        complete = (
+            abs(interval["start"] - round(interval["start"])) <= 2.0e-6
+            and abs(interval["end"] - round(interval["end"])) <= 2.0e-6
+        )
+        if not complete:
+            continue
+        boundary_distances = [
+            boundary_hit["distance"]
+            for boundary_hit in (interval["start_hit"], interval["end_hit"])
+            if boundary_hit is not None
+        ]
+        if boundary_distances and min(boundary_distances) <= minimum + band:
+            nearest.append(interval)
+    return sorted(nearest, key=lambda row: (row["start"], row["end"]))
+
+
+def _contiguous_interval_runs(intervals):
+    runs = []
+    for interval in intervals:
+        if runs and interval["start"] <= runs[-1]["end"] + 2.0e-6:
+            runs[-1]["end"] = max(runs[-1]["end"], interval["end"])
+            runs[-1]["intervals"].append(interval)
+        else:
+            runs.append({"start": interval["start"], "end": interval["end"], "intervals": [interval]})
+    return runs
+
+
+def _face_fully_on_target(model, adjacent_element_ids, element_map, target_elements, target_normal, maximum, tolerance, target_index):
+    """True when every sample of the source face projects onto the target.
+
+    The face is the region bounded by the source free-edge path: all nodes and
+    element centroids of the path-adjacent source shells must reach the target
+    along the target normal within the search distance.  The sample budget
+    scales with the face itself so a large girder web is not rejected by a
+    fixed point cap that small fixtures never reach.
+    """
+    nodes = model.nodes
+    points = []
+    seen_nodes = set()
+    point_limit = max(2500, 6 * len(adjacent_element_ids))
+    for element_id in adjacent_element_ids:
+        element = element_map.get(element_id)
+        if element is None:
+            continue
+        for node_id in element.node_ids:
+            if node_id not in seen_nodes:
+                seen_nodes.add(node_id)
+                points.append(nodes[node_id])
+        points.append(tuple(sum(nodes[node_id][axis] for node_id in element.node_ids) / len(element.node_ids) for axis in range(3)))
+        if len(points) > point_limit:
+            return False
+    if not points:
+        return False
+    for point in points:
+        if _bidirectional_hit(point, target_normal, target_elements, nodes, maximum, tolerance, target_index) is None:
+            return False
+    return True
+
+
+def _strict_failure_warnings(complete_edges, length, minimum_length, variation, maximum_variation, angle, strict_minimum_angle, distances, strict_maximum, tolerance):
+    """Name the exact trusted gates a demoted T relation failed, so review
+    logs show why the relation was not automatic."""
+    warnings = []
+    if not complete_edges:
+        warnings.append("T relation covers only part of a source free edge")
+    if length < minimum_length:
+        warnings.append("T relation length {:.3g} is below the minimum {:.3g}".format(length, minimum_length))
+    if variation > maximum_variation:
+        warnings.append("T hit distance variation {:.3g} exceeds the maximum {:.3g}".format(variation, maximum_variation))
+    if angle < strict_minimum_angle:
+        warnings.append("T normal angle {:.3g} deg is below the minimum {:.3g}".format(angle, strict_minimum_angle))
+    if max(distances) > strict_maximum + tolerance:
+        warnings.append("T hit distance {:.3g} exceeds the search distance {:.3g}".format(max(distances), strict_maximum))
+    return warnings or ["T relation is outside a trusted tolerance gate"]
+
+
+def _t_candidate_row(source_id, target_id, source_path, target_points, distances, target_elements_used, involved_edges, length, angle, variation, coverage, complete_edges, auto_eligible, trusted_reason=False, warnings=None):
+    return {
+        "candidate_id": "",
+        "candidate_type": "T_SEAM",
+        "source_component_id": source_id,
+        "target_component_id": target_id,
+        "source_path": source_path,
+        "source_node_ids": [row["node_id"] for row in source_path],
+        "source_edge_pairs": involved_edges,
+        "target_hint_element_ids": sorted(target_elements_used),
+        "target_projection_points": target_points,
+        "closed": False,
+        "length": round(length, 9),
+        "confidence": _candidate_confidence(1.0, variation, min(1.0, angle / 90.0)),
+        "projection_coverage": round(coverage, 6),
+        "complete_source_edges": bool(complete_edges),
+        "auto_eligible": bool(auto_eligible),
+        "recognition_status": "TRUSTED" if auto_eligible else "POTENTIAL",
+        "status": "AUTO_READY" if auto_eligible else "REVIEW_REQUIRED",
+        "distance": {"minimum": min(distances), "average": sum(distances) / len(distances), "maximum": max(distances)},
+        "normal_angle": round(angle, 6),
+        "reasons": (
+            ["nearest edge row of a source face fully falling on the target projects completely onto the target"]
+            if trusted_reason
+            else ["source free-edge extension intersects a continuous target shell region"]
+        ),
+        "warnings": warnings if warnings is not None else ([] if auto_eligible else ["T relation is partial, ambiguous, or outside a trusted tolerance gate"]),
+    }
+
+
+def _t_candidates(model, settings, topologies, source_ids=None, shared=None):
     strict_maximum = float(settings["search_distance"])
     maximum = strict_maximum * float(settings.get("potential_search_multiplier", 1.25))
     tolerance = float(settings["ray_tolerance"])
@@ -365,49 +648,62 @@ def _t_candidates(model, settings, topologies, source_ids=None):
         0.0,
         strict_minimum_angle - float(settings.get("potential_angle_margin", 10.0)),
     )
-    by_component = {component_id: sorted(model.elements_for_components([component_id]), key=lambda row: row.element_id) for component_id in topologies}
-    element_indexes = _component_element_indexes(by_component, model.nodes, maximum)
-    global_element_index = _global_element_index(by_component, model.nodes, maximum)
-    component_normals = {component_id: _component_normal(elements, model.nodes) for component_id, elements in by_component.items()}
+    minimum_length = float(settings["minimum_t_length"])
+    potential_length_ratio = float(settings.get("potential_length_ratio", 0.75))
+    maximum_variation = float(settings["maximum_distance_variation_ratio"])
+    nearest_band = _nearest_edge_band(strict_maximum, tolerance)
+    if shared is None:
+        shared = _detection_context(model, topologies, maximum)
+    nodes = model.nodes
     rows = []
-    for source_id, source_topology in sorted(topologies.items()):
+    for source_id in sorted(topologies):
         if source_ids is not None and source_id not in source_ids:
             continue
-        owner_by_id = {element.element_id: element for element in by_component[source_id]}
-        owner_by_edge = {tuple(sorted((first, second))): owner_id for first, second, owner_id in source_topology.free_edges}
-        source_paths = connected_edge_paths(source_topology.free_edges, model.nodes)
-        local_target_ids = set()
-        if global_element_index is not None:
-            for first, second, owner_id in source_topology.free_edges:
-                owner = owner_by_id.get(owner_id)
-                if owner is None:
-                    continue
-                try:
-                    direction, _ = _edge_outward_direction((first, second), owner, model.nodes)
-                except ValueError:
-                    continue
-                swept = _bounds_for_points((
-                    model.nodes[first], model.nodes[second],
-                    _add(model.nodes[first], _scale(direction, maximum)),
-                    _add(model.nodes[second], _scale(direction, maximum)),
-                ))
-                padding = max(tolerance, global_element_index.cell_size * tolerance * 4.0, 1.0e-9)
-                expanded = (
-                    swept[0] - padding, swept[1] + padding,
-                    swept[2] - padding, swept[3] + padding,
-                    swept[4] - padding, swept[5] + padding,
-                )
-                local_target_ids.update(
-                    element.component_id
-                    for element in global_element_index.query_bounds(expanded)
-                    if element.component_id != source_id
-                )
-        for target_id, target_elements in by_component.items():
-            if target_id not in local_target_ids:
+        source_topology = topologies[source_id]
+        element_map = _context_element_map(shared, source_id)
+        source_paths = connected_edge_paths(source_topology.free_edges, nodes)
+        # Outward edge geometry is computed once per source component; the
+        # swept bounds double as a broad-phase filter per candidate target.
+        edge_geometry = {}
+        for first, second, owner_id in source_topology.free_edges:
+            key = (first, second)
+            if key in edge_geometry:
                 continue
-            target_normal = component_normals[target_id]
+            owner = element_map.get(owner_id)
+            if owner is None:
+                continue
+            try:
+                direction, source_normal = _edge_outward_direction((first, second), owner, nodes)
+            except ValueError:
+                continue
+            swept = _bounds_for_points((
+                nodes[first], nodes[second],
+                _add(nodes[first], _scale(direction, maximum)),
+                _add(nodes[second], _scale(direction, maximum)),
+            ))
+            edge_geometry[key] = (direction, source_normal, swept)
+        if not edge_geometry:
+            continue
+        # Component bounds are a conservative superset of any edge sweep; each
+        # pair is still element-filtered by the swept-bounds query below.
+        neighbor_ids = [
+            target_id for target_id in sorted(topologies)
+            if target_id != source_id and _bounds_overlap(source_topology.bounds, topologies[target_id].bounds, maximum)
+        ]
+        # The face-fall-on check proves the whole source face projects onto the
+        # target footprint, so its ray range must cover the face's full
+        # standoff; the weld search distance alone would reject any web taller
+        # than that distance even when it stands squarely on the target.
+        face_maximum = maximum + _bounds_diagonal(source_topology.bounds)
+        for target_id in neighbor_ids:
+            target_normal = _context_normal(shared, target_id)
             if target_normal is None:
                 continue
+            target_elements = _context_elements(shared, target_id)
+            target_index = _context_index(shared, target_id)
+            index_padding = 0.0
+            if target_index is not None:
+                index_padding = max(tolerance, target_index.cell_size * tolerance * 4.0, 1.0e-9)
             for boundary in source_paths:
                 if boundary["branched"]:
                     continue
@@ -416,23 +712,31 @@ def _t_candidates(model, settings, topologies, source_ids=None):
                 if boundary["closed"]:
                     path_pairs.append((path_nodes[-1], path_nodes[0]))
                 intervals = []
-                contexts = {}
+                edge_contexts = {}
                 for edge_index, (first, second) in enumerate(path_pairs):
-                    owner = owner_by_id.get(owner_by_edge.get(tuple(sorted((first, second)))))
-                    if owner is None:
+                    key = (first, second) if first < second else (second, first)
+                    geometry = edge_geometry.get(key)
+                    if geometry is None:
                         continue
-                    try:
-                        direction, source_normal = _edge_outward_direction((first, second), owner, model.nodes)
-                    except ValueError:
-                        continue
+                    direction, source_normal, swept = geometry
                     normal_angle = angle_degrees(source_normal, target_normal)
                     if normal_angle < minimum_angle:
                         continue
+                    if target_index is not None:
+                        # Skip every ray sample when the edge sweep cannot reach
+                        # this target's elements at all.
+                        near = target_index.query_bounds((
+                            swept[0] - index_padding, swept[1] + index_padding,
+                            swept[2] - index_padding, swept[3] + index_padding,
+                            swept[4] - index_padding, swept[5] + index_padding,
+                        ))
+                        if not near:
+                            continue
                     edge_intervals, hit_at = _edge_hit_intervals(
-                        first, second, direction, target_elements, model.nodes,
-                        maximum, tolerance, element_indexes.get(target_id),
+                        first, second, direction, target_elements, nodes,
+                        maximum, tolerance, target_index,
                     )
-                    contexts[edge_index] = {"first": first, "second": second, "hit_at": hit_at, "angle": normal_angle}
+                    edge_contexts[edge_index] = {"first": first, "second": second, "hit_at": hit_at, "angle": normal_angle}
                     for interval in edge_intervals:
                         row = dict(interval)
                         row.update({"start": edge_index + interval["start"], "end": edge_index + interval["end"], "edge_index": edge_index})
@@ -440,13 +744,7 @@ def _t_candidates(model, settings, topologies, source_ids=None):
                 if not intervals:
                     continue
                 intervals.sort(key=lambda row: (row["start"], row["end"]))
-                groups = []
-                for interval in intervals:
-                    if groups and interval["start"] <= groups[-1]["end"] + 2.0e-6:
-                        groups[-1]["end"] = max(groups[-1]["end"], interval["end"])
-                        groups[-1]["intervals"].append(interval)
-                    else:
-                        groups.append({"start": interval["start"], "end": interval["end"], "intervals": [interval]})
+                groups = _contiguous_interval_runs(intervals)
                 path_limit = float(len(path_pairs))
                 if boundary["closed"] and len(groups) > 1 and groups[0]["start"] <= 2.0e-6 and groups[-1]["end"] >= path_limit - 2.0e-6:
                     wrapped = {"start": groups[-1]["start"], "end": groups[0]["end"] + path_limit, "intervals": groups[-1]["intervals"] + groups[0]["intervals"]}
@@ -455,47 +753,62 @@ def _t_candidates(model, settings, topologies, source_ids=None):
                 def source_point(parameter):
                     normalized = parameter % path_limit if boundary["closed"] else min(parameter, path_limit)
                     if not boundary["closed"] and normalized >= path_limit:
-                        return model.nodes[path_nodes[-1]], path_nodes[-1], len(path_pairs) - 1, 1.0
+                        return nodes[path_nodes[-1]], path_nodes[-1], len(path_pairs) - 1, 1.0
                     edge_index = min(int(math.floor(normalized)), len(path_pairs) - 1)
                     local = normalized - edge_index
                     first, second = path_pairs[edge_index]
-                    point = _add(model.nodes[first], _scale(_sub(model.nodes[second], model.nodes[first]), local))
+                    point = _add(nodes[first], _scale(_sub(nodes[second], nodes[first]), local))
                     node_id = first if local <= 2.0e-6 else (second if 1.0 - local <= 2.0e-6 else 0)
                     return point, node_id, edge_index, local
+
+                def assemble(values):
+                    source_path = []
+                    target_points = []
+                    distances = []
+                    target_elements_used = set()
+                    for value in values:
+                        point, node_id, edge_index, local = source_point(value)
+                        edge_context = edge_contexts.get(edge_index)
+                        hit = edge_context["hit_at"](local) if edge_context is not None else None
+                        if hit is None and local <= 2.0e-6:
+                            previous = (edge_index - 1) % len(path_pairs)
+                            previous_context = edge_contexts.get(previous)
+                            hit = previous_context["hit_at"](1.0) if previous_context is not None else None
+                        if hit is None:
+                            return None
+                        source_path.append({"node_id": node_id, "coordinates": list(point)})
+                        target_points.append(list(hit["point"]))
+                        distances.append(hit["distance"])
+                        target_elements_used.add(hit["element_id"])
+                    if len(source_path) < 2:
+                        return None
+                    return source_path, target_points, distances, target_elements_used
+
+                def edge_angles(values):
+                    indices = {source_point(value)[2] for value in values}
+                    angles = [edge_contexts[index]["angle"] for index in indices if index in edge_contexts]
+                    return sum(angles) / len(angles) if angles else minimum_angle
+
+                def involved_edge_pairs(interval_rows):
+                    return [
+                        [edge_contexts[interval["edge_index"]]["first"], edge_contexts[interval["edge_index"]]["second"]]
+                        for interval in interval_rows
+                    ]
 
                 for group in groups:
                     values = [group["start"]]
                     values.extend(float(value) for value in range(int(math.floor(group["start"])) + 1, int(math.ceil(group["end"]))) if group["start"] + 2.0e-6 < value < group["end"] - 2.0e-6)
                     values.append(group["end"])
-                    source_path = []
-                    target_points = []
-                    distances = []
-                    target_elements_used = set()
-                    valid = True
-                    for value in values:
-                        point, node_id, edge_index, local = source_point(value)
-                        context = contexts.get(edge_index)
-                        hit = context["hit_at"](local) if context is not None else None
-                        if hit is None and local <= 2.0e-6:
-                            previous = (edge_index - 1) % len(path_pairs)
-                            previous_context = contexts.get(previous)
-                            hit = previous_context["hit_at"](1.0) if previous_context is not None else None
-                        if hit is None:
-                            valid = False
-                            break
-                        source_path.append({"node_id": node_id, "coordinates": list(point)})
-                        target_points.append(list(hit["point"]))
-                        distances.append(hit["distance"])
-                        target_elements_used.add(hit["element_id"])
-                    if not valid or len(source_path) < 2:
+                    assembled = assemble(values)
+                    if assembled is None:
                         continue
+                    source_path, target_points, distances, target_elements_used = assembled
                     length = sum(_distance(tuple(source_path[index]["coordinates"]), tuple(source_path[index + 1]["coordinates"])) for index in range(len(source_path) - 1))
-                    if length < float(settings["minimum_t_length"]) * float(settings.get("potential_length_ratio", 0.75)):
+                    if length < minimum_length * potential_length_ratio:
                         continue
                     average = sum(distances) / len(distances)
                     variation = (max(distances) - min(distances)) / max(average, 1.0e-9)
-                    angles = [contexts[index]["angle"] for index in {source_point(value)[2] for value in values} if index in contexts]
-                    angle = sum(angles) / len(angles) if angles else minimum_angle
+                    angle = edge_angles(values)
                     # A trusted T seed must represent one or more complete
                     # source free edges.  A clipped interval is deliberately
                     # retained as a potential relation, but must never be sent
@@ -507,42 +820,94 @@ def _t_candidates(model, settings, topologies, source_ids=None):
                     )
                     strict_geometry = (
                         complete_edges
-                        and length >= float(settings["minimum_t_length"])
-                        and variation <= float(settings["maximum_distance_variation_ratio"])
+                        and length >= minimum_length
+                        and variation <= maximum_variation
                         and angle >= strict_minimum_angle
                         and max(distances) <= strict_maximum + tolerance
                     )
-                    involved_edges = []
-                    for interval in group["intervals"]:
-                        context = contexts[interval["edge_index"]]
-                        involved_edges.append([context["first"], context["second"]])
-                    rows.append({
-                        "candidate_id": "",
-                        "candidate_type": "T_SEAM",
-                        "source_component_id": source_id,
-                        "target_component_id": target_id,
-                        "source_path": source_path,
-                        "source_node_ids": [row["node_id"] for row in source_path],
-                        "source_edge_pairs": involved_edges,
-                        "target_hint_element_ids": sorted(target_elements_used),
-                        "target_projection_points": target_points,
-                        "closed": False,
-                        "length": round(length, 9),
-                        "confidence": _candidate_confidence(1.0, variation, min(1.0, angle / 90.0)),
-                        "projection_coverage": round(
-                            sum(interval["end"] - interval["start"] for interval in group["intervals"])
-                            / max(float(len(group["intervals"])), 1.0),
-                            6,
-                        ),
-                        "complete_source_edges": bool(complete_edges),
-                        "auto_eligible": strict_geometry,
-                        "recognition_status": "TRUSTED" if strict_geometry else "POTENTIAL",
-                        "status": "AUTO_READY" if strict_geometry else "REVIEW_REQUIRED",
-                        "distance": {"minimum": min(distances), "average": average, "maximum": max(distances)},
-                        "normal_angle": round(angle, 6),
-                        "reasons": ["source free-edge extension intersects a continuous target shell region"],
-                        "warnings": [] if strict_geometry else ["T relation is partial, ambiguous, or outside a trusted tolerance gate"],
-                    })
+                    involved_edges = involved_edge_pairs(group["intervals"])
+                    coverage = sum(interval["end"] - interval["start"] for interval in group["intervals"]) / max(float(len(group["intervals"])), 1.0)
+                    if strict_geometry:
+                        rows.append(_t_candidate_row(
+                            source_id, target_id, source_path, target_points, distances,
+                            target_elements_used, involved_edges, length, angle, variation,
+                            coverage, complete_edges, True,
+                        ))
+                        continue
+                    # Extended rule: a source face that falls completely on the
+                    # target is trusted once its nearest edge row projects onto
+                    # the target completely, even when unrelated side or upper
+                    # edges poison the whole-group completeness check.
+                    extended_rows = []
+                    nearest_intervals = _nearest_edge_intervals(group, edge_contexts, nearest_band)
+                    for run in _contiguous_interval_runs(nearest_intervals):
+                        # Sample the run through its own intervals: a shared
+                        # corner node must keep the hit of the edge it belongs
+                        # to, not the next edge's ray that may land somewhere
+                        # else entirely (e.g. an upturned flange).
+                        run_path = []
+                        run_points = []
+                        run_distances = []
+                        run_elements = set()
+                        run_angles = []
+                        broken = False
+                        for interval in run["intervals"]:
+                            context = edge_contexts[interval["edge_index"]]
+                            run_angles.append(context["angle"])
+                            first, second = context["first"], context["second"]
+                            for local, boundary_hit in ((0.0, interval["start_hit"]), (1.0, interval["end_hit"])):
+                                if local <= 2.0e-6 and run_path and run_path[-1]["node_id"] == first:
+                                    continue
+                                if boundary_hit is None:
+                                    broken = True
+                                    break
+                                point = _add(nodes[first], _scale(_sub(nodes[second], nodes[first]), local))
+                                run_path.append({"node_id": first if local <= 2.0e-6 else second, "coordinates": list(point)})
+                                run_points.append(list(boundary_hit["point"]))
+                                run_distances.append(boundary_hit["distance"])
+                                run_elements.add(boundary_hit["element_id"])
+                            if broken:
+                                break
+                        if broken or len(run_path) < 2:
+                            continue
+                        run_length = sum(_distance(tuple(run_path[index]["coordinates"]), tuple(run_path[index + 1]["coordinates"])) for index in range(len(run_path) - 1))
+                        if run_length < minimum_length:
+                            continue
+                        run_average = sum(run_distances) / len(run_distances)
+                        run_variation = (max(run_distances) - min(run_distances)) / max(run_average, 1.0e-9)
+                        run_angle = sum(run_angles) / len(run_angles)
+                        run_auto = (
+                            run_variation <= maximum_variation
+                            and run_angle >= strict_minimum_angle
+                            and max(run_distances) <= strict_maximum + tolerance
+                            and _face_fully_on_target(
+                                model, boundary["adjacent_element_ids"], element_map,
+                                target_elements, target_normal, face_maximum, tolerance, target_index,
+                            )
+                        )
+                        if not run_auto:
+                            continue
+                        extended_rows.append(_t_candidate_row(
+                            source_id, target_id, run_path, run_points, run_distances,
+                            run_elements, involved_edge_pairs(run["intervals"]), run_length,
+                            run_angle, run_variation, 1.0, True, True, trusted_reason=True,
+                        ))
+                    if extended_rows:
+                        rows.extend(extended_rows)
+                        continue
+                    potential_warnings = _strict_failure_warnings(
+                        complete_edges, length, minimum_length, variation, maximum_variation,
+                        angle, strict_minimum_angle, distances, strict_maximum, tolerance,
+                    )
+                    if nearest_intervals:
+                        potential_warnings.append(
+                            "extended nearest-edge rule did not qualify: the source face must fall completely on the target"
+                        )
+                    rows.append(_t_candidate_row(
+                        source_id, target_id, source_path, target_points, distances,
+                        target_elements_used, involved_edges, length, angle, variation,
+                        coverage, complete_edges, False, warnings=potential_warnings,
+                    ))
     return rows
 
 
@@ -559,107 +924,310 @@ def _bidirectional_hit(point, normal, elements, nodes, maximum, tolerance, eleme
     return min(hits, key=lambda row: (row["distance"], row["element_id"])) if hits else None
 
 
-def _patch_candidates(model, settings, topologies):
+def _loop_plane_basis(normal):
+    reference = (1.0, 0.0, 0.0)
+    if abs(dot(normal, reference)) > 0.9:
+        reference = (0.0, 1.0, 0.0)
+    axis_u = unit(cross(normal, reference))
+    axis_v = unit(cross(normal, axis_u))
+    return axis_u, axis_v
+
+
+def _point_in_polygon(point, polygon):
+    inside = False
+    count = len(polygon)
+    for index in range(count):
+        ax, ay = polygon[index]
+        bx, by = polygon[(index + 1) % count]
+        if (ay > point[1]) != (by > point[1]):
+            crossing = (bx - ax) * (point[1] - ay) / (by - ay) + ax
+            if point[0] < crossing:
+                inside = not inside
+    return inside
+
+
+def _polygon_area_2d(polygon):
+    total = 0.0
+    count = len(polygon)
+    for index in range(count):
+        ax, ay = polygon[index]
+        bx, by = polygon[(index + 1) % count]
+        total += ax * by - bx * ay
+    return abs(total) * 0.5
+
+
+def _classify_closed_loops(closed_paths, nodes, normal):
+    """Split closed free-edge loops into outer loops and their interior holes.
+
+    Components routinely carry several disjoint patch meshes.  Treating every
+    non-largest loop as a hole (the historical rule) misclassified the smaller
+    patches and disabled the whole component, so containment is now decided
+    geometrically on the loop plane.
+    """
+    if not closed_paths:
+        return [], {}
+    if len(closed_paths) == 1 or normal is None:
+        return list(closed_paths), {}
+    axis_u, axis_v = _loop_plane_basis(normal)
+    polygons = {}
+    for index, path in enumerate(closed_paths):
+        points = [nodes[node_id] for node_id in path["node_ids"]]
+        if len(points) < 3:
+            continue
+        polygons[index] = tuple((dot(point, axis_u), dot(point, axis_v)) for point in points)
+    outers = []
+    holes = {}
+    for index, path in enumerate(closed_paths):
+        polygon = polygons.get(index)
+        if polygon is None:
+            outers.append(path)
+            continue
+        container = None
+        container_area = None
+        polygon_area = _polygon_area_2d(polygon)
+        for other_index, other_polygon in polygons.items():
+            if other_index == index:
+                continue
+            # A hole lies fully inside its container and is strictly smaller;
+            # testing one vertex alone misclassifies overlapping sibling
+            # patches (one component carrying several repair patches).
+            if not all(_point_in_polygon(point, other_polygon) for point in polygon):
+                continue
+            area = _polygon_area_2d(other_polygon)
+            if area <= polygon_area:
+                continue
+            if container is None or area < container_area:
+                container, container_area = closed_paths[other_index], area
+        if container is None:
+            outers.append(path)
+        else:
+            holes.setdefault(id(container), []).append(path)
+    return outers, holes
+
+
+def _loop_projection_hits(model, shared, source_id, path, target_normal, target_elements, target_index, maximum, tolerance):
+    """Bidirectional normal hits for one closed loop's containment samples."""
+    nodes = model.nodes
+    node_hits = [
+        _bidirectional_hit(nodes[node_id], target_normal, target_elements, nodes, maximum, tolerance, target_index)
+        for node_id in path["node_ids"]
+    ]
+    edge_pairs = [tuple(pair) for pair in path["edge_pairs"]]
+    owners = _context_edge_owners(shared, source_id)
+    element_map = _context_element_map(shared, source_id)
+    extra_hits = []
+    for first, second in edge_pairs:
+        midpoint = _midpoint(nodes[first], nodes[second])
+        extra_hits.append(_bidirectional_hit(midpoint, target_normal, target_elements, nodes, maximum, tolerance, target_index))
+    for element_id in sorted({owners[tuple(sorted(pair))] for pair in edge_pairs if tuple(sorted(pair)) in owners}):
+        element = element_map.get(element_id)
+        if element is None:
+            continue
+        centroid = tuple(sum(nodes[node_id][axis] for node_id in element.node_ids) / len(element.node_ids) for axis in range(3))
+        extra_hits.append(_bidirectional_hit(centroid, target_normal, target_elements, nodes, maximum, tolerance, target_index))
+    return node_hits, extra_hits
+
+
+def _patch_row(source_id, target_id, group_id, loop_index, path, hole_rows, small_holes, node_hits, extra_hits, contained, angle, maximum_angle, settings, strict_maximum, tolerance, length, areas_differ=True, beyond_warning=False):
+    distances = [hit["distance"] for hit in list(node_hits) + list(extra_hits) if hit is not None]
+    if distances:
+        average = sum(distances) / len(distances)
+        variation = (max(distances) - min(distances)) / max(average, 1.0e-9)
+        distance_summary = {"minimum": min(distances), "average": average, "maximum": max(distances)}
+    else:
+        variation = 1.0
+        distance_summary = {"minimum": 0.0, "average": 0.0, "maximum": 0.0}
+    samples = len(node_hits) + len(extra_hits)
+    hit_count = sum(hit is not None for hit in list(node_hits) + list(extra_hits))
+    coverage = hit_count / float(samples) if samples else 0.0
+    minimum_length = float(settings["minimum_patch_length"])
+    maximum_variation = float(settings["maximum_distance_variation_ratio"])
+    auto = (
+        contained
+        and areas_differ
+        and not small_holes
+        and bool(distances)
+        and variation <= maximum_variation
+        and angle <= float(settings["maximum_patch_normal_angle"])
+        and max(distances) <= strict_maximum + tolerance
+        and length >= minimum_length
+    )
+    confidence = _candidate_confidence(1.0, variation, max(0.0, 1.0 - angle / max(maximum_angle, 1.0)))
+    warnings = []
+    if small_holes:
+        warnings.append("patch contains an internal hole below the automatic diameter limit")
+    if beyond_warning:
+        warnings.append("patch loop extends beyond the target footprint")
+    return {
+        "candidate_id": "",
+        "candidate_type": "PATCH_SEAM",
+        "patch_group_id": group_id,
+        "patch_loop_index": loop_index,
+        "source_component_id": source_id,
+        "target_component_id": target_id,
+        "source_node_ids": path["node_ids"],
+        "source_edge_pairs": path["edge_pairs"],
+        "target_hint_element_ids": sorted({
+            hit["element_id"] for hit in list(node_hits) + list(extra_hits) if hit is not None
+        }),
+        "target_projection_points": [
+            list(hit["point"]) for hit in node_hits if hit is not None
+        ],
+        "closed": True,
+        "length": round(length, 9),
+        "confidence": confidence,
+        "projection_coverage": round(coverage, 6),
+        "fully_contained": bool(contained),
+        "auto_eligible": auto,
+        "recognition_status": "TRUSTED" if auto else "POTENTIAL",
+        "status": "AUTO_READY" if auto else "REVIEW_REQUIRED",
+        "distance": distance_summary,
+        "normal_angle": round(angle, 6),
+        "hole_summary": hole_rows,
+        "reasons": ["smaller parallel shell is fully projected inside a larger target shell"],
+        "warnings": warnings if warnings else ([] if auto else ["parallel components overlap only partially or miss a trusted tolerance gate"]),
+    }
+
+
+def _patch_candidates(model, settings, topologies, shared=None):
     strict_maximum = float(settings["search_distance"])
     maximum = strict_maximum * float(settings.get("potential_search_multiplier", 1.25))
     tolerance = float(settings["ray_tolerance"])
     strict_maximum_angle = float(settings["maximum_patch_normal_angle"])
     maximum_angle = strict_maximum_angle + float(settings.get("potential_angle_margin", 10.0))
-    by_component = {component_id: sorted(model.elements_for_components([component_id]), key=lambda row: row.element_id) for component_id in topologies}
-    element_indexes = _component_element_indexes(by_component, model.nodes, maximum)
-    component_normals = {component_id: _component_normal(elements, model.nodes) for component_id, elements in by_component.items()}
-    component_areas = {component_id: _component_area(elements, model.nodes) for component_id, elements in by_component.items()}
+    minimum_length = float(settings["minimum_patch_length"])
+    potential_length_ratio = float(settings.get("potential_length_ratio", 0.75))
+    small_hole_diameter = float(settings["small_hole_diameter"])
+    if shared is None:
+        shared = _detection_context(model, topologies, maximum)
+    nodes = model.nodes
     rows = []
-    component_ids = sorted(by_component)
     candidate_pairs = set(find_candidate_component_pairs(topologies, maximum))
-    for index, first_id in enumerate(component_ids):
-        for second_id in component_ids[index + 1:]:
+    component_ids = sorted(topologies)
+    for first_index, first_id in enumerate(component_ids):
+        for second_id in component_ids[first_index + 1:]:
             if (first_id, second_id) not in candidate_pairs:
                 continue
-            first_elements, second_elements = by_component[first_id], by_component[second_id]
-            first_normal = component_normals[first_id]
-            second_normal = component_normals[second_id]
+            first_normal = _context_normal(shared, first_id)
+            second_normal = _context_normal(shared, second_id)
             if first_normal is None or second_normal is None:
                 continue
             angle = angle_degrees(first_normal, second_normal)
             if angle > maximum_angle:
                 continue
-            first_area, second_area = component_areas[first_id], component_areas[second_id]
-            strictly_smaller = abs(first_area - second_area) > max(first_area, second_area) * 0.02
-            source_id, target_id = (first_id, second_id) if first_area <= second_area else (second_id, first_id)
-            source_elements, target_elements = by_component[source_id], by_component[target_id]
-            target_index = element_indexes.get(target_id)
-            target_normal = component_normals[target_id]
-            source_nodes = sorted(topologies[source_id].node_ids)
-            node_hits = [_bidirectional_hit(model.nodes[node_id], target_normal, target_elements, model.nodes, maximum, tolerance, target_index) for node_id in source_nodes]
-            containment_points = [model.nodes[node_id] for node_id in source_nodes]
-            containment_points.extend(_midpoint(model.nodes[first], model.nodes[second]) for first, second, _ in topologies[source_id].free_edges)
-            containment_points.extend(tuple(sum(model.nodes[node_id][axis] for node_id in element.node_ids) / len(element.node_ids) for axis in range(3)) for element in source_elements)
-            hits = [_bidirectional_hit(point, target_normal, target_elements, model.nodes, maximum, tolerance, target_index) for point in containment_points]
-            hit_count = sum(hit is not None for hit in hits)
-            if hit_count == 0:
-                continue
-            distances = [hit["distance"] for hit in hits if hit is not None]
-            hit_by_node = {node_id: hit for node_id, hit in zip(source_nodes, node_hits) if hit is not None}
-            coverage = hit_count / float(len(hits))
-            fully_contained = coverage >= 1.0 - 1.0e-9 and len(hit_by_node) == len(source_nodes)
-            average = sum(distances) / len(distances)
-            variation = (max(distances) - min(distances)) / max(average, 1.0e-9)
-            paths = connected_edge_paths(topologies[source_id].free_edges, model.nodes)
-            closed_paths = [path for path in paths if path["closed"] and not path["branched"]]
-            if not closed_paths:
-                continue
-            outer = max(closed_paths, key=lambda row: row["length"])
-            inner = [path for path in closed_paths if path is not outer]
-            hole_rows = [{"length": path["length"], "equivalent_diameter": path["length"] / math.pi, "node_ids": path["node_ids"]} for path in inner]
-            small_holes = [row for row in hole_rows if row["equivalent_diameter"] < float(settings["small_hole_diameter"])]
-            group_id = "PATCH_{}_{}".format(source_id, target_id)
-            group_auto = (
-                fully_contained
-                and strictly_smaller
-                and not small_holes
-                and variation <= float(settings["maximum_distance_variation_ratio"])
-                and angle <= strict_maximum_angle
-                and max(distances) <= strict_maximum + tolerance
-            )
-            for path_index, path in enumerate(closed_paths, 1):
-                length = _path_length(path["node_ids"], model.nodes, True)
-                if length < float(settings["minimum_patch_length"]) * float(settings.get("potential_length_ratio", 0.75)):
+            first_area = _context_area(shared, first_id)
+            second_area = _context_area(shared, second_id)
+            areas_differ = abs(first_area - second_area) > max(first_area, second_area) * 0.02
+            # A patch relation is proven per closed loop: the loop's own
+            # boundary must project completely onto the partner component.
+            # Component area only breaks ties and guards the potential
+            # fallback, because one component may carry several patches whose
+            # total area says nothing about each patch footprint.
+            direction_results = []
+            contained_sources = []
+            for source_id, target_id in ((first_id, second_id), (second_id, first_id)):
+                loops = _context_weld_loops(shared, source_id)
+                if not loops:
                     continue
-                auto = group_auto and length >= float(settings["minimum_patch_length"])
-                confidence = _candidate_confidence(1.0, variation, max(0.0, 1.0 - angle / max(maximum_angle, 1.0)))
-                warnings = []
-                if small_holes:
-                    warnings.append("patch contains an internal hole below the automatic diameter limit")
-                rows.append({
-                    "candidate_id": "",
-                    "candidate_type": "PATCH_SEAM",
-                    "patch_group_id": group_id,
-                    "patch_loop_index": path_index,
-                    "source_component_id": source_id,
-                    "target_component_id": target_id,
-                    "source_node_ids": path["node_ids"],
-                    "source_edge_pairs": path["edge_pairs"],
-                    "target_hint_element_ids": sorted({hit["element_id"] for hit in hits if hit is not None}),
-                    "target_projection_points": [
-                        list(hit_by_node[node_id]["point"])
-                        for node_id in path["node_ids"] if node_id in hit_by_node
-                    ],
-                    "closed": True,
-                    "length": round(length, 9),
-                    "confidence": confidence,
-                    "projection_coverage": round(coverage, 6),
-                    "fully_contained": bool(fully_contained),
-                    "auto_eligible": auto,
-                    "recognition_status": "TRUSTED" if auto else "POTENTIAL",
-                    "status": "AUTO_READY" if auto else "REVIEW_REQUIRED",
-                    "distance": {"minimum": min(distances), "average": average, "maximum": max(distances)},
-                    "normal_angle": round(angle, 6),
-                    "hole_summary": hole_rows,
-                    "reasons": ["smaller parallel shell is fully projected inside a larger target shell"],
-                    "warnings": warnings if warnings else ([] if auto else ["parallel components overlap only partially or miss a trusted tolerance gate"]),
-                })
+                target_elements = _context_elements(shared, target_id)
+                target_index = _context_index(shared, target_id)
+                target_normal = _context_normal(shared, target_id)
+                target_bounds = topologies[target_id].bounds
+                direction_rows = []
+                any_contained = False
+                deferred_loops = []
+                for loop in loops:
+                    path = loop["path"]
+                    length = _path_length(path["node_ids"], nodes, True)
+                    if length < minimum_length * potential_length_ratio:
+                        continue
+                    if loop.get("is_hole") and length / math.pi < small_hole_diameter:
+                        # Fastener-sized openings are not weld seams.
+                        continue
+                    if not _bounds_within(loop["bounds"], target_bounds, maximum):
+                        deferred_loops.append((path, length))
+                        continue
+                    node_hits, extra_hits = _loop_projection_hits(
+                        model, shared, source_id, path, target_normal,
+                        target_elements, target_index, maximum, tolerance,
+                    )
+                    hit_count = sum(hit is not None for hit in node_hits + extra_hits)
+                    if hit_count == 0:
+                        continue
+                    contained = hit_count == len(node_hits) + len(extra_hits)
+                    any_contained = any_contained or contained
+                    direction_rows.append((path, length, node_hits, extra_hits, contained, False))
+                if any_contained:
+                    # Sibling loops of a proven patch keep their review row even
+                    # when they hang past the target footprint.
+                    for path, length in deferred_loops:
+                        direction_rows.append((
+                            path, length, [None] * len(path["node_ids"]), [], False, True,
+                        ))
+                    direction_results.append((source_id, target_id, direction_rows))
+                    contained_sources.append(source_id)
+            coincident_relations = []
+            if len(contained_sources) == 2:
+                # Coincident footprints: keep the smaller-area source side and
+                # remember the suppressed direction so ambiguity accounting
+                # still sees the proven-but-dropped relation (a three-plate
+                # stack must not weld its top plate straight onto the base).
+                keep_source = first_id if first_area <= second_area else second_id
+                suppressed_source = second_id if keep_source == first_id else first_id
+                coincident_relations = [(suppressed_source, keep_source)]
+                direction_results = [row for row in direction_results if row[0] == keep_source]
+            if not direction_results:
+                # Historical fallback: neither loop proved containment, so the
+                # smaller-area component keeps its potential review rows.
+                source_id, target_id = (first_id, second_id) if first_area <= second_area else (second_id, first_id)
+                loops = _context_weld_loops(shared, source_id)
+                if not loops:
+                    continue
+                target_elements = _context_elements(shared, target_id)
+                target_index = _context_index(shared, target_id)
+                target_normal = _context_normal(shared, target_id)
+                fallback_rows = []
+                for loop in loops:
+                    path = loop["path"]
+                    length = _path_length(path["node_ids"], nodes, True)
+                    if length < minimum_length * potential_length_ratio:
+                        continue
+                    if loop.get("is_hole") and length / math.pi < small_hole_diameter:
+                        continue
+                    node_hits, extra_hits = _loop_projection_hits(
+                        model, shared, source_id, path, target_normal,
+                        target_elements, target_index, maximum, tolerance,
+                    )
+                    if not any(hit is not None for hit in node_hits + extra_hits):
+                        continue
+                    fallback_rows.append((path, length, node_hits, extra_hits, False, False))
+                if fallback_rows:
+                    direction_results.append((source_id, target_id, fallback_rows))
+            for source_id, target_id, direction_rows in direction_results:
+                group_id = "PATCH_{}_{}".format(source_id, target_id)
+                for loop_index, (path, length, node_hits, extra_hits, contained, beyond) in enumerate(direction_rows, 1):
+                    hole_rows = [
+                        {"length": hole["length"], "equivalent_diameter": hole["length"] / math.pi, "node_ids": hole["node_ids"]}
+                        for hole in _loop_holes_for(shared, source_id, path)
+                    ]
+                    small_holes = [row for row in hole_rows if row["equivalent_diameter"] < small_hole_diameter]
+                    row = _patch_row(
+                        source_id, target_id, group_id, loop_index, path, hole_rows,
+                        small_holes, node_hits, extra_hits, contained, angle,
+                        maximum_angle, settings, strict_maximum, tolerance, length,
+                        areas_differ=areas_differ, beyond_warning=beyond,
+                    )
+                    if coincident_relations:
+                        row["coincident_relations"] = [list(pair) for pair in coincident_relations]
+                    rows.append(row)
     return rows
+
+
+def _loop_holes_for(shared, source_id, path):
+    for loop in _context_closed_loops(shared, source_id):
+        if loop["path"] is path:
+            return loop["holes"]
+    return []
 
 
 def _edge_match_distance(first_edge, second_edge, nodes):
@@ -741,7 +1309,13 @@ def _near_edge_candidates(model, settings, topologies):
 
 def _initialize_detection_worker(model, settings, topologies):
     global _DETECTION_CONTEXT
-    _DETECTION_CONTEXT = {"model": model, "settings": settings, "topologies": topologies}
+    maximum = float(settings["search_distance"]) * float(settings.get("potential_search_multiplier", 1.25))
+    _DETECTION_CONTEXT = {
+        "model": model,
+        "settings": settings,
+        "topologies": topologies,
+        "context": _detection_context(model, topologies, maximum),
+    }
 
 
 def _parallel_detection_task(task):
@@ -749,10 +1323,11 @@ def _parallel_detection_task(task):
     model = _DETECTION_CONTEXT["model"]
     settings = _DETECTION_CONTEXT["settings"]
     topologies = _DETECTION_CONTEXT["topologies"]
+    shared = _DETECTION_CONTEXT["context"]
     if kind == "T":
-        return _t_candidates(model, settings, topologies, set(source_ids))
+        return _t_candidates(model, settings, topologies, set(source_ids), shared)
     if kind == "PATCH":
-        return _patch_candidates(model, settings, topologies)
+        return _patch_candidates(model, settings, topologies, shared)
     if kind == "NEAR":
         return _near_edge_candidates(model, settings, topologies)
     raise ValueError("unsupported detection task {}".format(kind))
@@ -785,19 +1360,24 @@ def _apply_relation_ambiguity(candidates):
 
     Geometry detection intentionally keeps every plausible hit.  Trust is a
     separate, conservative decision: one source T edge may land on only one
-    target, and a patch component participating in a multi-component parallel
-    cluster requires manual review.
+    target, and one patch component may project onto only one target.  A
+    target carrying several distinct patches is not ambiguous - each patch
+    loop is an independent weld.
     """
     t_targets = defaultdict(set)
-    patch_partners = defaultdict(set)
+    patch_targets = defaultdict(set)
     for row in candidates:
         if row["candidate_type"] == "T_SEAM":
             t_targets[_t_relation_key(row)].add(int(row["target_component_id"]))
         elif row["candidate_type"] == "PATCH_SEAM":
             source = int(row["source_component_id"])
-            target = int(row["target_component_id"])
-            patch_partners[source].add(target)
-            patch_partners[target].add(source)
+            patch_targets[source].add(int(row["target_component_id"]))
+            # A coincident pair suppresses its larger-source direction, but
+            # that proven containment still counts: the suppressed component
+            # must not become a trusted weld onto further targets (the
+            # three-plate stack phantom weld through the middle plate).
+            for suppressed_source, suppressed_target in row.get("coincident_relations", []):
+                patch_targets[int(suppressed_source)].add(int(suppressed_target))
 
     for row in candidates:
         reason = ""
@@ -805,9 +1385,8 @@ def _apply_relation_ambiguity(candidates):
             reason = "one source edge extension intersects multiple target components"
         elif row["candidate_type"] == "PATCH_SEAM":
             source = int(row["source_component_id"])
-            target = int(row["target_component_id"])
-            if len(patch_partners[source]) > 1 or len(patch_partners[target]) > 1:
-                reason = "parallel overlap belongs to a multi-component patch cluster"
+            if len(patch_targets[source]) > 1:
+                reason = "one patch component projects onto multiple target components"
         if reason:
             row["auto_eligible"] = False
             row["recognition_status"] = "POTENTIAL"
@@ -932,6 +1511,7 @@ def detect_candidates(model, settings=None):
             if component_id in selected
         }
     worker_count = _resolved_worker_count(resolved, len(topologies), len(model.elements))
+    detection_maximum = float(resolved["search_distance"]) * float(resolved.get("potential_search_multiplier", 1.25))
     candidates = []
     if worker_count > 1:
         component_ids = sorted(topologies)
@@ -965,13 +1545,15 @@ def detect_candidates(model, settings=None):
             # Embedded/locked-down Python installations may prohibit child
             # processes. Preserve the exact serial path instead of failing the
             # engineering task solely because parallel startup was unavailable.
-            candidates = _t_candidates(model, resolved, topologies)
-            candidates.extend(_patch_candidates(model, resolved, topologies))
+            shared = _detection_context(model, topologies, detection_maximum)
+            candidates = _t_candidates(model, resolved, topologies, None, shared)
+            candidates.extend(_patch_candidates(model, resolved, topologies, shared))
             if bool(resolved.get("include_legacy_near_edges", False)):
                 candidates.extend(_near_edge_candidates(model, resolved, topologies))
     else:
-        candidates = _t_candidates(model, resolved, topologies)
-        candidates.extend(_patch_candidates(model, resolved, topologies))
+        shared = _detection_context(model, topologies, detection_maximum)
+        candidates = _t_candidates(model, resolved, topologies, None, shared)
+        candidates.extend(_patch_candidates(model, resolved, topologies, shared))
         if bool(resolved.get("include_legacy_near_edges", False)):
             candidates.extend(_near_edge_candidates(model, resolved, topologies))
     candidates = _apply_relation_ambiguity(candidates)

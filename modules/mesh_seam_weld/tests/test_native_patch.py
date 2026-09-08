@@ -18,7 +18,7 @@ class NativePatchTests(unittest.TestCase):
             """
 namespace eval ::MeshSeamWeld {
     variable cfg
-    array set cfg {weld_mesh_size 6.5}
+    array set cfg {weld_mesh_size 6.5 strict_patch_boundary_check 0}
 }
 namespace eval ::HybridCore {
     proc log args {}
@@ -33,7 +33,7 @@ namespace eval ::HybridCore {
             """
 set events {}
 set mesh {90}
-set broken 0
+set remeshMode normal
 proc ::MeshSeamWeld::uniq {ids} {return [lsort -unique -integer $ids]}
 proc ::MeshSeamWeld::componentIdsFromNodes args {return 10}
 proc ::MeshSeamWeld::seamComponentForRelatedComps args {
@@ -56,16 +56,31 @@ proc ::MeshSeamWeld::runImprintNodeList args {
     set ::mesh {90 100}
 }
 proc ::MeshSeamWeld::readShellElementConnectivityBulk {ids mark} {
-    if {$::broken && $ids eq "101"} {return {101 {1 2 4 9}}}
     set result {}
-    foreach id $ids {dict set result $id {1 2 4 3}}
+    foreach id $ids {
+        if {$id == 101 && $::remeshMode eq "broken"} {
+            dict set result $id {1 2 4 9}
+        } elseif {$id == 101 && $::remeshMode eq "split"} {
+            dict set result $id {1 9 2 4}
+        } elseif {$id == 102} {
+            dict set result $id {1 4 3}
+        } else {
+            dict set result $id {1 2 4 3}
+        }
+    }
     return $result
+}
+proc ::MeshSeamWeld::nodeXYZ id {
+    return [dict get {1 {0 0 0} 2 {1 0 0} 3 {1 1 0} 4 {0 1 0} 9 {0.5 0 0}} $id]
 }
 proc *createmark args {lappend ::events [linsert $args 0 mark]}
 proc *elementsaddnodesfixed args {lappend ::events fixed}
 proc *defaultremeshelems args {
     lappend ::events [linsert $args 0 automesh]
-    set ::mesh {90 101}
+    switch -- $::remeshMode {
+        split { set ::mesh {90 101 102} }
+        default { set ::mesh {90 101} }
+    }
 }
 proc ::MeshSeamWeld::clearLocalTopologyCaches args {}
 proc ::MeshSeamWeld::stageError {stage err} {error "$stage:$err"}
@@ -88,10 +103,33 @@ proc ::MeshSeamWeld::stageError {stage err} {error "$stage:$err"}
         self.assertIn("automesh 1 6.5 2 2 1 1 1 1 0 0 0 0 2 30", events)
         self.assertEqual(self.tcl.eval("set mesh"), "90 101")
 
-    def test_attachment_change_rejects_and_rolls_back_at_caller(self):
-        self.tcl.eval("set broken 1")
+    def test_relaxed_attachment_allows_in_place_edge_subdivision(self):
+        # The remesh split boundary edge 1-2 by inserting node 9 on it and
+        # retriangulated the strip (90 kept, 101/102 new).  The attachment
+        # polyline is unchanged, so the relaxed default accepts the result.
+        self.tcl.eval("set ::remeshMode split")
+        result = self.run_path()
+        self.assertIn("weldElems {101 102}", result)
+
+    def test_relaxed_attachment_still_rejects_moved_boundary(self):
+        # Element 101 no longer reaches boundary nodes 3/4; its boundary moved
+        # to node 9 off the original attachment edges.  Rejected even relaxed.
+        self.tcl.eval("set ::remeshMode broken")
+        with self.assertRaisesRegex(
+            tkinter.TclError, "AUTOMESH:Native patch remesh moved"
+        ):
+            self.run_path()
+
+    def test_strict_attachment_change_rejects_and_rolls_back_at_caller(self):
+        self.tcl.eval("set ::remeshMode broken")
+        self.tcl.eval("set ::MeshSeamWeld::cfg(strict_patch_boundary_check) 1")
         with self.assertRaisesRegex(tkinter.TclError, "AUTOMESH:Native patch remesh changed"):
             self.run_path()
+
+    def test_strict_mode_accepts_identical_boundary(self):
+        self.tcl.eval("set ::MeshSeamWeld::cfg(strict_patch_boundary_check) 1")
+        result = self.run_path()
+        self.assertIn("weldElems 101", result)
 
     def test_empty_patch_never_remeshes_existing_weld(self):
         self.tcl.eval("proc ::MeshSeamWeld::runImprintNodeList args {}")

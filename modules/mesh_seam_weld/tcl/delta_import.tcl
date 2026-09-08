@@ -1,19 +1,3 @@
-proc ::MeshSeamWeld::saveAutoSnapshot {path} {
-    file mkdir [file dirname $path]
-    if {[file exists $path]} { file delete -force $path }
-    catch {hm_answernext yes}
-    if {[catch {uplevel #0 [list *writefile [file nativename $path] 1]} err opts]} { return -options $opts $err }
-    if {![file isfile $path] || [file size $path] == 0} { error "HyperMesh did not create a valid auto-seam snapshot" }
-    return $path
-}
-
-proc ::MeshSeamWeld::restoreAutoSnapshot {path} {
-    if {![file isfile $path]} { error "auto-seam recovery snapshot is missing: $path" }
-    catch {hm_answernext yes}
-    uplevel #0 [list *readfile [file nativename $path] 0]
-    catch {::HWFlow::refreshBrowser}
-}
-
 proc ::MeshSeamWeld::applyAutoDelta {taskDir plans} {
     set delta [file join $taskDir output delta.fem]
     if {![file isfile $delta]} { error "planned delta FEM is missing: $delta" }

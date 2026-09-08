@@ -52,6 +52,27 @@ def _positive_int(value, label, line_number):
     return result
 
 
+def _element_property_id(value, element_id, card, line_number):
+    """Resolve a shell PID field using the bulk-data default: blank or 0 means EID."""
+    text = value.strip()
+    if not text:
+        return element_id
+    try:
+        result = int(text)
+    except ValueError as exc:
+        raise FemMeshError(
+            "{} PID is not an integer at line {}: {!r}".format(card, line_number, value)
+        ) from exc
+    if result == 0:
+        # HyperMesh writes PID 0 for shells whose component has no assigned
+        # property, and the solvers treat 0 like the blank default (PID = EID).
+        # The live model still owns a usable property, so keep the element.
+        return element_id
+    if result < 0:
+        raise FemMeshError("{} PID must be positive at line {}".format(card, line_number))
+    return result
+
+
 def _fixed_fields(raw):
     line = raw.rstrip("\r\n")
     large = len(line) >= 8 and "*" in line[:8]
@@ -163,7 +184,7 @@ def read_shell_fem(path, component_id, component_name="SOURCE_COMPONENT"):
             if len(fields) < 3 + expected:
                 raise FemMeshError("{} has too few fields at line {}".format(card, line_number))
             element_id = _positive_int(fields[1], "{} ID".format(card), line_number)
-            property_id = _positive_int(fields[2], "{} PID".format(card), line_number)
+            property_id = _element_property_id(fields[2], element_id, card, line_number)
             node_ids = tuple(
                 _positive_int(value, "{} node".format(card), line_number)
                 for value in fields[3 : 3 + expected]

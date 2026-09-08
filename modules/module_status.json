@@ -16,6 +16,7 @@
     "seam_surface": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true},
     "batch_property_assignment": {"status": "production", "runtime": "Tcl", "model_write": true},
     "bom_material_assignment": {"status": "controlled", "runtime": "Tcl", "model_write": true, "bom_reader": "reserved"},
-    "geometry_preprocess": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true}
+    "geometry_preprocess": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true},
+    "mesh_add_washer": {"status": "controlled", "runtime": "Tcl", "model_write": true, "requires_hm2019_smoke_test": true, "density_reduction_pending_onmachine_verification": ["8-12", "12-12", "16-12", "16-8"]}
   }
 }
