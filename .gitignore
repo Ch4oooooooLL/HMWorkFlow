@@ -18,6 +18,7 @@ AGENTS.md
 /optistruct.msg
 /abaqus.msg
 /nastran.msg
+/hmascii.msg
 
 # Generated documentation captures and task workspaces
 /doc/command.tcl

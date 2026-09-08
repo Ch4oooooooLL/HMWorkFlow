@@ -19,13 +19,13 @@ for directory in reversed((REPO_PYTHON_DIR, MODULE_DIR, COMMON_DIR, MESH_SEAM_SH
     sys.path.insert(0, text)
 
 try:
-    from .backend import detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
+    from .backend import build_recognition_plan, detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
     from .schema import validate_request
 except ImportError:
     # persistent_worker loads this entry under a private module name.  Import
     # through the public package namespace so module-local schema.py files from
     # previously executed tools cannot shadow hybrid_core dependencies.
-    from hmworkflow.fem_auto_seam.backend import detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
+    from hmworkflow.fem_auto_seam.backend import build_recognition_plan, detect_candidates, plan_candidate_deltas, resolved_worker_count_for_model, write_fem_bundle
     from hmworkflow.fem_auto_seam.schema import validate_request
 
 try:
@@ -47,12 +47,15 @@ def _backend_settings(settings, request=None):
     result.update({
         "minimum_t_length": float(settings["min_seam_length"]),
         "minimum_patch_length": float(settings["min_seam_length"]),
-        "minimum_t_normal_angle": max(0.0, 90.0 - float(settings["perpendicular_angle_min"])),
+        "minimum_t_normal_angle": float(settings["perpendicular_angle_min"]),
         "maximum_patch_normal_angle": float(settings["parallel_angle_max"]),
         "maximum_distance_variation_ratio": float(settings["max_distance_variation_ratio"]),
         "near_edge_distance": float(settings["near_edge_distance"]),
         "small_hole_diameter": float(settings["small_hole_diameter"]),
         "maximum_weld_triangle_ratio": float(settings["max_weld_tria_ratio"]),
+        "potential_search_multiplier": float(settings.get("potential_search_multiplier", 1.25)),
+        "potential_angle_margin": float(settings.get("potential_angle_margin", 10.0)),
+        "potential_length_ratio": float(settings.get("potential_length_ratio", 0.75)),
     })
     if request is not None:
         result["id_state"] = dict(request.get("id_state", {}))
@@ -75,6 +78,7 @@ def _mark_duplicates(candidates, model, existing, maximum):
         if distance <= float(maximum):
             row["duplicate_status"] = "POSSIBLE_DUPLICATE"
             row["auto_eligible"] = False
+            row["recognition_status"] = "POTENTIAL"
             row["status"] = "REVIEW_REQUIRED"
             row.setdefault("warnings", []).append("existing SEAM element is within {:.6g} of the candidate midpoint".format(distance))
     return candidates
@@ -147,7 +151,7 @@ def calculate(request, model, existing, performance=None, detected_candidates=No
         performance["candidate_cache_hit"] = True
     if settings["mode"] == "detect":
         performance["planning_seconds"] = 0.0
-        return {"candidates": candidates}
+        return {"candidates": candidates, "recognition": build_recognition_plan(candidates)}
     accepted = set(str(value) for value in request.get("accepted_candidate_ids", []))
     selected = [row for row in candidates if row["candidate_id"] in accepted]
     stage_started = time.perf_counter()
@@ -228,7 +232,15 @@ def main(argv=None):
         artifact_started = time.perf_counter()
         if request["settings"]["mode"] == "detect":
             result["candidates"] = calculated["candidates"]
-            result["summary"] = {"mode": "detect", "candidate_count": len(result["candidates"])}
+            result["recognition"] = calculated["recognition"]
+            result["trusted_seeds"] = calculated["recognition"]["trusted_seeds"]
+            result["potential_groups"] = calculated["recognition"]["potential_groups"]
+            result["summary"] = {
+                "mode": "detect",
+                "candidate_count": len(result["candidates"]),
+                "trusted_seed_count": len(result["trusted_seeds"]),
+                "potential_group_count": len(result["potential_groups"]),
+            }
             cache_payload = {
                 "cache_version": 1,
                 "cache_key": cache_key,

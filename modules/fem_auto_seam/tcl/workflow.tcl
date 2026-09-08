@@ -1,7 +1,7 @@
 proc ::FemAutoSeam::jsonSettings {} {
     variable cfg
     set rows {}
-    foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_distance_variation_ratio near_edge_distance small_hole_diameter max_weld_tria_ratio max_new_failed_elements existing_weld_search_distance auto_accept_confidence review_confidence remesh_element_size remesh_expand_layers remesh_feature_angle python_workers} {
+    foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_distance_variation_ratio near_edge_distance small_hole_diameter max_weld_tria_ratio max_new_failed_elements existing_weld_search_distance auto_accept_confidence review_confidence potential_search_multiplier potential_angle_margin potential_length_ratio remesh_element_size remesh_expand_layers remesh_feature_angle python_workers} {
         lappend rows "    \"$key\": [::HybridCore::jsonNumber $cfg($key)]"
     }
     lappend rows "    \"criteria_path\": [::HybridCore::jsonString [::FemAutoSeam::effectiveSpecificationPath criteria_path]]"

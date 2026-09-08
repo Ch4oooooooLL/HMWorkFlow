@@ -2,7 +2,7 @@
 
 `generate_fem.py` 生成一个 OptiStruct/HyperMesh 可导入的 `.fem`（纯 Python 标准库，
 便携运行时 Python 3.8 可直接运行），覆盖网格焊缝（Mesh Seam Weld）的手动路径
-（选节点路径 → 投影 → imprint/ruled）与 FAST_AUTO 自动路径（T 型 / 搭接候选）、
+（选节点路径 → 投影 → native Create Patch）与 FAST_AUTO 自动路径（T 型 / 搭接候选）、
 去重、以及负向控制场景。
 
 ## 生成
@@ -25,7 +25,7 @@ F10 类共享节点负向对照见 `examples/FemAutoSeam_Validation/`。
 | 场景 | 结构 | 预期 |
 |---|---|---|
 | C01 | 源板 120x100 挖 8 个圆孔（r 4~9.5mm）+ 完整目标板 160x120（z=0） | 手动路径：8 个闭合环；FAST_AUTO：8 个闭合环候选（closed_loop） |
-| C02 | 源板 100x60 直边开放路径 + 目标板 140x88 | 手动投影 + imprint/ruled；FAST_AUTO 1 候选 |
+| C02 | 源板 100x60 直边开放路径 + 目标板 140x88 | 手动投影 + native Create Patch；FAST_AUTO 1 候选 |
 | C03 | 源板五边形 45° 折线开放路径 + 目标板 140x100 | 手动投影分割；FAST_AUTO 1 候选 |
 | C04 | 垂直筋板壳 140x40 + 底板壳 200x140（法向 90°） | FAST_AUTO T 候选（T_PATH），1 |
 | C05 | 平行重叠壳板 120x80 @z2 叠在 160x100 @z0（法向 0°） | FAST_AUTO 搭接候选（L_SURF），1 |
@@ -40,8 +40,8 @@ F10 类共享节点负向对照见 `examples/FemAutoSeam_Validation/`。
 
    - **C01**：在源板上 8 个孔环各选一个种子节点（彼此不连续 → 批量闭环模式），
      目标组件选 `V01_PlateSolid_T2.0`；预期 8 个闭合边界与 8 条焊缝带。
-   - **C02 / C03**：手动选源自由边路径节点 → 目标板 → 投影 + 局部 imprint/remesh →
-     Ruled 连接带。
+   - **C02 / C03**：手动选源自由边路径节点 → 目标板 → 局部投影 →
+     native Create Patch → 新增 patch 边界固定 mixed remesh。
    - **C04 / C05**：FAST_AUTO 路径选择组件对，确认候选后导入现有边创建壳焊缝。
    - **C08**：选择 V08 组件对（不选 SEAM_T1），确认候选被标记为 DUPLICATE
      （去重距离 4.0 mm 覆盖 3 mm 间距）并转入复核表，不会重复创建。

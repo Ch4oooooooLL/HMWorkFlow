@@ -6,7 +6,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::FemAutoSeam {
-    variable VERSION "0.18"
+    variable VERSION "0.19"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] fem_auto_seam]
     variable cfg
     array set cfg {
@@ -22,6 +22,9 @@ namespace eval ::FemAutoSeam {
         exclude_existing_welds 1
         auto_accept_confidence 0.88
         review_confidence 0.60
+        potential_search_multiplier 1.25
+        potential_angle_margin 10.0
+        potential_length_ratio 0.75
         criteria_path ""
         remesh_element_size 8.0
         remesh_expand_layers 2
@@ -41,7 +44,8 @@ proc ::FemAutoSeam::stateKeys {} {
         search_distance min_seam_length parallel_angle_max perpendicular_angle_min
         max_distance_variation_ratio near_edge_distance small_hole_diameter
         max_weld_tria_ratio existing_weld_search_distance exclude_existing_welds
-        auto_accept_confidence review_confidence criteria_path
+        auto_accept_confidence review_confidence potential_search_multiplier
+        potential_angle_margin potential_length_ratio criteria_path
         remesh_element_size remesh_expand_layers remesh_feature_angle remesh_chunk_elements python_workers max_new_failed_elements
     }
 }
@@ -77,26 +81,16 @@ proc ::FemAutoSeam::browseFile {key extension zh en} {
 
 proc ::FemAutoSeam::validateUi {} {
     variable ui
-    foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_distance_variation_ratio near_edge_distance small_hole_diameter max_weld_tria_ratio existing_weld_search_distance auto_accept_confidence review_confidence} {
+    foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_distance_variation_ratio near_edge_distance small_hole_diameter max_weld_tria_ratio existing_weld_search_distance auto_accept_confidence review_confidence potential_search_multiplier potential_angle_margin potential_length_ratio} {
         if {![string is double -strict $ui($key)] || $ui($key) < 0} { error "$key must be non-negative" }
     }
-    foreach key {remesh_expand_layers max_new_failed_elements python_workers} {
+    if {$ui(potential_search_multiplier) < 1.0} { error "potential_search_multiplier must be at least 1" }
+    if {$ui(potential_length_ratio) > 1.0} { error "potential_length_ratio must not exceed 1" }
+    foreach key {python_workers} {
         if {![string is integer -strict $ui($key)] || $ui($key) < 0} { error "$key must be a non-negative integer" }
     }
-    if {![string is integer -strict $ui(remesh_chunk_elements)] || $ui(remesh_chunk_elements) <= 0} {
-        error "remesh_chunk_elements must be a positive integer"
-    }
-    foreach key {remesh_element_size remesh_feature_angle} {
-        if {![string is double -strict $ui($key)] || $ui($key) <= 0} { error "$key must be positive" }
-    }
-    foreach item [list [list criteria_path .criteria]] {
-        set key [lindex $item 0]; set extension [lindex $item 1]
-        if {[string trim $ui($key)] eq ""} { continue }
-        if {![file isfile $ui($key)] || [string tolower [file extension $ui($key)]] ne $extension} {
-            error "$key must reference a valid $extension file"
-        }
-        set ui($key) [file normalize $ui($key)]
-    }
+    # Legacy criteria/remesh settings remain readable for state migration but
+    # are not part of the recognition-only workflow.
 }
 
 proc ::FemAutoSeam::effectiveSpecificationPath {key} {
@@ -134,8 +128,8 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     frame $w.main -padx 12 -pady 10; pack $w.main -fill both -expand 1
     label $w.main.title -text [::HWFlow::txt "FEM 自动焊缝" "FEM Automatic Seam"] -font [::HWFlow::uiFont heading]
     message $w.main.note -width 620 -text [::HWFlow::txt \
-        "独立分析孤立划分后的壳网格，识别 T 型、贴片型和邻近自由边，在 FEM 层面切分母单元并创建焊缝壳；Python 直接修改模型 FEM 后重新打开替换当前模型，再按连通区域分批重绘。此功能与原“网格焊缝”配置相互独立。" \
-        "Analyze independently meshed shell components, detect T/patch/near-edge candidates, split mother shells at FEM level, and create weld shells. Python edits the model FEM and HyperMesh reopens it as the new model, then remeshes affected regions in bounded chunks. This tool has configuration independent from Mesh Seam Weld."]
+        "Python 只识别 T 型和贴片焊缝并提供已有节点种子。完全可信项交给现有网格焊缝的 nodes+comps patch/优化流程创建；部分覆盖、多目标或略超容差的潜在项按涉及的 Components 写入 HMASCII Set 并增量导入。" \
+        "Python only recognizes T and patch welds and supplies existing-node seeds. Trusted items are created by the Mesh Seam Weld nodes+comps patch/optimization workflow; partial, multi-target, or near-tolerance relations are grouped into component sets and incrementally imported through HMASCII."]
     grid $w.main.title -row 0 -column 0 -columnspan 3 -sticky w
     grid $w.main.note -row 1 -column 0 -columnspan 3 -sticky ew -pady {4 8}
     set fields {
@@ -143,17 +137,11 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
         {min_seam_length "最小焊缝长度" "Minimum seam length"}
         {parallel_angle_max "贴片平行角度" "Patch parallel angle"}
         {perpendicular_angle_min "T 型角度下限" "T angle lower limit"}
-        {near_edge_distance "邻近自由边距离" "Near free-edge distance"}
-        {small_hole_diameter "人工复核孔径阈值" "Review hole diameter"}
-        {auto_accept_confidence "自动创建置信度" "Auto-create confidence"}
-        {review_confidence "复核置信度" "Review confidence"}
-        {criteria_path "Criteria 文件" "Criteria file"}
+        {max_distance_variation_ratio "最大间距变化比例" "Maximum gap variation ratio"}
+        {potential_search_multiplier "潜在项距离放宽倍数" "Potential distance multiplier"}
+        {potential_angle_margin "潜在项角度放宽（度）" "Potential angle margin (deg)"}
+        {potential_length_ratio "潜在项最小长度比例" "Potential minimum length ratio"}
         {python_workers "Python 并行进程数（0=自动）" "Python workers (0=auto)"}
-        {remesh_element_size "重绘单元尺寸" "Remesh element size"}
-        {remesh_expand_layers "重绘扩展层数" "Remesh expansion layers"}
-        {remesh_feature_angle "重绘特征角" "Remesh feature angle"}
-        {remesh_chunk_elements "单批重绘单元上限" "Elements per remesh chunk"}
-        {max_new_failed_elements "允许新增失败单元" "Allowed new failed elements"}
     }
     set row 2
     foreach item $fields {
@@ -171,7 +159,7 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     }
     checkbutton $w.main.exclude -text [::HWFlow::txt "排除附近已有 SEAM 焊缝" "Exclude nearby existing SEAM welds"] -variable ::FemAutoSeam::ui(exclude_existing_welds)
     grid $w.main.exclude -row $row -column 0 -columnspan 3 -sticky w; incr row
-    label $w.main.required -text [::HWFlow::txt "固定流程：Python 修改模型 FEM 文件，HyperMesh 重新打开该文件替换当前模型，再按连通区域分批重绘受影响网格。" "Fixed workflow: Python edits the model FEM file; HyperMesh reopens it to replace the current model, then remeshes affected regions in bounded chunks."] -anchor w
+    label $w.main.required -text [::HWFlow::txt "固定流程：Python 识别 → 可信种子调用网格焊缝 → 潜在组合增量导入 Component Set；不再修改或重开 FEM。" "Fixed workflow: Python recognition → trusted seeds call Mesh Seam Weld → potential component sets are imported incrementally; the FEM is never modified or reopened."] -anchor w
     grid $w.main.required -row $row -column 0 -columnspan 3 -sticky w
     frame $w.buttons -padx 12 -pady 10; pack $w.buttons -fill x
     button $w.buttons.cancel -text [::HWFlow::txt "取消" "Cancel"] -command [list destroy $w]
@@ -220,6 +208,6 @@ proc ::FemAutoSeam::runAction {} { if {[::FemAutoSeam::showPanel 0]} { ::FemAuto
 proc ::FemAutoSeam::runSettings {} { ::FemAutoSeam::showPanel 1 }
 proc ::FemAutoSeam::run {} { ::FemAutoSeam::runAction }
 
-foreach file {exporter.tcl auto_ui.tcl delta_import.tcl quality_validator.tcl fast_executor.tcl workflow.tcl} {
+foreach file {exporter.tcl auto_ui.tcl delta_import.tcl quality_validator.tcl fast_executor.tcl workflow.tcl seed_workflow.tcl} {
     ::HWFlow::sourceUtf8 [file join $::FemAutoSeam::MODULE_DIR tcl $file]
 }

@@ -24,6 +24,9 @@ DEFAULTS = {
     "remesh_expand_layers": 2,
     "remesh_feature_angle": 30.0,
     "python_workers": 0,
+    "potential_search_multiplier": 1.25,
+    "potential_angle_margin": 10.0,
+    "potential_length_ratio": 0.75,
 }
 
 
@@ -39,10 +42,15 @@ def validate_request(data):
         "perpendicular_angle_min", "max_distance_variation_ratio",
         "near_edge_distance", "small_hole_diameter", "max_weld_tria_ratio",
         "existing_weld_search_distance", "auto_accept_confidence", "review_confidence",
+        "potential_search_multiplier", "potential_angle_margin", "potential_length_ratio",
     ):
         settings[key] = float(settings[key])
         if settings[key] < 0.0:
             raise SchemaError("{} must not be negative".format(key))
+    if settings["potential_search_multiplier"] < 1.0:
+        raise SchemaError("potential_search_multiplier must be at least 1")
+    if settings["potential_length_ratio"] > 1.0:
+        raise SchemaError("potential_length_ratio must not exceed 1")
     for key in ("max_new_failed_elements", "remesh_expand_layers", "python_workers"):
         settings[key] = int(settings[key])
         if settings[key] < 0:
