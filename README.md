@@ -693,13 +693,13 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 ### FEM 自动焊缝（独立模块）
 
-`FEM Automatic Seam` 与 `Mesh Seam Weld` 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型、贴片型和邻近自由边候选，并在 FEM 层面切分母单元、插入节点和创建焊缝壳；后者继续处理用户已经明确选择的网格焊缝路径。
+`FEM Automatic Seam` 与 `Mesh Seam Weld` 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型与贴片型候选；V2 Python Core 以有序真实自由边为 Source，按 PSHELL 厚度、Element ZOFFS/Ti 恢复 Target Physical Skin，并输出单/多 Component 的连续 `support_runs`。Python 仍只交付 `trusted_seeds`（AUTO）与 `potential_groups`（REVIEW）两类结果，实际创建继续复用 `Mesh Seam Weld` 的 nodes + target components 接口。
 
-该模块使用独立配置与任务目录。检测前固定生成独立的 `before.hm` 备份（唯一的回滚/撤销恢复点），随后把完整模型导出为 `input/model.fem`；整车规模检测按源 Component 多进程并行，但候选始终限制在用户选择的 Component 内。创建规划只复制一次所选模型，在同一累积模型中顺序处理候选，并把修改后的完整模型直接写回 FEM 文件；HyperMesh 以 File > Open 语义重新打开该文件替换当前模型（不再做任何增量导入/合并，非壳卡片原样保留）。替换后以 replacement mother elements 为种子向外扩展，将焊缝路径、新增切分节点及每批重绘区域外围节点设为固定节点，并按连通区域和单批单元上限在新模型上分批执行 element automesh。完成后导出 `result.fem` 并删除过程文件，因此成功任务目录严格只保留 `before.hm` 和 `result.fem`。可直接导入的十组验收模型位于 `examples/AutoShellSeamBackend/test_fem/`。
+该模块使用独立配置与任务目录。检测前固定生成独立的 `before.hm` 备份（唯一的回滚/撤销恢复点），随后把完整模型导出为 `input/model.fem`；整车规模检测按源 Component 多进程并行，但候选始终限制在用户选择的 Component 内。创建规划只复制一次所选模型，在同一累积模型中顺序处理候选，并把修改后的完整模型直接写回 FEM 文件；HyperMesh 以 File > Open 语义重新打开该文件替换当前模型（不再做任何增量导入/合并，非壳卡片原样保留）。替换后以 replacement mother elements 为种子向外扩展，将焊缝路径、新增切分节点及每批重绘区域外围节点设为固定节点，并按连通区域和单批单元上限在新模型上分批执行 element automesh。完成后导出 `result.fem` 并删除过程文件，因此成功任务目录严格只保留 `before.hm` 和 `result.fem`。可直接导入的十组验收模型位于 `examples/AutoShellSeamBackend/test_fem/`；V2 识别核心的 48 原子 + 4 复合确定性回归语料位于 `examples/validation_weld_recognition_v2/`，一键运行 `tools/weld_recognition_fixtures/run_all_pipeline.py`（建库与缺陷登记见 `docs/weld_recognition_v2_corpus_report_2026-09-09.md`）。
 
 `Criteria file` 可留空，此时使用 `modules/fem_auto_seam/defaults/` 中的内置 HM2019 质量标准。Python 并行进程数设为 `0` 时自动使用最多 8 个进程，也可按工作站核心数显式提高；Windows 子进程通过无控制台的 `pythonw.exe` 启动，实际进程数和持续时间显示在现有进度窗口的命令流中。重绘单元尺寸、邻域扩展层数、特征角和单批重绘单元上限由模块设置直接控制。
 
-检测、后台规划、FEM 替换、原生 automesh、质量检查和完成态导出均显示进度。高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 `Mesh Seam Weld` 继续手工创建。
+检测、后台规划、FEM 替换、原生 automesh、质量检查和完成态导出均显示进度。AUTO 必须通过覆盖、Physical Skin 残差、角度、目标歧义、孔洞/断口、投影连续性、曲率与实现风险 Hard Gate；`confidence` 仅用于排序。其余候选以及规划失败项进入 REVIEW，并携带固定 `reason_codes`。任务输出同时保留 `weld_recognition.json`、`recognition_summary.json` 与 `recognition_debug.csv` 供追溯。
 
 该模块使用独立配置 `fem_auto_seam` 和独立任务目录 `runtime/tasks/fem_auto_seam/`。设置页可单独配置搜索距离、置信度、小孔阈值、`.criteria`、Python 并行进程数、重绘尺寸、扩展层数、特征角和单批重绘上限。Python 不再移动节点或优化网格；HyperMesh 使用实机录制的 `*interactiveremeshelems`、`*automesh` 和 `*storemeshtodatabase 1` 流程分批重绘，并以原生 criteria 进行最终质量裁决。执行过程不建立候选 checkpoint，也不在 HyperMesh 内做任何增量导入；只有模型已经进入替换/重绘阶段且发生错误时，才使用任务级 `before.hm` 恢复一次整个批次。
 

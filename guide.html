@@ -1642,7 +1642,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                     <!-- Tab Content: Desc -->
                     <div class="detail-tab-pane active" id="femseam-desc">
                         <p style="margin-bottom:14px; font-size:14px; color:var(--text-secondary);">
-                            <strong>FEM Automatic Seam</strong> 与 <strong>Mesh Seam Weld</strong> 是两个独立工具。前者用于几何清理、抽中面和孤立 BatchMesher 完成之后，从多个互不共节点的壳 Component 中检测 T 型、贴片型和邻近自由边候选，并在 FEM 层面切分母单元、插入节点和创建焊缝壳；后者继续处理用户已经明确选择的网格焊缝路径。
+                            <strong>FEM Automatic Seam</strong> 与 <strong>Mesh Seam Weld</strong> 是两个独立工具。V2 Python Core 从互不共节点的壳 Component 中提取有序真实自由边，按 PSHELL 厚度、Element ZOFFS/Ti 恢复 Target Physical Skin，并保留跨多个 Target Component 的连续 support runs；后续仍只交付 AUTO 与 REVIEW 两类结果，创建继续复用 Mesh Seam Weld 的 nodes + target components 接口。
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
                             <li><strong>独立配置与任务目录</strong>：使用独立配置 <code>fem_auto_seam</code> 与任务目录 <code>runtime/tasks/fem_auto_seam/</code>；检测前固定生成独立的 <code>before.hm</code> 备份（唯一的回滚/撤销恢复点），随后把完整模型导出为 <code>input/model.fem</code>。</li>
@@ -1650,7 +1650,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <li><strong>FEM 文件直接替换</strong>：创建规划只复制一次所选模型，在同一累积模型中顺序处理候选，并把修改后的完整模型直接写回 FEM 文件；HyperMesh 以 File &gt; Open 语义重新打开该文件替换当前模型（不再做任何增量导入/合并，非壳卡片原样保留）。</li>
                             <li><strong>原生重绘与质量裁决</strong>：替换后以 replacement mother elements 为种子向外扩展，将焊缝路径、新增切分节点及每批重绘区域外围节点设为固定节点，并按连通区域和单批单元上限在新模型上分批执行 <code>*interactiveremeshelems</code>、<code>*automesh</code> 与 <code>*storemeshtodatabase 1</code> 流程重绘；Python 不移动节点、不优化网格，最终质量以原生 criteria 裁决。</li>
                             <li><strong>任务产物精简</strong>：完成后导出 <code>result.fem</code> 并删除过程文件，成功任务目录严格只保留 <code>before.hm</code> 和 <code>result.fem</code>；执行过程不建立候选 checkpoint，模型已进入替换/重绘阶段且出错时，用任务级 <code>before.hm</code> 恢复一次整个批次。</li>
-                            <li><strong>候选分流</strong>：高置信度 T 型/贴片型候选直接创建；其余候选以及规划失败项在完成后进入待处理表。选择条目会隔离并适配源/目标 Component 视角，也可直接调用现有 <code>Mesh Seam Weld</code> 继续手工创建。</li>
+                            <li><strong>候选分流</strong>：AUTO 必须通过覆盖、Physical Skin 残差、角度、目标歧义、孔洞/断口、投影连续性与曲率 Hard Gate；confidence 只用于 REVIEW 排序。其余候选携带固定 reason codes 进入待处理表。识别目录额外保存 <code>weld_recognition.json</code>、<code>recognition_summary.json</code> 与 <code>recognition_debug.csv</code>。</li>
                             <li><strong>验收模型</strong>：可直接导入的十组验收模型位于 <code>examples/AutoShellSeamBackend/test_fem/</code>。</li>
                         </ul>
                     </div>
