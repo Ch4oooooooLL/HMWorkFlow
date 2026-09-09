@@ -2,20 +2,20 @@
   "schema_version": "1.0",
   "case_id": "TC021",
   "case_kind": "atomic",
-  "purpose": "borderline T angle (70 deg)",
-  "failure_mode": "angle gating must route a 70 deg T to REVIEW, not AUTO",
+  "purpose": "T angle at the visible 70 degree threshold",
+  "failure_mode": "the public perpendicular-angle threshold is inclusive and controls V2 AUTO",
   "decision_policy": {},
   "welds": [
     {
       "semantic_id": "TC021_W01",
       "weld_type": "T",
       "source_component": "TC021_SRC_WEB",
-      "expected_decision": "REVIEW",
-      "required_reason_codes": [
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
         "ANGLE_BORDERLINE"
       ],
-      "required_reason_any": [],
-      "forbidden_reason_codes": [],
       "target_components": [
         "TC021_TGT_BASE"
       ],
@@ -77,6 +77,7 @@
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC021_SRC_WEB": 41001,

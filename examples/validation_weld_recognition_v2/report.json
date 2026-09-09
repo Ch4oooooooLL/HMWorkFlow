@@ -3,229 +3,53 @@
   "corpus_root": ".",
   "stage": {
     "generate": {
-      "atomic": 48,
+      "atomic": 50,
       "composite": 4,
-      "node_count": 70168,
-      "element_count": 61719,
-      "component_count": 280
+      "node_count": 72078,
+      "element_count": 63379,
+      "component_count": 290
     },
     "validate_fem": {
-      "fixture_count": 52,
-      "valid_count": 52,
+      "fixture_count": 54,
+      "valid_count": 54,
       "invalid_count": 0
     },
     "validate_geometry": {
-      "case_count": 52,
-      "valid_case_count": 52,
-      "weld_count": 169,
+      "case_count": 54,
+      "valid_case_count": 54,
+      "weld_count": 177,
       "finding_count": 0
     },
     "regression": {
-      "case_count": 52,
-      "passed_count": 48,
-      "failed_count": 4
+      "case_count": 54,
+      "passed_count": 54,
+      "failed_count": 0
     }
   },
   "decisions_expected": {
-    "auto": 112,
-    "review": 49
+    "auto": 131,
+    "review": 42
   },
   "failure_categories": {
-    "false_auto": 6,
+    "false_auto": 0,
     "missed_expected_auto": 0,
     "expected_auto_got_review": 0,
-    "expected_review_got_auto": 6,
+    "expected_review_got_auto": 0,
     "wrong_target": 0,
     "wrong_weld_type": 0,
     "wrong_source_subchain": 0,
-    "unexpected_candidate": 1,
+    "unexpected_candidate": 0,
     "duplicate_candidate": 0,
     "support_run_mismatch": 0,
-    "missing_required_reason": 6,
+    "missing_required_reason": 0,
     "forbidden_reason": 0
   },
   "candidates": {
-    "detected": 213,
-    "auto_rows": 115
+    "detected": 465,
+    "auto_rows": 146
   },
-  "failed_fixtures": [
-    {
-      "case_id": "TC027_source_inner_boundary",
-      "kind": "atomic",
-      "counts": {
-        "expected_welds": 2,
-        "matched_welds": 2,
-        "false_auto": 2,
-        "missed_expected_auto": 0,
-        "expected_review_got_auto": 2,
-        "expected_auto_got_review": 0,
-        "wrong_target": 0,
-        "wrong_weld_type": 0,
-        "wrong_source_subchain": 0,
-        "missing_required_reason": 2,
-        "forbidden_reason": 0,
-        "unexpected_candidate": 0,
-        "duplicate_candidate": 0,
-        "support_run_mismatch": 0
-      },
-      "issues": [
-        {
-          "kind": "FALSE_AUTO",
-          "semantic_id": "TC027_W01",
-          "message": "expected REVIEW, got AUTO"
-        },
-        {
-          "kind": "MISSING_REASON_ANY",
-          "semantic_id": "TC027_W01",
-          "message": "none of ['INNER_BOUNDARY_SOURCE'] present in []"
-        },
-        {
-          "kind": "FALSE_AUTO",
-          "semantic_id": "TC027_W02",
-          "message": "expected REVIEW, got AUTO"
-        },
-        {
-          "kind": "MISSING_REASON_ANY",
-          "semantic_id": "TC027_W02",
-          "message": "none of ['INNER_BOUNDARY_SOURCE'] present in []"
-        }
-      ]
-    },
-    {
-      "case_id": "TC046_coplanar_butt",
-      "kind": "atomic",
-      "counts": {
-        "expected_welds": 0,
-        "matched_welds": 0,
-        "false_auto": 0,
-        "missed_expected_auto": 0,
-        "expected_review_got_auto": 0,
-        "expected_auto_got_review": 0,
-        "wrong_target": 0,
-        "wrong_weld_type": 0,
-        "wrong_source_subchain": 0,
-        "missing_required_reason": 0,
-        "forbidden_reason": 0,
-        "unexpected_candidate": 1,
-        "duplicate_candidate": 0,
-        "support_run_mismatch": 0
-      },
-      "issues": [
-        {
-          "kind": "EXPECTED_NO_CANDIDATE",
-          "semantic_id": null,
-          "message": "policy expects zero candidates but PATCH_SEAM REVIEW emitted (TC046_SHEET_LEFT -> ['TC046_SHEET_RIGHT'])"
-        }
-      ]
-    },
-    {
-      "case_id": "CM002_adversarial_composite",
-      "kind": "composite",
-      "counts": {
-        "expected_welds": 9,
-        "matched_welds": 9,
-        "false_auto": 2,
-        "missed_expected_auto": 0,
-        "expected_review_got_auto": 2,
-        "expected_auto_got_review": 0,
-        "wrong_target": 0,
-        "wrong_weld_type": 0,
-        "wrong_source_subchain": 0,
-        "missing_required_reason": 2,
-        "forbidden_reason": 0,
-        "unexpected_candidate": 0,
-        "duplicate_candidate": 0,
-        "support_run_mismatch": 0
-      },
-      "issues": [
-        {
-          "kind": "FALSE_AUTO",
-          "semantic_id": "TC027_W01",
-          "message": "expected REVIEW, got AUTO"
-        },
-        {
-          "kind": "MISSING_REASON_ANY",
-          "semantic_id": "TC027_W01",
-          "message": "none of ['INNER_BOUNDARY_SOURCE'] present in []"
-        },
-        {
-          "kind": "FALSE_AUTO",
-          "semantic_id": "TC027_W02",
-          "message": "expected REVIEW, got AUTO"
-        },
-        {
-          "kind": "MISSING_REASON_ANY",
-          "semantic_id": "TC027_W02",
-          "message": "none of ['INNER_BOUNDARY_SOURCE'] present in []"
-        }
-      ]
-    },
-    {
-      "case_id": "CM003_full_corpus",
-      "kind": "composite",
-      "counts": {
-        "expected_welds": 57,
-        "matched_welds": 57,
-        "false_auto": 2,
-        "missed_expected_auto": 0,
-        "expected_review_got_auto": 2,
-        "expected_auto_got_review": 0,
-        "wrong_target": 0,
-        "wrong_weld_type": 0,
-        "wrong_source_subchain": 0,
-        "missing_required_reason": 2,
-        "forbidden_reason": 0,
-        "unexpected_candidate": 0,
-        "duplicate_candidate": 0,
-        "support_run_mismatch": 0
-      },
-      "issues": [
-        {
-          "kind": "FALSE_AUTO",
-          "semantic_id": "TC027_W01",
-          "message": "expected REVIEW, got AUTO"
-        },
-        {
-          "kind": "MISSING_REASON_ANY",
-          "semantic_id": "TC027_W01",
-          "message": "none of ['INNER_BOUNDARY_SOURCE'] present in []"
-        },
-        {
-          "kind": "FALSE_AUTO",
-          "semantic_id": "TC027_W02",
-          "message": "expected REVIEW, got AUTO"
-        },
-        {
-          "kind": "MISSING_REASON_ANY",
-          "semantic_id": "TC027_W02",
-          "message": "none of ['INNER_BOUNDARY_SOURCE'] present in []"
-        }
-      ]
-    }
-  ],
+  "failed_fixtures": [],
   "known_gaps": [
-    {
-      "case_id": "TC013_partial_target_middle",
-      "kind": "atomic",
-      "items": [
-        {
-          "kind": "KNOWN_GAP",
-          "semantic_id": "TC013_W01",
-          "message": "V2 extracts the correct X=100..300 subchain but downgrades it to REVIEW/PARTIAL_COVERAGE because parent-chain coverage is gated before subchain selection. Spec expects the perfect middle to AUTO."
-        }
-      ]
-    },
-    {
-      "case_id": "TC018_slightly_warped_target",
-      "kind": "atomic",
-      "items": [
-        {
-          "kind": "KNOWN_GAP",
-          "semantic_id": "TC018_W01",
-          "message": "V2's physical-skin projection uses an absolute tangential tolerance; a web sample that lands near an element crease column of a warped target micro-misses and can split an otherwise perfect chain. Tuned amplitude/phase avoid it only up to ~0.2 mm; a robust fix must use a geometry-relative tangential tolerance."
-        }
-      ]
-    },
     {
       "case_id": "TC024_better_target_with_distractor",
       "kind": "atomic",
@@ -238,13 +62,91 @@
       ]
     },
     {
-      "case_id": "TC030_projection_jump",
+      "case_id": "TC033_near_skin_counterfeit",
       "kind": "atomic",
       "items": [
         {
           "kind": "KNOWN_GAP",
-          "semantic_id": "TC030_W01",
-          "message": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint."
+          "semantic_id": "TC033_W02",
+          "message": "recall-first contact envelope (half source thickness + weld-toe setback) reaches a web standing 4 mm proud of the skin, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first."
+        }
+      ]
+    },
+    {
+      "case_id": "TC042_web_junction",
+      "kind": "atomic",
+      "items": [
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": "TC042_W03",
+          "message": "the junction end edge sits a few mm from the long web face, so the recall pass splits it into two short supported runs and AUTO-welds the long web leg without MULTI_TARGET_CONTINUOUS.  Accepted over-detection: the creation gate owns the junction decision."
+        }
+      ]
+    },
+    {
+      "case_id": "TC048_bracket_distractor",
+      "kind": "atomic",
+      "items": [
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": "TC048_W02",
+          "message": "the bracket bottom stands 4 mm proud of the skin, inside the recall-first contact envelope, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first."
+        }
+      ]
+    },
+    {
+      "case_id": "CM001_box_rail",
+      "kind": "composite",
+      "items": [
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": "CM001_W_DIA3_BOT",
+          "message": "DIA_3 stands 6 mm proud of the bottom skin, inside the recall-first contact envelope, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row."
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_1 -> CM001_SIDE_LEFT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_1 -> CM001_SIDE_RIGHT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_2 -> CM001_SIDE_LEFT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_2 -> CM001_SIDE_RIGHT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_3 -> CM001_SIDE_LEFT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_3 -> CM001_SIDE_RIGHT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_4 -> CM001_SIDE_LEFT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_DIA_4 -> CM001_SIDE_RIGHT: diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": null,
+          "message": "recall-policy tolerated candidate CM001_STIFF_LONG -> CM001_DIA_4: stiffener end edge stands ~5 mm clear of the DIA_4 face; recalled by the contact envelope although no physical weld exists"
         }
       ]
     },
@@ -254,8 +156,8 @@
       "items": [
         {
           "kind": "KNOWN_GAP",
-          "semantic_id": "TC030_W01",
-          "message": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint."
+          "semantic_id": "TC042_W03",
+          "message": "the junction end edge sits a few mm from the long web face, so the recall pass splits it into two short supported runs and AUTO-welds the long web leg without MULTI_TARGET_CONTINUOUS.  Accepted over-detection: the creation gate owns the junction decision."
         }
       ]
     },
@@ -265,27 +167,27 @@
       "items": [
         {
           "kind": "KNOWN_GAP",
-          "semantic_id": "TC013_W01",
-          "message": "V2 extracts the correct X=100..300 subchain but downgrades it to REVIEW/PARTIAL_COVERAGE because parent-chain coverage is gated before subchain selection. Spec expects the perfect middle to AUTO."
-        },
-        {
-          "kind": "KNOWN_GAP",
-          "semantic_id": "TC018_W01",
-          "message": "V2's physical-skin projection uses an absolute tangential tolerance; a web sample that lands near an element crease column of a warped target micro-misses and can split an otherwise perfect chain. Tuned amplitude/phase avoid it only up to ~0.2 mm; a robust fix must use a geometry-relative tangential tolerance."
-        },
-        {
-          "kind": "KNOWN_GAP",
           "semantic_id": "TC024_W01",
           "message": "V2 REVIEWs when any sample also sees the 8 mm distractor inside the broad search radius (ambiguity margin). Spec expects AUTO on B."
         },
         {
           "kind": "KNOWN_GAP",
-          "semantic_id": "TC030_W01",
-          "message": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint."
+          "semantic_id": "TC033_W02",
+          "message": "recall-first contact envelope (half source thickness + weld-toe setback) reaches a web standing 4 mm proud of the skin, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first."
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": "TC042_W03",
+          "message": "the junction end edge sits a few mm from the long web face, so the recall pass splits it into two short supported runs and AUTO-welds the long web leg without MULTI_TARGET_CONTINUOUS.  Accepted over-detection: the creation gate owns the junction decision."
+        },
+        {
+          "kind": "KNOWN_GAP",
+          "semantic_id": "TC048_W02",
+          "message": "the bracket bottom stands 4 mm proud of the skin, inside the recall-first contact envelope, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first."
         }
       ]
     }
   ],
-  "elapsed_seconds": 6.2709,
+  "elapsed_seconds": 18.260125,
   "status": "ALL_GREEN"
 }

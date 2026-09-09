@@ -46,6 +46,13 @@ FORBIDDEN_COLUMNS = [
     "note",
 ]
 
+TOLERATED_COLUMNS = [
+    "case_id",
+    "source_component",
+    "target_component",
+    "note",
+]
+
 
 def _join(value: Any) -> str:
     if value is None:
@@ -105,6 +112,15 @@ def forbidden_row(gt: Dict[str, Any], forbidden: Dict[str, Any]) -> Dict[str, st
     }
 
 
+def tolerated_row(gt: Dict[str, Any], tolerated: Dict[str, Any]) -> Dict[str, str]:
+    return {
+        "case_id": gt.get("case_id", ""),
+        "source_component": tolerated.get("source_component", ""),
+        "target_component": tolerated.get("target_component", ""),
+        "note": tolerated.get("note", ""),
+    }
+
+
 def write_weld_csv(gt: Dict[str, Any], path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -117,6 +133,13 @@ def write_forbidden_csv(gt: Dict[str, Any], path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = [forbidden_row(gt, item) for item in gt.get("forbidden_candidates", [])]
     _write_rows(FORBIDDEN_COLUMNS, rows, path)
+
+
+def write_tolerated_csv(gt: Dict[str, Any], path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [tolerated_row(gt, item) for item in gt.get("tolerated_candidates", [])]
+    _write_rows(TOLERATED_COLUMNS, rows, path)
 
 
 def _write_rows(columns: List[str], rows: Iterable[Dict[str, str]], path: Path) -> None:
@@ -134,6 +157,7 @@ def aggregate_case_csvs(case_dirs: Iterable[Path], output_path: Path,
     output_path.parent.mkdir(parents=True, exist_ok=True)
     aggregate: List[Dict[str, str]] = []
     forbidden: List[Dict[str, str]] = []
+    tolerated: List[Dict[str, str]] = []
     for case_dir in case_dirs:
         gt_path = Path(case_dir) / "ground_truth.json"
         if not gt_path.is_file():
@@ -142,8 +166,12 @@ def aggregate_case_csvs(case_dirs: Iterable[Path], output_path: Path,
         gt = json.loads(gt_path.read_text(encoding="utf-8"))
         aggregate.extend(weld_row(gt, weld) for weld in gt.get("welds", []))
         forbidden.extend(forbidden_row(gt, item) for item in gt.get("forbidden_candidates", []))
+        tolerated.extend(tolerated_row(gt, item) for item in gt.get("tolerated_candidates", []))
     _write_rows(WELD_COLUMNS, aggregate, output_path)
     forbidden_path = output_path.with_name(
         output_path.name.replace("ground_truth", "ground_truth_forbidden"))
     _write_rows(FORBIDDEN_COLUMNS, forbidden, forbidden_path)
-    return {"welds": len(aggregate), "forbidden": len(forbidden)}
+    tolerated_path = output_path.with_name(
+        output_path.name.replace("ground_truth", "ground_truth_tolerated"))
+    _write_rows(TOLERATED_COLUMNS, tolerated, tolerated_path)
+    return {"welds": len(aggregate), "forbidden": len(forbidden), "tolerated": len(tolerated)}

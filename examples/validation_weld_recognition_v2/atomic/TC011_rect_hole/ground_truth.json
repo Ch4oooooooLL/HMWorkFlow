@@ -80,6 +80,7 @@
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC011_SRC_WEB": 31001,

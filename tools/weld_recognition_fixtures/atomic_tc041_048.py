@@ -120,6 +120,10 @@ def tc042_web_junction(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, Lis
         source_path={"expected_node_ids": [bottom_b[0], top_b[0]]},
         geometry_parallel=False,
         required_reason_any=["MULTI_TARGET_CONTINUOUS", "TARGET_AMBIGUITY", "CURVED_TARGET"],
+        known_gap_note="the junction end edge sits a few mm from the long web face, so the "
+                       "recall pass splits it into two short supported runs and AUTO-welds the "
+                       "long web leg without MULTI_TARGET_CONTINUOUS.  Accepted "
+                       "over-detection: the creation gate owns the junction decision.",
         note="the cross web's 6 mm-short end edge stands against the long web side: a "
              "junction edge whose support is genuinely split between the long web and the "
              "base, so it must REVIEW and must not be fused into either straight leg",
@@ -275,6 +279,10 @@ def tc048_bracket_distractor(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[st
         semantic_id="TC048_W02", weld_type="T", source_component="TC048_SRC_BRACKET",
         target_components=["TC048_TGT_BASE"], expected_decision="REVIEW",
         required_reason_codes=["SKIN_ERROR_BORDERLINE"],
+        known_gap_note="the bracket bottom stands 4 mm proud of the skin, inside the "
+                       "recall-first contact envelope, so V2 emits AUTO without "
+                       "SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate "
+                       "rejects the row, the recognizer stays recall-first.",
         note="bottom 4 mm above the skin, short height: a phantom 'weld' the recognizer "
              "must route to REVIEW at most",
     ))

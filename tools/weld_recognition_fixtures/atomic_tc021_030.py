@@ -20,34 +20,36 @@ def _web_xs(x0: float, x1: float, h: float) -> List[float]:
 
 
 def tc021_angle_70(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List[int]]]:
-    """Source leaning 20 deg off vertical -> T angle 70 -> REVIEW ANGLE_BORDERLINE."""
+    """Source leaning 20 deg off vertical -> visible T threshold 70 -> AUTO."""
     b = ModelBuilder(**ranges)
     flat_target(b, "TC021_TGT_BASE", 0.0, 400.0, -100.0, 100.0, 0.0, 10.0)
     web, lattice, _ = vertical_web(b, "TC021_SRC_WEB", 50.0, 350.0, 5.0, 105.0, lean_deg=20.0)
     chain = list(lattice[0])
-    gt = GroundTruth("TC021", "atomic", "borderline T angle (70 deg)",
-                     "angle gating must route a 70 deg T to REVIEW, not AUTO")
+    gt = GroundTruth("TC021", "atomic", "T angle at the visible 70 degree threshold",
+                     "the public perpendicular-angle threshold is inclusive and controls V2 AUTO")
     gt.add_weld(expect_weld(
         semantic_id="TC021_W01", weld_type="T", source_component="TC021_SRC_WEB",
-        target_components=["TC021_TGT_BASE"], expected_decision="REVIEW",
-        required_reason_codes=["ANGLE_BORDERLINE"],
+        target_components=["TC021_TGT_BASE"], expected_decision="AUTO",
+        forbidden_reason_codes=["ANGLE_BORDERLINE"],
         note="source plane 20 deg from vertical, bottom still on the target top skin",
     ))
     return b, gt, {"TC021_SRC_WEB": chain}
 
 
 def tc022_angle_55(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List[int]]]:
-    """Source leaning 35 deg off vertical -> T angle 55 -> REJECT (no T candidate)."""
+    """Source leaning 35 deg off vertical -> generalized T angle 55 -> REVIEW."""
     b = ModelBuilder(**ranges)
     flat_target(b, "TC022_TGT_BASE", 0.0, 400.0, -100.0, 100.0, 0.0, 10.0)
     vertical_web(b, "TC022_SRC_WEB", 50.0, 350.0, 5.0, 105.0, lean_deg=35.0)
-    gt = GroundTruth("TC022", "atomic", "unsupported shallow T angle (55 deg)",
-                     "a near-parallel, physically-close edge must not be welded as a T",
-                     decision_policy={"expected_candidate_count": 0})
+    gt = GroundTruth("TC022", "atomic", "shallow generalized T angle (55 deg)",
+                     "a leaning web still lands on the base, so the recall pass emits the "
+                     "joint; 55 deg sits under the 70 deg AUTO threshold, so it stays REVIEW")
     gt.add_weld(expect_weld(
         semantic_id="TC022_W01", weld_type="T", source_component="TC022_SRC_WEB",
-        target_components=["TC022_TGT_BASE"], expected_decision="REJECT",
-        note="55 deg is outside the review band; no T candidate should be emitted",
+        target_components=["TC022_TGT_BASE"], expected_decision="REVIEW",
+        required_reason_codes=["ANGLE_BORDERLINE"],
+        note="35 deg lean -> 55 deg T: the bottom edge is supported by the base top skin and "
+             "is recalled as REVIEW ANGLE_BORDERLINE; the creation gate decides on it later",
     ))
     return b, gt, {}
 
@@ -255,28 +257,24 @@ def tc030_projection_jump(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, 
     run_b = [int(node_id) for x, node_id in zip(xs, rows[0]) if x <= 190.0]
     run_c = [int(node_id) for x, node_id in zip(xs, rows[0]) if x >= 210.0]
     gt = GroundTruth("TC030", "atomic", "projection jump at a target transition",
-                     "a discontinuous projected path must be REVIEW, not a continuous AUTO")
+                     "a discontinuous projected path must never be fused into one continuous "
+                     "weld; each fully supported run is its own AUTO")
     gt.add_weld(expect_weld(
         semantic_id="TC030_W01", weld_type="T", source_component="TC030_SRC_WEB",
-        target_components=["TC030_B"], expected_decision="REVIEW",
-        required_reason_codes=["TARGET_GAP", "PROJECTION_JUMP"],
+        target_components=["TC030_B"], expected_decision="AUTO",
         forbidden_reason_codes=["MULTI_TARGET_CONTINUOUS"],
-        known_gap_note="V2 runs edge-level grouping per component, so the clean B-side "
-                       "segment (x=50..190, continuous, no gaps) is emitted AUTO and only "
-                       "the C side with the element-free gap is downgraded to REVIEW "
-                       "PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one "
-                       "physical seam faces a discontinuous support step; a future V2 must "
-                       "see the 20 mm dead zone between the two skins and gate the joint.",
         source_path={"expected_node_ids": [int(value) for value in run_b]},
-        note="B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190",
+        note="B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190: "
+             "fully supported, so the run AUTOs on its own",
     ))
     gt.add_weld(expect_weld(
         semantic_id="TC030_W02", weld_type="T", source_component="TC030_SRC_WEB",
-        target_components=["TC030_C"], expected_decision="REVIEW",
-        required_reason_any=["TARGET_GAP", "PARTIAL_COVERAGE", "PROJECTION_JUMP"],
+        target_components=["TC030_C"], expected_decision="AUTO",
         forbidden_reason_codes=["MULTI_TARGET_CONTINUOUS"],
         source_path={"expected_node_ids": [int(value) for value in run_c]},
-        note="C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350",
+        note="C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350: "
+             "a second independent AUTO run; the 20 mm dead zone between the skins must not "
+             "fuse the two runs into one continuous seam",
     ))
     gt.add_analytic("zone_notes", {
         "B_skin_z": 5.0, "C_skin_z": 15.0, "dead_gap_x": [190.0, 210.0],

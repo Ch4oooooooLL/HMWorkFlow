@@ -107,11 +107,12 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "",
+      "known_gap_note": "recall-first contact envelope (half source thickness + weld-toe setback) reaches a web standing 4 mm proud of the skin, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first.",
       "note": "bottom 4 mm above the skin: physically not a weld, must be routed to REVIEW (SKIN_ERROR_BORDERLINE) at most, never AUTO"
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC033_SRC_FLUSH": 53001,

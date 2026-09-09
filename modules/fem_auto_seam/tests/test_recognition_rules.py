@@ -49,24 +49,75 @@ class RecognitionRuleTests(unittest.TestCase):
     def test_complete_single_target_t_edge_is_trusted_seed(self):
         model, _ = FIXTURES.straight_t()
         candidates = detect_candidates(model)
+        t_rows = [row for row in candidates if row["candidate_type"] == "T_SEAM"]
+        auto_rows = [row for row in t_rows if row["auto_eligible"]]
+        # One weldable chain; the web's two vertical end edges are recall-pass
+        # extras which must never reach AUTO.
+        self.assertEqual(1, len(auto_rows))
+        self.assertGreaterEqual(len(auto_rows[0]["source_node_ids"]), 2)
         plan = build_recognition_plan(candidates)
-        self.assertEqual(1, len(plan["trusted_seeds"]))
-        self.assertEqual("T", plan["trusted_seeds"][0]["weld_type"])
-        self.assertGreaterEqual(len(plan["trusted_seeds"][0]["source_node_ids"]), 2)
+        seed_ids = {seed["candidate_id"] for seed in plan["trusted_seeds"]}
+        self.assertIn(auto_rows[0]["candidate_id"], seed_ids)
         self.assertFalse(plan["potential_groups"])
 
-    def test_partial_t_overlap_is_potential_component_pair(self):
+    def test_complete_supported_t_subchain_is_trusted(self):
         model, _ = FIXTURES.partial_overlap_t()
-        plan = build_recognition_plan(detect_candidates(model))
-        self.assertFalse(plan["trusted_seeds"])
-        self.assertEqual([[1, 2]], [row["component_ids"] for row in plan["potential_groups"]])
+        candidates = detect_candidates(model)
+        t_rows = [row for row in candidates if row["candidate_type"] == "T_SEAM"]
+        auto_rows = [row for row in t_rows if row["auto_eligible"]]
+        self.assertEqual(1, len(auto_rows))
+        # The recall pass reports the fuller chain as REVIEW; it must not
+        # upgrade to AUTO and must not replace the supported subchain.
+        self.assertTrue(all(
+            not row["auto_eligible"] for row in t_rows
+            if row["candidate_id"] != auto_rows[0]["candidate_id"]
+        ))
+        plan = build_recognition_plan(candidates)
+        seed_ids = {seed["candidate_id"] for seed in plan["trusted_seeds"]}
+        self.assertIn(auto_rows[0]["candidate_id"], seed_ids)
+        self.assertFalse(plan["potential_groups"])
 
-    def test_same_t_edge_hitting_multiple_targets_becomes_one_group(self):
+    def test_ambiguous_t_relations_are_all_delivered_without_review(self):
         model, _ = FIXTURES.multi_target_same_edge()
-        plan = build_recognition_plan(detect_candidates(model))
-        self.assertFalse(plan["trusted_seeds"])
-        self.assertEqual(1, len(plan["potential_groups"]))
-        self.assertEqual([1, 2, 3], plan["potential_groups"][0]["component_ids"])
+        candidates = detect_candidates(model)
+        plan = build_recognition_plan(candidates)
+        self.assertEqual(
+            len([row for row in candidates if row["candidate_type"] == "T_SEAM"]),
+            len([seed for seed in plan["trusted_seeds"] if seed["weld_type"] == "T"]),
+        )
+        self.assertTrue(all(
+            seed["delivery_mode"] == "ALL_CANDIDATES"
+            for seed in plan["trusted_seeds"]
+        ))
+        self.assertFalse(plan["potential_groups"])
+
+    def test_all_t_and_patch_candidates_bypass_review_and_duplicate_gates(self):
+        candidates = [
+            {
+                "candidate_id": "T_REVIEW_1", "candidate_type": "T_SEAM",
+                "source_component_id": 11, "target_component_id": 21,
+                "target_component_ids": [21, 22], "source_node_ids": [101, 102],
+                "recognition_status": "POTENTIAL", "auto_eligible": False,
+                "duplicate_status": "POSSIBLE_DUPLICATE",
+                "reason_codes": ["INNER_BOUNDARY_SOURCE", "ANGLE_BORDERLINE"],
+            },
+            {
+                "candidate_id": "PATCH_REVIEW_1", "candidate_type": "PATCH_SEAM",
+                "source_component_id": 12, "target_component_id": 23,
+                "source_node_ids": [201, 202, 203, 201], "closed": True,
+                "recognition_status": "POTENTIAL", "auto_eligible": False,
+                "reason_codes": ["PARTIAL_COVERAGE"],
+            },
+        ]
+        plan = build_recognition_plan(candidates)
+        self.assertEqual({"T_REVIEW_1", "PATCH_REVIEW_1"}, {
+            seed["candidate_id"] for seed in plan["trusted_seeds"]
+        })
+        self.assertTrue(all(
+            seed["delivery_mode"] == "ALL_CANDIDATES"
+            for seed in plan["trusted_seeds"]
+        ))
+        self.assertFalse(plan["potential_groups"])
 
     def test_fully_contained_smaller_patch_supplies_all_free_edge_nodes(self):
         model, _ = FIXTURES.patch()
@@ -79,11 +130,11 @@ class RecognitionRuleTests(unittest.TestCase):
         patch = next(row for row in candidates if row["candidate_type"] == "PATCH_SEAM")
         self.assertEqual(patch["source_node_ids"], seed["source_node_ids"])
 
-    def test_small_hole_patch_and_legacy_near_edges_are_not_automatic(self):
+    def test_small_patch_hole_is_filtered_and_outer_boundary_is_automatic(self):
         model, _ = FIXTURES.patch_small_hole()
         plan = build_recognition_plan(detect_candidates(model))
-        self.assertFalse(plan["trusted_seeds"])
-        self.assertEqual([1, 2], plan["potential_groups"][0]["component_ids"])
+        self.assertEqual(1, len(plan["trusted_seeds"]))
+        self.assertFalse(plan["potential_groups"])
 
         model, _ = FIXTURES.near_free_edges()
         self.assertFalse(detect_candidates(model))
@@ -143,23 +194,28 @@ class RecognitionRuleTests(unittest.TestCase):
         builder.ruled("WEB_T1", FIXTURES.line_points(0, 60, 10), (0, 0, 20), 2, 1.0)
         candidates = detect_candidates(builder.model())
         t_rows = [row for row in candidates if row["candidate_type"] == "T_SEAM"]
-        self.assertEqual(1, len(t_rows))
-        row = t_rows[0]
+        auto_rows = [row for row in t_rows if row["auto_eligible"]]
+        self.assertEqual(1, len(auto_rows))
+        row = auto_rows[0]
         self.assertEqual("TRUSTED", row["recognition_status"])
-        self.assertTrue(row["auto_eligible"])
         self.assertAlmostEqual(60.0, row["length"], places=6)
         self.assertTrue(
             any("nearest edge row" in reason for reason in row["reasons"]),
             row["reasons"],
         )
+        self.assertTrue(all(
+            not extra["auto_eligible"] for extra in t_rows
+            if extra["candidate_id"] != row["candidate_id"]
+        ))
         plan = build_recognition_plan(candidates)
-        self.assertEqual(1, len(plan["trusted_seeds"]))
+        seed_ids = {seed["candidate_id"] for seed in plan["trusted_seeds"]}
+        self.assertIn(row["candidate_id"], seed_ids)
         self.assertFalse(plan["potential_groups"])
 
 
-    def test_patch_opening_edge_is_reviewed_while_outer_boundary_stays_trusted(self):
-        # V2 defaults inner loops to REVIEW because they can represent either
-        # ring welds or fastener openings.
+    def test_patch_opening_and_outer_boundary_are_both_trusted(self):
+        # Large exposed openings are genuine patch weld boundaries. Fastener-
+        # sized openings are filtered separately by small_hole_diameter.
         builder = FIXTURES.MeshBuilder()
         base = builder.grid("BASE_T2", (0, 0, 0), (10, 0, 0), (0, 10, 0), 7, 7, 2.0)
         patch = builder.grid(
@@ -174,12 +230,26 @@ class RecognitionRuleTests(unittest.TestCase):
         self.assertEqual(patch, outer["source_component_id"])
         self.assertEqual(base, outer["target_component_id"])
         self.assertTrue(outer["auto_eligible"], outer.get("warnings"))
-        self.assertFalse(inner["auto_eligible"])
-        self.assertIn("INNER_BOUNDARY_SOURCE", inner["reason_codes"])
+        self.assertTrue(inner["auto_eligible"], inner.get("warnings"))
+        self.assertNotIn("INNER_BOUNDARY_SOURCE", inner["reason_codes"])
         lengths = sorted(row["length"] for row in patch_rows)
         self.assertAlmostEqual(120.0, lengths[0], places=6)
         self.assertAlmostEqual(200.0, lengths[1], places=6)
-        self.assertEqual(1, len(build_recognition_plan(candidates)["trusted_seeds"]))
+        self.assertEqual(2, len(build_recognition_plan(candidates)["trusted_seeds"]))
+
+    def test_fastener_opening_does_not_veto_outer_patch_seam(self):
+        builder = FIXTURES.MeshBuilder()
+        base = builder.grid("BASE_T2", (0, 0, 0), (10, 0, 0), (0, 10, 0), 8, 8, 2.0)
+        patch = builder.grid(
+            "PATCH_WITH_FASTENER_T1", (10, 10, 3), (5, 0, 0), (0, 5, 0), 10, 10, 1.0,
+            omit={(4, 4)},
+        )
+        rows = [row for row in detect_candidates(builder.model()) if row["candidate_type"] == "PATCH_SEAM"]
+        self.assertEqual(1, len(rows))
+        self.assertEqual(patch, rows[0]["source_component_id"])
+        self.assertEqual(base, rows[0]["target_component_id"])
+        self.assertEqual("OUTER", rows[0]["boundary_class"])
+        self.assertTrue(rows[0]["auto_eligible"], rows[0].get("warnings"))
 
 
 if __name__ == "__main__":

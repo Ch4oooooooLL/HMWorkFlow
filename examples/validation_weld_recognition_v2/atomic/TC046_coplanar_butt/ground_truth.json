@@ -10,6 +10,7 @@
   },
   "welds": [],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "butt": {
       "rule": "no AUTO and no REVIEW candidate is expected between the two coplanar sheets"

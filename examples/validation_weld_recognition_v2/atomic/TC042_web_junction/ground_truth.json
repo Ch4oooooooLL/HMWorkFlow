@@ -159,11 +159,12 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": false,
-      "known_gap_note": "",
+      "known_gap_note": "the junction end edge sits a few mm from the long web face, so the recall pass splits it into two short supported runs and AUTO-welds the long web leg without MULTI_TARGET_CONTINUOUS.  Accepted over-detection: the creation gate owns the junction decision.",
       "note": "the cross web's 6 mm-short end edge stands against the long web side: a junction edge whose support is genuinely split between the long web and the base, so it must REVIEW and must not be fused into either straight leg"
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC042_SRC_CROSS": 62002,

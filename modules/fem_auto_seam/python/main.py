@@ -152,7 +152,13 @@ def calculate(request, model, existing, performance=None, detected_candidates=No
         performance["candidate_cache_hit"] = True
     if settings["mode"] == "detect":
         performance["planning_seconds"] = 0.0
-        return {"candidates": candidates, "recognition": build_recognition_plan(candidates)}
+        return {
+            "candidates": candidates,
+            "recognition": build_recognition_plan(
+                candidates, recall_first=settings.get("t_recall_first_mode", True),
+                submit_all=settings.get("submit_all_weld_candidates", True),
+            ),
+        }
     accepted = set(str(value) for value in request.get("accepted_candidate_ids", []))
     selected = [row for row in candidates if row["candidate_id"] in accepted]
     stage_started = time.perf_counter()

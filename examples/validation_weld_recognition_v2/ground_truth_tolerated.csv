@@ -1,0 +1,10 @@
+﻿case_id,source_component,target_component,note
+CM001,CM001_DIA_1,CM001_SIDE_LEFT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_DIA_1,CM001_SIDE_RIGHT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_DIA_2,CM001_SIDE_LEFT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_DIA_2,CM001_SIDE_RIGHT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_DIA_3,CM001_SIDE_LEFT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_DIA_3,CM001_SIDE_RIGHT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_DIA_4,CM001_SIDE_LEFT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_DIA_4,CM001_SIDE_RIGHT,diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists
+CM001,CM001_STIFF_LONG,CM001_DIA_4,stiffener end edge stands ~5 mm clear of the DIA_4 face; recalled by the contact envelope although no physical weld exists

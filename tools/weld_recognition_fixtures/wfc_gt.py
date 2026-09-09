@@ -88,6 +88,22 @@ def forbidden_candidate(
     }
 
 
+def tolerated_candidate(source_component: str, target_component: str, note: str) -> Dict[str, Any]:
+    """A candidate the recall-first policy may emit although the analytical
+    geometry does not justify it as a real weld.
+
+    Unlike ``forbidden_candidate`` this is not a defect the fixture must fail
+    on: it documents known over-detection that field iteration is expected to
+    filter out later.  The runner reports it as an informational item and does
+    not count it as an unexpected candidate.
+    """
+    return {
+        "source_component": source_component,
+        "target_component": target_component,
+        "note": note,
+    }
+
+
 class GroundTruth:
     """Aggregates the expected welds and forbidden relations of one fixture."""
 
@@ -100,6 +116,7 @@ class GroundTruth:
         self.decision_policy = dict(decision_policy or {})
         self.welds: List[Dict[str, Any]] = []
         self.forbidden: List[Dict[str, Any]] = []
+        self.tolerated: List[Dict[str, Any]] = []
         self.analytic: Dict[str, Any] = {}
 
     def add_weld(self, weld: Dict[str, Any]) -> "GroundTruth":
@@ -108,6 +125,10 @@ class GroundTruth:
 
     def add_forbidden(self, row: Dict[str, Any]) -> "GroundTruth":
         self.forbidden.append(row)
+        return self
+
+    def add_tolerated(self, row: Dict[str, Any]) -> "GroundTruth":
+        self.tolerated.append(row)
         return self
 
     def add_analytic(self, key: str, value: Any) -> "GroundTruth":
@@ -146,6 +167,7 @@ class GroundTruth:
             "decision_policy": self.decision_policy,
             "welds": self.welds,
             "forbidden_candidates": self.forbidden,
+            "tolerated_candidates": self.tolerated,
             "analytic": self.analytic,
         }
 

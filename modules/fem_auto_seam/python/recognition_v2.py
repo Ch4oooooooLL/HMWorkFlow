@@ -337,6 +337,65 @@ def _geometry_tolerance(settings, source_h, target_h, source_t, target_t):
     return max(values)
 
 
+def _point_in_polygon_2d(point, polygon):
+    inside = False
+    for index, first in enumerate(polygon):
+        second = polygon[(index + 1) % len(polygon)]
+        if (first[1] > point[1]) != (second[1] > point[1]):
+            crossing = (
+                (second[0] - first[0]) * (point[1] - first[1]) /
+                (second[1] - first[1]) + first[0]
+            )
+            if point[0] < crossing:
+                inside = not inside
+    return inside
+
+
+def _polygon_area_2d(polygon):
+    return abs(sum(
+        first[0] * polygon[(index + 1) % len(polygon)][1] -
+        polygon[(index + 1) % len(polygon)][0] * first[1]
+        for index, first in enumerate(polygon)
+    )) * 0.5
+
+
+def _classify_boundary_paths(paths, model, owner_by_edge, oriented):
+    """Mark closed free-edge paths as OUTER or INNER per shell island.
+
+    Splitting a rectangular/curved loop at corners turns its children into
+    open segments, so checking ``segment.closed`` loses the fact that a seam
+    came from a slot rim.  Classify the parent loops before segmentation and
+    preserve that evidence on every child.
+    """
+    closed = [path for path in paths if path.get("closed") and not path.get("branched")]
+    metadata = []
+    for path in closed:
+        owners = {
+            owner_by_edge.get(_canonical(first, second))
+            for first, second in path.get("edge_pairs", [])
+        } - {None}
+        island_ids = {oriented["island"].get(owner, 0) for owner in owners}
+        normals = [oriented["normal"].get(owner) for owner in owners]
+        normals = [value for value in normals if value is not None]
+        if not normals:
+            path["boundary_class"] = "OUTER"
+            continue
+        average = tuple(sum(value[axis] for value in normals) for axis in range(3))
+        drop_axis = max(range(3), key=lambda axis: abs(average[axis]))
+        keep_axes = [axis for axis in range(3) if axis != drop_axis]
+        polygon = [tuple(model.nodes[node_id][axis] for axis in keep_axes) for node_id in path["node_ids"]]
+        metadata.append((path, island_ids, polygon, _polygon_area_2d(polygon)))
+    for path, island_ids, polygon, area in metadata:
+        path["boundary_class"] = "OUTER"
+        for other, other_islands, container, container_area in metadata:
+            if other is path or island_ids.isdisjoint(other_islands) or container_area <= area:
+                continue
+            if all(_point_in_polygon_2d(point, container) for point in polygon):
+                path["boundary_class"] = "INNER"
+                break
+    return paths
+
+
 def _split_boundary(path, model, owner_by_edge, oriented, settings):
     ids = list(path["node_ids"])
     if len(ids) < 2:
@@ -344,7 +403,12 @@ def _split_boundary(path, model, owner_by_edge, oriented, settings):
     closed = bool(path.get("closed"))
     edge_count = len(ids) if closed else len(ids) - 1
     turn_limit = float(settings.get("boundary_split_turn_angle_deg", 30.0))
-    normal_limit = float(settings.get("boundary_split_source_normal_change_deg", 20.0))
+    # A stamped/curved web may rotate gradually while its complete lower edge
+    # remains supported by one face.  Splitting at the historical 20 degrees
+    # produced short fragments which then failed the minimum-length gate.
+    # Keep a sharp-fold split, but let ordinary formed geometry remain one
+    # chain; local source/target angles are still checked at every sample.
+    normal_limit = float(settings.get("boundary_split_source_normal_change_deg", 45.0))
     breaks = set()
     if not closed:
         breaks.update((0, len(ids) - 1))
@@ -402,37 +466,102 @@ def _edge_samples(first, second, nodes, source_h):
 
 
 def _sample_support(point, source_id, source_normal, source_h, source_t, target_ids, geometry, settings):
-    search = float(settings.get("search_distance", 12.0)) * float(settings.get("potential_search_multiplier", 1.25))
+    configured_search = float(settings.get("search_distance", 12.0))
+    search = configured_search * float(settings.get("potential_search_multiplier", 1.25))
     angle_review_min = float(settings.get("t_angle_review_min_deg", max(0.0, float(settings.get("minimum_t_normal_angle", 70.0)) - 5.0)))
     angle_review_max = float(settings.get("t_angle_review_max_deg", 115.0))
+    recall_pass = bool(settings.get("t_recall_candidate_pass", False))
+    if recall_pass:
+        # Broad candidate discovery accepts every non-coplanar generalized T
+        # angle.  A visually valid joint may be 40/140 degrees after midsurface
+        # extraction, especially on a sloped or curved base.  The small lower
+        # bound only separates coplanar PATCH relations from T relations.
+        angle_review_min = min(angle_review_min, float(settings.get("t_recall_angle_min_deg", 20.0)))
+        angle_review_max = max(angle_review_max, float(settings.get("t_recall_angle_max_deg", 90.0)))
     candidates = []
     for target_id in target_ids:
-        hit = _nearest_hit(point, target_id, geometry, search)
+        target_h = geometry["mesh_size"].get(target_id, source_h)
+        target_t = geometry["thickness"].get(target_id, 0.0)
+        # A midsurface T joint does not put the two exported midsurface edges
+        # at zero distance.  The legitimate construction clearance contains
+        # half of both shell thicknesses, plus the setback left for a weld toe
+        # / bevel.  Treat that as the local edge-to-face contact envelope.
+        bevel_clearance = max(
+            float(settings.get("t_bevel_clearance_mm", 2.0)),
+            float(settings.get("t_bevel_source_thickness_ratio", 0.50)) * source_t,
+            float(settings.get("t_bevel_mesh_ratio", 0.25)) * min(source_h, target_h),
+        )
+        # ``hit`` is already on the target physical skin, not its midsurface.
+        # Therefore the target half-thickness has already been consumed by
+        # the projection.  The remaining skin-space allowance is the source
+        # half-thickness plus weld-toe/bevel setback.  Expressed midsurface to
+        # midsurface this is exactly 0.5*(source_t+target_t)+bevel_clearance.
+        contact_envelope = 0.5 * source_t + bevel_clearance
+        review_multiplier = float(settings.get("geometry_review_multiplier", 3.0))
+        if recall_pass:
+            review_multiplier = max(
+                review_multiplier, float(settings.get("t_recall_distance_multiplier", 3.0)),
+            )
+        # ``search_distance`` is a user proximity hint, not a hard thickness
+        # ceiling.  Thick midsurface shells can have a legitimate physical
+        # contact envelope wider than that fixed value.
+        support_search = max(search, contact_envelope * review_multiplier)
+        hit = _nearest_hit(point, target_id, geometry, support_search)
         if hit is None:
             continue
         offset = _sub(point, hit["point"])
         normal_distance = abs(dot(offset, hit["normal"]))
         tangential_distance = math.sqrt(max(0.0, hit["distance"] ** 2 - normal_distance ** 2))
-        # A closest point clamped to a facet edge is not target support for a
-        # point outside the shell footprint.  Exact support requires the
-        # projection vector to be normal to the physical skin.
-        if tangential_distance > max(float(settings.get("ray_tolerance", 1.0e-7)) * 100.0, 1.0e-6):
-            continue
         angle = _angle(source_normal, hit["normal"])
         if not angle_review_min <= angle <= angle_review_max:
             continue
-        tolerance = _geometry_tolerance(
-            settings, source_h, geometry["mesh_size"].get(target_id, source_h),
+        base_tolerance = _geometry_tolerance(
+            settings, source_h, target_h,
             source_t, hit["thickness"],
         )
-        review_tolerance = tolerance * float(settings.get("geometry_review_multiplier", 3.0))
-        if hit["distance"] > min(search, review_tolerance):
+        tolerance = max(base_tolerance, contact_envelope)
+        review_tolerance = tolerance * review_multiplier
+        # Closest-point projection is clamped to individual triangle edges.
+        # On a warped quad, a curved mesh or the outer edge of the target this
+        # produces a small tangential residual even when the physical shells
+        # meet.  Use the same mesh/thickness-relative geometry tolerance as
+        # the normal residual instead of the historical absolute 1e-6 gate.
+        # The strict AUTO distance check below still prevents welding a free
+        # edge which is materially outside the target footprint.
+        tangential_tolerance = max(
+            float(settings.get("ray_tolerance", 1.0e-7)) * 100.0,
+            float(settings.get("geometry_abs_floor_mm", 0.5)) * 0.1,
+            base_tolerance * float(settings.get("t_tangential_tolerance_ratio", 0.10)),
+        )
+        if recall_pass:
+            # At a target boundary, closest-point projection is clamped to
+            # mesh edges.  Independent source/target discretizations can then
+            # leave a residual of several millimetres even though the visible
+            # source edge lies over the bottom face.  Admit up to a fraction
+            # of one local element for candidate generation; Create Patch is
+            # still limited to the selected target elements.
+            tangential_tolerance = max(
+                tangential_tolerance,
+                float(settings.get("t_recall_tangential_mesh_ratio", 1.0)) * min(source_h, target_h),
+            )
+        if tangential_distance > tangential_tolerance:
+            continue
+        if hit["distance"] > review_tolerance:
             continue
         angle_score = 1.0 - abs(90.0 - angle) / 25.0
         score = 0.75 * (1.0 - hit["distance"] / max(review_tolerance, 1.0e-9)) + 0.25 * _clamp(angle_score)
-        candidates.append(dict(hit, component_id=target_id, angle=angle, auto_tolerance=tolerance, score=score))
+        candidates.append(dict(
+            hit, component_id=target_id, angle=angle,
+            auto_tolerance=tolerance, tangential_distance=tangential_distance,
+            tangential_tolerance=tangential_tolerance,
+            score=score,
+        ))
     candidates.sort(key=lambda row: (-row["score"], row["distance"], row["component_id"], row["element_id"], row["skin"]))
-    return {"best": candidates[0] if candidates else None, "second": candidates[1] if len(candidates) > 1 else None}
+    return {
+        "best": candidates[0] if candidates else None,
+        "second": candidates[1] if len(candidates) > 1 else None,
+        "candidates": candidates,
+    }
 
 
 def _ordered_reason_codes(values):
@@ -441,7 +570,7 @@ def _ordered_reason_codes(values):
         "INNER_BOUNDARY_SOURCE", "SHORT_WELD", "PARTIAL_COVERAGE",
         "TARGET_GAP", "HOLE_INTERRUPTION", "TARGET_AMBIGUITY",
         "DUPLICATE_TARGET_SUPPORT", "ANGLE_BORDERLINE", "SKIN_ERROR_BORDERLINE",
-        "PROJECTION_JUMP", "CURVED_TARGET", "MULTI_TARGET_UNCERTAIN",
+        "PROJECTION_JUMP", "TARGET_NORMAL_JUMP", "CURVED_TARGET", "MULTI_TARGET_UNCERTAIN",
         "MESH_EDITOR_COMPONENT_TRANSITION", "VARIABLE_THICKNESS_UNCERTAIN",
         "BRIDGED_SMALL_GAP", "MULTI_TARGET_CONTINUOUS",
     ]
@@ -453,6 +582,52 @@ def _candidate_from_edges(model, source_id, segment, edge_rows, start, end, pare
     selected = edge_rows[start:end + 1]
     node_ids = segment["node_ids"][start:end + 2]
     length = sum(row["length"] for row in selected)
+    # Select target support at chain level, not independently at every point.
+    # A side wall or bracket which wins only at an endpoint must not hijack an
+    # otherwise complete edge-to-bottom-face relation.  Genuine multi-target
+    # seams retain every target that owns a material fraction of the chain.
+    ordered_samples = []
+    for edge_index, row in enumerate(selected):
+        ordered_samples.extend(row["samples"] if edge_index == 0 else row["samples"][1:])
+    best_counts = defaultdict(int)
+    near_counts = defaultdict(int)
+    ambiguity_window = float(settings.get("ambiguity_auto_min_score_margin", 0.50))
+    for sample in ordered_samples:
+        if sample.get("best") is not None:
+            best_counts[int(sample["best"]["component_id"])] += 1
+            best_score = float(sample["best"]["score"])
+            for candidate in sample.get("candidates", []):
+                if (
+                    float(candidate["distance"]) <= float(candidate["auto_tolerance"]) or
+                    best_score - float(candidate["score"]) < ambiguity_window
+                ):
+                    near_counts[int(candidate["component_id"])] += 1
+    retained_targets = set()
+    if best_counts:
+        dominant_target = min(best_counts, key=lambda value: (-best_counts[value], value))
+        # Two endpoint hits are a common side-wall/bracket distraction, not a
+        # reason to reject the bottom face supporting the rest of the edge.
+        # Require at least three samples as well as a material chain fraction.
+        minimum_samples = max(
+            3,
+            int(math.ceil(float(settings.get("t_target_min_support_ratio", 0.12)) * len(ordered_samples))),
+        )
+        retained_targets = {
+            component_id for component_id, count in best_counts.items()
+            if count >= minimum_samples
+        }
+        retained_targets.update(
+            component_id for component_id, count in near_counts.items()
+            if count >= minimum_samples
+        )
+        retained_targets.add(dominant_target)
+    for sample in [value for row in selected for value in row["samples"]]:
+        choices = [
+            candidate for candidate in sample.get("candidates", [])
+            if int(candidate["component_id"]) in retained_targets
+        ]
+        sample["best"] = choices[0] if choices else None
+        sample["second"] = choices[1] if len(choices) > 1 else None
     all_samples = [sample for row in selected for sample in row["samples"]]
     supported = [sample for sample in all_samples if sample["best"] is not None]
     if not supported:
@@ -476,12 +651,18 @@ def _candidate_from_edges(model, source_id, segment, edge_rows, start, end, pare
     if len(node_projections) != len(node_ids):
         node_projections = []
     coverage = len(supported) / float(len(all_samples))
-    effective_coverage = min(coverage, parent_coverage)
+    # AUTO is a property of this contiguous supported subchain.  Coverage of
+    # unrelated edges elsewhere on the same outer boundary must not veto it.
+    # Real gaps *inside* the seam are carried separately by parent_gap_reason.
+    effective_coverage = coverage
     reasons = []
     parent = segment["parent"]
+    # T recognition is deliberately edge-local.  The topology or shape of
+    # the rest of the source component does not invalidate a complete free
+    # edge which is supported by the target face.
     if parent.get("branched"):
         reasons.append("BOUNDARY_BRANCH")
-    if segment.get("closed"):
+    if parent.get("boundary_class") == "INNER":
         reasons.append("INNER_BOUNDARY_SOURCE")
     if effective_coverage < float(settings.get("t_coverage_auto", 0.98)):
         reasons.append("PARTIAL_COVERAGE")
@@ -489,7 +670,9 @@ def _candidate_from_edges(model, source_id, segment, edge_rows, start, end, pare
         reasons.append(parent_gap_reason)
     if length < float(settings.get("minimum_t_length", 15.0)):
         reasons.append("SHORT_WELD")
-    angle_auto_min = float(settings.get("t_angle_auto_min_deg", 80.0))
+    angle_auto_min = float(settings.get(
+        "t_angle_auto_min_deg", settings.get("minimum_t_normal_angle", 70.0),
+    ))
     angle_auto_max = float(settings.get("t_angle_auto_max_deg", 100.0))
     if min(angles) < angle_auto_min or max(angles) > angle_auto_max:
         reasons.append("ANGLE_BORDERLINE")
@@ -543,10 +726,16 @@ def _candidate_from_edges(model, source_id, segment, edge_rows, start, end, pare
     if internal_gap > 0.0:
         reasons.append("HOLE_INTERRUPTION" if len(target_ids) == 1 else "TARGET_GAP")
     max_normal_variation = 0.0
+    max_normal_jump = 0.0
     target_normals = [sample["best"]["normal"] for sample in supported]
     if target_normals:
         reference = target_normals[0]
         max_normal_variation = max(_angle(reference, value) for value in target_normals)
+        max_normal_jump = max(
+            [_angle(first, second) for first, second in zip(target_normals, target_normals[1:])] or [0.0]
+        )
+        if max_normal_jump > float(settings.get("target_normal_jump_auto_max_deg", 30.0)):
+            reasons.append("TARGET_NORMAL_JUMP")
         if max_normal_variation > float(settings.get("curved_target_auto_max_normal_variation_deg", 12.0)):
             reasons.append("CURVED_TARGET")
     projection_jump = False
@@ -573,11 +762,19 @@ def _candidate_from_edges(model, source_id, segment, edge_rows, start, end, pare
         reasons.append("NORMAL_INCONSISTENT")
     # Ti is interpolated into the physical-skin facets above, so variable
     # thickness is evidence rather than an automatic downgrade in V2.
-    blocking = set(reasons) - {"MULTI_TARGET_CONTINUOUS", "BRIDGED_SMALL_GAP"}
+    # Global curvature is diagnostic evidence, not a contradiction.  If each
+    # local sample meets the angle/skin/continuity gates, a curved supporting
+    # face is just as trustworthy as a planar one.
+    blocking = set(reasons) - {
+        # A branch elsewhere on the component boundary is only diagnostic.
+        # The selected supported edge is evaluated from its own owner faces;
+        # remote component topology must not veto it.
+        "BOUNDARY_BRANCH", "MULTI_TARGET_CONTINUOUS", "BRIDGED_SMALL_GAP", "CURVED_TARGET",
+    }
     decision = "AUTO" if not blocking else "REVIEW"
     confidence = _clamp(
         0.35 + 0.25 * effective_coverage + 0.15 * (1.0 - _percentile(distances, 0.95) / max(_percentile(tolerances, 0.95), 1.0e-9)) +
-        0.15 * (1.0 - abs(90.0 - sum(angles) / len(angles)) / 25.0) + 0.10 * min(1.0, ambiguity_margin / max(float(settings.get("ambiguity_auto_min_score_margin", 0.15)), 1.0e-9))
+        0.15 * (1.0 - abs(90.0 - sum(angles) / len(angles)) / 25.0) + 0.10 * min(1.0, ambiguity_margin / max(float(settings.get("ambiguity_auto_min_score_margin", 0.40)), 1.0e-9))
     )
     reason_codes = _ordered_reason_codes(reasons)
     focus = tuple(sum(point[axis] for point in projections) / len(projections) for axis in range(3))
@@ -626,6 +823,7 @@ def _candidate_from_edges(model, source_id, segment, edge_rows, start, end, pare
             "gap_count": gap_count,
             "max_internal_gap": round(internal_gap, 9),
             "target_normal_variation_deg": round(max_normal_variation, 6),
+            "target_normal_jump_deg": round(max_normal_jump, 6),
             "ambiguity_margin": round(ambiguity_margin, 6),
         },
         "review": {
@@ -638,81 +836,210 @@ def _candidate_from_edges(model, source_id, segment, edge_rows, start, end, pare
     }
 
 
+def mesh_continuous(source_node_ids, target_node_ids, minimum_ratio=0.5, minimum_nodes=2):
+    """True when the source nodes are merged into the target component mesh.
+
+    Shared GRID nodes mean the two components are already connected: the FEM
+    transfers load through those nodes, so no weld seam exists there and the
+    relation must not become a candidate.
+    """
+    ids = list(source_node_ids)
+    if not ids or not target_node_ids:
+        return False
+    shared = sum(1 for node_id in ids if node_id in target_node_ids)
+    return shared >= max(int(minimum_nodes), int(math.ceil(float(minimum_ratio) * len(ids))))
+
+
 def detect_t_candidates(model, settings, topologies, source_ids=None):
     """Detect T candidates from ordered free-edge chains and physical skins."""
+    recall_pass = bool(settings.get("t_recall_candidate_pass", False))
+    recall_first = bool(settings.get("t_recall_first_mode", True))
     oriented_all, geometry = build_physical_geometry_context(model, topologies)
     target_ids = sorted(topologies)
+    component_nodes = {component_id: topology.node_ids for component_id, topology in topologies.items()}
     rows = []
     chain_serial = 0
+
+    def segment_rows(source_id, segment, oriented, owner_by_edge, active_settings):
+        """Candidate rows of one free-edge segment under ``active_settings``.
+
+        Returns ``(rows, supported_fraction)``.  The fraction is the share of
+        the segment's edge length that found support.  The caller re-evaluates
+        a segment with the broad envelope when the strict pass reported only a
+        small fragment of it (see the supplementary pass below).
+        """
+        ids = segment["node_ids"]
+        if len(ids) < 2:
+            return [], 0.0
+        edge_lengths = [_distance(model.nodes[first], model.nodes[second]) for first, second in zip(ids, ids[1:])]
+        source_h = _percentile(edge_lengths, 0.5)
+        source_t = geometry["thickness"].get(source_id, 0.0)
+        edge_rows = []
+        for first, second, edge_length in zip(ids, ids[1:], edge_lengths):
+            owner_id = owner_by_edge.get(_canonical(first, second))
+            source_normal = oriented["normal"].get(owner_id)
+            if source_normal is None:
+                samples = []
+            else:
+                # A target which already shares this edge's GRID nodes is part
+                # of the same continuous mesh; the edge is not a weld seam
+                # against it and must not be supported by it.
+                connected_targets = {
+                    component_id for component_id in target_ids
+                    if component_id != source_id and
+                    mesh_continuous((first, second), component_nodes.get(component_id, ()), 1.0, 2)
+                }
+                edge_targets = [
+                    value for value in target_ids
+                    if value != source_id and value not in connected_targets
+                ]
+                samples = []
+                if edge_targets:
+                    sample_points = _edge_samples(first, second, model.nodes, source_h)
+                    for sample_index, point in enumerate(sample_points):
+                        support = _sample_support(point, source_id, source_normal, source_h, source_t, edge_targets, geometry, active_settings)
+                        support["point"] = point
+                        support["edge_sample_index"] = sample_index
+                        support["edge_sample_count"] = len(sample_points)
+                        samples.append(support)
+            edge_rows.append({"first": first, "second": second, "length": edge_length, "samples": samples})
+        supported_flags = [
+            bool(row["samples"]) and
+            sum(sample["best"] is not None for sample in row["samples"]) / float(len(row["samples"])) >=
+            float(active_settings.get("t_edge_review_coverage", 0.67))
+            for row in edge_rows
+        ]
+        if not any(supported_flags):
+            return [], 0.0
+        parent_coverage = sum(row["length"] for row, supported in zip(edge_rows, supported_flags) if supported) / max(sum(edge_lengths), 1.0e-9)
+        internal_unsupported = [
+            index for index, supported in enumerate(supported_flags)
+            if not supported and any(supported_flags[:index]) and any(supported_flags[index + 1:])
+        ]
+        parent_gap_reason = ""
+        if internal_unsupported:
+            left = max(index for index in range(internal_unsupported[0]) if supported_flags[index])
+            right = min(index for index in range(internal_unsupported[-1] + 1, len(supported_flags)) if supported_flags[index])
+            left_targets = [sample["best"]["component_id"] for sample in edge_rows[left]["samples"] if sample["best"] is not None]
+            right_targets = [sample["best"]["component_id"] for sample in edge_rows[right]["samples"] if sample["best"] is not None]
+            parent_gap_reason = "HOLE_INTERRUPTION" if set(left_targets) & set(right_targets) else "TARGET_GAP"
+        indexes = [index for index, supported in enumerate(supported_flags) if supported]
+        groups = []
+        start = previous = indexes[0]
+        for index in indexes[1:]:
+            if index != previous + 1:
+                groups.append((start, previous))
+                start = index
+            previous = index
+        groups.append((start, previous))
+        produced = []
+        for start, end in groups:
+            row = _candidate_from_edges(
+                model, source_id, segment, edge_rows, start, end, parent_coverage, parent_gap_reason,
+                source_h, source_t, owner_by_edge, oriented, geometry, active_settings,
+            )
+            if row is not None:
+                # Length is a creation/quality concern, not evidence that the
+                # local edge-to-face relation does not exist.  Keep even short
+                # curve fragments as candidates.
+                produced.append(row)
+        return produced, parent_coverage
+
+    missing_sources = set()
     for source_id in sorted(topologies):
         if source_ids is not None and source_id not in source_ids:
             continue
         topology = topologies[source_id]
         owner_by_edge = {_canonical(first, second): owner for first, second, owner in topology.free_edges}
-        for boundary in connected_edge_paths(topology.free_edges, model.nodes):
-            for segment in _split_boundary(boundary, model, owner_by_edge, oriented_all[source_id], settings):
+        oriented = oriented_all[source_id]
+        boundaries = connected_edge_paths(topology.free_edges, model.nodes)
+        boundaries = _classify_boundary_paths(boundaries, model, owner_by_edge, oriented)
+        source_rows = []
+        failed_segments = []
+        partial_segments = []
+        minimum_coverage = float(settings.get("t_recall_min_coverage", 0.5))
+        for boundary in boundaries:
+            for segment in _split_boundary(boundary, model, owner_by_edge, oriented, settings):
                 chain_serial += 1
-                ids = segment["node_ids"]
-                if len(ids) < 2:
-                    continue
-                edge_lengths = [_distance(model.nodes[first], model.nodes[second]) for first, second in zip(ids, ids[1:])]
-                source_h = _percentile(edge_lengths, 0.5)
-                source_t = geometry["thickness"].get(source_id, 0.0)
-                edge_rows = []
-                for first, second, edge_length in zip(ids, ids[1:], edge_lengths):
-                    owner_id = owner_by_edge.get(_canonical(first, second))
-                    source_normal = oriented_all[source_id]["normal"].get(owner_id)
-                    if source_normal is None:
-                        samples = []
-                    else:
-                        samples = []
-                        sample_points = _edge_samples(first, second, model.nodes, source_h)
-                        for sample_index, point in enumerate(sample_points):
-                            support = _sample_support(point, source_id, source_normal, source_h, source_t, [value for value in target_ids if value != source_id], geometry, settings)
-                            support["point"] = point
-                            support["edge_sample_index"] = sample_index
-                            support["edge_sample_count"] = len(sample_points)
-                            samples.append(support)
-                    edge_rows.append({"first": first, "second": second, "length": edge_length, "samples": samples})
-                supported_flags = [
-                    bool(row["samples"]) and
-                    sum(sample["best"] is not None for sample in row["samples"]) / float(len(row["samples"])) >=
-                    float(settings.get("t_edge_review_coverage", 0.67))
-                    for row in edge_rows
-                ]
-                if not any(supported_flags):
-                    continue
-                parent_coverage = sum(row["length"] for row, supported in zip(edge_rows, supported_flags) if supported) / max(sum(edge_lengths), 1.0e-9)
-                internal_unsupported = [
-                    index for index, supported in enumerate(supported_flags)
-                    if not supported and any(supported_flags[:index]) and any(supported_flags[index + 1:])
-                ]
-                parent_gap_reason = ""
-                if internal_unsupported:
-                    left = max(index for index in range(internal_unsupported[0]) if supported_flags[index])
-                    right = min(index for index in range(internal_unsupported[-1] + 1, len(supported_flags)) if supported_flags[index])
-                    left_targets = [sample["best"]["component_id"] for sample in edge_rows[left]["samples"] if sample["best"] is not None]
-                    right_targets = [sample["best"]["component_id"] for sample in edge_rows[right]["samples"] if sample["best"] is not None]
-                    parent_gap_reason = "HOLE_INTERRUPTION" if set(left_targets) & set(right_targets) else "TARGET_GAP"
-                indexes = [index for index, supported in enumerate(supported_flags) if supported]
-                groups = []
-                start = previous = indexes[0]
-                for index in indexes[1:]:
-                    if index != previous + 1:
-                        groups.append((start, previous))
-                        start = index
-                    previous = index
-                groups.append((start, previous))
-                for start, end in groups:
-                    row = _candidate_from_edges(
-                        model, source_id, segment, edge_rows, start, end, parent_coverage, parent_gap_reason,
-                        source_h, source_t, owner_by_edge, oriented_all[source_id], geometry, settings,
-                    )
-                    if row is not None:
+                produced, supported_fraction = segment_rows(
+                    source_id, segment, oriented, owner_by_edge, settings)
+                if produced:
+                    for row in produced:
+                        row["recall_candidate_fallback"] = recall_pass
                         row["source"]["chain_id"] = chain_serial
-                        minimum_review_length = float(settings.get("minimum_t_length", 15.0)) * float(settings.get("potential_length_ratio", 0.75))
-                        if row["length"] >= minimum_review_length:
-                            rows.append(row)
+                    source_rows.extend(produced)
+                    if supported_fraction < minimum_coverage:
+                        partial_segments.append((segment, chain_serial, produced))
+                else:
+                    failed_segments.append((segment, chain_serial))
+        rows.extend(source_rows)
+        if not recall_first or recall_pass:
+            continue
+        if not source_rows:
+            missing_sources.add(source_id)
+            continue
+        # A component which already has strict rows may still own further
+        # weldable free-edge chains (an oblique T beside a square T on the
+        # same web).  Re-evaluate the unclaimed chains with the broad envelope.
+        # A chain the strict pass covered only below the coverage floor counts
+        # as unclaimed too: a grazing fragment (the two nodes where a web's end
+        # edge touches the skin) must not hide the full generalized-T seam the
+        # same chain makes against its real partner.  Chains the strict pass
+        # already reported across the floor are left alone, so a genuine gap
+        # split (two supported runs around an element-free void) is never fused
+        # back into one continuous row.
+        relaxed_settings = dict(settings)
+        relaxed_settings["t_recall_candidate_pass"] = True
+        relaxed_settings["t_edge_review_coverage"] = float(
+            settings.get("t_recall_edge_review_coverage", 0.01)
+        )
+        for segment, chain_id in failed_segments:
+            for row in segment_rows(source_id, segment, oriented, owner_by_edge, relaxed_settings)[0]:
+                if float(row.get("projection_coverage", 0.0)) < minimum_coverage:
+                    continue
+                row["recall_candidate_fallback"] = True
+                row["source"]["chain_id"] = chain_id
+                rows.append(row)
+        for segment, chain_id, strict_rows in partial_segments:
+            strict_nodes = [set(row.get("source_node_ids") or []) for row in strict_rows]
+            for row in segment_rows(source_id, segment, oriented, owner_by_edge, relaxed_settings)[0]:
+                if float(row.get("projection_coverage", 0.0)) < minimum_coverage:
+                    continue
+                nodes = set(row.get("source_node_ids") or [])
+                if nodes and any(
+                    len(nodes & other) / float(len(nodes)) >= 0.5 for other in strict_nodes
+                ):
+                    continue  # the strict fragment already reports this chain
+                row["recall_candidate_fallback"] = True
+                row["source"]["chain_id"] = chain_id
+                rows.append(row)
+    # Run the broad, recall-oriented geometry envelope for source components
+    # for which the normal detector found no T edge at all.  This prevents
+    # relaxed tangential/coverage gates from adding side-edge noise beside
+    # already-good seams, while eliminating the field failure mode of
+    # returning zero T candidates for an otherwise weldable component.
+    if recall_first and not recall_pass and missing_sources:
+        fallback_settings = dict(settings)
+        fallback_settings["t_recall_candidate_pass"] = True
+        fallback_settings["t_edge_review_coverage"] = float(
+            settings.get("t_recall_edge_review_coverage", 0.01)
+        )
+        minimum_coverage = float(settings.get("t_recall_min_coverage", 0.5))
+        strict_pairs = {
+            (int(row["source_component_id"]), int(target_id))
+            for row in rows for target_id in row.get("target_component_ids", [])
+        }
+        fallback_rows = detect_t_candidates(
+            model, fallback_settings, topologies, source_ids=missing_sources,
+        )
+        rows.extend(
+            row for row in fallback_rows
+            if float(row.get("projection_coverage", 0.0)) >= minimum_coverage
+            and not any(
+                (int(target_id), int(row["source_component_id"])) in strict_pairs
+                for target_id in row.get("target_component_ids", [])
+            )
+        )
     return rows
 
 
@@ -722,7 +1049,7 @@ def enrich_non_t_candidate(row, model, settings, topologies):
     reason_codes = list(row.get("reason_codes", []))
     boundary_class = str(row.get("boundary_class", "OUTER"))
     if boundary_class == "INNER":
-        policy = str(settings.get("patch_inner_loop_policy", "review")).lower()
+        policy = str(settings.get("patch_inner_loop_policy", "auto_all")).lower()
         if policy != "auto_all":
             reason_codes.append("INNER_BOUNDARY_SOURCE")
     warning_text = " ".join(str(value).lower() for value in row.get("warnings", []))
@@ -760,6 +1087,7 @@ def enrich_non_t_candidate(row, model, settings, topologies):
         "skin_error_p95": float(row.get("distance", {}).get("maximum", 0.0)),
         "skin_error_max": float(row.get("distance", {}).get("maximum", 0.0)),
         "gap_count": 0, "max_internal_gap": 0.0, "target_normal_variation_deg": 0.0,
+        "target_normal_jump_deg": 0.0,
         "ambiguity_margin": 0.0 if row.get("ambiguous_relation") else 1.0,
     })
     row["review"] = {

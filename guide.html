@@ -1513,11 +1513,11 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             该模块主要用于处理车身结构件之间的焊缝面（Seam Surface）网格创建。它打破了传统几何 Ruled 面划分网格的低效率，采用了在已有网格上直接投影的流程：
                         </p>
                         <ul style="margin-left:20px; margin-bottom: 20px; font-size:14px; color:var(--text-secondary);">
-                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理。单点及不连续边界种子通过 HyperMesh 2019 原生 <code>*findedges</code> 为每个源 component 创建临时隐藏 PLOTEL 自由边组件；单个自由边点按目标组件最近壳单元的局部法向筛选边图，提取经过该点且与目标平面平行的完整开放或闭合直线/曲线，内部点仍提取其所属整个 component 的全部闭合自由边。路径提取完成后临时组件立即清理，原有 <code>^edges</code> 会被保留和恢复。运行流程不导出 FEM，也不调用 Python。</li>
+                            <li><strong>节点选择</strong>：连续的一串节点按开放 <code>node path</code> 处理。单点及不连续边界种子通过 HyperMesh 2019 原生 <code>*findedges</code> 为每个源 component 创建临时隐藏 PLOTEL 自由边组件；单个自由边点沿该 component 的自由边图双向行走，取经过该点、折角不超过「单点边界折角上限」（默认 180°）的完整开放或闭合边界，分叉处取最直延续、两侧同样最直时拒绝，内部点仍提取其所属整个 component 的全部闭合自由边。路径提取完成后临时组件立即清理，原有 <code>^edges</code> 会被保留和恢复。运行流程不导出 FEM，也不调用 Python。</li>
                             <li><strong>印记区网格重构 (Remeshing)</strong>：将原始节点路径作为 Nodes 输入，将该路径投影到所选目标 components 后最近的几层单元作为 Elements 输入，调用 Mesh Edit imprint。与目标 patch 共节点、但不属于目标 patch 的平面外单元只记录诊断数量，不会混入 Elements 输入。</li>
                             <li><strong>原生 Create Patch</strong>：以源 Nodes 和局部目标 Elements 调用 <code>imprint_nodelist</code> 的 <code>create_joint_elems=1</code> 模式，直接在按板厚选定的 <code>SEAM_*</code> component 中创建焊缝壳，不再以 Ruled 作为手动主路径。</li>
                             <li><strong>局部失败隔离</strong>：每条路径都在独立撤销事务中完成即时目标 patch、imprint、后置节点验证和连接带创建。任一阶段失败会回滚并跳过当前路径，不会退化为整个目标 component 的 imprint，也不会保留部分焊缝。</li>
-                            <li><strong>批量性能与可靠性</strong>：原生自由边图按源 component 在批次内缓存；单边界点只读取其所在连通轮廓，内部点在边界分类后跳过目标法向查询。每条路径执行前才统一投影全部源节点、一次反查目标壳单元并扩展两到三层 Elements，避免前一路径重网格后留下过期 ID。仅本次 Create Patch 新增的单元进入 mixed remesh，所有连接边节点固定，重绘前后边界必须一致。</li>
+                            <li><strong>批量性能与可靠性</strong>：原生自由边图按源 component 在批次内缓存；单边界点只读取其所在连通轮廓并按折角上限行走，内部点保留原有闭合自由边流程。每条路径执行前才统一投影全部源节点、一次反查目标壳单元并扩展两到三层 Elements，避免前一路径重网格后留下过期 ID。仅本次 Create Patch 新增的单元进入 mixed remesh，所有连接边节点固定，并按拓扑校验附件保持：原连接边要么保留、要么由插入节点沿原边细分（曲边允许弦高偏差），丢失边界节点或横向改接仍整路径回滚。</li>
                             <li><strong>FAST_AUTO</strong>：自动识别 T、CONNECT 和搭接候选，用户明确接受后优先通过 <code>EXISTING_EDGE_PATH</code> 直接导入 CQUAD4/CTRIA3；显式开启后可使用受控节点微调或单母单元保守切分。该路径禁止 imprint、ruled 和 automesh，每个候选在自己的原生撤销事务中执行，失败用 <code>*undohistorystate</code> 回滚，不再写入整模型快照文件。</li>
                             <li><strong>LEGACY_MANUAL</strong>：保留手动节点选择交互，但创建阶段使用局部 Mesh Edit Create Patch 和新增 patch 的边界固定 mixed remesh。</li>
                             <li><strong>批次撤回</strong>：每条路径/候选都是 HyperMesh 原生撤销栈上的命名动作。成功批次可回到工具箱，在“网格焊缝”行点击 <strong>“撤回”</strong> 一次撤回整批；也可直接用 Ctrl+Z 逐条撤销。若批次之后又做过其他修改，撤回整批会把这些修改一并撤销，确认框会标明数量。</li>
@@ -1537,7 +1537,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">2</span>
                                 <div class="step-title">选择源 node path</div>
-                                <div class="step-detail">多选连续节点时使用所选开放路径。单点及不连续种子由原生 <code>*findedges</code> 创建一一对应的临时自由边组件：单个自由边点选择与目标局部平面平行的所在开放/闭合线，内部点选择该源 component 的全部闭合自由边；分叉、非流形或方向不匹配的边界会拒绝。</div>
+                                <div class="step-detail">多选连续节点时使用所选开放路径。单点及不连续种子由原生 <code>*findedges</code> 创建一一对应的临时自由边组件：单个自由边点沿自由边图双向行走，取折角不超过「单点边界折角上限」（默认 180°）的所在开放/闭合边界，分叉处取最直延续，两侧同样最直时拒绝；内部点选择该源 component 的全部闭合自由边。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">3</span>
@@ -1547,7 +1547,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">4</span>
                                 <div class="step-title">配置生成参数</div>
-                                <div class="step-detail">填写焊缝尺寸并点击 <strong>“生成”</strong>。程序逐路径准备当前目标网格的两到三层局部 Elements，以原始节点列表和该局部范围执行 Mesh Edit Create Patch；随后只对新增焊缝 patch 做 mixed remesh，并固定全部连接边节点。若未创建 patch、缺少源侧连接节点或重绘改变连接边，当前路径会整体回滚。</div>
+                                <div class="step-detail">填写焊缝尺寸并点击 <strong>“生成”</strong>。程序逐路径准备当前目标网格的两到三层局部 Elements，以原始节点列表和该局部范围执行 Mesh Edit Create Patch；随后只对新增焊缝 patch 做 mixed remesh，并固定全部连接边节点。若未创建 patch、缺少源侧连接节点或重绘丢失/横向改接连接边，当前路径会整体回滚。</div>
                             </div>
                             <div class="step-item">
                                 <span class="step-num">5</span>
@@ -1600,6 +1600,11 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                                         <td>投影时的面法线夹角阈值。超出此夹角的平面印记将不予投影，防止投影穿透。</td>
                                     </tr>
                                     <tr>
+                                        <td><code>boundary_bend_angle_max</code></td>
+                                        <td><code>180.0</code></td>
+                                        <td>单点边界种子的折角上限（度）。沿自由边图行走时，相邻两段方向夹角不超过该值的拐角视为同一条边界；分叉节点取折角最小的延续，两侧同样最直时拒绝该路径。</td>
+                                    </tr>
+                                    <tr>
                                         <td><code>mesh_elem_type</code></td>
                                         <td><code>2</code></td>
                                         <td>焊缝单元的形状类型。常用：1 (三角形单元) / 2 (四边形为主单元)。</td>
@@ -1615,7 +1620,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
 
                     <div class="detail-tab-pane" id="weld-safety">
                         <div class="alert-box warning"><svg viewBox="0 0 24 24"><path d="M13,14H11V10H13M13,18H11V16H13M12,2A10,10 0 1,0 22,12A10,10 0 0,0 12,2Z"/></svg><div class="alert-content"><h4>会重构目标组件的局部网格</h4><p>此模块并非只创建新单元：<code>imprint_nodelist</code> 会在目标组件写入节点路径并进行局部重划分。请先保存模型，并在生成后检查印记区域的单元质量、法向和连接关系。</p></div></div>
-                        <ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>闭环种子仅接受唯一、无自交、每个节点恰有两条自由边的闭合流形；多个种子必须对应可识别的闭环。</li><li>连续多节点严格按开放路径处理；imprint 后会比较正反方向，闭环还会校正起点，避免首尾交叉连接。</li><li>批量闭环任务只允许一个目标组件，并通过命令流进度窗口逐环提示。</li><li>输出组件为空、焊缝尺寸非正、扩展层数或网格枚举参数为负时会被拒绝。</li></ul>
+                        <ul style="margin-left:20px; font-size:14px; color:var(--text-secondary);"><li>闭环种子仅接受唯一、无自交、每个节点恰有两条自由边的闭合流形；多个种子必须对应可识别的闭环。</li><li>连续多节点严格按开放路径处理；imprint 后会比较正反方向，闭环还会校正起点，避免首尾交叉连接。</li><li>批量闭环任务只允许一个目标组件，并通过命令流进度窗口逐环提示。</li><li>输出组件为空、焊缝尺寸非正、扩展层数或网格枚举参数为负时会被拒绝。</li><li>单点边界按折角上限行走：拐角超过上限即作为边界端点收尾；分叉节点上两侧同样最直、坐标不可读或零长边时拒绝该路径。</li></ul>
                     </div>
                 </div>
             </section>

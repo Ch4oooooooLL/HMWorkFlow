@@ -948,7 +948,7 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "V2 extracts the correct X=100..300 subchain but downgrades it to REVIEW/PARTIAL_COVERAGE because parent-chain coverage is gated before subchain selection. Spec expects the perfect middle to AUTO.",
+      "known_gap_note": "",
       "note": "subchain X=100..300 is geometrically perfect; endpoint discretization tolerance allowed"
     },
     {
@@ -1269,10 +1269,8 @@
       "semantic_id": "TC019_W01",
       "weld_type": "T",
       "source_component": "TC019_SRC_WEB",
-      "expected_decision": "REVIEW",
-      "required_reason_codes": [
-        "CURVED_TARGET"
-      ],
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
       "required_reason_any": [],
       "forbidden_reason_codes": [],
       "target_components": [
@@ -1409,12 +1407,12 @@
       "semantic_id": "TC021_W01",
       "weld_type": "T",
       "source_component": "TC021_SRC_WEB",
-      "expected_decision": "REVIEW",
-      "required_reason_codes": [
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
         "ANGLE_BORDERLINE"
       ],
-      "required_reason_any": [],
-      "forbidden_reason_codes": [],
       "target_components": [
         "TC021_TGT_BASE"
       ],
@@ -1478,8 +1476,10 @@
       "semantic_id": "TC022_W01",
       "weld_type": "T",
       "source_component": "TC022_SRC_WEB",
-      "expected_decision": "REJECT",
-      "required_reason_codes": [],
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "ANGLE_BORDERLINE"
+      ],
       "required_reason_any": [],
       "forbidden_reason_codes": [],
       "target_components": [
@@ -1493,7 +1493,7 @@
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
       "known_gap_note": "",
-      "note": "55 deg is outside the review band; no T candidate should be emitted"
+      "note": "35 deg lean -> 55 deg T: the bottom edge is supported by the base top skin and is recalled as REVIEW ANGLE_BORDERLINE; the creation gate decides on it later"
     },
     {
       "semantic_id": "TC023_W01",
@@ -1977,11 +1977,8 @@
       "semantic_id": "TC030_W01",
       "weld_type": "T",
       "source_component": "TC030_SRC_WEB",
-      "expected_decision": "REVIEW",
-      "required_reason_codes": [
-        "TARGET_GAP",
-        "PROJECTION_JUMP"
-      ],
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
       "required_reason_any": [],
       "forbidden_reason_codes": [
         "MULTI_TARGET_CONTINUOUS"
@@ -2026,20 +2023,16 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint.",
-      "note": "B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190"
+      "known_gap_note": "",
+      "note": "B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190: fully supported, so the run AUTOs on its own"
     },
     {
       "semantic_id": "TC030_W02",
       "weld_type": "T",
       "source_component": "TC030_SRC_WEB",
-      "expected_decision": "REVIEW",
+      "expected_decision": "AUTO",
       "required_reason_codes": [],
-      "required_reason_any": [
-        "TARGET_GAP",
-        "PARTIAL_COVERAGE",
-        "PROJECTION_JUMP"
-      ],
+      "required_reason_any": [],
       "forbidden_reason_codes": [
         "MULTI_TARGET_CONTINUOUS"
       ],
@@ -2084,7 +2077,7 @@
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
       "known_gap_note": "",
-      "note": "C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350"
+      "note": "C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350: a second independent AUTO run; the 20 mm dead zone between the skins must not fuse the two runs into one continuous seam"
     },
     {
       "semantic_id": "TC031_W01",
@@ -2319,7 +2312,7 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "",
+      "known_gap_note": "recall-first contact envelope (half source thickness + weld-toe setback) reaches a web standing 4 mm proud of the skin, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first.",
       "note": "bottom 4 mm above the skin: physically not a weld, must be routed to REVIEW (SKIN_ERROR_BORDERLINE) at most, never AUTO"
     },
     {
@@ -2508,11 +2501,65 @@
       "note": "outer 80x80 frame ring fully inside the base footprint: its perimeter is the real patch seam and may AUTO"
     },
     {
-      "semantic_id": "TC037_W01",
+      "semantic_id": "TC036_W02",
       "weld_type": "PATCH",
-      "source_component": "TC037_TILT",
-      "expected_decision": "REJECT",
+      "source_component": "TC036_PATCH",
+      "expected_decision": "AUTO",
       "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC036_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC036_PATCH",
+        "expected_node_ids": [
+          28624,
+          28625,
+          28626,
+          28627,
+          28628,
+          28637,
+          28646,
+          28655,
+          28664,
+          28663,
+          28662,
+          28661,
+          28660,
+          28651,
+          28642,
+          28633
+        ],
+        "start_xyz": [
+          70080.0,
+          -20.0,
+          10.0
+        ],
+        "end_xyz": [
+          70080.0,
+          -10.0,
+          10.0
+        ],
+        "length": 150.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the 40x40 exposed inner boundary projects completely onto the base and is a real patch seam"
+    },
+    {
+      "semantic_id": "TC037_W01",
+      "weld_type": "T",
+      "source_component": "TC037_TILT",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "ANGLE_BORDERLINE"
+      ],
       "required_reason_any": [],
       "forbidden_reason_codes": [],
       "target_components": [
@@ -2524,9 +2571,9 @@
       "source_path": null,
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
-      "geometry_parallel": true,
+      "geometry_parallel": false,
       "known_gap_note": "",
-      "note": "plate 35 deg from parallel and from perpendicular: no patch, no T"
+      "note": "plate 35 deg from parallel: the low edge is a 55 deg generalized T on the base top skin, recalled as REVIEW ANGLE_BORDERLINE, never AUTO"
     },
     {
       "semantic_id": "TC038_W01",
@@ -3098,7 +3145,7 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": false,
-      "known_gap_note": "",
+      "known_gap_note": "the junction end edge sits a few mm from the long web face, so the recall pass splits it into two short supported runs and AUTO-welds the long web leg without MULTI_TARGET_CONTINUOUS.  Accepted over-detection: the creation gate owns the junction decision.",
       "note": "the cross web's 6 mm-short end edge stands against the long web side: a junction edge whose support is genuinely split between the long web and the base, so it must REVIEW and must not be fused into either straight leg"
     },
     {
@@ -3432,8 +3479,171 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "",
+      "known_gap_note": "the bracket bottom stands 4 mm proud of the skin, inside the recall-first contact envelope, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first.",
       "note": "bottom 4 mm above the skin, short height: a phantom 'weld' the recognizer must route to REVIEW at most"
+    },
+    {
+      "semantic_id": "TC050_W01",
+      "weld_type": "T",
+      "source_component": "TC050_SRC_LONG",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC050_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC050_SRC_LONG",
+        "expected_node_ids": [
+          36789,
+          36790,
+          36791,
+          36792,
+          36793,
+          36794,
+          36795,
+          36796,
+          36797,
+          36798,
+          36799,
+          36800,
+          36801,
+          36802,
+          36803,
+          36804,
+          36805,
+          36806,
+          36807,
+          36808,
+          36809,
+          36810,
+          36811,
+          36812,
+          36813,
+          36814,
+          36815,
+          36816,
+          36817
+        ],
+        "start_xyz": [
+          98060.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          98340.0,
+          0.0,
+          5.0
+        ],
+        "length": 280.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "long web bottom chain flush on the base skin"
+    },
+    {
+      "semantic_id": "TC050_W02",
+      "weld_type": "T",
+      "source_component": "TC050_SRC_CROSS",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC050_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC050_SRC_CROSS",
+        "expected_node_ids": [
+          37108,
+          37109,
+          37110,
+          37111,
+          37112,
+          37113,
+          37114,
+          37115,
+          37116,
+          37117,
+          37118
+        ],
+        "start_xyz": [
+          98240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          98290.0,
+          92.60254037844386,
+          5.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "cross web bottom chain flush on the base skin"
+    },
+    {
+      "semantic_id": "TC050_W03",
+      "weld_type": "T",
+      "source_component": "TC050_SRC_CROSS",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "ANGLE_BORDERLINE",
+        "PARTIAL_COVERAGE",
+        "TARGET_NORMAL_JUMP"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC050_SRC_LONG"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": true,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC050_SRC_CROSS",
+        "expected_node_ids": [
+          37108,
+          37119,
+          37130,
+          37141,
+          37152,
+          37163,
+          37174,
+          37185,
+          37196,
+          37207,
+          37218
+        ],
+        "start_xyz": [
+          98240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          98240.0,
+          6.0,
+          105.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the cross web's end column stands 6 mm clear of the long web face at 60 degrees: a generalized T whose angle fails the strict envelope, so only the per-chain recall pass can report it"
     }
   ],
   "forbidden_candidates": [
@@ -3456,6 +3666,7 @@
       "note": "closed dependency cycle: no pair in the loop may AUTO"
     }
   ],
+  "tolerated_candidates": [],
   "analytic": {
     "TC001_standard_t.target_top_skin_z": 5.0,
     "TC001_standard_t.source_bottom_z": 5.0,
@@ -3501,13 +3712,8 @@
         20.0
       ],
       "span": 40.0,
-      "expected_decision": "REVIEW",
-      "expected_reasons": [
-        "INNER_BOUNDARY_SOURCE",
-        "HOLE_INTERRUPTION"
-      ],
-      "never_auto": true,
-      "verified": "V2 emits the inner loop as a separate REVIEW row (patch_inner_loop_policy review); the runner matches the outer ring only because span grouping cannot separate concentric loops of one source component."
+      "expected_decision": "AUTO",
+      "verified": "V2 emits the inner loop as a separate AUTO patch row; fastener-sized openings below small_hole_diameter remain excluded rather than becoming weld paths."
     },
     "TC041_weld_on_weld.dependencies": {
       "TC041_W02": [
@@ -3525,6 +3731,27 @@
     },
     "TC046_coplanar_butt.butt": {
       "rule": "no AUTO and no REVIEW candidate is expected between the two coplanar sheets"
+    },
+    "TC049_mesh_continuous_seam.mesh_continuity": {
+      "shared_node_ids": [
+        49110,
+        49111,
+        49112,
+        49113,
+        49114,
+        49115,
+        49116,
+        49117,
+        49118,
+        49119,
+        49120
+      ],
+      "rule": "shared GRID nodes on the seam mean one continuous mesh; the recognizer must not offer the pair as a weld candidate"
+    },
+    "TC050_generalized_t_beside_square_t.generalized_t": {
+      "dihedral_deg": 60.0,
+      "clearance_mm": 6.0,
+      "rule": "the strict pass reports the cross web's bottom chain only; the end column must be recovered by the recall pass on the same component"
     }
   }
 }

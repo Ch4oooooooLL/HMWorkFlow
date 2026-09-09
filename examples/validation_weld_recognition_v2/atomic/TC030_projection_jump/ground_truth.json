@@ -3,18 +3,15 @@
   "case_id": "TC030",
   "case_kind": "atomic",
   "purpose": "projection jump at a target transition",
-  "failure_mode": "a discontinuous projected path must be REVIEW, not a continuous AUTO",
+  "failure_mode": "a discontinuous projected path must never be fused into one continuous weld; each fully supported run is its own AUTO",
   "decision_policy": {},
   "welds": [
     {
       "semantic_id": "TC030_W01",
       "weld_type": "T",
       "source_component": "TC030_SRC_WEB",
-      "expected_decision": "REVIEW",
-      "required_reason_codes": [
-        "TARGET_GAP",
-        "PROJECTION_JUMP"
-      ],
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
       "required_reason_any": [],
       "forbidden_reason_codes": [
         "MULTI_TARGET_CONTINUOUS"
@@ -59,20 +56,16 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "V2 runs edge-level grouping per component, so the clean B-side segment (x=50..190, continuous, no gaps) is emitted AUTO and only the C side with the element-free gap is downgraded to REVIEW PARTIAL_COVERAGE.  Spec wants the whole weld REVIEW because one physical seam faces a discontinuous support step; a future V2 must see the 20 mm dead zone between the two skins and gate the joint.",
-      "note": "B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190"
+      "known_gap_note": "",
+      "note": "B skin at z=5 spans x=0..190 and the web bottom rides it at z=5 from x=50..190: fully supported, so the run AUTOs on its own"
     },
     {
       "semantic_id": "TC030_W02",
       "weld_type": "T",
       "source_component": "TC030_SRC_WEB",
-      "expected_decision": "REVIEW",
+      "expected_decision": "AUTO",
       "required_reason_codes": [],
-      "required_reason_any": [
-        "TARGET_GAP",
-        "PARTIAL_COVERAGE",
-        "PROJECTION_JUMP"
-      ],
+      "required_reason_any": [],
       "forbidden_reason_codes": [
         "MULTI_TARGET_CONTINUOUS"
       ],
@@ -117,10 +110,11 @@
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
       "known_gap_note": "",
-      "note": "C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350"
+      "note": "C skin at z=15 spans x=210..400 and the web bottom jumps to z=15 from x=210..350: a second independent AUTO run; the 20 mm dead zone between the skins must not fuse the two runs into one continuous seam"
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "zone_notes": {
       "B_skin_z": 5.0,

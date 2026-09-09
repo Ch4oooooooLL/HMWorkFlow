@@ -1,0 +1,189 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC050",
+  "case_kind": "atomic",
+  "purpose": "generalized T beside a square T on one source",
+  "failure_mode": "a source component may own several weldable free-edge chains: the cross web's flush bottom chain AUTO-welds the base while its 60-degree end column against the long web must still be reported as a candidate",
+  "decision_policy": {
+    "per_chain_recall": "report_every_supported_chain"
+  },
+  "welds": [
+    {
+      "semantic_id": "TC050_W01",
+      "weld_type": "T",
+      "source_component": "TC050_SRC_LONG",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC050_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC050_SRC_LONG",
+        "expected_node_ids": [
+          50273,
+          50274,
+          50275,
+          50276,
+          50277,
+          50278,
+          50279,
+          50280,
+          50281,
+          50282,
+          50283,
+          50284,
+          50285,
+          50286,
+          50287,
+          50288,
+          50289,
+          50290,
+          50291,
+          50292,
+          50293,
+          50294,
+          50295,
+          50296,
+          50297,
+          50298,
+          50299,
+          50300,
+          50301
+        ],
+        "start_xyz": [
+          60.0,
+          0.0,
+          5.0
+        ],
+        "end_xyz": [
+          340.0,
+          0.0,
+          5.0
+        ],
+        "length": 280.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "long web bottom chain flush on the base skin"
+    },
+    {
+      "semantic_id": "TC050_W02",
+      "weld_type": "T",
+      "source_component": "TC050_SRC_CROSS",
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
+      "required_reason_any": [],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC050_TGT_BASE"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": false,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC050_SRC_CROSS",
+        "expected_node_ids": [
+          50592,
+          50593,
+          50594,
+          50595,
+          50596,
+          50597,
+          50598,
+          50599,
+          50600,
+          50601,
+          50602
+        ],
+        "start_xyz": [
+          240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          290.0,
+          92.60254037844386,
+          5.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "cross web bottom chain flush on the base skin"
+    },
+    {
+      "semantic_id": "TC050_W03",
+      "weld_type": "T",
+      "source_component": "TC050_SRC_CROSS",
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [],
+      "required_reason_any": [
+        "ANGLE_BORDERLINE",
+        "PARTIAL_COVERAGE",
+        "TARGET_NORMAL_JUMP"
+      ],
+      "forbidden_reason_codes": [],
+      "target_components": [
+        "TC050_SRC_LONG"
+      ],
+      "forbidden_targets": [],
+      "allow_extra_targets": true,
+      "support_runs": [],
+      "source_path": {
+        "component": "TC050_SRC_CROSS",
+        "expected_node_ids": [
+          50592,
+          50603,
+          50614,
+          50625,
+          50636,
+          50647,
+          50658,
+          50669,
+          50680,
+          50691,
+          50702
+        ],
+        "start_xyz": [
+          240.0,
+          6.0,
+          5.0
+        ],
+        "end_xyz": [
+          240.0,
+          6.0,
+          105.0
+        ],
+        "length": 100.0
+      },
+      "overlap_axis": "X",
+      "allowed_realization_segments": 1,
+      "geometry_parallel": true,
+      "known_gap_note": "",
+      "note": "the cross web's end column stands 6 mm clear of the long web face at 60 degrees: a generalized T whose angle fails the strict envelope, so only the per-chain recall pass can report it"
+    }
+  ],
+  "forbidden_candidates": [],
+  "tolerated_candidates": [],
+  "analytic": {
+    "generalized_t": {
+      "dihedral_deg": 60.0,
+      "clearance_mm": 6.0,
+      "rule": "the strict pass reports the cross web's bottom chain only; the end column must be recovered by the recall pass on the same component"
+    },
+    "component_names": {
+      "TC050_SRC_CROSS": 70002,
+      "TC050_SRC_LONG": 70001,
+      "TC050_TGT_BASE": 70000
+    }
+  }
+}

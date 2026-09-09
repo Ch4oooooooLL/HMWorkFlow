@@ -54,110 +54,140 @@ proc ::MeshSeamWeld::pointSegmentDistance {segmentStart segmentEnd point} {
     return [expr {sqrt($dx*$dx + $dy*$dy + $dz*$dz)}]
 }
 
-proc ::MeshSeamWeld::pointOnBoundarySegment {coords segA segB nodeId} {
-    foreach id [list $segA $segB $nodeId] {
-        if {![dict exists $coords $id]} { return 0 }
+# Depth-first search for a simple after-remesh boundary chain from $fromNode
+# to $toNode whose intermediate nodes are all new (absent from the original
+# boundary).  Returns the chain node list including both endpoints, or {} when
+# no such chain exists.
+proc ::MeshSeamWeld::boundaryChainThroughNewNodes {fromNode toNode afterAdjName beforeNodeName} {
+    upvar 1 $afterAdjName afterAdj
+    upvar 1 $beforeNodeName beforeNode
+    if {![info exists afterAdj($fromNode)]} { return {} }
+    set stack [list [list $fromNode [list $fromNode]]]
+    set visited [dict create $fromNode 1]
+    while {[llength $stack] > 0} {
+        set entry [lindex $stack end]
+        set stack [lrange $stack 0 end-1]
+        lassign $entry current path
+        foreach neighbor $afterAdj($current) {
+            if {$neighbor eq $toNode} { return [concat $path [list $toNode]] }
+            if {[info exists beforeNode($neighbor)]} { continue }
+            if {[dict exists $visited $neighbor]} { continue }
+            dict set visited $neighbor 1
+            lappend stack [list $neighbor [concat $path [list $neighbor]]]
+        }
     }
-    set pa [dict get $coords $segA]
-    set pb [dict get $coords $segB]
-    set ax [lindex $pa 0]; set ay [lindex $pa 1]; set az [lindex $pa 2]
-    set bx [lindex $pb 0]; set by [lindex $pb 1]; set bz [lindex $pb 2]
-    set length [expr {sqrt(($bx-$ax)*($bx-$ax) + ($by-$ay)*($by-$ay) + ($bz-$az)*($bz-$az))}]
-    set distance [::MeshSeamWeld::pointSegmentDistance $pa $pb [dict get $coords $nodeId]]
-    return [expr {$distance <= 1.0e-3 * $length + 1.0e-9}]
+    return {}
 }
 
-# Walk the after-remesh boundary graph from $fromNode to $toNode.  Every
-# intermediate node must lie on the straight segment between them, so an
-# in-place subdivision of the original edge is accepted while any sideways
-# reconnection of the boundary fails.
-proc ::MeshSeamWeld::boundaryEdgeChainPreserved {fromNode toNode afterAdjName coords} {
-    upvar 1 $afterAdjName afterAdj
-    if {![info exists afterAdj($fromNode)]} { return 0 }
-    set previous $fromNode
-    set current ""
-    foreach neighbor $afterAdj($fromNode) {
-        if {$neighbor eq $toNode} { set current $toNode; break }
-        if {[::MeshSeamWeld::pointOnBoundarySegment $coords $fromNode $toNode $neighbor]} {
-            set current $neighbor
-            break
-        }
+# An inserted boundary node is accepted when the original attachment edge it
+# subdivides is still its closest original attachment edge.  Comparing against
+# the closest edge instead of the chord of one edge keeps the test valid on
+# curved rails, where the remesher inserts the node on the curve and therefore
+# off the chord.  A node that ended up next to a different attachment edge (for
+# example on the opposite rail) is rejected.  Unreadable coordinates fail
+# closed.
+proc ::MeshSeamWeld::boundaryNodeBelongsToEdge {nodeId a b boundaryBefore coords} {
+    foreach id [list $nodeId $a $b] {
+        if {![dict exists $coords $id]} { return 0 }
     }
-    set visited [dict create]
-    set guard 0
-    while {$current ne $toNode} {
-        if {$current eq "" || [dict exists $visited $current] || [incr guard] > 100000} {
-            return 0
-        }
-        dict set visited $current 1
-        set next ""
-        if {[info exists afterAdj($current)]} {
-            foreach neighbor $afterAdj($current) {
-                if {$neighbor eq $previous} { continue }
-                if {$neighbor eq $toNode} { set next $toNode; break }
-                if {[::MeshSeamWeld::pointOnBoundarySegment $coords $fromNode $toNode $neighbor]} {
-                    set next $neighbor
-                    break
-                }
-            }
-        }
-        set previous $current
-        set current $next
+    set own [::MeshSeamWeld::pointSegmentDistance [dict get $coords $a] \
+        [dict get $coords $b] [dict get $coords $nodeId]]
+    foreach edge $boundaryBefore {
+        lassign $edge c d
+        if {$c eq $d} { continue }
+        if {($c eq $a && $d eq $b) || ($c eq $b && $d eq $a)} { continue }
+        if {![dict exists $coords $c] || ![dict exists $coords $d]} { return 0 }
+        set other [::MeshSeamWeld::pointSegmentDistance [dict get $coords $c] \
+            [dict get $coords $d] [dict get $coords $nodeId]]
+        if {$other < $own - (1.0e-3 * $own + 1.0e-9)} { return 0 }
     }
     return 1
 }
 
-proc ::MeshSeamWeld::afterEdgeOnOriginalBoundary {a b boundaryBefore coords} {
-    if {$a eq $b} { return 0 }
-    foreach edge $boundaryBefore {
-        lassign $edge c d
-        if {$c eq $d} { continue }
-        if {[::MeshSeamWeld::pointOnBoundarySegment $coords $c $d $a] &&
-            [::MeshSeamWeld::pointOnBoundarySegment $coords $c $d $b]} { return 1 }
-    }
-    return 0
-}
-
-# Relaxed attachment validation used instead of the exact boundary-edge-set
-# equality when strict_patch_boundary_check is off.  The remesher legitimately
-# subdivides a long boundary edge by inserting nodes on it while both fixed
-# endpoints stay, which the exact comparison rejected.  The attachment counts
-# as changed when an original boundary edge is neither preserved nor replaced
-# by a collinear subdivided chain, or a new boundary edge leaves the original
-# attachment polyline.  Unreadable coordinates fail closed.
-proc ::MeshSeamWeld::patchBoundaryAttachmentChanged {boundaryBefore boundaryAfter} {
+# Attachment validation for the mixed remesh of the native patch, used instead
+# of the exact boundary-edge-set equality when strict_patch_boundary_check is
+# off.  The remesher legitimately subdivides a long boundary edge in place by
+# inserting nodes while both fixed endpoints stay.  On a curved rail it places
+# those nodes on the curve, so they are off the original chord by the chord's
+# sagitta (measured 0.37 mm on a 16.9 mm chord at R=97, HM 2019/2022), which a
+# chord-collinearity tolerance rejects.  The attachment is therefore validated
+# topologically: every original boundary node must keep its boundary
+# attachment, every original boundary edge must be preserved or replaced by a
+# chain of newly inserted nodes, every inserted node must still belong to the
+# original edge it subdivides, and no after-remesh boundary edge may lie
+# outside the original attachment.  A lost attachment node, a sideways
+# reconnection or unreadable coordinates fail closed.  Returns "" when the
+# attachment is preserved, otherwise a short diagnostic.
+proc ::MeshSeamWeld::patchBoundaryAttachmentProblem {boundaryBefore boundaryAfter} {
     array set afterAdj {}
+    array set afterEdge {}
     foreach edge $boundaryAfter {
         lassign $edge a b
-        if {$a eq $b} { return 1 }
+        if {$a eq $b} { return "degenerate after-remesh boundary edge $a-$b" }
         lappend afterAdj($a) $b
         lappend afterAdj($b) $a
+        set afterEdge([lsort -integer [list $a $b]]) 1
     }
+    array set beforeNode {}
     set nodeIds {}
-    foreach edge [concat $boundaryBefore $boundaryAfter] {
+    foreach edge $boundaryBefore {
+        foreach nodeId $edge {
+            set beforeNode($nodeId) 1
+            lappend nodeIds $nodeId
+        }
+    }
+    foreach edge $boundaryAfter {
         foreach nodeId $edge { lappend nodeIds $nodeId }
     }
     set nodeIds [lsort -integer -unique $nodeIds]
-    if {[llength $nodeIds] == 0} { return 0 }
+    if {[llength $nodeIds] == 0} { return "" }
     set coords [::MeshSeamWeld::patchBoundaryNodeCoordinates $nodeIds]
-    if {[dict size $coords] == 0} { return 1 }
+    if {[dict size $coords] == 0} { return "boundary node coordinates are unreadable" }
 
+    array set afterNode {}
+    foreach edge $boundaryAfter {
+        foreach nodeId $edge { set afterNode($nodeId) 1 }
+    }
+    foreach nodeId [lsort -integer [array names beforeNode]] {
+        if {![info exists afterNode($nodeId)]} {
+            return "original attachment node $nodeId lost its boundary attachment"
+        }
+    }
+
+    array set covered {}
     foreach edge $boundaryBefore {
         lassign $edge a b
         if {$a eq $b} { continue }
-        if {[info exists afterAdj($a)] && [lsearch -exact $afterAdj($a) $b] >= 0} { continue }
-        if {![::MeshSeamWeld::boundaryEdgeChainPreserved $a $b afterAdj $coords]} {
-            return 1
-        }
-    }
-    foreach edge $boundaryAfter {
-        lassign $edge a b
-        if {[::MeshSeamWeld::afterEdgeOnOriginalBoundary $a $b $boundaryBefore $coords]} {
+        set key [lsort -integer [list $a $b]]
+        if {[info exists afterEdge($key)]} {
+            set covered($key) 1
             continue
         }
-        return 1
+        set chain [::MeshSeamWeld::boundaryChainThroughNewNodes $a $b afterAdj beforeNode]
+        if {[llength $chain] < 2} {
+            return "attachment edge $a-$b was neither kept nor subdivided"
+        }
+        foreach nodeId [lrange $chain 1 end-1] {
+            if {![::MeshSeamWeld::boundaryNodeBelongsToEdge $nodeId $a $b \
+                    $boundaryBefore $coords]} {
+                return "inserted node $nodeId does not belong to attachment edge $a-$b"
+            }
+        }
+        for {set index 0} {$index < [llength $chain] - 1} {incr index} {
+            set key [lsort -integer [list [lindex $chain $index] \
+                [lindex $chain [expr {$index + 1}]]]]
+            if {![info exists afterEdge($key)]} {
+                return "subdivision chain of attachment edge $a-$b is not a boundary chain"
+            }
+            set covered($key) 1
+        }
     }
-    return 0
+    foreach key [lsort [array names afterEdge]] {
+        if {![info exists covered($key)]} {
+            return "after-remesh boundary edge [join $key -] is outside the original attachment"
+        }
+    }
+    return ""
 }
 
 proc ::MeshSeamWeld::processWeldPathNativePatch {sourceNodes targetComps closedLoop {progressOpened 0} {pathIndex 1} {pathTotal 1} {sourceCompIds {}} {seamComp ""} {targetElemIds {}} {imprintClosedLoop ""}} {
@@ -238,9 +268,12 @@ proc ::MeshSeamWeld::processWeldPathNativePatch {sourceNodes targetComps closedL
             if {[lsort $boundaryBefore] ne [lsort $boundaryAfter]} {
                 error "Native patch remesh changed its attachment edges."
             }
-        } elseif {[::MeshSeamWeld::patchBoundaryAttachmentChanged \
-                $boundaryBefore $boundaryAfter]} {
-            error "Native patch remesh moved the patch attachment boundary."
+        } else {
+            set boundaryProblem [::MeshSeamWeld::patchBoundaryAttachmentProblem \
+                $boundaryBefore $boundaryAfter]
+            if {$boundaryProblem ne ""} {
+                error "Native patch remesh moved the patch attachment boundary: $boundaryProblem (boundary_edges [llength $boundaryBefore] -> [llength $boundaryAfter])."
+            }
         }
     } meshErr]} {
         ::MeshSeamWeld::stageError AUTOMESH $meshErr

@@ -2,18 +2,16 @@
   "schema_version": "1.0",
   "case_id": "TC019",
   "case_kind": "atomic",
-  "purpose": "strongly curved target (~20 deg normal swing) is review",
-  "failure_mode": "a large cumulative normal change along the weld must downgrade AUTO",
+  "purpose": "strongly curved target with complete local support stays AUTO",
+  "failure_mode": "global curvature is evidence; every local edge/face sample remains trustworthy",
   "decision_policy": {},
   "welds": [
     {
       "semantic_id": "TC019_W01",
       "weld_type": "T",
       "source_component": "TC019_SRC_WEB",
-      "expected_decision": "REVIEW",
-      "required_reason_codes": [
-        "CURVED_TARGET"
-      ],
+      "expected_decision": "AUTO",
+      "required_reason_codes": [],
       "required_reason_any": [],
       "forbidden_reason_codes": [],
       "target_components": [
@@ -78,6 +76,7 @@
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC019_SRC_WEB": 39001,

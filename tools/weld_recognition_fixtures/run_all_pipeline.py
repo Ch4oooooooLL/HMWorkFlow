@@ -9,10 +9,7 @@ root.  Every failure category the spec cares about is reported separately and
 False AUTO is never folded into an overall-accuracy figure.
 
 Exit status is 0 only when every stage passes: all FEM validators clean, the
-geometry validator has no findings, and the regression contains no unexpected
-(design-intent) failure.  The four intentional FAIL fixtures (TC027, TC046,
-CM002, CM003) document genuine V2 defects listed in README.md and are counted
-explicitly as known fails rather than hidden.
+geometry validator has no findings, and every recognition fixture passes.
 """
 from __future__ import annotations
 
@@ -132,13 +129,8 @@ def run(output_root: Path, regression_settings=None) -> dict:
 
     fem_ok = fem_report["invalid_count"] == 0
     geometry_ok = geometry_report["finding_count"] == 0
-    # regression "passes" when no NEW unexpected defect appears: the four known
-    # failures are accepted but reported explicitly, so pass when the failed
-    # set is exactly the documented design-intent set.
-    expected_known_fails = {"TC027_source_inner_boundary", "TC046_coplanar_butt",
-                            "CM002_adversarial_composite", "CM003_full_corpus"}
     failed_ids = {entry["case_id"] for entry in failed_cases}
-    regression_clean = bool(failed_ids) and failed_ids == expected_known_fails
+    regression_clean = not failed_ids
     report["status"] = "ALL_GREEN" if (fem_ok and geometry_ok and regression_clean) else "SEE_FAILURES"
     return report
 

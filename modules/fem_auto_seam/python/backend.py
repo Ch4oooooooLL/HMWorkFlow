@@ -31,7 +31,7 @@ try:
     from hmworkflow.mesh_seam_weld.element_projection import angle_degrees, cross, dot, norm, unit
     from hmworkflow.mesh_seam_weld.local_split_planner import _plane, _project, _triangulate
     from .multi_element_split_planner import plan_multi_element_split
-    from .recognition_v2 import build_physical_geometry_context, detect_t_candidates as detect_t_candidates_v2, enrich_non_t_candidate
+    from .recognition_v2 import build_physical_geometry_context, detect_t_candidates as detect_t_candidates_v2, enrich_non_t_candidate, mesh_continuous
     from hmworkflow.mesh_seam_weld.quality_guard import element_metrics, validate_strip_connectivity, validate_weld_elements
     from hmworkflow.mesh_seam_weld.shell_topology import build as build_topology
     from hmworkflow.mesh_seam_weld.weld_strip_planner import plan_zipper
@@ -39,7 +39,7 @@ except ImportError:
     from element_projection import angle_degrees, cross, dot, norm, unit
     from local_split_planner import _plane, _project, _triangulate
     from multi_element_split_planner import plan_multi_element_split
-    from recognition_v2 import build_physical_geometry_context, detect_t_candidates as detect_t_candidates_v2, enrich_non_t_candidate
+    from recognition_v2 import build_physical_geometry_context, detect_t_candidates as detect_t_candidates_v2, enrich_non_t_candidate, mesh_continuous
     from quality_guard import element_metrics, validate_strip_connectivity, validate_weld_elements
     from shell_topology import build as build_topology
     from weld_strip_planner import plan_zipper
@@ -72,8 +72,8 @@ DEFAULT_SETTINGS = {
     # V2 recognition gates.  They remain request-overridable and are kept in
     # one settings table so geometry code contains no decision magic numbers.
     "boundary_split_turn_angle_deg": 30.0,
-    "boundary_split_source_normal_change_deg": 20.0,
-    "t_angle_auto_min_deg": 80.0,
+    "boundary_split_source_normal_change_deg": 45.0,
+    "t_angle_auto_min_deg": 70.0,
     "t_angle_auto_max_deg": 100.0,
     "t_angle_review_min_deg": 65.0,
     "t_angle_review_max_deg": 115.0,
@@ -82,13 +82,46 @@ DEFAULT_SETTINGS = {
     "geometry_mesh_ratio_auto": 0.35,
     "geometry_thickness_ratio_auto": 0.15,
     "geometry_review_multiplier": 3.0,
-    "ambiguity_auto_min_score_margin": 0.50,
+    "t_tangential_tolerance_ratio": 0.10,
+    "t_bevel_clearance_mm": 2.0,
+    "t_bevel_source_thickness_ratio": 0.50,
+    "t_bevel_mesh_ratio": 0.25,
+    "t_target_min_support_ratio": 0.12,
+    "t_edge_review_coverage": 0.67,
+    # Candidate recall accepts generalized T intersections and excludes only
+    # near-coplanar faces (handled by PATCH).  The reported angle remains
+    # diagnostic, while Tcl/Create Patch decides realizability.
+    "t_recall_angle_min_deg": 20.0,
+    "t_recall_angle_max_deg": 90.0,
+    "t_recall_distance_multiplier": 3.0,
+    "t_recall_tangential_mesh_ratio": 1.0,
+    "t_recall_edge_review_coverage": 0.01,
+    # Supplementary relaxed rows (a chain the strict pass missed on a source
+    # component which already owns strict rows) must clear this sample
+    # coverage, so a chain that merely brushes a face at one end stays out.
+    "t_recall_min_coverage": 0.5,
+    # Components which already share GRID nodes are one continuous mesh; the
+    # FEM transfers load there, so no weld seam is missing.
+    "ignore_shared_nodes": True,
+    "min_continuous_nodes": 3,
+    "patch_review_min_coverage": 0.25,
+    "ambiguity_auto_min_score_margin": 0.40,
     "ambiguity_sample_ratio": 0.25,
     "curved_target_auto_max_normal_variation_deg": 12.0,
+    "target_normal_jump_auto_max_deg": 30.0,
     "projection_jump_ratio": 2.5,
     "small_gap_auto_length_over_h": 0.25,
-    "patch_inner_loop_policy": "review",
+    # A patch opening larger than ``small_hole_diameter`` is a genuine exposed
+    # patch boundary and is welded together with the outer perimeter.  Smaller
+    # fastener openings are filtered before rows are built, so they neither
+    # create welds nor veto an otherwise valid patch.
+    "patch_inner_loop_policy": "auto_all",
     "review_multi_target_realization": False,
+    "t_recall_first_mode": True,
+    # Field-validation policy: every structurally usable T/PATCH candidate is
+    # sent to Tcl.  Recognition scores and review reasons remain diagnostics;
+    # they no longer suppress creation.
+    "submit_all_weld_candidates": True,
 }
 
 
@@ -1092,7 +1125,6 @@ def _patch_row(source_id, target_id, group_id, loop_index, path, hole_rows, smal
     auto = (
         contained
         and areas_differ
-        and not small_holes
         and bool(distances)
         and variation <= maximum_variation
         and angle <= float(settings["maximum_patch_normal_angle"])
@@ -1102,7 +1134,7 @@ def _patch_row(source_id, target_id, group_id, loop_index, path, hole_rows, smal
     confidence = _candidate_confidence(1.0, variation, max(0.0, 1.0 - angle / max(maximum_angle, 1.0)))
     warnings = []
     if small_holes:
-        warnings.append("patch contains an internal hole below the automatic diameter limit")
+        warnings.append("fastener-sized patch openings are excluded from the weld path")
     if beyond_warning:
         warnings.append("patch loop extends beyond the target footprint")
     return {
@@ -1135,6 +1167,13 @@ def _patch_row(source_id, target_id, group_id, loop_index, path, hole_rows, smal
         "reasons": ["smaller parallel shell is fully projected inside a larger target shell"],
         "warnings": warnings if warnings else ([] if auto else ["parallel components overlap only partially or miss a trusted tolerance gate"]),
     }
+
+
+def _loop_mesh_continuous(path, target_topology):
+    """True when a weld loop is already merged into the partner component mesh."""
+    if target_topology is None:
+        return False
+    return mesh_continuous(path.get("node_ids") or [], target_topology.node_ids)
 
 
 def _patch_candidates(model, settings, topologies, shared=None):
@@ -1186,6 +1225,11 @@ def _patch_candidates(model, settings, topologies, shared=None):
                 deferred_loops = []
                 for loop in loops:
                     path = loop["path"]
+                    if _loop_mesh_continuous(path, topologies[target_id]):
+                        # The loop is merged into the partner mesh: the two
+                        # components already share those GRID nodes, so the
+                        # patch is connected and no seam is missing.
+                        continue
                     length = _path_length(path["node_ids"], nodes, True)
                     if length < minimum_length * potential_length_ratio:
                         continue
@@ -1237,6 +1281,8 @@ def _patch_candidates(model, settings, topologies, shared=None):
                 fallback_rows = []
                 for loop in loops:
                     path = loop["path"]
+                    if _loop_mesh_continuous(path, topologies[target_id]):
+                        continue
                     length = _path_length(path["node_ids"], nodes, True)
                     if length < minimum_length * potential_length_ratio:
                         continue
@@ -1246,7 +1292,14 @@ def _patch_candidates(model, settings, topologies, shared=None):
                         model, shared, source_id, path, target_normal,
                         target_elements, target_index, maximum, tolerance,
                     )
-                    if not any(hit is not None for hit in node_hits + extra_hits):
+                    hit_count = sum(hit is not None for hit in node_hits + extra_hits)
+                    if hit_count < max(
+                        2,
+                        int(math.ceil(
+                            len(node_hits + extra_hits) *
+                            float(settings.get("patch_review_min_coverage", 0.25))
+                        )),
+                    ):
                         continue
                     fallback_rows.append((path, length, node_hits, extra_hits, False, False))
                 if fallback_rows:
@@ -1446,25 +1499,60 @@ def _apply_relation_ambiguity(candidates):
     return candidates
 
 
-def build_recognition_plan(candidates):
-    """Return trusted seed jobs and component-only potential review groups."""
+def build_recognition_plan(candidates, recall_first=True, submit_all=True):
+    """Build Tcl seed jobs, optionally bypassing every recognition review gate."""
     trusted = []
     potential_rows = []
     for row in candidates:
-        if row.get("recognition_status") == "TRUSTED" and row.get("auto_eligible"):
+        standard_trusted = row.get("recognition_status") == "TRUSTED" and row.get("auto_eligible")
+        target_ids = [
+            int(value) for value in row.get("target_component_ids", [row.get("target_component_id", 0)])
+            if value is not None and int(value) > 0
+        ]
+        source_nodes = [int(value) for value in row.get("source_node_ids", []) if int(value) > 0]
+        direct_delivery = (
+            bool(submit_all)
+            and row.get("candidate_type") in ("T_SEAM", "PATCH_SEAM")
+            and bool(source_nodes)
+            and bool(target_ids)
+        )
+        # Temporary recall-first field-validation policy.  A detected local T
+        # edge is delivered for creation even when conservative scoring marked
+        # it REVIEW (gap, partial coverage, target ambiguity, angle border,
+        # projection jump).  Only evidence that the selected edge itself is
+        # topologically unsafe remains blocking; unrelated component geometry
+        # never participates here.  Existing seams are never duplicated.
+        if row.get("recall_candidate_fallback"):
+            local_topology_blockers = {"INNER_BOUNDARY_SOURCE"}
+        else:
+            local_topology_blockers = {
+                "INNER_BOUNDARY_SOURCE", "SHORT_WELD", "ANGLE_BORDERLINE",
+                "SKIN_ERROR_BORDERLINE",
+            }
+        recall_trusted = (
+            bool(recall_first)
+            and row.get("candidate_type") == "T_SEAM"
+            and row.get("duplicate_status", "NEW") == "NEW"
+            and len(source_nodes) >= 2
+            and bool(target_ids)
+            and not (set(row.get("reason_codes", [])) & local_topology_blockers)
+        )
+        if direct_delivery or standard_trusted or recall_trusted:
             seed = {
                 "candidate_id": str(row["candidate_id"]),
                 "weld_type": "T" if row["candidate_type"] == "T_SEAM" else "PATCH",
                 "source_component_id": int(row["source_component_id"]),
-                "target_component_ids": [
-                    int(value) for value in row.get("target_component_ids", [row["target_component_id"]])
-                    if int(value) > 0
-                ],
-                "source_node_ids": [int(value) for value in row.get("source_node_ids", []) if int(value) > 0],
+                "target_component_ids": target_ids,
+                "source_node_ids": source_nodes,
                 "closed_loop": bool(row.get("closed", False)),
                 "confidence": float(row.get("confidence", 0.0)),
                 "support_runs": list(row.get("support_runs", [])),
                 "reason_codes": list(row.get("reason_codes", [])),
+                "delivery_mode": (
+                    "ALL_CANDIDATES" if direct_delivery else
+                    "RECALL_FIRST" if recall_trusted and not standard_trusted else
+                    "STANDARD"
+                ),
             }
             if seed["source_node_ids"]:
                 trusted.append(seed)

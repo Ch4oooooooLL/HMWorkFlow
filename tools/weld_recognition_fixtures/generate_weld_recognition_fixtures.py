@@ -24,6 +24,7 @@ from atomic_tc011_020 import ATOMIC_CASES_011_020
 from atomic_tc021_030 import ATOMIC_CASES_021_030
 from atomic_tc031_040 import ATOMIC_CASES_031_040
 from atomic_tc041_048 import ATOMIC_CASES_041_048
+from atomic_tc049_050 import ATOMIC_CASES_049_050
 from wfc_catalogue import (ATOMIC_DIR, DEFAULT_OUTPUT_ROOT, atomic_subdir,
                            case_id_range, component_banners, write_json)
 from wfc_csv import aggregate_case_csvs, write_weld_csv
@@ -49,6 +50,7 @@ ATOMIC_REGISTRY.update(ATOMIC_CASES_011_020)
 ATOMIC_REGISTRY.update(ATOMIC_CASES_021_030)
 ATOMIC_REGISTRY.update(ATOMIC_CASES_031_040)
 ATOMIC_REGISTRY.update(ATOMIC_CASES_041_048)
+ATOMIC_REGISTRY.update(ATOMIC_CASES_049_050)
 
 
 def _register(prefix):  # pragma: no cover - registration groups live in each module

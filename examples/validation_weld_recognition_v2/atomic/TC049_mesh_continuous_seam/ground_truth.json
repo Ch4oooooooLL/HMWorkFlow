@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "case_id": "TC049",
+  "case_kind": "atomic",
+  "purpose": "mesh-continuous components (shared GRID nodes)",
+  "failure_mode": "a web merged into the base mesh through shared GRID nodes transfers load directly: no weld seam exists there, so no candidate may be emitted",
+  "decision_policy": {
+    "mesh_continuous": "no_candidate",
+    "expected_candidate_count": 0
+  },
+  "welds": [],
+  "forbidden_candidates": [],
+  "tolerated_candidates": [],
+  "analytic": {
+    "mesh_continuity": {
+      "shared_node_ids": [
+        49110,
+        49111,
+        49112,
+        49113,
+        49114,
+        49115,
+        49116,
+        49117,
+        49118,
+        49119,
+        49120
+      ],
+      "rule": "shared GRID nodes on the seam mean one continuous mesh; the recognizer must not offer the pair as a weld candidate"
+    },
+    "component_names": {
+      "TC049_SRC_WEB": 69001,
+      "TC049_TGT_BASE": 69000
+    }
+  }
+}

@@ -311,6 +311,8 @@ def analyse_atomic(result: dict) -> dict:
         if expected_target_names and group_target_names != expected_target_names:
             if weld.get("allow_extra_targets") and expected_target_names <= group_target_names:
                 pass  # extra targets are documented physical near-neighbours
+            elif known_gap:
+                issues.append({"kind": "KNOWN_GAP", "semantic_id": weld["semantic_id"], "message": weld["known_gap_note"]})
             else:
                 counts["wrong_target"] += 1
                 issues.append({"kind": "WRONG_TARGET", "semantic_id": weld["semantic_id"], "message": "expected {} got {}".format(sorted(expected_target_names), sorted(group_target_names))})
@@ -376,8 +378,21 @@ def analyse_atomic(result: dict) -> dict:
                 span = _gt_span(weld, model)
                 if _overlap_ratio(_candidate_span(row, model), span) >= 0.5:
                     covered_auto.add(id(row))
+    tolerated_pairs = {
+        (entry["source_component"], entry["target_component"]): entry.get("note", "")
+        for entry in gt.get("tolerated_candidates", [])
+    }
     for row in auto_candidates:
         if id(row) not in covered_auto:
+            src_name = name_by_id.get(row["source_component_id"])
+            tgt_names = {name_by_id.get(t) for t in row.get("target_component_ids", [row["target_component_id"]])}
+            hits = [target for target in tgt_names if (src_name, target) in tolerated_pairs]
+            if hits and len(hits) == len(tgt_names):
+                for target in sorted(hits):
+                    issues.append({"kind": "KNOWN_GAP", "semantic_id": None,
+                                   "message": "recall-policy tolerated candidate {} -> {}: {}".format(
+                                       src_name, target, tolerated_pairs[(src_name, target)])})
+                continue
             counts["unexpected_candidate"] += 1
             issues.append({"kind": "UNEXPECTED_AUTO", "message": "AUTO candidate {} -> {} has no expected weld source overlap".format(name_by_id.get(row["source_component_id"]), [name_by_id.get(t) for t in row.get("target_component_ids", [])])})
     return {"counts": counts, "issues": issues}

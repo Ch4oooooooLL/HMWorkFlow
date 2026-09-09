@@ -29,6 +29,7 @@
       "note": "closed dependency cycle: no pair in the loop may AUTO"
     }
   ],
+  "tolerated_candidates": [],
   "analytic": {
     "cycle": {
       "plates": [

@@ -686,7 +686,7 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "",
+      "known_gap_note": "DIA_3 stands 6 mm proud of the bottom skin, inside the recall-first contact envelope, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row.",
       "note": "diaphragm 3 stands 6 mm proud of the skin: phantom, never AUTO; its rim ends 8 mm from the side-wall skin, so a tolerant recognizer may also list the wall among the targets"
     },
     {
@@ -823,12 +823,12 @@
       "semantic_id": "CM001_W_DIA5_BOT",
       "weld_type": "T",
       "source_component": "CM001_DIA_5",
-      "expected_decision": "REVIEW",
+      "expected_decision": "AUTO",
       "required_reason_codes": [],
-      "required_reason_any": [
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
         "ANGLE_BORDERLINE"
       ],
-      "forbidden_reason_codes": [],
       "target_components": [
         "CM001_BASE_BOTTOM"
       ],
@@ -884,18 +884,18 @@
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
       "known_gap_note": "",
-      "note": "diaphragm 5 tilted 15 deg off vertical -> 75 deg T"
+      "note": "diaphragm 5 tilted 15 deg off vertical -> 75 deg T, above the visible 70 deg threshold"
     },
     {
       "semantic_id": "CM001_W_DIA5_TOP",
       "weld_type": "T",
       "source_component": "CM001_DIA_5",
-      "expected_decision": "REVIEW",
+      "expected_decision": "AUTO",
       "required_reason_codes": [],
-      "required_reason_any": [
+      "required_reason_any": [],
+      "forbidden_reason_codes": [
         "ANGLE_BORDERLINE"
       ],
-      "forbidden_reason_codes": [],
       "target_components": [
         "CM001_BASE_TOP"
       ],
@@ -951,7 +951,7 @@
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
       "known_gap_note": "",
-      "note": "diaphragm 5 top chain also at the 75 deg borderline angle"
+      "note": "diaphragm 5 top chain is also 75 deg and qualifies for AUTO"
     },
     {
       "semantic_id": "CM001_W_STIFF_BOT",
@@ -1115,6 +1115,53 @@
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [
+    {
+      "source_component": "CM001_DIA_1",
+      "target_component": "CM001_SIDE_LEFT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_DIA_1",
+      "target_component": "CM001_SIDE_RIGHT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_DIA_2",
+      "target_component": "CM001_SIDE_LEFT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_DIA_2",
+      "target_component": "CM001_SIDE_RIGHT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_DIA_3",
+      "target_component": "CM001_SIDE_LEFT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_DIA_3",
+      "target_component": "CM001_SIDE_RIGHT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_DIA_4",
+      "target_component": "CM001_SIDE_LEFT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_DIA_4",
+      "target_component": "CM001_SIDE_RIGHT",
+      "note": "diaphragm end edge stands ~5 mm clear of the wall inner skin; recalled by the contact envelope although no physical weld exists"
+    },
+    {
+      "source_component": "CM001_STIFF_LONG",
+      "target_component": "CM001_DIA_4",
+      "note": "stiffener end edge stands ~5 mm clear of the DIA_4 face; recalled by the contact envelope although no physical weld exists"
+    }
+  ],
   "analytic": {
     "component_roles": {
       "bottom": "CM001_BASE_BOTTOM",

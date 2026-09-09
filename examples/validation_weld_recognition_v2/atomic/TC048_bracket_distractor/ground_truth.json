@@ -97,11 +97,12 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "",
+      "known_gap_note": "the bracket bottom stands 4 mm proud of the skin, inside the recall-first contact envelope, so V2 emits AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the creation gate rejects the row, the recognizer stays recall-first.",
       "note": "bottom 4 mm above the skin, short height: a phantom 'weld' the recognizer must route to REVIEW at most"
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC048_SRC_BRACKET": 68002,

@@ -62,9 +62,7 @@ def tc012_narrow_slot(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List
 def tc013_partial_target_middle(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List[int]]]:
     """Source 0..400 but only the X=100..300 middle has a target.
 
-    Spec: extract only the effective subchain and AUTO it.  V2 currently
-    extracts the right subchain but downgrades it to REVIEW because the whole
-    parent chain coverage is below the AUTO gate (known implementation gap).
+    Spec: extract only the effective subchain and AUTO it.
     """
     b = ModelBuilder(**ranges)
     flat_target(b, "TC013_TGT_BASE", 100.0, 300.0, -100.0, 100.0, 0.0, 10.0)
@@ -72,14 +70,10 @@ def tc013_partial_target_middle(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict
     chain = list(web_lattice[0])
     gt = GroundTruth(
         "TC013", "atomic", "source edge overhanging the target must only use the effective middle",
-        "a recognizer that welds the whole 400 mm free edge would fabricate weld in the void",
-        decision_policy={"known_impl_gap": "parent-coverage penalty downgrades the correct subchain to REVIEW"})
+        "a recognizer that welds the whole 400 mm free edge would fabricate weld in the void")
     gt.add_weld(expect_weld(
         semantic_id="TC013_W01", weld_type="T", source_component="TC013_SRC_WEB",
         target_components=["TC013_TGT_BASE"], expected_decision="AUTO",
-        known_gap_note="V2 extracts the correct X=100..300 subchain but downgrades it to "
-                       "REVIEW/PARTIAL_COVERAGE because parent-chain coverage is gated before "
-                       "subchain selection. Spec expects the perfect middle to AUTO.",
         note="subchain X=100..300 is geometrically perfect; endpoint discretization tolerance allowed",
     ))
     return b, gt, {"TC013_SRC_WEB": chain}
@@ -209,12 +203,11 @@ def tc019_curved_target(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, Li
     b, chain = _curved_target_case("TC019", 900.0, 155.0, ranges,
         "curved target", "later", "")
     gt = GroundTruth(
-        "TC019", "atomic", "strongly curved target (~20 deg normal swing) is review",
-        "a large cumulative normal change along the weld must downgrade AUTO")
+        "TC019", "atomic", "strongly curved target with complete local support stays AUTO",
+        "global curvature is evidence; every local edge/face sample remains trustworthy")
     gt.add_weld(expect_weld(
         semantic_id="TC019_W01", weld_type="T", source_component="TC019_SRC_WEB",
-        target_components=["TC019_TGT_BASE"], expected_decision="REVIEW",
-        required_reason_codes=["CURVED_TARGET"],
+        target_components=["TC019_TGT_BASE"], expected_decision="AUTO",
         geometry_parallel=False,
         note="R=900 arc; cumulative normal change ~20 deg; skin error stays small",
     ))

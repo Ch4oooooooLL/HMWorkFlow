@@ -20,7 +20,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::MeshSeamWeld {
-    variable VERSION "0.54"
+    variable VERSION "0.55"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] mesh_seam_weld]
 
     variable cfg
@@ -57,6 +57,7 @@ namespace eval ::MeshSeamWeld {
         imprint_remesh_mode    2
         imprint_angle          30.0
         strict_patch_boundary_check 0
+        boundary_bend_angle_max 180.0
         mesh_face_shape        1
         mesh_elem_type         2
         mesh_smooth_method     1
@@ -140,7 +141,7 @@ proc ::MeshSeamWeld::stateKeys {} {
         max_weld_tria_ratio quality_guard_enabled max_new_failed_elements existing_weld_search_distance
         exclude_existing_welds keep_task_files auto_accept_confidence review_confidence execution_batch_size
         output_component weld_mesh_size patch_expand_layers imprint_remain imprint_remesh_mode imprint_angle
-        strict_patch_boundary_check
+        strict_patch_boundary_check boundary_bend_angle_max
         mesh_face_shape mesh_elem_type mesh_smooth_method mesh_smooth_tol
         mesh_size_control mesh_skew_control mesh_path_param
         mesh_cross_param mesh_cross_size create_geometry_surf
@@ -437,7 +438,7 @@ proc ::MeshSeamWeld::updateModeUi {} {
     foreach key {search_distance min_seam_length parallel_angle_max perpendicular_angle_min max_target_path_offset max_node_move} {
         if {[winfo exists $panel.e_$key]} { $panel.e_$key configure -state $autoState }
     }
-    foreach key {patch_expand_layers imprint_remesh_mode imprint_angle} {
+    foreach key {patch_expand_layers imprint_remesh_mode imprint_angle boundary_bend_angle_max} {
         if {[winfo exists $panel.e_$key]} { $panel.e_$key configure -state $manualState }
     }
     # Native Create Patch fixes remain=3 and remeshes the new patch in mixed
@@ -508,6 +509,7 @@ proc ::MeshSeamWeld::showPanel {} {
         {imprint_remain "imprint remain 参数" "Imprint remain option"}
         {imprint_remesh_mode "imprint remesh_mode 参数" "Imprint remesh_mode option"}
         {imprint_angle "imprint angle 参数" "Imprint angle option"}
+        {boundary_bend_angle_max "单点边界折角上限（度）" "Single-seed boundary bend limit (deg)"}
         {mesh_face_shape "焊缝面 shape_type" "Weld face shape_type"}
         {mesh_elem_type "焊缝面 elem_type，2 为混合" "Weld face elem_type, 2 = mixed"}
     }
@@ -524,7 +526,7 @@ proc ::MeshSeamWeld::showPanel {} {
     checkbutton $w.main.param.keep_tasks -text [::HWFlow::txt "保留任务文件" "Keep task files"] -variable ::MeshSeamWeld::ui(keep_task_files)
     checkbutton $w.main.param.local_split -text [::HWFlow::txt "允许局部切分（未验证，默认关闭）" "Allow local split (unvalidated; off by default)"] -variable ::MeshSeamWeld::ui(allow_local_split)
     checkbutton $w.main.param.node_move -text [::HWFlow::txt "允许受控目标节点微调" "Allow guarded target-node adjustment"] -variable ::MeshSeamWeld::ui(allow_target_node_move)
-    checkbutton $w.main.param.strict_boundary -text [::HWFlow::txt "patch 连接边逐边严格校验（默认允许 remesh 细分边界边）" "Strict per-edge patch boundary check (remesh may subdivide boundary edges by default)"] -variable ::MeshSeamWeld::ui(strict_patch_boundary_check)
+    checkbutton $w.main.param.strict_boundary -text [::HWFlow::txt "patch 连接边逐边严格校验（默认允许 remesh 沿原连接边细分，含曲边）" "Strict per-edge patch boundary check (remesh may subdivide original attachment edges by default, including curved rails)"] -variable ::MeshSeamWeld::ui(strict_patch_boundary_check)
     grid $w.main.param.exclude_existing -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid $w.main.param.keep_tasks -row $row -column 0 -columnspan 2 -sticky w; incr row
     grid $w.main.param.node_move -row $row -column 0 -columnspan 2 -sticky w; incr row
@@ -532,8 +534,8 @@ proc ::MeshSeamWeld::showPanel {} {
     grid $w.main.param.strict_boundary -row $row -column 0 -columnspan 2 -sticky w
 
     message $w.main.note -width 520 -text [::HWFlow::txt \
-        "连续节点直接作为开放路径执行。单点先由原生自由边图区分边界点和内部点：边界点只批量读取所在连通轮廓，并按目标最近壳单元的局部法向提取与目标平面平行的完整开放/闭合直线或曲线；内部点不查询目标法向，保留原流程，提取所属 component 的全部闭合自由边。不连续边界节点仍按端点对生成较短开放路径。识别结果逐路径投影到目标组件，扩展两到三层局部 Elements patch，再以 create_joint_elems=1 调用 Mesh Edit Create Patch，直接在 SEAM_* component 中创建焊缝壳。仅对本次新增 patch 做边界固定的 mixed remesh；空 patch、边界缺失或重绘破坏附件边界时整条路径回滚。默认允许 remesh 在原边界边上插入节点细分（长边加密），勾选「patch 连接边逐边严格校验」后恢复重绘前后逐边完全一致的校验。自由边图按源 component 在本批次缓存，运行流程不导出 FEM，也不调用 Python。" \
-        "Continuous nodes execute directly as open paths. A single node is first classified from the native free-edge graph. For a boundary node, only its connected outline is batch-read and filtered by the nearest target shell's local normal to collect the complete parallel open/closed line or curve. An internal node skips target-normal lookup and retains the existing behavior of selecting all closed free boundaries of its source component. Disconnected boundary nodes still form shorter open endpoint-pair paths. Each result is projected to the target and expanded to a two- or three-layer local Elements patch; Mesh Edit Create Patch is then called with create_joint_elems=1 to create the weld shell directly in SEAM_*. Only the newly created patch receives a boundary-fixed mixed remesh. Empty patches, missing attachment nodes, or an attachment boundary broken by the remesh roll back the path. By default the remesh may subdivide boundary edges in place by inserting nodes on them; enable the strict per-edge patch boundary check to restore the previous exact edge-set equality validation. Native edge graphs are cached per source component for the batch; no FEM export or Python planning is used."]
+        "连续节点直接作为开放路径执行。单点先由原生自由边图区分边界点和内部点：边界点只批量读取所在连通轮廓，并从该点沿自由边图双向行走，取折角不超过「单点边界折角上限」（默认 180°）的完整开放或闭合边界，分叉处取最直延续、两侧同样最直时整条路径报错；内部点保留原流程，提取所属 component 的全部闭合自由边。不连续边界节点仍按端点对生成较短开放路径。识别结果逐路径投影到目标组件，扩展两到三层局部 Elements patch，再以 create_joint_elems=1 调用 Mesh Edit Create Patch，直接在 SEAM_* component 中创建焊缝壳。仅对本次新增 patch 做边界固定的 mixed remesh；空 patch、边界缺失或重绘破坏附件边界时整条路径回滚。默认按拓扑校验附件保持：每条原连接边要么原样保留、要么由仅含新插入节点的边界链取代，插入节点必须仍归属于它所细分的原连接边（曲边允许弦高偏差），丢失原边界节点或横向改接仍整路径回滚；勾选「patch 连接边逐边严格校验」后恢复重绘前后逐边完全一致的校验。自由边图按源 component 在本批次缓存，运行流程不导出 FEM，也不调用 Python。" \
+        "Continuous nodes execute directly as open paths. A single node is first classified from the native free-edge graph. For a boundary node, only its connected outline is batch-read and then walked in both directions along the free-edge graph to collect the complete open or closed boundary whose corners stay within the single-seed boundary bend limit (180 degrees by default); at a branch the straightest continuation wins, and equally straight continuations fail the path. An internal node retains the existing behavior of selecting all closed free boundaries of its source component. Disconnected boundary nodes still form shorter open endpoint-pair paths. Each result is projected to the target and expanded to a two- or three-layer local Elements patch; Mesh Edit Create Patch is then called with create_joint_elems=1 to create the weld shell directly in SEAM_*. Only the newly created patch receives a boundary-fixed mixed remesh. Empty patches, missing attachment nodes, or an attachment boundary broken by the remesh roll back the path. By default the attachment is validated topologically: every original attachment edge is either kept or replaced by a boundary chain of newly inserted nodes that must still belong to the edge they subdivide (curved rails may deviate by the chord sagitta), while lost attachment nodes or sideways reconnections still roll back the path. Enable the strict per-edge patch boundary check to restore the previous exact edge-set equality validation. Native edge graphs are cached per source component for the batch; no FEM export or Python planning is used."]
     grid $w.main.note -row 3 -column 0 -columnspan 4 -sticky ew -pady {0 8}
 
     frame $w.btn -padx 12 -pady 10
@@ -609,6 +611,11 @@ proc ::MeshSeamWeld::acceptPanel {} {
     }
     if {![string is double -strict $ui(imprint_angle)] || $ui(imprint_angle) < 0} {
         tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "imprint angle 必须为非负数值。" "imprint angle must be non-negative."]
+        return
+    }
+    if {![string is double -strict $ui(boundary_bend_angle_max)] ||
+        $ui(boundary_bend_angle_max) <= 0 || $ui(boundary_bend_angle_max) > 180} {
+        tk_messageBox -icon warning -title [::HWFlow::txt "网格焊缝" "Mesh Seam Weld"] -message [::HWFlow::txt "单点边界折角上限必须为 0 到 180 之间的数值。" "Single-seed boundary bend limit must be between 0 and 180 degrees."]
         return
     }
     if {![string is double -strict $ui(mesh_smooth_tol)] || $ui(mesh_smooth_tol) <= 0} {
@@ -1616,76 +1623,38 @@ proc ::MeshSeamWeld::manifoldFreeEdgePathFromSeed {graph seedNode} {
     return [dict create path $path closed $closed]
 }
 
-proc ::MeshSeamWeld::unitNormalFromCoordinates {nodeIds coordinates} {
-    if {[llength $nodeIds] < 3} { return {} }
-    foreach nodeId [lrange $nodeIds 0 2] {
-        if {![dict exists $coordinates $nodeId]} { return {} }
-    }
-    set p0 [dict get $coordinates [lindex $nodeIds 0]]
-    set p1 [dict get $coordinates [lindex $nodeIds 1]]
-    set p2 [dict get $coordinates [lindex $nodeIds 2]]
-    set normal [::MeshSeamWeld::cross \
-        [::MeshSeamWeld::vsub $p1 $p0] [::MeshSeamWeld::vsub $p2 $p0]]
-    set length [expr {sqrt([::MeshSeamWeld::dot $normal $normal])}]
-    if {$length <= 1.0e-12} { return {} }
-    return [::MeshSeamWeld::vscale $normal [expr {1.0/$length}]]
-}
-
-proc ::MeshSeamWeld::localTargetNormalsAtSourceNode {sourceNode targetComps} {
-    variable nodeXYZCache
-    array set allowedComp {}
-    foreach componentId [::MeshSeamWeld::uniq $targetComps] {
-        set allowedComp($componentId) 1
-    }
-    set entityType [::MeshSeamWeld::markTargetElementsForProjection $targetComps 1]
-    foreach {x y z} [::MeshSeamWeld::nodeXYZ $sourceNode] break
-    set queryError ""
-    if {[catch {set targetNode [hm_getclosestnode $x $y $z 1 2]} queryError] ||
-        ![string is integer -strict $targetNode] || $targetNode <= 0} {
-        catch {*clearmark $entityType 1}
-        error "Could not locate the target surface near source node $sourceNode: $queryError"
-    }
-
-    set localElements {}
-    foreach elemId [::MeshSeamWeld::adjacentElementsForNodes [list $targetNode]] {
-        set componentId [::MeshSeamWeld::elemComponentId $elemId]
-        if {[info exists allowedComp($componentId)] &&
-            [::MeshSeamWeld::isLinearShellElement $elemId]} {
-            lappend localElements $elemId
+# Bend angle in degrees at $current between the incoming direction
+# (previous -> current) and the outgoing direction (current -> next).  A
+# straight continuation is 0, a right-angle corner is 90, and a fold-back
+# onto the previous edge is 180.  Unreadable coordinates or zero-length
+# segments fail closed.
+proc ::MeshSeamWeld::freeEdgeBendAngle {previous current next coordinates} {
+    foreach nodeId [list $previous $current $next] {
+        if {![dict exists $coordinates $nodeId]} {
+            error "Cannot read coordinates for native free-edge node $nodeId."
         }
     }
-    catch {*clearmark $entityType 1}
-    set connectivity [::MeshSeamWeld::readShellElementConnectivityBulk $localElements]
-    set nodeIds {}
-    dict for {elemId nodes} $connectivity {
-        set nodeIds [concat $nodeIds [lrange $nodes 0 2]]
+    set incoming [::MeshSeamWeld::vsub [dict get $coordinates $current] \
+        [dict get $coordinates $previous]]
+    set outgoing [::MeshSeamWeld::vsub [dict get $coordinates $next] \
+        [dict get $coordinates $current]]
+    set incomingLength [expr {sqrt([::MeshSeamWeld::dot $incoming $incoming])}]
+    set outgoingLength [expr {sqrt([::MeshSeamWeld::dot $outgoing $outgoing])}]
+    if {$incomingLength <= 1.0e-12 || $outgoingLength <= 1.0e-12} {
+        error "Native free-edge segment at node $current has zero length."
     }
-    set nodeIds [lsort -integer -unique $nodeIds]
-    set coordinates [::HybridCore::readNodeCoordinatesBulk $nodeIds \
-        [list ::MeshSeamWeld::nodeXYZ]]
-    foreach nodeId $nodeIds {
-        if {[dict exists $coordinates $nodeId]} {
-            set nodeXYZCache($nodeId) [dict get $coordinates $nodeId]
-        }
-    }
-    set normals {}
-    dict for {elemId nodes} $connectivity {
-        set normal [::MeshSeamWeld::unitNormalFromCoordinates $nodes $coordinates]
-        if {[llength $normal] == 3} { lappend normals $normal }
-    }
-    if {[llength $normals] == 0} {
-        error "Could not calculate a local shell normal on the selected target components."
-    }
-    return $normals
+    set cosine [expr {[::MeshSeamWeld::dot $incoming $outgoing] /
+        ($incomingLength*$outgoingLength)}]
+    if {$cosine > 1.0} { set cosine 1.0 }
+    if {$cosine < -1.0} { set cosine -1.0 }
+    return [expr {acos($cosine)*180.0/acos(-1.0)}]
 }
 
-proc ::MeshSeamWeld::parallelFreeEdgePathsFromSeed {graph seedNode targetNormals {angleDeg 15.0}} {
+# Coordinates of the free-edge region connected to the seed only.  Other
+# outlines and holes of the same source component are irrelevant and stay
+# unread.
+proc ::MeshSeamWeld::freeEdgeRegionCoordinates {graph seedNode} {
     variable nodeXYZCache
-    if {![dict exists $graph $seedNode] || [llength $targetNormals] == 0} {
-        return {}
-    }
-    # Only read coordinates for the original boundary connected to this seed;
-    # other outlines and holes in a large source component are irrelevant.
     set queue [list $seedNode]
     set queueIndex 0
     array set touched {}
@@ -1700,94 +1669,165 @@ proc ::MeshSeamWeld::parallelFreeEdgePathsFromSeed {graph seedNode targetNormals
         ::MeshSeamWeld::responsiveCheckpoint [array size touched] 512
     }
     set graphNodes [lsort -integer [array names touched]]
-    set coordinates [::HybridCore::readNodeCoordinatesBulk $graphNodes \
-        [list ::MeshSeamWeld::nodeXYZ]]
+    set coordinates [dict create]
+    if {[catch {set coordinates [::HybridCore::readNodeCoordinatesBulk \
+            $graphNodes [list ::MeshSeamWeld::nodeXYZ]]}]} {
+        set coordinates [dict create]
+    }
     foreach nodeId $graphNodes {
         if {[dict exists $coordinates $nodeId]} {
             set nodeXYZCache($nodeId) [dict get $coordinates $nodeId]
+            continue
         }
+        if {[info exists nodeXYZCache($nodeId)]} {
+            dict set coordinates $nodeId $nodeXYZCache($nodeId)
+            continue
+        }
+        if {[catch {::MeshSeamWeld::nodeXYZ $nodeId} xyz]} { continue }
+        dict set coordinates $nodeId $xyz
+        set nodeXYZCache($nodeId) $xyz
     }
+    return $coordinates
+}
 
-    # Filter the native graph before walking it.  This is important for a
-    # folded or spatial boundary: the desired line may be only the maximal
-    # straight/curved span through the seed whose tangents lie in a plane
-    # parallel to the target, rather than the component's complete outline.
-    set sineTolerance [expr {sin(double($angleDeg) * acos(-1.0) / 180.0)}]
-    set matches {}
-    array set seen {}
-    foreach normal $targetNormals {
-        set normalLength [expr {sqrt([::MeshSeamWeld::dot $normal $normal])}]
-        if {$normalLength <= 1.0e-12} { continue }
-        set unitNormal [::MeshSeamWeld::vscale $normal [expr {1.0/$normalLength}]]
-        set filtered [dict create]
-        foreach first $graphNodes {
-            if {![dict exists $coordinates $first]} { continue }
-            foreach second [dict get $graph $first] {
-                if {$first >= $second || ![dict exists $coordinates $second]} { continue }
-                set tangent [::MeshSeamWeld::vsub \
-                    [dict get $coordinates $second] [dict get $coordinates $first]]
-                set tangentLength [expr {sqrt([::MeshSeamWeld::dot $tangent $tangent])}]
-                if {$tangentLength <= 1.0e-12 ||
-                    abs([::MeshSeamWeld::dot $tangent $unitNormal])/$tangentLength > $sineTolerance} {
-                    continue
+# Expand one free-edge seed to the complete native boundary the seed belongs
+# to.  The walk follows the free-edge graph and stays on the same boundary
+# while every corner along it turns by at most $maxBendDeg (default 180: any
+# corner except a fold-back onto the previous edge).  At a branched node the
+# straightest continuation inside the limit wins; equally straight
+# continuations, unreadable coordinates and zero-length segments fail closed.
+# Returns {path <ordered node list> closed <0|1>}, or {} when the seed is not
+# part of this graph.
+proc ::MeshSeamWeld::bendLimitedFreeEdgePathFromSeed {graph seedNode {maxBendDeg 180.0}} {
+    if {![dict exists $graph $seedNode]} { return {} }
+    set coordinates [::MeshSeamWeld::freeEdgeRegionCoordinates $graph $seedNode]
+    set limit [expr {double($maxBendDeg) + 1.0e-9}]
+    array set visited [list $seedNode 1]
+
+    # A manifold boundary node has two free-edge neighbors.  A branched seed
+    # keeps only its straightest pair; if no pair stays inside the limit the
+    # seed cannot define one boundary.
+    set directions [lsort -integer -unique [dict get $graph $seedNode]]
+    if {[llength $directions] == 0} {
+        error "Free-edge seed node $seedNode has no free-edge neighbor."
+    }
+    if {[llength $directions] > 2} {
+        set bestBend 1.0e300
+        set bestPair {}
+        set ties 0
+        set directionCount [llength $directions]
+        for {set i 0} {$i < $directionCount} {incr i} {
+            for {set j [expr {$i+1}]} {$j < $directionCount} {incr j} {
+                set bend [::MeshSeamWeld::freeEdgeBendAngle \
+                    [lindex $directions $i] $seedNode [lindex $directions $j] \
+                    $coordinates]
+                if {$bend < $bestBend - 1.0e-6} {
+                    set bestBend $bend
+                    set bestPair [list [lindex $directions $i] [lindex $directions $j]]
+                    set ties 0
+                } elseif {abs($bend - $bestBend) <= 1.0e-6} {
+                    incr ties
                 }
-                dict lappend filtered $first $second
-                dict lappend filtered $second $first
             }
         }
-        if {![dict exists $filtered $seedNode]} { continue }
-        foreach nodeId [dict keys $filtered] {
-            dict set filtered $nodeId [lsort -integer -unique [dict get $filtered $nodeId]]
+        if {[llength $bestPair] == 0 || $bestBend > $limit} {
+            error "Free-edge seed node $seedNode is a branch with no continuous boundary through it."
         }
-        set match [::MeshSeamWeld::manifoldFreeEdgePathFromSeed $filtered $seedNode]
-        set signature [join [lsort -integer [dict get $match path]] ,]
-        if {![info exists seen($signature)]} {
-            set seen($signature) 1
-            lappend matches $match
+        if {$ties > 0} {
+            error "Free-edge seed node $seedNode branches into equally straight continuations; cannot decide its boundary."
         }
+        set directions $bestPair
     }
-    return $matches
+
+    # Walk both directions away from the seed.  A candidate that was already
+    # visited closes the loop; a candidate beyond the bend limit ends the open
+    # boundary.
+    set walks {}
+    set closed 0
+    foreach firstNeighbor $directions {
+        set chain {}
+        set previous $seedNode
+        set current $firstNeighbor
+        while {1} {
+            if {[info exists visited($current)]} { set closed 1; break }
+            lappend chain $current
+            set visited($current) 1
+            set candidates {}
+            set reachedBoundary 0
+            foreach neighbor [lsort -integer -unique [dict get $graph $current]] {
+                if {$neighbor eq $previous} { continue }
+                if {[info exists visited($neighbor)]} {
+                    set reachedBoundary 1
+                    continue
+                }
+                lappend candidates $neighbor
+            }
+            if {[llength $candidates] == 0} {
+                if {$reachedBoundary} { set closed 1 }
+                break
+            }
+            set best ""
+            set bestBend 1.0e300
+            set ties 0
+            foreach neighbor $candidates {
+                set bend [::MeshSeamWeld::freeEdgeBendAngle $previous $current \
+                    $neighbor $coordinates]
+                if {$bend < $bestBend - 1.0e-6} {
+                    set bestBend $bend
+                    set best $neighbor
+                    set ties 0
+                } elseif {abs($bend - $bestBend) <= 1.0e-6} {
+                    incr ties
+                }
+            }
+            if {$bestBend > $limit} { break }
+            if {$ties > 0} {
+                error "Native free-edge boundary at node $current branches into equally straight continuations; cannot decide the boundary."
+            }
+            set previous $current
+            set current $best
+            ::MeshSeamWeld::responsiveCheckpoint [llength $chain] 512
+        }
+        lappend walks $chain
+    }
+
+    # Closed boundaries start at the picked node; open boundaries start at
+    # their lower endpoint so the same mesh always yields the same order.
+    set path [concat [lreverse [lindex $walks 1]] [list $seedNode] \
+        [lindex $walks 0]]
+    if {!$closed && [lindex $path end] < [lindex $path 0]} {
+        set path [lreverse $path]
+    }
+    return [dict create path $path closed $closed]
 }
 
-proc ::MeshSeamWeld::nativeGraphsContainNode {graphsByComponent nodeId} {
-    foreach componentId [dict keys $graphsByComponent] {
-        if {[dict exists [dict get $graphsByComponent $componentId] $nodeId]} {
-            return 1
-        }
-    }
-    return 0
-}
-
-proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByComponent {pairBoundaryMode 0} {targetNormals {}}} {
+proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByComponent {pairBoundaryMode 0} {boundaryBendAngleMax ""}} {
     set selectedNodes [::MeshSeamWeld::uniq $selectedNodes]
 
     # The common single-boundary-seed case does not need a scan of every
     # closed loop in every source component.  Walk just the touched connected
     # region, accepting either an open line/curve or a closed boundary.
     if {!$pairBoundaryMode && [llength $selectedNodes] == 1} {
+        variable cfg
         set selectedNode [lindex $selectedNodes 0]
+        set bendLimit $boundaryBendAngleMax
+        if {$bendLimit eq ""} {
+            set bendLimit [expr {[info exists cfg(boundary_bend_angle_max)] ?
+                $cfg(boundary_bend_angle_max) : 180.0}]
+        }
         set boundaryMatches {}
         array set seenBoundary {}
         foreach componentId [lsort -integer [dict keys $graphsByComponent]] {
             set graph [dict get $graphsByComponent $componentId]
             if {![dict exists $graph $selectedNode]} { continue }
-            if {[llength $targetNormals] > 0} {
-                variable cfg
-                set tolerance [expr {[info exists cfg(parallel_angle_max)] ?
-                    $cfg(parallel_angle_max) : 15.0}]
-                set componentMatches [::MeshSeamWeld::parallelFreeEdgePathsFromSeed \
-                    $graph $selectedNode $targetNormals $tolerance]
-            } else {
-                set componentMatches [list \
-                    [::MeshSeamWeld::manifoldFreeEdgePathFromSeed $graph $selectedNode]]
-            }
-            foreach match $componentMatches {
-                set path [dict get $match path]
-                set signature [join [lsort -integer $path] ,]
-                if {![info exists seenBoundary($signature)]} {
-                    set seenBoundary($signature) 1
-                    lappend boundaryMatches $match
-                }
+            set match [::MeshSeamWeld::bendLimitedFreeEdgePathFromSeed \
+                $graph $selectedNode $bendLimit]
+            if {[llength $match] == 0} { continue }
+            set path [dict get $match path]
+            set signature [join [lsort -integer $path] ,]
+            if {![info exists seenBoundary($signature)]} {
+                set seenBoundary($signature) 1
+                lappend boundaryMatches $match
             }
         }
         if {[llength $boundaryMatches] > 1} {
@@ -1799,11 +1839,6 @@ proc ::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs {selectedNodes graphsByCompon
             set closed [dict get $match closed]
             return [dict create paths [list $path] internal_single_node 0 \
                 pair_boundary_mode 0 closed_loop $closed]
-        }
-        if {[llength $targetNormals] > 0} {
-            error [::HWFlow::txt \
-                "节点 $selectedNode 所在边界上没有与目标 component 局部平面平行的连续直线或曲线。" \
-                "No continuous line or curve through boundary node $selectedNode is parallel to the local target-component plane."]
         }
     }
 
@@ -6030,8 +6065,8 @@ proc ::MeshSeamWeld::diagnoseFailure {errorText} {
         SOURCE_PLAN {
             set reasonZh "HyperMesh 原生自由边组件创建或源路径排序失败。"
             set reasonEn "Native HyperMesh free-edge component creation or source-path ordering failed."
-            set actionZh "边界节点可使用与目标面平行的开放或闭合无分叉路径；内部节点保留原有闭合自由边流程。请检查路径是否分叉、非流形，或存在无法恢复的 ^edges 组件冲突。"
-            set actionEn "A boundary node may use an open or closed, unbranched path parallel to the target surface; an internal node retains the existing closed-free-edge workflow. Check for branching, non-manifold topology, or an unrecoverable ^edges component conflict."
+            set actionZh "边界节点使用折角不超过上限的开放或闭合无分叉边界；内部节点保留原有闭合自由边流程。请检查路径是否分叉、非流形，或存在无法恢复的 ^edges 组件冲突。"
+            set actionEn "A boundary node uses an open or closed unbranched boundary whose corners stay within the bend limit; an internal node retains the existing closed-free-edge workflow. Check for branching, non-manifold topology, or an unrecoverable ^edges component conflict."
         }
         IMPRINT {
             set reasonZh "HyperMesh 在目标网格上执行 imprint 失败。"
@@ -6054,8 +6089,8 @@ proc ::MeshSeamWeld::diagnoseFailure {errorText} {
         AUTOMESH {
             set reasonZh "原生 Create Patch 已执行，但新建 patch 的 mixed 重网格或连接-边界校验失败。"
             set reasonEn "Native Create Patch ran, but mixed remeshing or attachment-boundary validation of the new patch failed."
-            set actionZh "检查源路径是否完整投影到目标局部面、patch 边界是否有效，以及焊缝网格尺寸是否适合该局部区域。若失败发生在边界校验且已开启严格模式，可在设置中关闭「patch 连接边逐边严格校验」后重试。"
-            set actionEn "Check that the source path projects completely onto the local target surface, that the patch boundary is valid, and that the weld mesh size suits the local region. If the boundary check failed while strict mode was enabled, disable the strict per-edge patch boundary check in settings and retry."
+            set actionZh "检查源路径是否完整投影到目标局部面、patch 边界是否有效，以及焊缝网格尺寸是否适合该局部区域。若失败发生在边界校验，失败原因会指明具体的节点/连接边；严格模式开启时可在设置中关闭「patch 连接边逐边严格校验」后重试。"
+            set actionEn "Check that the source path projects completely onto the local target surface, that the patch boundary is valid, and that the weld mesh size suits the local region. If the boundary check failed, the reason names the offending node or attachment edge; with strict mode enabled, disable the strict per-edge patch boundary check in settings and retry."
         }
         TRANSACTION {
             set reasonZh "无法启动或回滚该边界/路径的 HyperMesh 撤销事务。"
@@ -6107,7 +6142,7 @@ proc ::MeshSeamWeld::writeFailureReport {taskDir context failureRecords} {
     catch {set hmVersion [hm_info -appinfo VERSION]}
     puts $channel "hypermesh_version=[::MeshSeamWeld::reportLineValue $hmVersion]"
     puts $channel "created_at=[clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}]"
-    foreach key {source_mode path_total success_count source_components target_components weld_mesh_size patch_expand_layers imprint_remesh_mode imprint_angle strict_patch_boundary_check} {
+    foreach key {source_mode path_total success_count source_components target_components weld_mesh_size patch_expand_layers imprint_remesh_mode imprint_angle strict_patch_boundary_check boundary_bend_angle_max} {
         puts $channel "$key=[::MeshSeamWeld::reportLineValue [::MeshSeamWeld::dictValueOr $context $key {}]]"
     }
     puts $channel "failure_count=[llength $failureRecords]"
@@ -6284,26 +6319,11 @@ proc ::MeshSeamWeld::runAction {} {
                 # request to weld the entire closed loop.  The pair branch
                 # also validates the batch rule: exactly two endpoints per
                 # free boundary and an even total endpoint count.  A single
-                # boundary seed is instead expanded to its locally parallel
-                # open/closed native edge path.
+                # boundary seed is instead expanded to the whole bend-limited
+                # native boundary of its component that runs through it.
                 set pairBoundaryMode [expr {[llength $selectedNodes] >= 2}]
-                set targetNormals {}
-                if {[llength $selectedNodes] == 1} {
-                    set selectedNode [lindex $selectedNodes 0]
-                    set singleNodeOnBoundary \
-                        [::MeshSeamWeld::nativeGraphsContainNode \
-                            $nativeGraphs $selectedNode]
-                    # Preserve the internal-single-node route: target normals
-                    # are needed only to split a boundary into locally parallel
-                    # spans.  An internal seed proceeds directly to all closed
-                    # free boundaries of its source component.
-                    if {$singleNodeOnBoundary} {
-                        set targetNormals [::MeshSeamWeld::localTargetNormalsAtSourceNode \
-                            $selectedNode $targetComps]
-                    }
-                }
                 set nativeSelection [::MeshSeamWeld::pathsFromNativeFreeEdgeGraphs \
-                    $selectedNodes $nativeGraphs $pairBoundaryMode $targetNormals]
+                    $selectedNodes $nativeGraphs $pairBoundaryMode]
             } nativeEdgeErr]} {
                 ::MeshSeamWeld::stageError SOURCE_PLAN $nativeEdgeErr
             }
@@ -6335,8 +6355,8 @@ proc ::MeshSeamWeld::runAction {} {
             } elseif {[llength $selectedNodes] == 1} {
                 set sourceSelectionMode \
                     [expr {$pathClosedLoop ?
-                        "single free-edge seed -> parallel closed boundary" :
-                        "single free-edge seed -> parallel open line/curve"}]
+                        "single free-edge seed -> bend-limited closed boundary" :
+                        "single free-edge seed -> bend-limited open line/curve"}]
             } else {
                 set sourceSelectionMode \
                     "multiple free-edge seeds -> matching native free-edge loops"
@@ -6494,7 +6514,8 @@ proc ::MeshSeamWeld::runAction {} {
                 patch_expand_layers $cfg(patch_expand_layers) \
                 imprint_remesh_mode $cfg(imprint_remesh_mode) \
                 imprint_angle $cfg(imprint_angle) \
-                strict_patch_boundary_check $cfg(strict_patch_boundary_check)]
+                strict_patch_boundary_check $cfg(strict_patch_boundary_check) \
+                boundary_bend_angle_max $cfg(boundary_bend_angle_max)]
             if {[catch {
                 set failureReportPath [::MeshSeamWeld::writeFailureReport \
                     $batchTaskDir $reportContext $failureRecords]
@@ -6530,7 +6551,8 @@ proc ::MeshSeamWeld::runAction {} {
                 patch_expand_layers $cfg(patch_expand_layers) \
                 imprint_remesh_mode $cfg(imprint_remesh_mode) \
                 imprint_angle $cfg(imprint_angle) \
-                strict_patch_boundary_check $cfg(strict_patch_boundary_check)]
+                strict_patch_boundary_check $cfg(strict_patch_boundary_check) \
+                boundary_bend_angle_max $cfg(boundary_bend_angle_max)]
             catch {set failureReportPath [::MeshSeamWeld::writeFailureReport \
                 $batchTaskDir $fatalContext [list $fatalRecord]]}
         }

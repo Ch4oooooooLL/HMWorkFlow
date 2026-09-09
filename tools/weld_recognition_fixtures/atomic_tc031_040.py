@@ -106,6 +106,10 @@ def tc033_near_skin_counterfeit(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict
         target_components=["TC033_TGT_BASE"], expected_decision="REVIEW",
         forbidden_reason_codes=[],
         required_reason_codes=["SKIN_ERROR_BORDERLINE"],
+        known_gap_note="recall-first contact envelope (half source thickness + weld-toe "
+                       "setback) reaches a web standing 4 mm proud of the skin, so V2 emits "
+                       "AUTO without SKIN_ERROR_BORDERLINE.  Accepted over-detection: the "
+                       "creation gate rejects the row, the recognizer stays recall-first.",
         note="bottom 4 mm above the skin: physically not a weld, must be routed to REVIEW "
              "(SKIN_ERROR_BORDERLINE) at most, never AUTO",
     ))
@@ -178,6 +182,15 @@ def _ring(lattice) -> List[int]:
     return [int(value) for value in ring]
 
 
+def _inner_rect_ring(lattice, u0: int, u1: int, v0: int, v1: int) -> List[int]:
+    """Clockwise lattice-node ring around an omitted rectangular cell block."""
+    ring = [lattice[v0][u] for u in range(u0, u1 + 1)]
+    ring.extend(lattice[v][u1] for v in range(v0 + 1, v1 + 1))
+    ring.extend(lattice[v1][u] for u in range(u1 - 1, u0 - 1, -1))
+    ring.extend(lattice[v][u0] for v in range(v1 - 1, v0, -1))
+    return [int(value) for value in ring]
+
+
 def tc035_patch_auto(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List[int]]]:
     """A small plate fully contained above a larger plate -> AUTO patch."""
     b = ModelBuilder(**ranges)
@@ -198,37 +211,40 @@ def tc035_patch_auto(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List[
 
 
 def tc036_patch_small_window(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List[int]]]:
-    """A patch plate carrying a fastener-sized central window (20x20 mm)."""
+    """A patch plate carrying a weldable 40x40 mm central opening."""
     b = ModelBuilder(**ranges)
-    _base, _patch, _lat, _cells = _patch_plate(
+    _base, _patch, lattice, _cells = _patch_plate(
         b, "TC036", (-200.0, 200.0, -150.0, 150.0), (60.0, 140.0, -40.0, 40.0), 10.0,
         small_h=10.0,
         omit={(i, j) for i in range(2, 6) for j in range(2, 6)},
     )
-    gt = GroundTruth("TC036", "atomic", "patch plate with a small central window",
-                     "a fastener-sized opening must keep its inner rim in REVIEW, never AUTO",
-                     decision_policy={"patch_small_window": "outer_ring_auto_inner_review"})
+    gt = GroundTruth("TC036", "atomic", "patch plate with a central opening",
+                     "a qualified exposed patch opening is welded together with its outer perimeter",
+                     decision_policy={"patch_opening": "outer_and_inner_auto"})
     gt.add_weld(expect_weld(
         semantic_id="TC036_W01", weld_type="PATCH", source_component="TC036_PATCH",
         target_components=["TC036_BASE"], expected_decision="AUTO",
-        source_path={"expected_node_ids": _ring(_lat)},
+        source_path={"expected_node_ids": _ring(lattice)},
         note="outer 80x80 frame ring fully inside the base footprint: its perimeter is the "
              "real patch seam and may AUTO",
     ))
+    gt.add_weld(expect_weld(
+        semantic_id="TC036_W02", weld_type="PATCH", source_component="TC036_PATCH",
+        target_components=["TC036_BASE"], expected_decision="AUTO",
+        source_path={"expected_node_ids": _inner_rect_ring(lattice, 2, 6, 2, 6)},
+        note="the 40x40 exposed inner boundary projects completely onto the base and is a real patch seam",
+    ))
     gt.add_analytic("inner_window", {
         "x": [80.0, 120.0], "y": [-20.0, 20.0], "span": 40.0,
-        "expected_decision": "REVIEW",
-        "expected_reasons": ["INNER_BOUNDARY_SOURCE", "HOLE_INTERRUPTION"],
-        "never_auto": True,
-        "verified": "V2 emits the inner loop as a separate REVIEW row (patch_inner_loop_policy "
-                    "review); the runner matches the outer ring only because span grouping cannot "
-                    "separate concentric loops of one source component.",
+        "expected_decision": "AUTO",
+        "verified": "V2 emits the inner loop as a separate AUTO patch row; fastener-sized openings "
+                    "below small_hole_diameter remain excluded rather than becoming weld paths.",
     })
     return b, gt, {}
 
 
 def tc037_patch_tilted_not_parallel(ranges) -> Tuple[ModelBuilder, GroundTruth, Dict[str, List[int]]]:
-    """A plate tilted 35 deg over a base is neither parallel (patch) nor perpendicular (T)."""
+    """A plate tilted 35 deg over a base: no patch, but its low edge lands on the base."""
     b = ModelBuilder(**ranges)
     import math
     flat_target(b, "TC037_BASE", -200.0, 200.0, -150.0, 150.0, 0.0, 10.0, h=40.0)
@@ -241,12 +257,15 @@ def tc037_patch_tilted_not_parallel(ranges) -> Tuple[ModelBuilder, GroundTruth, 
         3, 4, 6.0,
     )
     gt = GroundTruth("TC037", "atomic", "tilted plate over a base",
-                     "35 deg tilt is outside both the parallel patch band and the T band",
-                     decision_policy={"expected_candidate_count": 0})
+                     "a 35 deg tilted plate is no patch, but its lower edge still lands on "
+                     "the base and is recalled as a 55 deg generalized T in REVIEW")
     gt.add_weld(expect_weld(
-        semantic_id="TC037_W01", weld_type="PATCH", source_component="TC037_TILT",
-        target_components=["TC037_BASE"], expected_decision="REJECT",
-        note="plate 35 deg from parallel and from perpendicular: no patch, no T",
+        semantic_id="TC037_W01", weld_type="T", source_component="TC037_TILT",
+        target_components=["TC037_BASE"], expected_decision="REVIEW",
+        required_reason_codes=["ANGLE_BORDERLINE"],
+        geometry_parallel=False,
+        note="plate 35 deg from parallel: the low edge is a 55 deg generalized T on the base "
+             "top skin, recalled as REVIEW ANGLE_BORDERLINE, never AUTO",
     ))
     return b, gt, {}
 

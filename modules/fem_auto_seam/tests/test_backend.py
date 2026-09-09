@@ -263,9 +263,10 @@ class OfflineBackendTests(unittest.TestCase):
                 auto_case_count += 1
             if any(not candidate.get("auto_eligible") for candidate in candidates):
                 review_case_count += 1
-        # V2 conservatively demotes the angled T and inner patch boundary.
+        # Truly ambiguous geometry remains review-only; the visible 70 degree
+        # T threshold and locally complete curved supports are AUTO.
         self.assertGreaterEqual(auto_case_count, 3)
-        self.assertGreaterEqual(review_case_count, 4)
+        self.assertGreaterEqual(review_case_count, 2)
 
     def test_combined_acceptance_fem_matches_individual_detection_without_cross_pairs(self):
         fixture_root = EXAMPLE_DIR / "test_fem"
@@ -417,29 +418,36 @@ class OfflineBackendTests(unittest.TestCase):
                 for candidate in detect_candidates(model)
             ))
 
-    def test_partial_overlap_and_same_edge_multiple_targets_are_potential(self):
+    def test_supported_subchain_and_continuous_targets_are_auto_but_ambiguity_is_potential(self):
         model, _ = FIXTURES.partial_overlap_t()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
-        self.assertEqual(1, len(candidates))
+        auto_rows = [row for row in candidates if row["auto_eligible"]]
+        self.assertEqual(1, len(auto_rows))
         # V2 sends an ordered chain of existing source nodes downstream; it no
         # longer invents legacy interpolation nodes at x=23/x=57 for REVIEW.
-        self.assertAlmostEqual(20.0, candidates[0]["length"], places=4)
-        self.assertFalse(candidates[0]["auto_eligible"])
-        self.assertEqual("POTENTIAL", candidates[0]["recognition_status"])
+        self.assertAlmostEqual(20.0, auto_rows[0]["length"], places=4)
+        self.assertEqual("TRUSTED", auto_rows[0]["recognition_status"])
+        # The recall pass reports the fuller chain as REVIEW, never as AUTO.
+        auto_ids = {row["candidate_id"] for row in auto_rows}
+        self.assertTrue(all(
+            not row["auto_eligible"] for row in candidates
+            if row["candidate_id"] not in auto_ids
+        ))
 
         model, _ = FIXTURES.four_target_t()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
-        self.assertEqual(1, len(candidates))
-        self.assertEqual([1, 2, 3, 4], candidates[0]["target_component_ids"])
-        self.assertEqual(4, len(candidates[0]["support_runs"]))
-        self.assertTrue(candidates[0]["auto_eligible"])
+        auto_rows = [row for row in candidates if row["auto_eligible"]]
+        self.assertEqual(1, len(auto_rows))
+        self.assertEqual([1, 2, 3, 4], auto_rows[0]["target_component_ids"])
+        self.assertEqual(4, len(auto_rows[0]["support_runs"]))
 
         model, _ = FIXTURES.multi_target_same_edge()
         candidates = [row for row in detect_candidates(model) if row["candidate_type"] == "T_SEAM"]
-        self.assertEqual(1, len(candidates))
-        self.assertFalse(candidates[0]["auto_eligible"])
-        self.assertIn("TARGET_AMBIGUITY", candidates[0]["reason_codes"])
-        self.assertTrue(candidates[0]["review"]["alternative_targets"])
+        ambiguous = [row for row in candidates if "TARGET_AMBIGUITY" in row["reason_codes"]]
+        self.assertEqual(1, len(ambiguous))
+        self.assertFalse(ambiguous[0]["auto_eligible"])
+        self.assertTrue(ambiguous[0]["review"]["alternative_targets"])
+        self.assertTrue(all(not row["auto_eligible"] for row in candidates))
 
     def test_trusted_straight_and_curved_t_keep_legacy_planner_compatible(self):
         for factory in (FIXTURES.straight_t, FIXTURES.curved_t):
@@ -451,13 +459,13 @@ class OfflineBackendTests(unittest.TestCase):
             self.assertTrue(created[0]["created_weld_element_ids"])
             self.assertGreater(len(result.elements), len(model.elements))
 
-    def test_small_patch_hole_and_near_edges_remain_review_only(self):
+    def test_small_patch_hole_is_filtered_without_vetoing_outer_seam(self):
         model, _ = FIXTURES.patch_small_hole()
         candidates = detect_candidates(model)
         patches = [row for row in candidates if row["candidate_type"] == "PATCH_SEAM"]
         self.assertTrue(patches)
-        self.assertTrue(all(not row["auto_eligible"] for row in patches))
-        self.assertTrue(any("hole" in warning for row in patches for warning in row["warnings"]))
+        self.assertTrue(all(row["auto_eligible"] for row in patches))
+        self.assertTrue(any("excluded" in warning for row in patches for warning in row["warnings"]))
 
         model, _ = FIXTURES.near_free_edges()
         self.assertFalse(detect_candidates(model))

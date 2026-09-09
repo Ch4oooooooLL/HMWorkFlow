@@ -4,9 +4,7 @@
   "case_kind": "atomic",
   "purpose": "source edge overhanging the target must only use the effective middle",
   "failure_mode": "a recognizer that welds the whole 400 mm free edge would fabricate weld in the void",
-  "decision_policy": {
-    "known_impl_gap": "parent-coverage penalty downgrades the correct subchain to REVIEW"
-  },
+  "decision_policy": {},
   "welds": [
     {
       "semantic_id": "TC013_W01",
@@ -82,11 +80,12 @@
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
       "geometry_parallel": true,
-      "known_gap_note": "V2 extracts the correct X=100..300 subchain but downgrades it to REVIEW/PARTIAL_COVERAGE because parent-chain coverage is gated before subchain selection. Spec expects the perfect middle to AUTO.",
+      "known_gap_note": "",
       "note": "subchain X=100..300 is geometrically perfect; endpoint discretization tolerance allowed"
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC013_SRC_WEB": 33001,

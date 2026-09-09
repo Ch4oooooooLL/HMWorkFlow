@@ -3,17 +3,17 @@
   "case_id": "TC037",
   "case_kind": "atomic",
   "purpose": "tilted plate over a base",
-  "failure_mode": "35 deg tilt is outside both the parallel patch band and the T band",
-  "decision_policy": {
-    "expected_candidate_count": 0
-  },
+  "failure_mode": "a 35 deg tilted plate is no patch, but its lower edge still lands on the base and is recalled as a 55 deg generalized T in REVIEW",
+  "decision_policy": {},
   "welds": [
     {
       "semantic_id": "TC037_W01",
-      "weld_type": "PATCH",
+      "weld_type": "T",
       "source_component": "TC037_TILT",
-      "expected_decision": "REJECT",
-      "required_reason_codes": [],
+      "expected_decision": "REVIEW",
+      "required_reason_codes": [
+        "ANGLE_BORDERLINE"
+      ],
       "required_reason_any": [],
       "forbidden_reason_codes": [],
       "target_components": [
@@ -25,12 +25,13 @@
       "source_path": null,
       "overlap_axis": "X",
       "allowed_realization_segments": 1,
-      "geometry_parallel": true,
+      "geometry_parallel": false,
       "known_gap_note": "",
-      "note": "plate 35 deg from parallel and from perpendicular: no patch, no T"
+      "note": "plate 35 deg from parallel: the low edge is a 55 deg generalized T on the base top skin, recalled as REVIEW ANGLE_BORDERLINE, never AUTO"
     }
   ],
   "forbidden_candidates": [],
+  "tolerated_candidates": [],
   "analytic": {
     "component_names": {
       "TC037_BASE": 57000,

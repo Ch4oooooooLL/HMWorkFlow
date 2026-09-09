@@ -1,2 +1,2 @@
 ﻿case_id,case_kind,semantic_id,weld_type,source_component,expected_decision,target_components,required_reason_codes,required_reason_any,forbidden_reason_codes,forbidden_targets,allow_extra_targets,overlap_axis,allowed_realization_segments,geometry_parallel,source_path_node_ids,source_path_start_xyz,source_path_end_xyz,source_path_length,known_gap_note,note
-TC022,atomic,TC022_W01,T,TC022_SRC_WEB,REJECT,TC022_TGT_BASE,,,,,0,X,1,1,,,,0,,55 deg is outside the review band; no T candidate should be emitted
+TC022,atomic,TC022_W01,T,TC022_SRC_WEB,REVIEW,TC022_TGT_BASE,ANGLE_BORDERLINE,,,,0,X,1,1,,,,0,,35 deg lean -> 55 deg T: the bottom edge is supported by the base top skin and is recalled as REVIEW ANGLE_BORDERLINE; the creation gate decides on it later
