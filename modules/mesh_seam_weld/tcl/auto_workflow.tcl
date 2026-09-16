@@ -1,8 +1,8 @@
 proc ::MeshSeamWeld::autoJsonSettings {} {
     variable cfg
     set rows {}
-    foreach key {search_distance min_seam_length min_path_nodes parallel_angle_max perpendicular_angle_min max_distance_variation_ratio existing_path_search_width max_target_path_offset max_node_move max_node_move_ratio max_weld_tria_ratio max_new_failed_elements existing_weld_search_distance auto_accept_confidence review_confidence execution_batch_size weld_mesh_size} { lappend rows "    \"$key\": [::HybridCore::jsonNumber $cfg($key)]" }
-    foreach key {allow_target_node_move allow_local_split prefer_quad_weld allow_weld_end_tria quality_guard_enabled} { lappend rows "    \"$key\": [::HybridCore::jsonBool $cfg($key)]" }
+    foreach key {search_distance min_seam_length min_path_nodes parallel_angle_max perpendicular_angle_min max_distance_variation_ratio existing_path_search_width max_target_path_offset max_node_move max_node_move_ratio max_weld_tria_ratio max_new_failed_elements existing_weld_search_distance auto_accept_confidence review_confidence execution_batch_size weld_mesh_size patch_expand_layers} { lappend rows "    \"$key\": [::HybridCore::jsonNumber $cfg($key)]" }
+    foreach key {allow_target_node_move allow_local_split prefer_quad_weld allow_weld_end_tria quality_guard_enabled allow_break_existing_weld} { lappend rows "    \"$key\": [::HybridCore::jsonBool $cfg($key)]" }
     return [join $rows ",\n"]
 }
 

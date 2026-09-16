@@ -48,8 +48,28 @@ ruled surfaces, automesh, or connectors.
   on failure.
 - existing `SEAM_T*` centroids are exported for conservative duplicate checks.
   Partial-overlap editing and candidate split/merge are not automated.
-- a real HyperMesh 2019 smoke test and a model-specific timing comparison with
-  legacy imprint/ruled have not yet been performed.
+- `allow_break_existing_weld` (default off) is exported with the other settings.
+  The automatic route reaches the same by-adjacent expansion guards as the manual
+  route, so automatic creation also refuses to remesh an existing `SEAM_*` weld
+  strip unless the option is enabled. See `doc/native_patch_validation.md` for
+  the protection rule.
+- the recall-first envelope and `submit_all_weld_candidates` deliver every
+  supported candidate, including generalized T angles, partial coverage and short
+  fragments. Only evidence that would create the wrong or a duplicate weld keeps
+  a candidate in review: target ambiguity, uncertain multi-target, non-manifold
+  region, inconsistent normal, inner boundary, an unsupported short edge and an
+  existing weld (`duplicate_status` other than `NEW`). The mesh executor
+  validates the created result, so tolerance findings (coverage, projection jump,
+  normal jump, gap, skin error) never suppress a location the operator asked to
+  weld. A failed creation is retried with an adjusted weld mesh size before the
+  path is reported; see `doc/native_patch_validation.md`.
+- a real HyperMesh 2019 smoke test
+  (`modules/mesh_seam_weld/tests/hm2019_mesh_safety_smoke.tcl`) and a
+  model-specific timing comparison with legacy imprint/ruled have not yet been
+  performed on the target production models. The smoke test itself passes on
+  HyperMesh 2019.0.0.70 and HM2022 (22.0) and covers the target-scope,
+  rollback and duplicate-weld cases described in
+  `doc/native_patch_validation.md`.
 
 Planning writes a self-contained HTML audit plus JSON manifest. Model execution
 writes `execution_report.json` with per-candidate CREATED/ROLLED_BACK/CANCELLED
