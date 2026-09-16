@@ -106,7 +106,10 @@ class RecognitionV2Tests(unittest.TestCase):
         self.assertTrue(any(abs(row["normal_angle"] - 40.0) < 1.0 for row in rows), rows)
         plan = build_recognition_plan(rows)
         self.assertEqual(len(rows), len(plan["trusted_seeds"]))
-        self.assertFalse(plan["potential_groups"])
+        main = next(row for row in rows if row["candidate_id"] == plan["trusted_seeds"][0]["candidate_id"])
+        self.assertGreaterEqual(main["length"], 60.0)
+        self.assertAlmostEqual(main["projection_coverage"], 1.0)
+        self.assertFalse(plan["potential_groups"])  # every reported T chain is delivered
 
     def test_visible_60_degree_setting_builds_a_valid_relaxed_review_envelope(self):
         request = validate_request({

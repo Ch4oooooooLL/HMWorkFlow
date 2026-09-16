@@ -13,7 +13,24 @@ class FemAutoSeamModuleBoundaryTests(unittest.TestCase):
         self.assertIn('proc     "::FemAutoSeam::runAction"', toolkit)
         self.assertIn('settings_proc "::FemAutoSeam::runSettings"', toolkit)
         self.assertIn('undo_proc "::FemAutoSeam::undoLast"', toolkit)
+        self.assertIn('shortcut_proc "::FemAutoSeam::quickDeleteWeld"', toolkit)
         self.assertIn("Python 识别 T 型与贴片焊缝", toolkit)
+
+    def test_settings_exposes_quick_delete_and_loads_implementation(self):
+        module = (ROOT / "modules" / "fem_auto_seam.tcl").read_text(encoding="utf-8")
+        self.assertIn('"快速删除焊缝" "Quick Delete Weld"', module)
+        self.assertIn("quickDeleteFromPanel", module)
+        self.assertIn("quick_delete.tcl", module)
+
+    def test_quick_delete_is_scoped_and_rollback_safe(self):
+        implementation = (ROOT / "modules" / "fem_auto_seam" / "tcl" / "quick_delete.tcl").read_text(encoding="utf-8")
+        self.assertIn("quickDeleteWeldIsland", implementation)
+        self.assertIn('string match -nocase "SEAM*"', implementation)
+        self.assertIn("*deletemark elems 1", implementation)
+        self.assertIn("runBatchElementAutomesh", implementation)
+        self.assertIn("preservedWeldConnectivity", implementation)
+        self.assertIn("*startnotehistorystate", implementation)
+        self.assertIn("*undohistorystate 1", implementation)
 
     def test_production_workflow_is_recognition_and_seed_execution_only(self):
         module = (ROOT / "modules" / "fem_auto_seam.tcl").read_text(encoding="utf-8")

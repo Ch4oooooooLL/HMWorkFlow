@@ -6,7 +6,7 @@ if {![namespace exists ::HybridCore]} {
 }
 
 namespace eval ::FemAutoSeam {
-    variable VERSION "0.20"
+    variable VERSION "0.22"
     variable MODULE_DIR [file join [file dirname [file normalize [info script]]] fem_auto_seam]
     variable cfg
     array set cfg {
@@ -167,6 +167,8 @@ proc ::FemAutoSeam::showPanel {{settingsOnly 0}} {
     pack $w.buttons.cancel $w.buttons.save -side right -padx {6 0}
     button $w.buttons.undo -text [::HWFlow::txt "撤销上一批" "Undo Last Batch"] -command [list ::FemAutoSeam::undoLast]
     pack $w.buttons.undo -side right -padx {6 0}
+    button $w.buttons.quick_delete -text [::HWFlow::txt "快速删除焊缝" "Quick Delete Weld"] -command ::FemAutoSeam::quickDeleteFromPanel
+    pack $w.buttons.quick_delete -side left -padx {0 6}
     if {!$settingsOnly} {
         button $w.buttons.run -text [::HWFlow::txt "保存并开始" "Save and Start"] -command [list ::FemAutoSeam::acceptPanel 1]
         pack $w.buttons.run -side right -padx {6 0}
@@ -208,6 +210,6 @@ proc ::FemAutoSeam::runAction {} { if {[::FemAutoSeam::showPanel 0]} { ::FemAuto
 proc ::FemAutoSeam::runSettings {} { ::FemAutoSeam::showPanel 1 }
 proc ::FemAutoSeam::run {} { ::FemAutoSeam::runAction }
 
-foreach file {exporter.tcl auto_ui.tcl delta_import.tcl quality_validator.tcl fast_executor.tcl workflow.tcl seed_workflow.tcl} {
+foreach file {exporter.tcl auto_ui.tcl delta_import.tcl quality_validator.tcl fast_executor.tcl quick_delete.tcl workflow.tcl seed_workflow.tcl} {
     ::HWFlow::sourceUtf8 [file join $::FemAutoSeam::MODULE_DIR tcl $file]
 }

@@ -850,11 +850,25 @@ def mesh_continuous(source_node_ids, target_node_ids, minimum_ratio=0.5, minimum
     return shared >= max(int(minimum_nodes), int(math.ceil(float(minimum_ratio) * len(ids))))
 
 
-def detect_t_candidates(model, settings, topologies, source_ids=None):
+def _same_target_path_contains(container, fragment):
+    """Node overlap alone is not coverage (adjacent edges share a node)."""
+    targets = lambda row: set(row.get("target_component_ids", []))
+    edges = lambda row: {_canonical(*pair) for pair in row.get("source_edge_pairs", [])}
+    fragment_edges = edges(fragment)
+    return (targets(container) == targets(fragment) and bool(fragment_edges)
+            and fragment_edges <= edges(container))
+
+
+def detect_t_candidates(
+        model, settings, topologies, source_ids=None,
+        geometry_context=None, defer_missing_fallback=False):
     """Detect T candidates from ordered free-edge chains and physical skins."""
     recall_pass = bool(settings.get("t_recall_candidate_pass", False))
     recall_first = bool(settings.get("t_recall_first_mode", True))
-    oriented_all, geometry = build_physical_geometry_context(model, topologies)
+    if geometry_context is None:
+        oriented_all, geometry = build_physical_geometry_context(model, topologies)
+    else:
+        oriented_all, geometry = geometry_context
     target_ids = sorted(topologies)
     component_nodes = {component_id: topology.node_ids for component_id, topology in topologies.items()}
     rows = []
@@ -1001,15 +1015,18 @@ def detect_t_candidates(model, settings, topologies, source_ids=None):
                 row["source"]["chain_id"] = chain_id
                 rows.append(row)
         for segment, chain_id, strict_rows in partial_segments:
-            strict_nodes = [set(row.get("source_node_ids") or []) for row in strict_rows]
             for row in segment_rows(source_id, segment, oriented, owner_by_edge, relaxed_settings)[0]:
                 if float(row.get("projection_coverage", 0.0)) < minimum_coverage:
                     continue
-                nodes = set(row.get("source_node_ids") or [])
-                if nodes and any(
-                    len(nodes & other) / float(len(nodes)) >= 0.5 for other in strict_nodes
-                ):
+                if any(_same_target_path_contains(other, row) for other in strict_rows):
                     continue  # the strict fragment already reports this chain
+                # A complete recalled main edge supersedes its short strict
+                # fragment.  Do not execute both against the same mother mesh.
+                if float(row.get("projection_coverage", 0.0)) >= 0.98:
+                    replaced = [other for other in strict_rows
+                                if _same_target_path_contains(row, other)]
+                    rows[:] = [other for other in rows
+                               if not any(other is old for old in replaced)]
                 row["recall_candidate_fallback"] = True
                 row["source"]["chain_id"] = chain_id
                 rows.append(row)
@@ -1018,7 +1035,7 @@ def detect_t_candidates(model, settings, topologies, source_ids=None):
     # relaxed tangential/coverage gates from adding side-edge noise beside
     # already-good seams, while eliminating the field failure mode of
     # returning zero T candidates for an otherwise weldable component.
-    if recall_first and not recall_pass and missing_sources:
+    if recall_first and not recall_pass and missing_sources and not defer_missing_fallback:
         fallback_settings = dict(settings)
         fallback_settings["t_recall_candidate_pass"] = True
         fallback_settings["t_edge_review_coverage"] = float(
@@ -1031,6 +1048,7 @@ def detect_t_candidates(model, settings, topologies, source_ids=None):
         }
         fallback_rows = detect_t_candidates(
             model, fallback_settings, topologies, source_ids=missing_sources,
+            geometry_context=(oriented_all, geometry),
         )
         rows.extend(
             row for row in fallback_rows

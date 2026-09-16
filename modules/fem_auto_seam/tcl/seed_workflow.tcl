@@ -73,7 +73,10 @@ proc ::FemAutoSeam::importReviewGroupSets {taskDir groups} {
 proc ::FemAutoSeam::failedSeedsAsPotentialGroups {trusted execution} {
     set failed {}
     foreach row [dict get $execution results] {
-        if {[dict get $row status] ne "CREATED"} { dict set failed [dict get $row candidate_id] 1 }
+        if {[dict get $row status] ne "CREATED" &&
+            [::MeshSeamWeld::dictValueOr $row block_kind ""] ne "cancelled"} {
+            dict set failed [dict get $row candidate_id] 1
+        }
     }
     set groups {}
     set serial 0
@@ -148,7 +151,10 @@ proc ::FemAutoSeam::runWorkflow {} {
     }
     catch {::HWFlow::refreshBrowser}
     ::FemAutoSeam::workflowProgressClose [::HWFlow::ctxt "FEM 自动焊缝完成" "FEM Automatic Seam finished"]
+    set wasCancelled [::MeshSeamWeld::dictValueOr $execution cancelled 0]
+    set cancellationZh [expr {$wasCancelled ? "（用户已取消剩余创建）" : ""}]
+    set cancellationEn [expr {$wasCancelled ? " (remaining creation cancelled by user)" : ""}]
     tk_messageBox -icon [expr {[dict get $execution failed] ? "warning" : "info"}] -message [::HWFlow::txt \
-        "识别完成：可信种子 [llength $trusted]；创建成功 [dict get $execution succeeded]，失败 [dict get $execution failed]；潜在组合 Set [dict get $imported created]。\n潜在组合已按组保存在 FEM_SEAM_REVIEW_* / FEM_SEAM_FAILED_* Set 中，可删除 Set 或据此手动创建焊缝。" \
-        "Recognition complete: [llength $trusted] trusted seeds; [dict get $execution succeeded] created and [dict get $execution failed] failed; [dict get $imported created] potential-group sets.\nPotential relations are stored as FEM_SEAM_REVIEW_* / FEM_SEAM_FAILED_* sets for deletion or manual weld creation."]
+        "识别完成$cancellationZh：可信种子 [llength $trusted]；创建成功 [dict get $execution succeeded]，未创建/失败 [dict get $execution failed]；潜在组合 Set [dict get $imported created]。\n潜在组合已按组保存在 FEM_SEAM_REVIEW_* / FEM_SEAM_FAILED_* Set 中，可删除 Set 或据此手动创建焊缝。" \
+        "Recognition complete$cancellationEn: [llength $trusted] trusted seeds; [dict get $execution succeeded] created and [dict get $execution failed] not created/failed; [dict get $imported created] potential-group sets.\nPotential relations are stored as FEM_SEAM_REVIEW_* / FEM_SEAM_FAILED_* sets for deletion or manual weld creation."]
 }

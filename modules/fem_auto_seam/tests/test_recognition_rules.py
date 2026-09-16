@@ -58,7 +58,14 @@ class RecognitionRuleTests(unittest.TestCase):
         plan = build_recognition_plan(candidates)
         seed_ids = {seed["candidate_id"] for seed in plan["trusted_seeds"]}
         self.assertIn(auto_rows[0]["candidate_id"], seed_ids)
-        self.assertFalse(plan["potential_groups"])
+        # The weldable main edge is delivered for creation; only candidates
+        # whose own evidence is unsafe may stay in review.
+        reviewed = {
+            candidate_id
+            for group in plan["potential_groups"]
+            for candidate_id in group.get("candidate_ids", [])
+        }
+        self.assertNotIn(auto_rows[0]["candidate_id"], reviewed)
 
     def test_complete_supported_t_subchain_is_trusted(self):
         model, _ = FIXTURES.partial_overlap_t()
@@ -75,23 +82,19 @@ class RecognitionRuleTests(unittest.TestCase):
         plan = build_recognition_plan(candidates)
         seed_ids = {seed["candidate_id"] for seed in plan["trusted_seeds"]}
         self.assertIn(auto_rows[0]["candidate_id"], seed_ids)
+        # Recall delivery keeps every reported chain; the recognizer no longer
+        # suppresses a supported edge that the user asked to weld.
+        self.assertEqual({row["candidate_id"] for row in t_rows}, seed_ids)
         self.assertFalse(plan["potential_groups"])
 
-    def test_ambiguous_t_relations_are_all_delivered_without_review(self):
+    def test_ambiguous_t_relations_require_review_even_with_submit_all(self):
         model, _ = FIXTURES.multi_target_same_edge()
         candidates = detect_candidates(model)
         plan = build_recognition_plan(candidates)
-        self.assertEqual(
-            len([row for row in candidates if row["candidate_type"] == "T_SEAM"]),
-            len([seed for seed in plan["trusted_seeds"] if seed["weld_type"] == "T"]),
-        )
-        self.assertTrue(all(
-            seed["delivery_mode"] == "ALL_CANDIDATES"
-            for seed in plan["trusted_seeds"]
-        ))
-        self.assertFalse(plan["potential_groups"])
+        self.assertFalse([seed for seed in plan["trusted_seeds"] if seed["weld_type"] == "T"])
+        self.assertTrue(plan["potential_groups"])
 
-    def test_all_t_and_patch_candidates_bypass_review_and_duplicate_gates(self):
+    def test_submit_all_cannot_bypass_coverage_and_duplicate_gates(self):
         candidates = [
             {
                 "candidate_id": "T_REVIEW_1", "candidate_type": "T_SEAM",
@@ -110,14 +113,8 @@ class RecognitionRuleTests(unittest.TestCase):
             },
         ]
         plan = build_recognition_plan(candidates)
-        self.assertEqual({"T_REVIEW_1", "PATCH_REVIEW_1"}, {
-            seed["candidate_id"] for seed in plan["trusted_seeds"]
-        })
-        self.assertTrue(all(
-            seed["delivery_mode"] == "ALL_CANDIDATES"
-            for seed in plan["trusted_seeds"]
-        ))
-        self.assertFalse(plan["potential_groups"])
+        self.assertFalse(plan["trusted_seeds"])
+        self.assertTrue(plan["potential_groups"])
 
     def test_fully_contained_smaller_patch_supplies_all_free_edge_nodes(self):
         model, _ = FIXTURES.patch()
@@ -210,7 +207,12 @@ class RecognitionRuleTests(unittest.TestCase):
         plan = build_recognition_plan(candidates)
         seed_ids = {seed["candidate_id"] for seed in plan["trusted_seeds"]}
         self.assertIn(row["candidate_id"], seed_ids)
-        self.assertFalse(plan["potential_groups"])
+        reviewed = {
+            candidate_id
+            for group in plan["potential_groups"]
+            for candidate_id in group.get("candidate_ids", [])
+        }
+        self.assertNotIn(row["candidate_id"], reviewed)
 
 
     def test_patch_opening_and_outer_boundary_are_both_trusted(self):

@@ -118,9 +118,8 @@ DEFAULT_SETTINGS = {
     "patch_inner_loop_policy": "auto_all",
     "review_multi_target_realization": False,
     "t_recall_first_mode": True,
-    # Field-validation policy: every structurally usable T/PATCH candidate is
-    # sent to Tcl.  Recognition scores and review reasons remain diagnostics;
-    # they no longer suppress creation.
+    # Broaden delivery within the supported geometry envelope.  Coverage,
+    # ambiguity, topology and duplicate safety gates remain mandatory.
     "submit_all_weld_candidates": True,
 }
 
@@ -1416,7 +1415,26 @@ def _initialize_detection_worker(model, settings, topologies):
         "settings": settings,
         "topologies": topologies,
         "context": _detection_context(model, topologies, maximum),
+        "t_geometry": None,
     }
+
+
+def _worker_t_geometry():
+    """Build the immutable physical-skin cache at most once per worker.
+
+    The strict detector can invoke a relaxed recall pass.  Rebuilding normals,
+    facets and spatial indexes for that second pass used to roughly double the
+    CPU and peak allocation of every Windows worker.
+    """
+    geometry = _DETECTION_CONTEXT.get("t_geometry")
+    if geometry is None:
+        geometry = build_physical_geometry_context(
+            _DETECTION_CONTEXT["model"], _DETECTION_CONTEXT["topologies"])
+        _DETECTION_CONTEXT["t_geometry"] = geometry
+        # PATCH uses the same physical facets.  If the process later receives
+        # that task, share them instead of materializing a second copy.
+        _DETECTION_CONTEXT["context"]["physical_geometry"] = geometry[1]
+    return geometry
 
 
 def _parallel_detection_task(task):
@@ -1426,7 +1444,20 @@ def _parallel_detection_task(task):
     topologies = _DETECTION_CONTEXT["topologies"]
     shared = _DETECTION_CONTEXT["context"]
     if kind == "T":
-        return detect_t_candidates_v2(model, settings, topologies, set(source_ids))
+        return detect_t_candidates_v2(
+            model, settings, topologies, set(source_ids),
+            geometry_context=_worker_t_geometry(),
+            defer_missing_fallback=True,
+        )
+    if kind == "T_RECALL":
+        relaxed = dict(settings)
+        relaxed["t_recall_candidate_pass"] = True
+        relaxed["t_edge_review_coverage"] = float(
+            settings.get("t_recall_edge_review_coverage", 0.01))
+        return detect_t_candidates_v2(
+            model, relaxed, topologies, set(source_ids),
+            geometry_context=_worker_t_geometry(),
+        )
     if kind == "PATCH":
         return _patch_candidates(model, settings, topologies, shared)
     if kind == "NEAR":
@@ -1439,7 +1470,11 @@ def _resolved_worker_count(settings, component_count, element_count):
     if configured < 0:
         raise ValueError("python_workers must not be negative")
     available = max(1, int(os.cpu_count() or 1))
-    workers = configured if configured else min(8, max(1, available - 1))
+    # Recognition runs in a separate Python process while HyperMesh waits, so
+    # reserving one logical CPU only left compute capacity idle.  Keep the
+    # conservative eight-process memory cap but use every available core under
+    # that cap; users can still set an explicit lower value.
+    workers = configured if configured else min(8, available)
     workers = min(workers, max(1, component_count + 2))
     if workers < 2 or component_count < 4 or element_count < int(settings.get("parallel_min_elements", 2000)):
         return 1
@@ -1449,6 +1484,30 @@ def _resolved_worker_count(settings, component_count, element_count):
 def resolved_worker_count_for_model(model, settings):
     component_ids = {element.component_id for element in model.elements.values()}
     return _resolved_worker_count(settings, len(component_ids), len(model.elements))
+
+
+def _balanced_source_groups(topologies, component_ids, partition_count):
+    """Greedily balance source components by free-edge detection work."""
+    partition_count = max(1, min(int(partition_count), len(component_ids)))
+    groups = [[] for _ in range(partition_count)]
+    loads = [0 for _ in range(partition_count)]
+    weighted = sorted(
+        (int(component_id) for component_id in component_ids),
+        key=lambda component_id: (
+            -len(topologies[component_id].free_edges),
+            -len(topologies[component_id].element_ids),
+            component_id,
+        ),
+    )
+    for component_id in weighted:
+        target = min(range(partition_count), key=lambda index: (loads[index], index))
+        groups[target].append(component_id)
+        loads[target] += max(
+            1,
+            len(topologies[component_id].free_edges),
+            len(topologies[component_id].element_ids) // 8,
+        )
+    return [sorted(group) for group in groups if group]
 
 
 def _t_relation_key(candidate):
@@ -1500,7 +1559,7 @@ def _apply_relation_ambiguity(candidates):
 
 
 def build_recognition_plan(candidates, recall_first=True, submit_all=True):
-    """Build Tcl seed jobs, optionally bypassing every recognition review gate."""
+    """Deliver supported paths; recall settings never bypass mesh safety gates."""
     trusted = []
     potential_rows = []
     for row in candidates:
@@ -1516,12 +1575,8 @@ def build_recognition_plan(candidates, recall_first=True, submit_all=True):
             and bool(source_nodes)
             and bool(target_ids)
         )
-        # Temporary recall-first field-validation policy.  A detected local T
-        # edge is delivered for creation even when conservative scoring marked
-        # it REVIEW (gap, partial coverage, target ambiguity, angle border,
-        # projection jump).  Only evidence that the selected edge itself is
-        # topologically unsafe remains blocking; unrelated component geometry
-        # never participates here.  Existing seams are never duplicated.
+        # Recall can deliver a generalized T angle marked REVIEW.  The common
+        # safety gate below still excludes unsupported or ambiguous geometry.
         if row.get("recall_candidate_fallback"):
             local_topology_blockers = {"INNER_BOUNDARY_SOURCE"}
         else:
@@ -1537,7 +1592,24 @@ def build_recognition_plan(candidates, recall_first=True, submit_all=True):
             and bool(target_ids)
             and not (set(row.get("reason_codes", [])) & local_topology_blockers)
         )
-        if direct_delivery or standard_trusted or recall_trusted:
+        # Only evidence that would produce a wrong or duplicate weld blocks
+        # delivery.  Coverage shortfalls, projection jumps and skin error are
+        # tolerance findings: the mesh executor still validates the result, so
+        # they stay diagnostics instead of suppressing the candidate.
+        blockers = {
+            "TARGET_AMBIGUITY", "MULTI_TARGET_UNCERTAIN", "NON_MANIFOLD_REGION",
+            "NORMAL_INCONSISTENT", "INNER_BOUNDARY_SOURCE", "SHORT_WELD",
+        }
+        safe = (
+            row.get("duplicate_status", "NEW") == "NEW"
+            and not row.get("ambiguous_relation", False)
+            and not (set(row.get("reason_codes", [])) & blockers)
+            and float(row.get("projection_coverage", 1.0)) >= 0.5
+            and float(row.get("length", 0.0)) >= 1.0e-9
+            and len(source_nodes) >= (3 if row.get("closed", False) else 2)
+            and len(source_nodes) == len(set(source_nodes))
+        )
+        if safe and (direct_delivery or standard_trusted or recall_trusted):
             seed = {
                 "candidate_id": str(row["candidate_id"]),
                 "weld_type": "T" if row["candidate_type"] == "T_SEAM" else "PATCH",
@@ -1665,8 +1737,12 @@ def detect_candidates(model, settings=None):
     candidates = []
     if worker_count > 1:
         component_ids = sorted(topologies)
-        t_partitions = max(1, worker_count - 2)
-        source_groups = [component_ids[index::t_partitions] for index in range(t_partitions)]
+        # Reserve one slot for PATCH and another only when the optional legacy
+        # near-edge pass is enabled.  The old unconditional two-slot reserve
+        # left a core idle during the normal recognition workflow.
+        auxiliary_tasks = 1 + int(bool(resolved.get("include_legacy_near_edges", False)))
+        t_partitions = max(1, worker_count - auxiliary_tasks)
+        source_groups = _balanced_source_groups(topologies, component_ids, t_partitions)
         tasks = [("T", group) for group in source_groups if group]
         tasks.append(("PATCH", ()))
         if bool(resolved.get("include_legacy_near_edges", False)):
@@ -1687,8 +1763,52 @@ def detect_candidates(model, settings=None):
                     initializer=_initialize_detection_worker,
                     initargs=(model, resolved, topologies),
                 ) as executor:
-                    for rows in executor.map(_parallel_detection_task, tasks):
-                        candidates.extend(rows)
+                    strict_t_rows = []
+                    for task, rows in zip(tasks, executor.map(_parallel_detection_task, tasks)):
+                        if task[0] == "T":
+                            strict_t_rows.extend(rows)
+                        else:
+                            candidates.extend(rows)
+
+                    # Missing-source recall depends on reverse relations from
+                    # every source component.  Running it independently inside
+                    # each partition created extra REVIEW rows (and made output
+                    # depend on worker count).  Perform a second pool wave only
+                    # for sources without a strict/local-supplementary row, then
+                    # apply the same global reverse-pair suppression as serial.
+                    sources_with_rows = {
+                        int(row["source_component_id"]) for row in strict_t_rows
+                    }
+                    missing_sources = [
+                        component_id for component_id in component_ids
+                        if component_id not in sources_with_rows
+                    ]
+                    fallback_rows = []
+                    if (bool(resolved.get("t_recall_first_mode", True)) and
+                            missing_sources):
+                        fallback_partitions = min(worker_count, len(missing_sources))
+                        fallback_groups = _balanced_source_groups(
+                            topologies, missing_sources, fallback_partitions)
+                        fallback_tasks = [
+                            ("T_RECALL", group) for group in fallback_groups if group
+                        ]
+                        for rows in executor.map(_parallel_detection_task, fallback_tasks):
+                            fallback_rows.extend(rows)
+                    strict_pairs = {
+                        (int(row["source_component_id"]), int(target_id))
+                        for row in strict_t_rows
+                        for target_id in row.get("target_component_ids", [])
+                    }
+                    minimum_coverage = float(resolved.get("t_recall_min_coverage", 0.5))
+                    strict_t_rows.extend(
+                        row for row in fallback_rows
+                        if float(row.get("projection_coverage", 0.0)) >= minimum_coverage
+                        and not any(
+                            (int(target_id), int(row["source_component_id"])) in strict_pairs
+                            for target_id in row.get("target_component_ids", [])
+                        )
+                    )
+                    candidates.extend(strict_t_rows)
             finally:
                 multiprocessing.set_executable(original_executable)
         except Exception:
@@ -1720,6 +1840,10 @@ def detect_candidates(model, settings=None):
         ]
     for index, row in enumerate(candidates, 1):
         row["candidate_id"] = "B{:06d}".format(index)
+        if row.get("candidate_type") == "T_SEAM" and isinstance(row.get("source"), dict):
+            # Worker partitions have independent local chain counters.  The
+            # public value must be stable across serial/parallel execution.
+            row["source"]["chain_id"] = index
         row["joint_type"] = {"T_SEAM": "T_PATH", "PATCH_SEAM": "L_SURF"}.get(row["candidate_type"], "REVIEW")
         row["duplicate_status"] = "NEW"
         source_topology = topologies.get(int(row["source_component_id"]))

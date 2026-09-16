@@ -91,6 +91,18 @@ class OfflineBackendTests(unittest.TestCase):
         parallel = detect_candidates(model, {"python_workers": 2, "parallel_min_elements": 0})
         self.assertEqual(serial, parallel)
 
+    def test_multi_partition_recall_matches_serial_candidates(self):
+        # More than two workers creates several independent T-source
+        # partitions.  Reverse-relation suppression must still be global;
+        # otherwise each partition emits extra relaxed REVIEW rows.
+        fixture = EXAMPLE_DIR / "test_fem" / "combined_all_cases_manifest.json"
+        model = __import__(
+            "hmworkflow.mesh_seam_weld.fem_mesh_reader", fromlist=["read_shell_fem_bundle"]
+        ).read_shell_fem_bundle(fixture)
+        serial = detect_candidates(model, {"python_workers": 1})
+        parallel = detect_candidates(model, {"python_workers": 4, "parallel_min_elements": 0})
+        self.assertEqual(serial, parallel)
+
     def test_fem_reader_skips_unsupported_elements_without_aborting(self):
         with tempfile.TemporaryDirectory() as directory:
             fem = Path(directory) / "mixed.fem"
