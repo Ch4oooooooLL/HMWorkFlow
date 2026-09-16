@@ -5,7 +5,8 @@
 
 .DESCRIPTION
     Runs build_package.ps1, verifies that the expected ZIP was created, and
-    then uploads it to "拷入 / 李永超 / HM" by using upload-anyshare.ps1.
+    then uploads it to "拷入 / 李永超 / HM" by using upload_anyshare.ps1
+    (the workspace-local uploader). Override with -UploadScript if needed.
 
 .EXAMPLE
     .\build_and_upload.ps1
@@ -31,7 +32,7 @@ param(
 
     [string] $Code = $env:ANYSHARE_CODE,
 
-    [string] $UploadScript = 'C:\Users\hjlyc\Documents\Codex\2026-08-14\https-pan-sntonly-com-anyshare-zh\outputs\upload-anyshare.ps1',
+    [string] $UploadScript = 'upload_anyshare.ps1',
 
     [switch] $ShowBrowser,
 
@@ -52,10 +53,17 @@ if (-not (Test-Path -LiteralPath $BuildScript -PathType Leaf)) {
     throw "未找到打包脚本：$BuildScript"
 }
 
-if (-not (Test-Path -LiteralPath $UploadScript -PathType Leaf)) {
-    throw "未找到 AnyShare 上传脚本：$UploadScript`n可通过 -UploadScript 指定脚本路径。"
+if ([System.IO.Path]::IsPathRooted($UploadScript)) {
+    $ResolvedUploadScriptPath = [System.IO.Path]::GetFullPath($UploadScript)
 }
-$ResolvedUploadScript = (Resolve-Path -LiteralPath $UploadScript).Path
+else {
+    $ResolvedUploadScriptPath = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $UploadScript))
+}
+
+if (-not (Test-Path -LiteralPath $ResolvedUploadScriptPath -PathType Leaf)) {
+    throw "未找到 AnyShare 上传脚本：$ResolvedUploadScriptPath`n可通过 -UploadScript 指定脚本路径。"
+}
+$ResolvedUploadScript = $ResolvedUploadScriptPath
 
 if ([System.IO.Path]::IsPathRooted($OutputDir)) {
     $ResolvedOutputDir = [System.IO.Path]::GetFullPath($OutputDir)
