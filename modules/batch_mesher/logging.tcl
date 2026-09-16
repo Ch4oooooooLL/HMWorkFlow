@@ -72,6 +72,22 @@ proc ::BatchMesher::groupJson {group indent} {
 proc ::BatchMesher::taskJson {task indent} {
     set componentNames {}
     foreach name [dict get $task component_names] { lappend componentNames [::BatchMesher::jsonString $name] }
+    set reviewFindings {}
+    if {[dict exists $task review_findings]} {
+        foreach finding [dict get $task review_findings] { lappend reviewFindings [::BatchMesher::jsonString $finding] }
+    }
+    set validationStatus ""
+    if {[dict exists $task validation_status]} { set validationStatus [dict get $task validation_status] }
+    set reviewFindingCount [llength $reviewFindings]
+    if {[dict exists $task review_finding_count]} { set reviewFindingCount [dict get $task review_finding_count] }
+    set createdElements null
+    if {[dict exists $task created_elements]} { set createdElements [::BatchMesher::jsonNumberOrNull [dict get $task created_elements]] }
+    set qualityStatus ""
+    if {[dict exists $task quality_status]} { set qualityStatus [dict get $task quality_status] }
+    set qualityFailedElements null
+    if {[dict exists $task quality_failed_elements]} { set qualityFailedElements [::BatchMesher::jsonNumberOrNull [dict get $task quality_failed_elements]] }
+    set connectivityStatus ""
+    if {[dict exists $task connectivity_status]} { set connectivityStatus [dict get $task connectivity_status] }
     return [join [list \
         "$indent{" \
         "$indent  \"task_id\": [::BatchMesher::jsonString [dict get $task task_id]]," \
@@ -81,6 +97,13 @@ proc ::BatchMesher::taskJson {task indent} {
         "$indent  \"component_ids\": [::BatchMesher::jsonIdArray [dict get $task component_ids]]," \
         "$indent  \"component_names\": \[[join $componentNames ,]\]," \
         "$indent  \"status\": [::BatchMesher::jsonString [dict get $task status]]," \
+        "$indent  \"created_elements\": $createdElements," \
+        "$indent  \"validation_status\": [::BatchMesher::jsonString $validationStatus]," \
+        "$indent  \"review_finding_count\": $reviewFindingCount," \
+        "$indent  \"review_findings\": \[[join $reviewFindings ,]\]," \
+        "$indent  \"quality_status\": [::BatchMesher::jsonString $qualityStatus]," \
+        "$indent  \"quality_failed_elements\": $qualityFailedElements," \
+        "$indent  \"connectivity_status\": [::BatchMesher::jsonString $connectivityStatus]," \
         "$indent  \"elapsed_seconds\": [::BatchMesher::jsonNumberOrNull [dict get $task elapsed_seconds]]," \
         "$indent  \"started_at\": [::BatchMesher::jsonString [dict get $task started_at]]," \
         "$indent  \"ended_at\": [::BatchMesher::jsonString [dict get $task ended_at]]," \
@@ -110,11 +133,28 @@ proc ::BatchMesher::writeRunReport {{final 0}} {
     }
     set statuses {}
     foreach task $runtime(tasks) { lappend statuses [dict get $task status] }
+    set reviewTaskCount 0
+    set reviewFindingCount 0
+    foreach task $runtime(tasks) {
+        if {[dict exists $task validation_status] && [dict get $task validation_status] eq "needs_review"} {
+            incr reviewTaskCount
+        }
+        if {[dict exists $task review_finding_count] &&
+            [string is integer -strict [dict get $task review_finding_count]]} {
+            incr reviewFindingCount [dict get $task review_finding_count]
+        }
+    }
     set result running
     if {$final} {
         if {$runtime(run_error) ne "" || [lsearch -exact $statuses failed] >= 0} { set result failed \
         } elseif {[lsearch -exact $statuses cancelled] >= 0} { set result cancelled \
         } else { set result completed }
+    }
+    set validationResult pending
+    if {$final} {
+        if {$reviewTaskCount > 0} { set validationResult needs_review \
+        } elseif {$result ne "completed"} { set validationResult incomplete \
+        } else { set validationResult passed }
     }
     set lines [list \
         "{" \
@@ -135,6 +175,9 @@ proc ::BatchMesher::writeRunReport {{final 0}} {
         "  \"cancelled\": [::BatchMesher::jsonBool [expr {[lsearch -exact $statuses cancelled] >= 0}]]," \
         "  \"error_message\": [::BatchMesher::jsonString $runtime(run_error)]," \
         "  \"result\": [::BatchMesher::jsonString $result]," \
+        "  \"validation_result\": [::BatchMesher::jsonString $validationResult]," \
+        "  \"review_task_count\": $reviewTaskCount," \
+        "  \"review_finding_count\": $reviewFindingCount," \
         "  \"groups\": \[" \
         [join $groupJson ",\n"] \
         "  \]," \

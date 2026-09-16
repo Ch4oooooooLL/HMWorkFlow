@@ -257,10 +257,23 @@ proc ::BatchMesherWorker::appendTaskWarning {taskVar message} {
     dict set task warning_message $warning
 }
 
+proc ::BatchMesherWorker::appendReviewFinding {taskVar finding} {
+    upvar 1 $taskVar task
+    set finding [string trim $finding]
+    if {$finding eq ""} { return }
+    set findings {}
+    if {[dict exists $task review_findings]} { set findings [dict get $task review_findings] }
+    lappend findings $finding
+    dict set task review_findings $findings
+    dict set task review_finding_count [llength $findings]
+    dict set task validation_status needs_review
+    ::BatchMesherWorker::appendTaskWarning task $finding
+}
+
 # Check the result at the engineering boundary that matters for downstream
 # assembly: every element created for one topology-connected surface group
-# must belong to the same node-connected FE region. Quality failures do not
-# affect this result and are handled separately.
+# should belong to the same node-connected FE region. This is a review check,
+# not an output gate: created mesh is retained even when the check fails.
 proc ::BatchMesherWorker::meshConnectivitySummary {elementIds} {
     set elementIds [::BatchMesherWorker::uniqueIds $elementIds]
     if {[llength $elementIds] == 0} {
@@ -355,6 +368,9 @@ proc ::BatchMesherWorker::runTask {index} {
     dict set task ended_at ""
     dict set task elapsed_seconds ""
     dict set task error_message ""
+    dict set task validation_status passed
+    dict set task review_findings {}
+    dict set task review_finding_count 0
     dict set task log_path $taskLog
     ::BatchMesherWorker::replaceRecord $index $task
     ::BatchMesherWorker::writeState running $index "Running $taskId / $groupId ([llength $ids] surfaces)"
@@ -400,6 +416,7 @@ proc ::BatchMesherWorker::runTask {index} {
     dict set task created_elements [llength $created]
     if {[llength $created] == 0} {
         set code 1
+        dict set task validation_status no_output
         if {[string trim $errorMessage] eq ""} {
             set errorMessage "BatchMesher returned without creating elements; surface_ids=$ids"
             set errorOptions [dict create -errorinfo $errorMessage]
@@ -409,39 +426,39 @@ proc ::BatchMesherWorker::runTask {index} {
         dict set task connectivity_status [dict get $connectivity status]
         dict set task connectivity_components [dict get $connectivity component_count]
         if {[dict get $connectivity status] eq "invalid"} {
-            set code 1
-            set connectivityError "BATCHMESH_CONNECTIVITY_INVALID [dict get $connectivity message]; component_sizes=[dict get $connectivity component_sizes] surface_ids=$ids"
-            if {[string trim $errorMessage] ne ""} { append connectivityError "\nNative BatchMesh diagnostic: $errorMessage" }
-            set errorMessage $connectivityError
-            set errorOptions [dict create -errorinfo $connectivityError]
+            set connectivityFinding "CONNECTIVITY_REVIEW_REQUIRED [dict get $connectivity message]; component_sizes=[dict get $connectivity component_sizes] surface_ids=$ids; mesh retained in output"
+            ::BatchMesherWorker::appendReviewFinding task $connectivityFinding
         } else {
             if {[dict get $connectivity status] eq "unavailable"} {
-                ::BatchMesherWorker::appendTaskWarning task \
+                ::BatchMesherWorker::appendReviewFinding task \
                     "Connectivity verification unavailable; mesh retained: [dict get $connectivity message]"
             }
-            if {$code} {
-                # Preserve the native diagnostic, but a created mesh whose
-                # connectivity is not known to be wrong remains usable.
-                set batchWarning $errorMessage
-                set code 0
-            }
-            set quality [::BatchMesherWorker::meshQualitySummary $created]
-            set qualityStatus [dict get $quality status]
-            set qualityFailed [dict get $quality failed_ids]
-            dict set task quality_status $qualityStatus
-            dict set task quality_failed_elements [llength $qualityFailed]
-            dict set task optimization_attempts 0
-            if {$qualityStatus eq "needs_optimization"} {
-                dict set task optimization_status pending
-                ::BatchMesherWorker::appendTaskWarning task \
-                    "QUALITY_NEEDS_OPTIMIZATION failed_elements=[llength $qualityFailed] element_ids=$qualityFailed; mesh retained for later iterative optimization"
-            } elseif {$qualityStatus eq "passed"} {
-                dict set task optimization_status not_required
-            } else {
-                dict set task optimization_status available
-                ::BatchMesherWorker::appendTaskWarning task \
-                    "Quality verification unavailable; mesh retained for later review: [dict get $quality info]"
-            }
+        }
+        if {$code} {
+            # A native command may report that criteria/cleanup could not be
+            # fully satisfied after it has already created useful mesh. Keep
+            # that mesh and move the diagnostic into the review report.
+            set batchWarning $errorMessage
+            ::BatchMesherWorker::appendReviewFinding task \
+                "NATIVE_BATCHMESH_REVIEW_REQUIRED $errorMessage; created_elements=[llength $created]; mesh retained in output"
+            set code 0
+        }
+        set quality [::BatchMesherWorker::meshQualitySummary $created]
+        set qualityStatus [dict get $quality status]
+        set qualityFailed [dict get $quality failed_ids]
+        dict set task quality_status $qualityStatus
+        dict set task quality_failed_elements [llength $qualityFailed]
+        dict set task optimization_attempts 0
+        if {$qualityStatus eq "needs_optimization"} {
+            dict set task optimization_status pending
+            ::BatchMesherWorker::appendReviewFinding task \
+                "QUALITY_NEEDS_OPTIMIZATION failed_elements=[llength $qualityFailed] element_ids=$qualityFailed; mesh retained for later iterative optimization"
+        } elseif {$qualityStatus eq "passed"} {
+            dict set task optimization_status not_required
+        } else {
+            dict set task optimization_status available
+            ::BatchMesherWorker::appendReviewFinding task \
+                "Quality verification unavailable; mesh retained for later review: [dict get $quality info]"
         }
     }
     set ended [clock milliseconds]
@@ -462,10 +479,13 @@ proc ::BatchMesherWorker::runTask {index} {
         if {[string trim $batchWarning] ne ""} {
             # BatchMesher can return a Tcl error after producing a usable mesh
             # (for example when quality optimization cannot meet every target).
-            # Element creation is the authoritative result boundary.
-            ::BatchMesherWorker::appendTaskWarning task $batchWarning
+            # Element creation is the authoritative result boundary. The raw
+            # diagnostic is already represented by a structured review finding.
             ::BatchMesherWorker::appendLog $taskLog WARN \
                 "completed_with_warning created_elements=[llength $created] warning=$batchWarning"
+        } elseif {[dict get $task validation_status] eq "needs_review"} {
+            ::BatchMesherWorker::appendLog $taskLog WARN \
+                "completed_with_review created_elements=[llength $created] findings=[dict get $task review_finding_count]"
         } else {
             ::BatchMesherWorker::appendLog $taskLog INFO "completed created_elements=[llength $created] elapsed_seconds=[dict get $task elapsed_seconds]"
         }

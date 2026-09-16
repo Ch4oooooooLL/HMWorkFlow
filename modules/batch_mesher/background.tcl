@@ -217,6 +217,9 @@ proc ::BatchMesher::tasksForBackground {taskIds} {
             dict set task ended_at ""
             dict set task error_message ""
             dict set task warning_message ""
+            dict set task validation_status pending
+            dict set task review_findings {}
+            dict set task review_finding_count 0
             dict set task packaging_status pending
             dict set task packaging_error ""
             dict set task log_path ""

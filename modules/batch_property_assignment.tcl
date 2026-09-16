@@ -10,14 +10,14 @@
 # HyperMesh-native empty components, existing properties, and 1D-name
 # keywords BEAM/RBE/BUSH/SPRING are skipped.
 #
-# Failed/unrecognized components stay untouched.  An empty component
-# collector is created in PROPERTY_ASSIGNMENT_REVIEW so the Model Browser
-# contains a name-only review list without duplicating mesh or geometry.
+# Failed/unrecognized components stay untouched and are placed in component
+# sets grouped by a stable error code.  No component is copied or moved and
+# no assembly is created or modified.
 # ======================================================================
 
 namespace eval ::BatchPropertyAssignment {
-    variable REVIEW_ASSEMBLY "PROPERTY_ASSIGNMENT_REVIEW"
     variable REVIEW_PREFIX "PROPERTY_REVIEW__"
+    variable ERROR_SET_PREFIX "PROPERTY_ERROR__"
 }
 
 proc ::BatchPropertyAssignment::formatThicknessToken {value} {
@@ -113,6 +113,81 @@ proc ::BatchPropertyAssignment::parseComponentName {name} {
         thickness [expr {double($thickness)}] \
         thickness_token $token \
         property_name "${material}_T${token}"]
+}
+
+proc ::BatchPropertyAssignment::componentNameError {name} {
+    set name [string trim $name]
+    if {$name eq ""} {
+        return [list NAME_EMPTY "component 名称为空" "component name is empty"]
+    }
+
+    set upper [string toupper $name]
+    if {[string first "SEAM" $upper] >= 0} {
+        if {![regexp -nocase {T[+-]?[0-9]} $name]} {
+            return [list SEAM_THICKNESS_MISSING \
+                "焊缝名称中缺少 T 后的数字厚度" \
+                "weld name has no numeric thickness after T"]
+        }
+        return [list THICKNESS_INVALID \
+            "焊缝名称中的厚度不是有效正数" \
+            "weld thickness is not a valid positive number"]
+    }
+
+    if {![regexp -nocase {^V[[:alnum:].+-]+_} $name]} {
+        return [list VERSION_PREFIX_INVALID \
+            "名称缺少有效的 V 版本前缀" \
+            "name has no valid V-version prefix"]
+    }
+    if {[regexp -nocase {^V[[:alnum:].+-]+__T} $name]} {
+        return [list PART_NUMBER_MISSING \
+            "V 版本前缀与厚度字段之间缺少件号" \
+            "part number is missing between the V-version prefix and thickness"]
+    }
+    if {![regexp -nocase {_T} $name]} {
+        return [list THICKNESS_MISSING \
+            "名称中缺少 _T 厚度字段" \
+            "name has no _T thickness field"]
+    }
+    if {![regexp -nocase {_T[+-]?[0-9]} $name]} {
+        return [list THICKNESS_INVALID \
+            "名称中的厚度不是有效数字" \
+            "thickness in the name is not numeric"]
+    }
+    if {![regexp -nocase {_T[^_]*_[^_]+$} $name]} {
+        return [list MATERIAL_NAME_MISSING \
+            "名称末尾缺少材料字段" \
+            "name has no trailing material field"]
+    }
+    if {[regexp -nocase {_T(?:0+(?:[.]0*)?|-[0-9])(?:[^0-9.]|$)} $name]} {
+        return [list THICKNESS_INVALID \
+            "名称中的厚度必须为正数" \
+            "thickness in the name must be positive"]
+    }
+    return [list NAME_FORMAT_INVALID \
+        "名称结构不符合 Property 识别规则" \
+        "name structure does not match the property naming rules"]
+}
+
+proc ::BatchPropertyAssignment::classifyRuntimeError {stage message} {
+    set text [string tolower $message]
+    switch -- $stage {
+        MATERIAL {
+            if {[string first "steel" $text] >= 0} {return MATERIAL_STEEL_CREATE_FAILED}
+            return MATERIAL_CREATE_FAILED
+        }
+        PROPERTY {
+            if {[string first "unsupported property card" $text] >= 0} {return PROPERTY_CARD_UNSUPPORTED}
+            if {[string first "cannot create" $text] >= 0} {return PROPERTY_CREATE_FAILED}
+            if {[string first "cannot read property id" $text] >= 0} {return PROPERTY_LOOKUP_FAILED}
+            if {[string first "cannot set material" $text] >= 0} {return PROPERTY_MATERIAL_ASSIGN_FAILED}
+            if {[string first "cannot set pshell thickness" $text] >= 0} {return PROPERTY_THICKNESS_ASSIGN_FAILED}
+            if {[string first "thickness verification failed" $text] >= 0} {return PROPERTY_THICKNESS_VERIFY_FAILED}
+            if {[string first "material verification failed" $text] >= 0} {return PROPERTY_MATERIAL_VERIFY_FAILED}
+            return PROPERTY_OPERATION_FAILED
+        }
+        ASSIGN { return PROPERTY_ASSIGN_VERIFY_FAILED }
+    }
+    return PROPERTY_UNKNOWN_ERROR
 }
 
 proc ::BatchPropertyAssignment::isIgnoredThicknessName {name} {
@@ -405,25 +480,79 @@ proc ::BatchPropertyAssignment::assignProperty {componentId propertyId propertyN
     return 1
 }
 
-proc ::BatchPropertyAssignment::reviewEntryName {componentName} {
-    variable REVIEW_PREFIX
-    return "${REVIEW_PREFIX}${componentName}"
+proc ::BatchPropertyAssignment::errorSetName {errorCode} {
+    variable ERROR_SET_PREFIX
+    return "${ERROR_SET_PREFIX}${errorCode}"
 }
 
-proc ::BatchPropertyAssignment::ensureReviewEntry {componentName} {
-    variable REVIEW_ASSEMBLY
-    set reviewName [::BatchPropertyAssignment::reviewEntryName $componentName]
-    # createComponent only creates an empty collector here.  No duplicate or
-    # move command is used, so the source component contents remain untouched.
-    set reviewId [::HWFlow::createComponent $reviewName 3]
-    if {$reviewId eq ""} {
-        error "cannot create empty review component $reviewName"
+proc ::BatchPropertyAssignment::setComponentIds {setId} {
+    foreach dataName {ids entitylist componentlist} {
+        set values {}
+        if {![catch {set values [hm_getvalue sets id=$setId dataname=$dataName]}] &&
+            [llength $values] > 0} {
+            return [lsort -integer -unique $values]
+        }
     }
-    set assemblyId [::HWFlow::addComponentsToAssembly $REVIEW_ASSEMBLY [list $reviewId] 3]
-    if {$assemblyId eq ""} {
-        error "cannot add $reviewName to assembly $REVIEW_ASSEMBLY"
+    return {}
+}
+
+proc ::BatchPropertyAssignment::ensureErrorSet {errorCode componentIds} {
+    set componentIds [lsort -integer -unique $componentIds]
+    if {[llength $componentIds] == 0} {return ""}
+    set setName [::BatchPropertyAssignment::errorSetName $errorCode]
+    set setId [::BatchPropertyAssignment::entityIdByName {sets} $setName]
+
+    set existingIds {}
+    if {$setId ne ""} {
+        set existingIds [::BatchPropertyAssignment::setComponentIds $setId]
     }
-    return $reviewId
+    set mergedIds [lsort -integer -unique [concat $existingIds $componentIds]]
+
+    if {$setId eq ""} {
+        catch {*clearmark comps 1}
+        set memberType comps
+        if {[catch {eval *createmark comps 1 $mergedIds} markError]} {
+            set memberType components
+            if {[catch {eval *createmark components 1 $mergedIds} secondMarkError]} {
+                error "cannot mark components for set $setName: $markError / $secondMarkError"
+            }
+        }
+        set createError ""
+        if {[catch {uplevel #0 [list *entitysetcreate $setName $memberType 1]} createError]} {
+            catch {*clearmark comps 1}
+            catch {*clearmark components 1}
+            error "cannot create component set $setName: $createError"
+        }
+        catch {*clearmark comps 1}
+        catch {*clearmark components 1}
+        set setId [::BatchPropertyAssignment::entityIdByName {sets} $setName]
+        if {$setId eq ""} {error "cannot read component set id for $setName"}
+    } else {
+        set command [list *setvalue sets "id=$setId" "ids={comps $mergedIds}"]
+        if {[catch {uplevel #0 $command} updateError]} {
+            error "cannot update component set $setName: $updateError"
+        }
+    }
+
+    set actualIds [::BatchPropertyAssignment::setComponentIds $setId]
+    if {[llength $actualIds] > 0} {
+        foreach componentId $componentIds {
+            if {$componentId ni $actualIds} {
+                error "component set $setName verification failed for component $componentId"
+            }
+        }
+    }
+    return $setId
+}
+
+proc ::BatchPropertyAssignment::failureRow {componentId componentName errorCode reasonZh reasonEn} {
+    return [dict create \
+        component_id $componentId \
+        component_name $componentName \
+        error_code $errorCode \
+        set_name [::BatchPropertyAssignment::errorSetName $errorCode] \
+        reason_zh $reasonZh \
+        reason_en $reasonEn]
 }
 
 proc ::BatchPropertyAssignment::appendProgress {message} {
@@ -433,7 +562,6 @@ proc ::BatchPropertyAssignment::appendProgress {message} {
 }
 
 proc ::BatchPropertyAssignment::execute {} {
-    variable REVIEW_ASSEMBLY
     variable REVIEW_PREFIX
     set componentIds [::BatchPropertyAssignment::allComponentIds]
     set emptyComponentIds [::BatchPropertyAssignment::nativeEmptyComponentIds]
@@ -487,7 +615,9 @@ proc ::BatchPropertyAssignment::execute {} {
 
         set parsed [::BatchPropertyAssignment::parseComponentName $componentName]
         if {[llength $parsed] == 0} {
-            lappend failures [list $componentName "未能从名称提取有效厚度及材料/焊缝信息" "could not extract a valid thickness and material/weld information from the name"]
+            lassign [::BatchPropertyAssignment::componentNameError $componentName] errorCode reasonZh reasonEn
+            lappend failures [::BatchPropertyAssignment::failureRow \
+                $componentId $componentName $errorCode $reasonZh $reasonEn]
             continue
         }
 
@@ -495,7 +625,10 @@ proc ::BatchPropertyAssignment::execute {} {
         set materialId [::BatchPropertyAssignment::materialIdByName $materialName]
         if {$materialId eq "" && [string equal -nocase $materialName Steel]} {
             if {[catch {set materialId [::BatchPropertyAssignment::ensureSteelMaterial]} materialError]} {
-                lappend failures [list $componentName $materialError $materialError]
+                lappend failures [::BatchPropertyAssignment::failureRow \
+                    $componentId $componentName \
+                    [::BatchPropertyAssignment::classifyRuntimeError MATERIAL $materialError] \
+                    $materialError $materialError]
                 continue
             }
         }
@@ -503,7 +636,10 @@ proc ::BatchPropertyAssignment::execute {} {
             if {[catch {
                 set materialId [::BatchPropertyAssignment::ensureEmptyMaterial $materialName]
             } materialError]} {
-                lappend failures [list $componentName $materialError $materialError]
+                lappend failures [::BatchPropertyAssignment::failureRow \
+                    $componentId $componentName \
+                    [::BatchPropertyAssignment::classifyRuntimeError MATERIAL $materialError] \
+                    $materialError $materialError]
                 continue
             }
             if {$materialName ni $createdMaterials} {lappend createdMaterials $materialName}
@@ -524,11 +660,15 @@ proc ::BatchPropertyAssignment::execute {} {
             set assignedOk [::BatchPropertyAssignment::assignProperty \
                 $componentId $propertyId $propertyName]
         } assignmentError]} {
-            lappend failures [list $componentName $assignmentError $assignmentError]
+            lappend failures [::BatchPropertyAssignment::failureRow \
+                $componentId $componentName \
+                [::BatchPropertyAssignment::classifyRuntimeError PROPERTY $assignmentError] \
+                $assignmentError $assignmentError]
             continue
         }
         if {!$assignedOk} {
-            lappend failures [list $componentName \
+            lappend failures [::BatchPropertyAssignment::failureRow \
+                $componentId $componentName PROPERTY_ASSIGN_VERIFY_FAILED \
                 "property 赋予或校验失败" "property assignment or verification failed"]
             continue
         }
@@ -537,14 +677,29 @@ proc ::BatchPropertyAssignment::execute {} {
         ::BatchPropertyAssignment::appendProgress "$componentName -> $propertyName"
     }
 
-    set reviewErrors {}
+    set errorGroups {}
     foreach failure $failures {
-        lassign $failure componentName reasonZh reasonEn
-        if {$reasonEn eq ""} { set reasonEn $reasonZh }
-        if {[catch {::BatchPropertyAssignment::ensureReviewEntry $componentName} reviewError]} {
-            lappend reviewErrors [list $componentName $reviewError]
+        set errorCode [dict get $failure error_code]
+        dict lappend errorGroups $errorCode [dict get $failure component_id]
+    }
+    set setErrors {}
+    set errorSets {}
+    dict for {errorCode failedComponentIds} $errorGroups {
+        set setName [::BatchPropertyAssignment::errorSetName $errorCode]
+        if {[catch {
+            set setId [::BatchPropertyAssignment::ensureErrorSet $errorCode $failedComponentIds]
+        } setError]} {
+            lappend setErrors [dict create error_code $errorCode set_name $setName reason $setError]
+        } else {
+            lappend errorSets [dict create error_code $errorCode set_name $setName \
+                set_id $setId component_ids [lsort -integer -unique $failedComponentIds]]
         }
-        ::BatchPropertyAssignment::appendProgress "$componentName: $reasonEn"
+    }
+    foreach failure $failures {
+        set componentName [dict get $failure component_name]
+        set errorCode [dict get $failure error_code]
+        set reasonEn [dict get $failure reason_en]
+        ::BatchPropertyAssignment::appendProgress "$componentName: $errorCode - $reasonEn"
     }
     catch {::HWFlow::refreshBrowserNow 0}
     return [dict create \
@@ -561,15 +716,15 @@ proc ::BatchPropertyAssignment::execute {} {
         property_names $createdProperties \
         created_material_names $createdMaterials \
         failures $failures \
-        review_errors $reviewErrors \
-        review_assembly $REVIEW_ASSEMBLY]
+        error_sets $errorSets \
+        set_errors $setErrors]
 }
 
 proc ::BatchPropertyAssignment::runAction {} {
     set title [::HWFlow::txt "批量赋予 Property 和材料" "Batch Property and Material Assignment"]
     set prompt [::HWFlow::txt \
-        "将扫描全部 component。厚度标记为 TT 的 component 自动忽略；SEAM_SOLID 自动使用 Steel 材料和 PSOLID。普通件从名称提取 T 后数字和最后的材料字段；若材料名称已识别但模型中不存在，将创建空 MAT1 并继续全部 Property 操作，完成后请补全材料参数。\n\n只有名称无法识别或实际创建/赋予失败的非空 component 才会以空 collector 名称副本列入 PROPERTY_ASSIGNMENT_REVIEW；原 component 不会被移动。是否继续？" \
-        "Scan all components. Components whose thickness marker is TT are ignored; SEAM_SOLID uses Steel and PSOLID. Regular part names supply the number after T and the final material field. If a recognized material is missing from the model, an empty MAT1 is created and all property operations continue; complete its parameters afterward.\n\nOnly unrecognized names or actual creation/assignment failures are listed as empty name-only collectors in PROPERTY_ASSIGNMENT_REVIEW; source components are not moved. Continue?"]
+        "将扫描全部 component。厚度标记为 TT 的 component 自动忽略；SEAM_SOLID 自动使用 Steel 材料和 PSOLID。普通件从名称提取 T 后数字和最后的材料字段；若材料名称已识别但模型中不存在，将创建空 MAT1 并继续全部 Property 操作，完成后请补全材料参数。\n\n名称无法识别或实际创建/赋予失败的非空 component 会按错误类型加入 PROPERTY_ERROR__<错误码> set；不会复制、移动 component，也不会修改 assembly。是否继续？" \
+        "Scan all components. Components whose thickness marker is TT are ignored; SEAM_SOLID uses Steel and PSOLID. Regular part names supply the number after T and the final material field. If a recognized material is missing from the model, an empty MAT1 is created and all property operations continue; complete its parameters afterward.\n\nNon-empty components with naming or creation/assignment failures are added to PROPERTY_ERROR__<error-code> sets; components are not copied or moved and assemblies are not modified. Continue?"]
     if {[llength [info commands tk_messageBox]] > 0} {
         set answer [tk_messageBox -icon question -type yesno -default no -title $title -message $prompt]
         if {$answer ne "yes"} {return}
@@ -598,7 +753,8 @@ proc ::BatchPropertyAssignment::runAction {} {
     set properties [dict get $result property_names]
     set createdMaterials [dict get $result created_material_names]
     set failures [dict get $result failures]
-    set reviewErrors [dict get $result review_errors]
+    set errorSets [dict get $result error_sets]
+    set setErrors [dict get $result set_errors]
     if {$progressOpened && [llength [info commands ::HWFlow::progressClose]] > 0} {
         catch {::HWFlow::progressClose [::HWFlow::ctxt \
             "完成：$assigned / $scanned 个 component 已赋予 Property。" \
@@ -606,8 +762,8 @@ proc ::BatchPropertyAssignment::runAction {} {
     }
 
     set message [::HWFlow::txt \
-        "批量赋予完成。\n\n扫描 component：$scanned\n成功赋予：$assigned\nHyperMesh 识别空组件跳过：$skippedEmpty\n已有 Property 跳过：$skippedExisting\n1D 关键词跳过：$skippedOneDimensional\n厚度 TT 跳过：$skippedThicknessTT\nProperty 分类数：[llength $properties]\n新建空材料数：[llength $createdMaterials]\n待人工复核：[llength $failures]\n复核 assembly：[dict get $result review_assembly]" \
-        "Batch assignment complete.\n\nComponents scanned: $scanned\nAssigned: $assigned\nSkipped as empty by HyperMesh: $skippedEmpty\nSkipped with existing property: $skippedExisting\nSkipped by 1D keyword: $skippedOneDimensional\nSkipped for TT thickness: $skippedThicknessTT\nProperty groups: [llength $properties]\nNew empty materials: [llength $createdMaterials]\nManual review: [llength $failures]\nReview assembly: [dict get $result review_assembly]"]
+        "批量赋予完成。\n\n扫描 component：$scanned\n成功赋予：$assigned\nHyperMesh 识别空组件跳过：$skippedEmpty\n已有 Property 跳过：$skippedExisting\n1D 关键词跳过：$skippedOneDimensional\n厚度 TT 跳过：$skippedThicknessTT\nProperty 分类数：[llength $properties]\n新建空材料数：[llength $createdMaterials]\n待人工复核：[llength $failures]\n错误分类 set：[llength $errorSets]" \
+        "Batch assignment complete.\n\nComponents scanned: $scanned\nAssigned: $assigned\nSkipped as empty by HyperMesh: $skippedEmpty\nSkipped with existing property: $skippedExisting\nSkipped by 1D keyword: $skippedOneDimensional\nSkipped for TT thickness: $skippedThicknessTT\nProperty groups: [llength $properties]\nNew empty materials: [llength $createdMaterials]\nManual review: [llength $failures]\nError-category sets: [llength $errorSets]"]
     if {[llength $createdMaterials] > 0} {
         set zhMaterialNames [join $createdMaterials "、"]
         set enMaterialNames [join $createdMaterials ", "]
@@ -618,7 +774,7 @@ proc ::BatchPropertyAssignment::runAction {} {
     if {[llength $failures] > 0} {
         set preview {}
         foreach row [lrange $failures 0 7] {
-            lappend preview "[lindex $row 0]: [lindex $row 1]"
+            lappend preview "[dict get $row component_name] ([dict get $row error_code]): [dict get $row reason_zh]"
         }
         append message "\n\n[join $preview \n]"
         if {[llength $failures] > 8} {
@@ -627,12 +783,12 @@ proc ::BatchPropertyAssignment::runAction {} {
                 "\n...and [expr {[llength $failures] - 8}] more."]
         }
     }
-    if {[llength $reviewErrors] > 0} {
+    if {[llength $setErrors] > 0} {
         append message [::HWFlow::txt \
-            "\n\n注意：[llength $reviewErrors] 个异常名称副本创建失败。" \
-            "\n\nWarning: [llength $reviewErrors] review name entries could not be created."]
+            "\n\n注意：[llength $setErrors] 个错误分类 set 创建或更新失败。" \
+            "\n\nWarning: [llength $setErrors] error-category sets could not be created or updated."]
     }
-    tk_messageBox -icon [expr {[llength $createdMaterials] > 0 || [llength $failures] > 0 || [llength $reviewErrors] > 0 ? "warning" : "info"}] \
+    tk_messageBox -icon [expr {[llength $createdMaterials] > 0 || [llength $failures] > 0 || [llength $setErrors] > 0 ? "warning" : "info"}] \
         -title $title -message $message
 }
 

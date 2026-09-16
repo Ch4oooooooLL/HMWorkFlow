@@ -76,6 +76,12 @@ proc ::BatchMesher::onTaskSelected {args} {
     if {[dict exists $task warning_message] && [dict get $task warning_message] ne ""} {
         append ui(task_detail) "\n[::BatchMesher::txt {网格警告} {Meshing warning}]: [dict get $task warning_message]"
     }
+    if {[dict exists $task validation_status]} {
+        append ui(task_detail) "\n[::BatchMesher::txt {校核状态} {Validation status}]: [dict get $task validation_status]"
+        if {[dict get $task validation_status] eq "needs_review" && [dict exists $task review_finding_count]} {
+            append ui(task_detail) " ([dict get $task review_finding_count] [::BatchMesher::txt {项见运行报告} {findings in run report}])"
+        }
+    }
     if {[dict exists $task quality_status]} {
         append ui(task_detail) "\n[::BatchMesher::txt {质量状态} {Quality status}]: [dict get $task quality_status]"
         if {[dict get $task quality_status] eq "needs_optimization"} {

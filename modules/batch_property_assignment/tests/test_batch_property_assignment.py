@@ -237,7 +237,7 @@ class BatchPropertyAssignmentNamingTests(unittest.TestCase):
             0,
         )
 
-    def test_execute_groups_components_and_lists_only_failures_for_review(self):
+    def test_execute_groups_failures_by_error_set(self):
         self.tcl.eval(
             r"""
 rename ::BatchPropertyAssignment::allComponentIds ::BatchPropertyAssignment::allComponentIds_real
@@ -249,7 +249,7 @@ rename ::BatchPropertyAssignment::componentHasAnyProperty ::BatchPropertyAssignm
 rename ::BatchPropertyAssignment::isIgnoredOneDimensionalName ::BatchPropertyAssignment::isIgnoredOneDimensionalName_real
 rename ::BatchPropertyAssignment::ensureProperty ::BatchPropertyAssignment::ensureProperty_real
 rename ::BatchPropertyAssignment::assignProperty ::BatchPropertyAssignment::assignProperty_real
-rename ::BatchPropertyAssignment::ensureReviewEntry ::BatchPropertyAssignment::ensureReviewEntry_real
+rename ::BatchPropertyAssignment::ensureErrorSet ::BatchPropertyAssignment::ensureErrorSet_real
 proc ::BatchPropertyAssignment::allComponentIds {} {return {1 2 3 4 5 6 7 8 9}}
 proc ::BatchPropertyAssignment::nativeEmptyComponentIds {} {return {6}}
 proc ::BatchPropertyAssignment::componentName {id} {
@@ -278,9 +278,9 @@ proc ::BatchPropertyAssignment::ensureProperty {name thickness materialId {cardI
     return [expr {200 + [llength $::propertyCalls]}]
 }
 proc ::BatchPropertyAssignment::assignProperty {componentId propertyId propertyName} {return 1}
-set ::reviewCalls {}
-proc ::BatchPropertyAssignment::ensureReviewEntry {componentName} {
-    lappend ::reviewCalls $componentName
+set ::errorSetCalls {}
+proc ::BatchPropertyAssignment::ensureErrorSet {errorCode componentIds} {
+    lappend ::errorSetCalls [list $errorCode $componentIds]
     return 301
 }
 """
@@ -300,7 +300,18 @@ proc ::BatchPropertyAssignment::ensureReviewEntry {componentName} {
             self.tcl.splitlist(self.tcl.call("dict", "get", result, "property_names")),
             ("Q355_T10", "SEAM_T20", "SEAM_SOLID", "NEWSTEEL_T2"),
         )
-        self.assertEqual(self.tcl.splitlist(self.tcl.eval("set ::reviewCalls")), ("BAD_NAME",))
+        error_set_calls = self.tcl.splitlist(self.tcl.eval("set ::errorSetCalls"))
+        self.assertEqual(len(error_set_calls), 1)
+        self.assertEqual(
+            self.tcl.splitlist(error_set_calls[0]),
+            ("VERSION_PREFIX_INVALID", "3"),
+        )
+        failures = self.tcl.splitlist(self.tcl.call("dict", "get", result, "failures"))
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(
+            self.tcl.call("dict", "get", failures[0], "error_code"),
+            "VERSION_PREFIX_INVALID",
+        )
         self.assertEqual(
             self.tcl.splitlist(self.tcl.call("dict", "get", result, "created_material_names")),
             ("NEWSTEEL",),
@@ -328,6 +339,72 @@ proc hm_getmark {entityType markId} {return {9 3 9}}
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.tcl.splitlist(calls[0]), ("comps", "2"))
 
+    def test_name_failures_have_specific_stable_error_codes(self):
+        cases = {
+            "": "NAME_EMPTY",
+            "SEAM_NOTE": "SEAM_THICKNESS_MISSING",
+            "SEAM_T0": "THICKNESS_INVALID",
+            "PART_T2_Q355": "VERSION_PREFIX_INVALID",
+            "V01__T2_Q355": "PART_NUMBER_MISSING",
+            "V01_PART_Q355": "THICKNESS_MISSING",
+            "V01_PART_TX_Q355": "THICKNESS_INVALID",
+            "V01_PART_T2": "MATERIAL_NAME_MISSING",
+        }
+        for name, expected in cases.items():
+            with self.subTest(name=name):
+                detail = self.tcl.call("::BatchPropertyAssignment::componentNameError", name)
+                self.assertEqual(self.tcl.splitlist(detail)[0], expected)
+
+    def test_runtime_property_errors_are_split_by_operation(self):
+        cases = {
+            "cannot create PSHELL property P": "PROPERTY_CREATE_FAILED",
+            "cannot read property id for P": "PROPERTY_LOOKUP_FAILED",
+            "cannot set material id 2 on property P": "PROPERTY_MATERIAL_ASSIGN_FAILED",
+            "cannot set PSHELL thickness 2 on property P": "PROPERTY_THICKNESS_ASSIGN_FAILED",
+            "PSHELL thickness verification failed for P": "PROPERTY_THICKNESS_VERIFY_FAILED",
+            "material verification failed for property P": "PROPERTY_MATERIAL_VERIFY_FAILED",
+        }
+        for message, expected in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(
+                    self.tcl.call(
+                        "::BatchPropertyAssignment::classifyRuntimeError",
+                        "PROPERTY",
+                        message,
+                    ),
+                    expected,
+                )
+
+    def test_existing_error_set_is_updated_with_unique_component_members(self):
+        self.tcl.eval(
+            r"""
+rename ::BatchPropertyAssignment::entityIdByName ::BatchPropertyAssignment::entityIdByName_real
+rename ::BatchPropertyAssignment::setComponentIds ::BatchPropertyAssignment::setComponentIds_real
+proc ::BatchPropertyAssignment::entityIdByName {types name} {return 41}
+set ::setValueCalls {}
+proc ::BatchPropertyAssignment::setComponentIds {setId} {
+    if {[llength $::setValueCalls]} {return {2 5 7}}
+    return {2 5}
+}
+proc *setvalue {args} {lappend ::setValueCalls $args}
+"""
+        )
+        self.assertEqual(
+            int(
+                self.tcl.call(
+                    "::BatchPropertyAssignment::ensureErrorSet",
+                    "THICKNESS_INVALID",
+                    (5, 7, 7),
+                )
+            ),
+            41,
+        )
+        calls = self.tcl.splitlist(self.tcl.eval("set ::setValueCalls"))
+        self.assertEqual(len(calls), 1)
+        args = self.tcl.splitlist(calls[0])
+        self.assertEqual(args[:2], ("sets", "id=41"))
+        self.assertEqual(args[2], "ids={comps 2 5 7}")
+
 
 class BatchPropertyAssignmentIntegrationPolicyTests(unittest.TestCase):
     def test_module_is_visible_under_mesh(self):
@@ -337,16 +414,17 @@ class BatchPropertyAssignmentIntegrationPolicyTests(unittest.TestCase):
         self.assertIn('proc     "::BatchPropertyAssignment::runAction"', block)
         self.assertNotIn("hidden", block)
 
-    def test_review_entries_are_empty_collectors_not_content_duplicates(self):
+    def test_failures_are_component_sets_and_do_not_touch_assemblies(self):
         source = MODULE.read_text(encoding="utf-8")
-        body = source.split("proc ::BatchPropertyAssignment::ensureReviewEntry", 1)[1].split(
+        body = source.split("proc ::BatchPropertyAssignment::ensureErrorSet", 1)[1].split(
             "\nproc ::BatchPropertyAssignment::", 1
         )[0]
-        self.assertIn("::HWFlow::createComponent", body)
-        self.assertIn("::HWFlow::addComponentsToAssembly", body)
-        self.assertNotIn("*duplicatemark", body)
-        self.assertNotIn("*duplicateentities", body)
-        self.assertNotIn("*movemark", body)
+        self.assertIn("*entitysetcreate", body)
+        self.assertIn('"ids={comps $mergedIds}"', body)
+        self.assertNotIn("addComponentsToAssembly", source)
+        self.assertNotIn("assemblymodify", source.lower())
+        self.assertNotIn("::HWFlow::createComponent", source)
+        self.assertNotIn("*movemark", source)
 
     def test_pshell_creation_uses_hm2019_thickness_attribute(self):
         source = MODULE.read_text(encoding="utf-8")

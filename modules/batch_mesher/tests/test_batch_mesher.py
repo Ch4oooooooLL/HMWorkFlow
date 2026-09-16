@@ -394,6 +394,17 @@ class BatchMesherTests(unittest.TestCase):
                 self.h.eval("dict get [lindex $::BatchMesherWorker::records 0] warning_message"),
             )
 
+    def test_zero_created_elements_remains_a_real_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.install_background_worker_model_mock(directory)
+            self.h.eval("proc *hm_batchmesh2 {args} {return}")
+            self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "1")
+            task = "[lindex $::BatchMesherWorker::records 0]"
+            self.assertEqual(self.h.eval(f"dict get {task} status"), "failed")
+            self.assertEqual(self.h.eval(f"dict get {task} validation_status"), "no_output")
+            self.assertEqual(self.h.eval(f"dict get {task} created_elements"), "0")
+            self.assertEqual(self.h.eval("set ::BatchMesherWorker::successfulElements"), "")
+
     def test_quality_failure_is_queued_for_optimization_and_mesh_is_kept(self):
         with tempfile.TemporaryDirectory() as directory:
             self.install_background_worker_model_mock(directory)
@@ -420,7 +431,7 @@ class BatchMesherTests(unittest.TestCase):
                 self.h.eval(f"dict get {task} warning_message"),
             )
 
-    def test_disconnected_created_mesh_is_a_connectivity_failure(self):
+    def test_disconnected_created_mesh_is_retained_for_review(self):
         with tempfile.TemporaryDirectory() as directory:
             self.install_background_worker_model_mock(directory)
             self.h.eval(
@@ -434,12 +445,13 @@ class BatchMesherTests(unittest.TestCase):
                 }
                 """
             )
-            self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "1")
+            self.assertEqual(self.h.eval("::BatchMesherWorker::runTask 0"), "0")
             task = "[lindex $::BatchMesherWorker::records 0]"
-            self.assertEqual(self.h.eval(f"dict get {task} status"), "failed")
+            self.assertEqual(self.h.eval(f"dict get {task} status"), "completed")
             self.assertEqual(self.h.eval(f"dict get {task} connectivity_status"), "invalid")
-            self.assertIn("BATCHMESH_CONNECTIVITY_INVALID", self.h.eval(f"dict get {task} error_message"))
-            self.assertEqual(self.h.eval("set ::BatchMesherWorker::successfulElements"), "")
+            self.assertEqual(self.h.eval(f"dict get {task} validation_status"), "needs_review")
+            self.assertIn("CONNECTIVITY_REVIEW_REQUIRED", self.h.eval(f"dict get {task} review_findings"))
+            self.assertEqual(self.h.eval("set ::BatchMesherWorker::successfulElements"), "30 40")
 
     def test_hm2019_worker_passes_absolute_user_standard_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1128,10 +1140,15 @@ class BatchMesherTests(unittest.TestCase):
             self.h.eval("set ::BatchMesher::ui(HYPERMESH_VERSION) 2019")
             self.h.eval("set ::BatchMesher::runtime(groups) [list [dict create group_id G001 surface_ids {1 2} surface_count 2 component_ids {10} component_names {FRAME_A} excluded 0]]")
             self.h.eval("set ::BatchMesher::runtime(tasks) [::BatchMesher::buildTasks $::BatchMesher::runtime(groups)]")
+            self.h.eval("set task [lindex $::BatchMesher::runtime(tasks) 0]; dict set task validation_status needs_review; dict set task review_findings [list {QUALITY_NEEDS_OPTIMIZATION failed_elements=2}]; dict set task review_finding_count 1; set ::BatchMesher::runtime(tasks) [list $task]")
             self.h.eval("::BatchMesher::writeRunReport 1")
             data = json.loads((Path(directory) / "result.json").read_text(encoding="utf-8"))
             self.assertEqual(data["hypermesh_version"], "2019")
             self.assertEqual(data["groups"][0]["surface_ids"], [1, 2])
+            self.assertEqual(data["validation_result"], "needs_review")
+            self.assertEqual(data["review_finding_count"], 1)
+            self.assertEqual(data["tasks"][0]["validation_status"], "needs_review")
+            self.assertIn("QUALITY_NEEDS_OPTIMIZATION", data["tasks"][0]["review_findings"][0])
 
 
 if __name__ == "__main__":

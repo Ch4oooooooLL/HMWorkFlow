@@ -1,5 +1,5 @@
 namespace eval ::BatchMesher {
-    variable VERSION "2.7"
+    variable VERSION "2.8"
     variable CONFIG_KEY "batch_mesher"
     # hmbatch.exe can return before the real hmopengl process has finished
     # loading HyperMesh and sourcing the worker Tcl, especially when several

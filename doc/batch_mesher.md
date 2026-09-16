@@ -76,7 +76,7 @@ Windows 默认勾选“显示 hmbatch 命令窗口”。整次运行只打开一
 
 每个成功 worker 保存只移除了快照原有 Elements 的原生 `task_result.hm` 作为恢复文件，并把结果 Component 设为自定义输出范围，通过 `*feoutputwithdata` 输出 `task_result.fem`；这会让模板整体序列化 Component 内的新增 Elements 及依赖，避免旧的逐实体 mark 导出产生只有 GRID、没有 Element 卡的半有效文件。FEM 导出失败只会把“封装状态”标为失败，不会把已生成网格改判为失败。无论成功任务是一个还是多个，都统一进入合并 worker：空白模型逐个执行采用默认 OptiStruct 选项的 `*feinputwithdata2`，使用 `overwrite_flag=0` 自动偏移冲突实体 ID，随后保存干净的 FE-only `merged_result.hm` 并导出 `batchmesh_result.fem`。主会话优先以 `geom_merge=0, fe_merge=1` 导入合并 HM；跨版本原生 HM 不兼容时，自动回退到唯一的最终合并 FEM。
 
-worker 日志记录 FEM 文件大小、预期 Element/Component 数以及 `export_mode=custom_components`。合并日志为每个 FEM 输入记录文件大小、`overwrite_flag=0`、`import_options=default`、Surfaces/Elements/Nodes/Components/Properties/Materials 前后计数、命令返回和完整 `errorInfo`，并记录 `merged_result.hm`、最终 FEM 的大小及最终实体计数。
+worker 日志记录 FEM 文件大小、预期 Element/Component 数以及 `export_mode=custom_components`。合并日志为每个 FEM 输入记录文件大小、`overwrite_flag=0`、`import_options=default`、Surfaces/Elements/Nodes/Components/Properties/Materials 前后计数、命令返回和完整 `errorInfo`，并记录 `merged_result.hm`、最终 FEM 的大小及最终实体计数。输出遵循“已生成网格优先”：只要任务为目标面生成了单元，就参与 HM/FEM 封装与最终合并；质量、跨边界连通性或原生命令返回的非致命校核诊断不会再丢弃这些单元，而是写入任务的 `validation_status=needs_review`、`review_findings` 及运行报告。只有完全没有生成单元、worker 无法启动/载入模型或输出封装本身失败时，才无法提供该任务输出。
 
 主会话不再逐包增量导入 FEM，而是一次性 `*mergefile` 已经清理并聚合完成的原生结果。此前一次 HM2019 FEM translator 零增量来自旧的输入/结果组织；当前每个 worker FEM 已可独立打开，并在独立合并进程中逐包验证 Element 增量。导入前后比较 Element/Node/Component/Property/Material ID 集合；命令报错或没有新增单元时整批回滚新增实体。最终 FEM 或原生合并模型无效时不会尝试导入，并保留 worker/merge 日志用于诊断。
 
@@ -119,7 +119,7 @@ runtime/tasks/batch_mesher/<run-id>/
   batchmesh_result.fem        # 仅包含成功任务产生的网格
 ```
 
-失败日志包含 task/group、Surface 数量、criteria/param 路径、原始 Tcl errorInfo 和检查建议。worker 在实机 BatchMesh 返回后会分别记录 `connectivity_status` 和 `quality_status`：质量不达标标记为 `needs_optimization`，保留失败单元数量并继续封装输出，供导入后反复执行局部网格优化；即使后续无法完全满足 criteria，原始网格仍然保留。只有已确认同一几何连通域被划分成多个节点不连通的 FE 区域时，才以 `BATCHMESH_CONNECTIVITY_INVALID` 判定网格结果失败；若旧补丁版本无法提供连通性查询，只记录警告并保留网格。即使 Altair launcher 没有产生 stdout/stderr，`launch.log` 也会保留实际命令、独立工作目录和 launcher PID；120 秒内未收到真实 worker 状态握手时，`manager_failure.log` 会记录状态文件及各日志是否存在和字节数。
+失败日志包含 task/group、Surface 数量、criteria/param 路径、原始 Tcl errorInfo 和检查建议。worker 在实机 BatchMesh 返回后会分别记录 `connectivity_status` 和 `quality_status`：质量不达标标记为 `needs_optimization`，保留失败单元数量并继续封装输出，供导入后反复执行局部网格优化；即使后续无法完全满足 criteria，原始网格仍然保留。跨边界连通性不满足时标记为 `CONNECTIVITY_REVIEW_REQUIRED`，同样保留并输出网格，由运行报告明确给出连通区域数量、各区域单元数及目标 Surface IDs；若旧补丁版本无法提供连通性查询，也记录为待复核。即使 Altair launcher 没有产生 stdout/stderr，`launch.log` 也会保留实际命令、独立工作目录和 launcher PID；120 秒内未收到真实 worker 状态握手时，`manager_failure.log` 会记录状态文件及各日志是否存在和字节数。
 
 ## 测试
 
