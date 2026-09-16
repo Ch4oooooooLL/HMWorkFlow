@@ -1076,7 +1076,7 @@
                     <svg viewBox="0 0 24 24"><path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"/></svg>
                     <div class="alert-content">
                         <h4>主面板与隐藏模块</h4>
-                        <p>当前主面板显示可直接运行的模块，本指南均提供入口说明。BOM 模块当前使用 Q355 默认材料，真实 BOM 文件解析接口预留到后续版本。</p>
+                        <p>主面板默认显示收藏与最近使用工具，可通过顶部搜索跨模块检索，或切换“几何准备、网格处理、焊缝、连接与载荷”分类。每行的“运行”是主操作，“更多”集中提供设置、说明、快捷键、收藏及模块支持的撤回操作。本指南均提供入口说明。BOM 模块当前使用 Q355 默认材料，真实 BOM 文件解析接口预留到后续版本。</p>
                     </div>
                 </div>
 
@@ -1517,6 +1517,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <li><strong>印记区网格重构 (Remeshing)</strong>：将原始节点路径作为 Nodes 输入，将该路径投影到所选目标 components 后最近的几层单元作为 Elements 输入，调用 Mesh Edit imprint。与目标 patch 共节点、但不属于目标 patch 的平面外单元只记录诊断数量，不会混入 Elements 输入。</li>
                             <li><strong>原生 Create Patch</strong>：以源 Nodes 和局部目标 Elements 调用 <code>imprint_nodelist</code> 的 <code>create_joint_elems=1</code> 模式，直接在按板厚选定的 <code>SEAM_*</code> component 中创建焊缝壳，不再以 Ruled 作为手动主路径。</li>
                             <li><strong>局部失败隔离</strong>：每条路径都在独立撤销事务中完成即时目标 patch、imprint、后置节点验证和连接带创建。任一阶段失败会回滚并跳过当前路径，不会退化为整个目标 component 的 imprint，也不会保留部分焊缝。</li>
+                            <li><strong>创建优先</strong>：原生邻接重绘若合法重建了附近既有焊缝壳，或对局部节点及边界链进行了删除、重编号、网格平滑和重新剖分，只记录告警并继续校验结果；面积、连接和附件仍完整时保留新焊缝，不再因旧单元、节点或边的拓扑身份变化而误拦截。开启“严格边界检查”后仍执行逐边守恒。</li>
                             <li><strong>批量性能与可靠性</strong>：原生自由边图按源 component 在批次内缓存；单边界点只读取其所在连通轮廓并按折角上限行走，内部点保留原有闭合自由边流程。每条路径执行前才统一投影全部源节点、一次反查目标壳单元并扩展两到三层 Elements，避免前一路径重网格后留下过期 ID。仅本次 Create Patch 新增的单元进入 mixed remesh，所有连接边节点固定，并按拓扑校验附件保持：原连接边要么保留、要么由插入节点沿原边细分（曲边允许弦高偏差），丢失边界节点或横向改接仍整路径回滚。</li>
                             <li><strong>FAST_AUTO</strong>：自动识别 T、CONNECT 和搭接候选，用户明确接受后优先通过 <code>EXISTING_EDGE_PATH</code> 直接导入 CQUAD4/CTRIA3；显式开启后可使用受控节点微调或单母单元保守切分。该路径禁止 imprint、ruled 和 automesh，每个候选在自己的原生撤销事务中执行，失败用 <code>*undohistorystate</code> 回滚，不再写入整模型快照文件。</li>
                             <li><strong>LEGACY_MANUAL</strong>：保留手动节点选择交互，但创建阶段使用局部 Mesh Edit Create Patch 和新增 patch 的边界固定 mixed remesh。</li>
@@ -1552,7 +1553,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                             <div class="step-item">
                                 <span class="step-num">5</span>
                                 <div class="step-title">需要时撤回最近批次</div>
-                                <div class="step-detail">回到工具箱主面板，在 <strong>“网格焊缝”</strong> 所在行点击 <strong>“撤回”</strong> 并确认，撤回通过 HyperMesh 原生撤销一次性回退该批次的全部动作；也可以直接用 Ctrl+Z 逐条撤销。撤回只保留最近一次成功批次；若批次之后又做过其他修改，会被一并撤销。</div>
+                                <div class="step-detail">回到工具箱主面板，在 <strong>“网格焊缝”</strong> 所在行打开 <strong>“更多 → 撤回最近操作”</strong> 并确认，撤回通过 HyperMesh 原生撤销一次性回退该批次的全部动作；也可以直接用 Ctrl+Z 逐条撤销。撤回只保留最近一次成功批次；若批次之后又做过其他修改，会被一并撤销。</div>
                             </div>
                         </div>
                     </div>
@@ -1582,7 +1583,7 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                                     <tr>
                                         <td><code>patch_expand_layers</code></td>
                                         <td><code>2</code></td>
-                                        <td>印记影响区外扩的单元层数，控制局部重划分网格的平滑过渡范围。</td>
+                                        <td>印记影响区外扩的单元层数（by adjacent 层，默认 2）。原生 Create Patch 的 <code>imprint_nodelist</code> 按此层数对焊缝周围环带执行自带质量重绘（0 仅切分、不调优，焊缝与底面交界处周边网格容易畸变），同时决定局部补片标记的环数；层数越大影响区越大、耗时越长。</td>
                                     </tr>
                                     <tr>
                                         <td><code>imprint_remain</code></td>
@@ -1731,11 +1732,11 @@ source [file join $::HMWorkFlow_Dir "shortcut_bootstrap.tcl"]
                 <h1 class="section-title">批量赋予 Property 和材料</h1>
                 <div class="module-detail">
                     <div class="detail-header"><div class="detail-title"><span class="card-badge mesh">网格</span><span>按命名规则批量建立 PSHELL</span></div><div class="detail-path-badge">modules/batch_property_assignment.tcl</div></div>
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">扫描目标 component 名称，从 <code>Vxx_件号_Txx_材料</code> 或 <code>SEAM_Txx</code> 中解析厚度和材料，批量创建或复用 PSHELL Property，并把无法解析的名称集中列出供人工复核。</p>
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:14px;">扫描目标 component 名称，从 <code>Vxx_件号_Txx_材料</code> 或 <code>SEAM_Txx</code> 中解析厚度和材料，批量创建或复用 PSHELL Property；失败 component 按错误类型归入 <code>PROPERTY_ERROR__&lt;错误码&gt;</code> set。</p>
                     <div class="step-list">
                         <div class="step-item"><span class="step-num">1</span><div class="step-title">规范组件名称</div><div class="step-detail">确认名称包含可解析的厚度与材料标识；焊缝组件可使用 <code>SEAM_Txx</code>。</div></div>
                         <div class="step-item"><span class="step-num">2</span><div class="step-title">执行批量赋予</div><div class="step-detail">工具按名称匹配 HyperMesh 中已创建的材料实体，复用等价属性或创建新的 PSHELL，再赋给对应组件。</div></div>
-                        <div class="step-item"><span class="step-num">3</span><div class="step-title">处理异常清单</div><div class="step-detail">修正未识别厚度、材料或命名格式的组件后重新运行；已正确匹配的结果无需逐项重建。</div></div>
+                        <div class="step-item"><span class="step-num">3</span><div class="step-title">按 set 处理异常</div><div class="step-detail">在 Model Browser 中按错误码 set 定位组件，分别处理版本前缀、厚度、材料、Property 创建或赋予校验问题。组件不会被复制或移动，assembly 不会被修改。</div></div>
                     </div>
                     <div class="alert-box warning"><div class="alert-content"><h4>命名不是最终工程校核</h4><p>批量规则减少重复操作，但材料牌号、厚度、卡片类型和单位制仍须与当前 OptiStruct 项目规范一致。</p></div></div>
                 </div>

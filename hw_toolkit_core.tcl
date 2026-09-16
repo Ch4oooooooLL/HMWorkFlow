@@ -15,6 +15,39 @@ namespace eval ::HWToolkit {
     variable QUIET_ERRORS 0
     variable PENDING_SHORTCUT_TARGET ""
     variable PENDING_SHORTCUT_AFTER ""
+    variable HOME_SECTION "Common"
+    variable HOME_FILTER ""
+    variable HOME_STATE_LOADED 0
+    variable HOME_FAVORITES {}
+    variable HOME_RECENTS {}
+    variable HOME_DEFAULT_FAVORITES {
+        midsurf batch_mesher mesh_seam_weld fem_auto_seam
+        shell_washer_hole_rbe2 contact_setup
+    }
+    variable HOME_SUMMARIES [dict create \
+        midsurf [list "批量抽取钣金实体中面并整理输出组件。" "Extract sheet-metal midsurfaces and organize the outputs."] \
+        bom_material_assignment [list "读取 BOM 规则并批量规范材料与组件命名。" "Apply BOM material rules and normalize component names."] \
+        geometry_preprocess [list "转换坐标系并整理、归档模型组件。" "Transform coordinates and organize or archive components."] \
+        geometry_cleanup [list "连续清理倒角、圆角与沉台等局部几何。" "Clean local chamfers, fillets, and pockets continuously."] \
+        seam_surface [list "基于几何路径创建、编辑和诊断曲面焊缝。" "Create, edit, and diagnose geometry-based surface seams."] \
+        batch_mesher [list "按拓扑连通域并行执行 BatchMesher 网格划分。" "Mesh topology domains in parallel with BatchMesher."] \
+        mesh_seam_weld [list "在已有壳网格上创建并局部重绘焊缝。" "Create welds on existing shell mesh with local remeshing."] \
+        node_patch_builder [list "按节点边界追踪并重建局部壳网格补片。" "Trace a node boundary and rebuild a local shell patch."] \
+        fem_auto_seam [list "自动识别可信焊缝候选并批量创建或删除。" "Recognize trusted weld candidates for batch creation or deletion."] \
+        batch_property_assignment [list "根据组件命名批量创建并赋予属性和材料。" "Create and assign properties and materials from component names."] \
+        local_mesh_optimizer [list "仅对质量失败区域执行增量网格优化。" "Incrementally optimize only failed mesh regions."] \
+        mesh_add_washer [list "在纯壳网格孔边创建规则 Washer。" "Create a regular washer around a shell-mesh hole."] \
+        weld_integrity_check [list "定位可能漏焊的组件对并辅助人工复核。" "Locate possible missing welds for guided review."] \
+        shell_washer_hole_rbe2 [list "识别壳网格 Washer 孔并批量创建 RIGIDS。" "Detect shell washer holes and create RIGIDS in batch."] \
+        auto_hole_rbe2 [list "识别实体通孔并自动创建 RBE2 或 RBE3。" "Detect solid through-holes and create RBE2 or RBE3."] \
+        rbe2_bolt_connector [list "按孔位配对创建螺栓连接。" "Pair holes and create bolt connectors."] \
+        cbush_creator [list "在源节点上方创建并连接 CBUSH 单元。" "Create and connect CBUSH elements above source nodes."] \
+        batch_temp_nodes [list "根据坐标文本批量创建可撤销的临时节点。" "Create undoable temporary nodes from coordinate text."] \
+        batch_load_application [list "读取载荷文件并批量映射、创建载荷工况。" "Map load files and create load cases in batch."] \
+        contact_setup [list "基于组件自动识别并创建接触。" "Detect and create contacts automatically from components."] \
+        contact_surface_setup [list "选择两侧表面并创建局部接触。" "Create a local contact from two selected surfaces."] \
+        adhesive_connector [list "按区域创建并实现胶粘连接。" "Create and realize adhesive connectors by area."] \
+        solid_seam_connector [list "按节点或组件创建实体焊缝连接。" "Create solid seam connectors from nodes or components."]]
 
     set MODULES {
         midsurf {
@@ -80,13 +113,23 @@ namespace eval ::HWToolkit {
             settings_proc "::MeshSeamWeld::runSettings"
             undo_proc "::MeshSeamWeld::undoLast"
         }
+        node_patch_builder {
+            group    "Mesh"
+            label_zh "节点补片"
+            label_en "Node Patch Builder"
+            desc_zh  "按用户点选顺序，以 3 个及以上壳网格节点定义补片边界。工具优先复用满足直线偏差、转角与绕路限制的真实单元边链；缺少边链时，仅沿相邻角点连线在法向连续的局部 TRIA3/QUAD4 壳面内追踪并重构。\n歧义路径、跨空气、明显折角、非流形边、自交和过度非平面边界均会停止；边界边数越多，每条边的追踪与搜索上限按比例收紧。全部修改和补片三角化归入一个原生撤销状态，失败自动回滚。\n默认创建 PATCH_时间戳 组件；不自动识别缺口、焊缝或 Property。"
+            desc_en  "Define a local shell patch with 3 or more nodes selected in perimeter order. Existing true element-edge chains are preferred under line-deviation, turn-angle, and detour limits; missing chains are traced and rebuilt only along each adjacent-corner segment across a normal-continuous local TRIA3/QUAD4 shell patch.\nAmbiguous paths, air gaps, sharp folds, non-manifold edges, self-intersection, and excessive non-planarity are rejected, and the per-side trace/search budget tightens as the boundary gains sides. Splits and patch triangulation share one native undo state and roll back together on failure.\nA timestamped PATCH component is created by default; holes, welds, and properties are never inferred."
+            proc     "::NodePatch::runAction"
+            undo_proc "::NodePatch::undoLast"
+        }
         fem_auto_seam {
             group    "Mesh"
             label_zh "FEM 自动焊缝"
             label_en "FEM Automatic Seam"
-            desc_zh  "Python 识别 T 型与贴片焊缝并只输出已有节点种子：完整单目标 T 边、以及小贴片完整投影到单一大板的自由边属于可信项。\n可信项直接调用现有网格焊缝的 nodes+comps 局部 patch、imprint、优化与创建链路，不再由 FEM 后台切分或重开模型。\n部分覆盖、多目标、多个平行组件或略超距离/角度/长度容差的潜在项，按涉及 Components 组成 HMASCII Set 增量导入，供人工删除或创建焊缝。"
-            desc_en  "Python recognizes T and patch welds and outputs existing-node seeds only. Complete single-target T edges and a smaller patch fully projected onto one larger plate are trusted.\nTrusted seeds call the existing Mesh Seam Weld nodes+comps local patch, imprint, optimization, and creation chain; no FEM-side split or model reopen remains.\nPartial coverage, multiple targets, parallel clusters, or near distance/angle/length tolerances are incrementally imported as HMASCII component sets for manual deletion or weld creation."
+            desc_zh  "Python 识别 T 型与贴片焊缝并只输出已有节点种子：完整单目标 T 边、以及小贴片完整投影到单一大板的自由边属于可信项。\n可信项直接调用现有网格焊缝的 nodes+comps 局部 patch、imprint、优化与创建链路，不再由 FEM 后台切分或重开模型。\n设置页提供“快速删除焊缝”；本模块的快捷键也直接进入此删除与底面局部重绘流程，不再打开设置面板。"
+            desc_en  "Python recognizes T and patch welds and outputs existing-node seeds only. Complete single-target T edges and a smaller patch fully projected onto one larger plate are trusted.\nTrusted seeds call the existing Mesh Seam Weld nodes+comps local patch, imprint, optimization, and creation chain; no FEM-side split or model reopen remains.\nThe settings page provides Quick Delete Weld; this module's shortcut enters that deletion and local supporting-mesh remesh flow directly instead of opening settings."
             proc     "::FemAutoSeam::runAction"
+            shortcut_proc "::FemAutoSeam::quickDeleteWeld"
             settings_proc "::FemAutoSeam::runSettings"
             undo_proc "::FemAutoSeam::undoLast"
         }
@@ -360,6 +403,186 @@ proc ::HWToolkit::groupText {group} {
     return $group
 }
 
+proc ::HWToolkit::moduleSummary {key info} {
+    variable HOME_SUMMARIES
+    if {[dict exists $HOME_SUMMARIES $key]} {
+        set pair [dict get $HOME_SUMMARIES $key]
+        return [::HWFlow::txt [lindex $pair 0] [lindex $pair 1]]
+    }
+    set desc [::HWToolkit::moduleText $info desc]
+    return [lindex [split $desc "\n"] 0]
+}
+
+proc ::HWToolkit::homeSectionText {section} {
+    switch -- $section {
+        "Common"     { return [::HWFlow::txt "常用" "Common"] }
+        "All"        { return [::HWFlow::txt "全部" "All"] }
+        "Geometry"   { return [::HWFlow::txt "几何准备" "Geometry"] }
+        "Meshing"    { return [::HWFlow::txt "网格处理" "Meshing"] }
+        "Weld"       { return [::HWFlow::txt "焊缝" "Weld"] }
+        "Connection" { return [::HWFlow::txt "连接与载荷" "Connection & Loads"] }
+    }
+    return $section
+}
+
+proc ::HWToolkit::homeBusinessSection {key} {
+    switch -- $key {
+        geometry_preprocess - midsurf - geometry_cleanup -
+        bom_material_assignment {
+            return Geometry
+        }
+        batch_mesher - node_patch_builder - mesh_add_washer -
+        local_mesh_optimizer - batch_property_assignment {
+            return Meshing
+        }
+        seam_surface - mesh_seam_weld - fem_auto_seam -
+        weld_integrity_check - solid_seam_connector {
+            return Weld
+        }
+        shell_washer_hole_rbe2 - auto_hole_rbe2 - rbe2_bolt_connector -
+        cbush_creator - batch_temp_nodes - batch_load_application -
+        contact_setup - contact_surface_setup - adhesive_connector {
+            return Connection
+        }
+    }
+    return Connection
+}
+
+proc ::HWToolkit::homeStateFile {} {
+    return [file join [::HWFlow::configDir] home.cfg]
+}
+
+proc ::HWToolkit::validHomeKeyList {values} {
+    variable MODULES
+    set result {}
+    foreach key $values {
+        if {[dict exists $MODULES $key] &&
+            [::HWToolkit::moduleVisible [dict get $MODULES $key]] &&
+            [lsearch -exact $result $key] < 0} {
+            lappend result $key
+        }
+    }
+    return $result
+}
+
+proc ::HWToolkit::loadHomeState {} {
+    variable HOME_STATE_LOADED
+    variable HOME_FAVORITES
+    variable HOME_RECENTS
+    variable HOME_DEFAULT_FAVORITES
+    if {$HOME_STATE_LOADED} { return }
+    set HOME_STATE_LOADED 1
+    set HOME_FAVORITES [::HWToolkit::validHomeKeyList $HOME_DEFAULT_FAVORITES]
+    set HOME_RECENTS {}
+
+    set path [::HWToolkit::homeStateFile]
+    if {![file isfile $path]} { return }
+    if {[catch {set text [::HWFlow::readTextFile $path]}]} { return }
+    foreach line [split $text "\n"] {
+        set pos [string first "=" $line]
+        if {$pos < 1} { continue }
+        set name [string trim [string range $line 0 [expr {$pos - 1}]]]
+        set value [string trim [string range $line [expr {$pos + 1}] end]]
+        set values {}
+        foreach item [split $value ","] {
+            set item [string trim $item]
+            if {$item ne ""} { lappend values $item }
+        }
+        switch -- $name {
+            favorites { set HOME_FAVORITES [::HWToolkit::validHomeKeyList $values] }
+            recents   { set HOME_RECENTS [::HWToolkit::validHomeKeyList $values] }
+        }
+    }
+}
+
+proc ::HWToolkit::saveHomeState {} {
+    variable HOME_FAVORITES
+    variable HOME_RECENTS
+    set text "version=1\n"
+    append text "favorites=[join $HOME_FAVORITES ,]\n"
+    append text "recents=[join $HOME_RECENTS ,]\n"
+    catch {::HWFlow::writeTextFile [::HWToolkit::homeStateFile] $text}
+}
+
+proc ::HWToolkit::homeCommonKeys {} {
+    variable HOME_FAVORITES
+    variable HOME_RECENTS
+    ::HWToolkit::loadHomeState
+    set result $HOME_FAVORITES
+    set added 0
+    foreach key $HOME_RECENTS {
+        if {[lsearch -exact $result $key] >= 0} { continue }
+        lappend result $key
+        incr added
+        if {$added >= 4} { break }
+    }
+    return $result
+}
+
+proc ::HWToolkit::homeIsFavorite {key} {
+    variable HOME_FAVORITES
+    ::HWToolkit::loadHomeState
+    return [expr {[lsearch -exact $HOME_FAVORITES $key] >= 0}]
+}
+
+proc ::HWToolkit::toggleHomeFavorite {key} {
+    variable HOME_FAVORITES
+    ::HWToolkit::loadHomeState
+    set index [lsearch -exact $HOME_FAVORITES $key]
+    if {$index >= 0} {
+        set HOME_FAVORITES [lreplace $HOME_FAVORITES $index $index]
+    } else {
+        lappend HOME_FAVORITES $key
+    }
+    ::HWToolkit::saveHomeState
+    ::HWToolkit::refreshHomeContent
+}
+
+proc ::HWToolkit::rememberHomeModule {key} {
+    variable HOME_RECENTS
+    ::HWToolkit::loadHomeState
+    set index [lsearch -exact $HOME_RECENTS $key]
+    if {$index >= 0} { set HOME_RECENTS [lreplace $HOME_RECENTS $index $index] }
+    set HOME_RECENTS [linsert $HOME_RECENTS 0 $key]
+    if {[llength $HOME_RECENTS] > 8} { set HOME_RECENTS [lrange $HOME_RECENTS 0 7] }
+    ::HWToolkit::saveHomeState
+}
+
+proc ::HWToolkit::homeSectionKeys {section} {
+    variable MODULES
+    if {$section eq "Common"} { return [::HWToolkit::homeCommonKeys] }
+    set keys {}
+    foreach {key info} $MODULES {
+        if {![::HWToolkit::moduleVisible $info]} { continue }
+        if {$section eq "All" || [::HWToolkit::homeBusinessSection $key] eq $section} {
+            lappend keys $key
+        }
+    }
+    return $keys
+}
+
+proc ::HWToolkit::homeFilteredKeys {} {
+    variable MODULES
+    variable HOME_SECTION
+    variable HOME_FILTER
+    set query [string tolower [string trim $HOME_FILTER]]
+    set keys [::HWToolkit::homeSectionKeys $HOME_SECTION]
+    if {$query eq ""} { return $keys }
+
+    set matches {}
+    foreach key [::HWToolkit::visibleModuleKeys] {
+        set info [dict get $MODULES $key]
+        set haystack [string tolower [join [list $key \
+            [::HWToolkit::moduleText $info label] \
+            [::HWToolkit::moduleSummary $key $info] \
+            [::HWToolkit::moduleText $info desc] \
+            [::HWToolkit::homeSectionText [::HWToolkit::homeBusinessSection $key]] \
+            [::HWToolkit::groupText [dict get $info group]]] " "]]
+        if {[string first $query $haystack] >= 0} { lappend matches $key }
+    }
+    return $matches
+}
+
 proc ::HWToolkit::clearExistingWindows {} {
     catch {::MidSurf::savePanelState}
     catch {set ::BomMaterialAssignment::ui(ok) 0}
@@ -367,6 +590,7 @@ proc ::HWToolkit::clearExistingWindows {} {
     catch {::RB2W::savePanelState}
     catch {::BatchMesher::savePanelState}
     catch {::MeshSeamWeld::saveState}
+    catch {::NodePatch::close}
     catch {::RB2Bolt::saveState}
     catch {::SeamSurf::savePanelState}
     catch {::GeomCleanup::savePanelState}
@@ -410,6 +634,7 @@ proc ::HWToolkit::clearExistingWindows {} {
         .adhesive_connector
         .batch_mesher
         .mesh_seam_weld
+        .node_patch_builder
         .fem_auto_seam
         .fem_auto_seam_review
         .hwshortcut_manager
@@ -453,13 +678,12 @@ proc ::HWToolkit::showPanel {} {
     return [::HWToolkit::showPanelHome]
 }
 
-# Flat single-level home panel shared by HyperMesh 2019 and HyperWorks 2022.
-# Every visible tool is one row: clicking its name runs it immediately and
-# the two trailing buttons open its settings and its shortcut binding.  One
-# builder serves both host generations; the shared Tk backend, the system
-# palette and the unified font scale keep the two layouts identical.
+# Searchable, sectioned home panel shared by HyperMesh 2019 and HyperWorks
+# 2022.  Only one section is visible at a time; search spans the whole module
+# library.  Low-frequency actions live in a row menu so the primary Run action
+# remains visually clear.
 proc ::HWToolkit::showPanelHome {} {
-    variable MODULES
+    variable HOME_FILTER
     set w .hwtoolkit
     if {[winfo exists $w]} {
         catch {wm deiconify $w}
@@ -471,35 +695,15 @@ proc ::HWToolkit::showPanelHome {} {
     ::HWFlow::createTopLevel $w main
     wm withdraw $w
     wm title $w "HyperMesh Toolkit"
-    # The compact rows and footer set a natural width of about 540 px; the
-    # minimum lets users shrink the panel down to the point where the footer
-    # buttons still fit without clipping.
-    wm minsize $w 540 380
+    wm minsize $w 660 460
     wm resizable $w 1 1
 
     set bodyBg        [::HWFlow::uiColors bodyBg]
     set textPrimary   [::HWFlow::uiColors textPrimary]
     set textSecondary [::HWFlow::uiColors textSecondary]
 
-    # The widest visible tool name sets the shared name-column width so every
-    # row starts its buttons at the same offset without clipping names.  The
-    # width is measured in the module font (pixel text width converted to the
-    # character unit the label -width option uses), not in a visual-length
-    # heuristic, which truncated mixed CJK/ASCII names like
-    # "BatchMesher 自动网格划分".
-    set nameFont [::HWFlow::uiFont module]
-    set zeroWidth [font measure $nameFont "0"]
-    set nameWidth 0
-    foreach {key info} $MODULES {
-        if {![::HWToolkit::moduleVisible $info]} { continue }
-        set text [::HWToolkit::moduleText $info label]
-        set pixels [font measure $nameFont $text]
-        set chars [expr {int(ceil(double($pixels) / $zeroWidth)) + 1}]
-        if {$chars > $nameWidth} { set nameWidth $chars }
-    }
-
     ::HWFlow::uiWidget frame $w.header -background $bodyBg
-    pack $w.header -fill x -padx 12 -pady {8 0}
+    pack $w.header -fill x -padx 14 -pady {10 0}
     ::HWFlow::uiWidget label $w.header.title -text "HyperMesh Toolkit" \
         -font [::HWFlow::uiFont header] -foreground $textPrimary \
         -background $bodyBg -anchor w
@@ -508,58 +712,57 @@ proc ::HWToolkit::showPanelHome {} {
     ::HWFlow::uiWidget label $w.header.version -text $version \
         -font [::HWFlow::uiFont small] -foreground $textSecondary \
         -background $bodyBg -anchor e
-    ::HWFlow::uiWidget label $w.header.hint \
-        -text [::HWFlow::txt "点击名称运行 · 行尾按钮：快捷键 / 设置 / 帮助" "Click a name to run · trailing buttons: shortcut / settings / help"] \
-        -font [::HWFlow::uiFont small] -foreground $textSecondary \
-        -background $bodyBg -anchor w
+    menu $w.header.menu -tearoff 0
+    $w.header.menu add command -label [::HWFlow::txt "查看使用指南" "View Guide"] \
+        -command ::HWToolkit::openGuide
+    $w.header.menu add command -label [::HWFlow::txt "复制诊断信息" "Copy Diagnostics"] \
+        -command ::HWToolkit::copyDiagnostics
+    ::HWFlow::uiWidget button $w.header.help -text "?" -width 3 -cursor hand2 \
+        -command [list ::HWToolkit::showHomeMenu $w.header.menu $w.header.help]
     pack $w.header.version -side right
+    pack $w.header.help -side right -padx {0 8}
     pack $w.header.title -side left
-    pack $w.header.hint -side left -padx {12 0}
+
+    ::HWFlow::uiWidget frame $w.search -background $bodyBg
+    pack $w.search -fill x -padx 14 -pady {8 4}
+    ::HWFlow::uiWidget label $w.search.label \
+        -text [::HWFlow::txt "搜索工具" "Search tools"] -background $bodyBg -anchor w
+    ::HWFlow::uiWidget entry $w.search.entry -textvariable ::HWToolkit::HOME_FILTER \
+        -background [::HWFlow::uiColors inputBg] -foreground [::HWFlow::uiColors inputFg]
+    ::HWFlow::uiWidget button $w.search.clear -text [::HWFlow::txt "清除" "Clear"] \
+        -width 7 -command ::HWToolkit::clearHomeFilter -cursor hand2
+    pack $w.search.label -side left -padx {0 8}
+    pack $w.search.clear -side right -padx {6 0}
+    pack $w.search.entry -side left -fill x -expand 1
+    bind $w.search.entry <KeyRelease> {after idle ::HWToolkit::refreshHomeContent}
+
     ::HWFlow::groove $w.rule
-    pack $w.rule -fill x -padx 12 -pady {6 0}
+    pack $w.rule -fill x -padx 14 -pady {4 0}
+
+    ::HWFlow::uiWidget frame $w.tabs -background $bodyBg
+    pack $w.tabs -fill x -padx 14 -pady {8 4}
+    foreach section {Common All Geometry Meshing Weld Connection} {
+        set count [llength [::HWToolkit::homeSectionKeys $section]]
+        set label [::HWToolkit::homeSectionText $section]
+        if {$section ne "All"} { append label " $count" }
+        set name [string tolower $section]
+        ::HWFlow::uiWidget button $w.tabs.$name -text $label -width 12 \
+            -command [list ::HWToolkit::selectHomeSection $section] -cursor hand2
+        pack $w.tabs.$name -side left -padx {0 5}
+    }
 
     ::HWFlow::scrollableFrame $w.body
-    pack $w.body -fill both -expand 1 -padx 12 -pady {2 6}
-    set content $w.body.c.inner
-
-    # Building a row creates several children and therefore several
-    # <Configure> events.  Recomputing the canvas bbox after every child used
-    # to turn initial layout into dozens of full scroll-region passes.  The
-    # panel is still withdrawn here, so suspend that binding while the fixed
-    # home-page tree is assembled and perform one calculation afterwards.
-    bind $content <Configure> ""
-
-    set groupIndex 0
-    foreach group [::HWToolkit::moduleGroups] {
-        ::HWFlow::groupHeader $content.g$groupIndex [::HWToolkit::groupText $group]
-        pack $content.g$groupIndex -fill x -pady {4 1}
-        ::HWToolkit::buildHomeGroup $content $group $nameWidth
-        incr groupIndex
-    }
-    bind $content <Configure> [list ::HWFlow::scrollableInnerConfigure $w.body.c]
-    # Let the canvas adopt the full content height so the window opens tall
-    # enough to show every tool; the scrollbar only appears when the user
-    # shrinks the window or the screen cannot fit the panel.
-    update idletasks
-    set contentHeight [winfo reqheight $content]
-    if {$contentHeight > 50} {
-        catch {$w.body.c configure -height $contentHeight}
-    }
-    # Append (do not replace) the scrollable-frame binding that keeps the
-    # inner frame at the canvas width; replacing it left every row at its
-    # content width and pushed the trailing buttons next to the name instead
-    # of the end of the row.
+    pack $w.body -fill both -expand 1 -padx 14 -pady {2 6}
+    catch {$w.body.c configure -height 390}
     bind $w.body.c <Configure> +[list ::HWToolkit::scheduleHomeScroll $w]
+    ::HWToolkit::refreshHomeContent
 
     set footer [::HWFlow::actionBar $w.foot]
-    pack $w.foot -fill x -padx 12 -pady {0 8}
-    foreach {name text width command} [list \
-        help [::HWFlow::txt "查看帮助" "View Help"] 12 ::HWToolkit::openGuide \
-        diagnostics [::HWFlow::txt "复制诊断" "Copy Diagnostics"] 12 ::HWToolkit::copyDiagnostics \
-        shortcuts [::HWFlow::txt "工具箱设置" "Toolbox Settings"] 13 ::HWShortcut::showSettings] {
-        ::HWFlow::uiWidget button $footer.$name -text $text -width $width -command $command -cursor hand2
-        pack $footer.$name -side left -padx {0 6}
-    }
+    pack $w.foot -fill x -padx 14 -pady {0 10}
+    ::HWFlow::uiWidget button $footer.shortcuts \
+        -text [::HWFlow::txt "工具箱设置" "Toolbox Settings"] -width 13 \
+        -command ::HWShortcut::showSettings -cursor hand2
+    pack $footer.shortcuts -side left
     ::HWFlow::uiWidget button $footer.topmost -text [::HWToolkit::topmostButtonText] \
         -width 16 -command ::HWToolkit::toggleProjectTopmost -cursor hand2
     pack $footer.topmost -side right -padx {0 6}
@@ -570,15 +773,68 @@ proc ::HWToolkit::showPanelHome {} {
     bind $w <Escape> ::HWToolkit::closePanel
     wm protocol $w WM_DELETE_WINDOW ::HWToolkit::closePanel
 
-    # Size to the natural requested width instead of a fixed legacy width:
-    # the flat compact layout only needs what the header, rows, and footer
-    # actually request, so the window adapts to the current content.
-    ::HWFlow::centerWindow $w 0 0
+    ::HWFlow::centerWindow $w 720 620
     wm deiconify $w
     catch {raise $w}
     catch {focus $w}
     ::HWToolkit::updateHomeScroll $w
     return $w
+}
+
+proc ::HWToolkit::clearHomeFilter {} {
+    variable HOME_FILTER
+    set HOME_FILTER ""
+    ::HWToolkit::refreshHomeContent
+    catch {focus .hwtoolkit.search.entry}
+}
+
+proc ::HWToolkit::selectHomeSection {section} {
+    variable HOME_SECTION
+    set HOME_SECTION $section
+    ::HWToolkit::refreshHomeContent
+}
+
+proc ::HWToolkit::refreshHomeContent {} {
+    variable MODULES
+    variable HOME_SECTION
+    variable HOME_FILTER
+    set w .hwtoolkit
+    if {[llength [info commands winfo]] == 0} { return }
+    if {![winfo exists $w.body.c.inner]} { return }
+    set content $w.body.c.inner
+
+    foreach section {Common All Geometry Meshing Weld Connection} {
+        set button $w.tabs.[string tolower $section]
+        if {![winfo exists $button]} { continue }
+        catch {$button configure -relief [expr {$section eq $HOME_SECTION ? "sunken" : "raised"}]}
+    }
+    foreach child [winfo children $content] { catch {destroy $child} }
+
+    set keys [::HWToolkit::homeFilteredKeys]
+    set query [string trim $HOME_FILTER]
+    if {$query ne ""} {
+        set heading [::HWFlow::txt "搜索结果（[llength $keys]）" "Search results ([llength $keys])"]
+    } else {
+        set heading "[::HWToolkit::homeSectionText $HOME_SECTION]（[llength $keys]）"
+    }
+    ::HWFlow::groupHeader $content.heading $heading
+    pack $content.heading -fill x -pady {4 3}
+
+    if {[llength $keys] == 0} {
+        ::HWFlow::uiWidget label $content.empty \
+            -text [::HWFlow::txt "没有匹配的工具，请尝试名称或功能关键词。" "No matching tools. Try a name or capability keyword."] \
+            -font [::HWFlow::uiFont default] -foreground [::HWFlow::uiColors textSecondary] \
+            -background [::HWFlow::uiColors bodyBg] -anchor w
+        pack $content.empty -fill x -padx 8 -pady 18
+    } else {
+        foreach key $keys {
+            ::HWToolkit::buildHomeRow $content $key [dict get $MODULES $key]
+        }
+    }
+    update idletasks
+    catch {$w.body.c configure -scrollregion [$w.body.c bbox all]}
+    catch {$w.body.c yview moveto 0}
+    ::HWToolkit::scheduleHomeScroll $w
 }
 
 # Keep the home panel scroll-free whenever the content fits: the vertical
@@ -616,49 +872,75 @@ proc ::HWToolkit::scheduleHomeScroll {w} {
     set HOME_SCROLL_TIMER [after 80 [list ::HWToolkit::updateHomeScroll $w]]
 }
 
-# One tool row: the name runs the module on click (highlighted on hover),
-# followed by the shortcut, settings, and help buttons.  The enriched module
-# description lives behind the help button instead of on the row, keeping the
-# panel compact while the full help text stays one click away.
-proc ::HWToolkit::buildHomeRow {parent key info nameWidth} {
+# One compact tool row: summary and shortcut status are informational; Run is
+# the single primary action and the menu holds settings/help/key binding.
+proc ::HWToolkit::buildHomeRow {parent key info} {
     set row $parent.r_$key
     set bodyBg [::HWFlow::uiColors bodyBg]
     ::HWFlow::uiWidget frame $row -background $bodyBg
-    pack $row -fill x -pady 1
+    pack $row -fill x -padx 4 -pady 3
 
+    set favorite [::HWToolkit::homeIsFavorite $key]
+    ::HWFlow::uiWidget button $row.favorite -width 3 \
+        -text [expr {$favorite ? "★" : "☆"}] \
+        -font [::HWFlow::uiFont default] -cursor hand2 \
+        -command [list ::HWToolkit::toggleHomeFavorite $key]
+    pack $row.favorite -side left -padx {0 2}
+
+    ::HWFlow::uiWidget frame $row.text -background $bodyBg
+    pack $row.text -side left -fill x -expand 1 -padx {4 10}
     ::HWFlow::uiWidget label $row.name -text [::HWToolkit::moduleText $info label] \
-        -font [::HWFlow::uiFont module] -width $nameWidth -anchor w -cursor hand2 \
+        -font [::HWFlow::uiFont module] -anchor w -cursor hand2 \
         -foreground [::HWFlow::uiColors textPrimary] -background $bodyBg
-    pack $row.name -side left -padx {4 8}
+    ::HWFlow::uiWidget label $row.summary -text [::HWToolkit::moduleSummary $key $info] \
+        -font [::HWFlow::uiFont small] -anchor w \
+        -foreground [::HWFlow::uiColors textSecondary] -background $bodyBg
+    pack $row.name -in $row.text -fill x
+    pack $row.summary -in $row.text -fill x -pady {1 0}
     bind $row.name <Button-1> [list ::HWToolkit::runModule $key]
     bind $row.name <Enter> [list ::HWToolkit::homeRowHover $row.name 1]
     bind $row.name <Leave> [list ::HWToolkit::homeRowHover $row.name 0]
 
-    # Packed right first, so the visual order is: shortcut, settings, help.
-    ::HWFlow::uiWidget button $row.help -width 6 \
-        -text [::HWFlow::txt "帮助" "Help"] -font [::HWFlow::uiFont default] \
-        -cursor hand2 -command [list ::HWToolkit::helpModule $key]
-    pack $row.help -side right -padx {0 4}
-    ::HWFlow::uiWidget button $row.settings -width 8 \
-        -text [::HWFlow::txt "设置" "Settings"] -font [::HWFlow::uiFont default] \
-        -cursor hand2 -command [list ::HWToolkit::settingsModule $key]
-    if {![dict exists $info settings_proc]} {
-        $row.settings configure -state disabled
+    menu $row.menu -tearoff 0
+    if {[dict exists $info settings_proc]} {
+        $row.menu add command -label [::HWFlow::txt "设置" "Settings"] \
+            -command [list ::HWToolkit::settingsModule $key]
     }
-    pack $row.settings -side right -padx {0 2}
-    ::HWFlow::uiWidget button $row.shortcut -text [::HWToolkit::shortcutButtonText $key] \
-        -font [::HWFlow::uiFont default] -cursor hand2 \
+    if {[dict exists $info undo_proc]} {
+        $row.menu add command -label [::HWFlow::txt "撤回最近操作" "Undo Latest Action"] \
+            -command [list ::HWToolkit::undoModule $key]
+    }
+    $row.menu add command -label [::HWFlow::txt "模块说明" "Module Help"] \
+        -command [list ::HWToolkit::helpModule $key]
+    $row.menu add command -label [::HWFlow::txt "设置快捷键" "Set Shortcut"] \
         -command [list ::HWShortcut::showForModule $key]
-    pack $row.shortcut -side right -padx {2 4}
+    $row.menu add separator
+    if {$favorite} {
+        set favoriteLabel [::HWFlow::txt "从常用中移除" "Remove from Common"]
+    } else {
+        set favoriteLabel [::HWFlow::txt "添加到常用" "Add to Common"]
+    }
+    $row.menu add command -label $favoriteLabel \
+        -command [list ::HWToolkit::toggleHomeFavorite $key]
+
+    ::HWFlow::uiWidget button $row.more -width 6 -text [::HWFlow::txt "更多" "More"] \
+        -font [::HWFlow::uiFont default] -cursor hand2 \
+        -command [list ::HWToolkit::showHomeMenu $row.menu $row.more]
+    pack $row.more -side right -padx {4 2}
+    ::HWFlow::uiWidget button $row.run -width 8 -text [::HWFlow::txt "运行" "Run"] \
+        -font [::HWFlow::uiFont default] -cursor hand2 \
+        -command [list ::HWToolkit::runModule $key]
+    pack $row.run -side right -padx {4 0}
+    ::HWFlow::uiWidget label $row.shortcut -text [::HWToolkit::shortcutText $key] \
+        -font [::HWFlow::uiFont small] -anchor e \
+        -foreground [::HWFlow::uiColors textSecondary] -background $bodyBg
+    pack $row.shortcut -side right -padx {4 6}
 }
 
-proc ::HWToolkit::buildHomeGroup {parent group nameWidth} {
-    variable MODULES
-    foreach {key info} $MODULES {
-        if {![::HWToolkit::moduleVisible $info]} { continue }
-        if {[dict get $info group] ne $group} { continue }
-        ::HWToolkit::buildHomeRow $parent $key $info $nameWidth
-    }
+proc ::HWToolkit::showHomeMenu {menuWidget buttonWidget} {
+    if {![winfo exists $menuWidget] || ![winfo exists $buttonWidget]} { return }
+    tk_popup $menuWidget [winfo rootx $buttonWidget] \
+        [expr {[winfo rooty $buttonWidget] + [winfo height $buttonWidget]}]
 }
 
 proc ::HWToolkit::homeRowHover {nameWidget active} {
@@ -670,8 +952,8 @@ proc ::HWToolkit::homeRowHover {nameWidget active} {
     }
 }
 
-# The row shortcut button doubles as the binding status: it shows the bound
-# key when one exists and a bind prompt otherwise.
+# Compatibility helper retained for shortcut-manager callers that need a
+# binding prompt instead of the home row's muted status text.
 proc ::HWToolkit::shortcutButtonText {key} {
     if {[llength [info commands ::HWShortcut::moduleShortcut]] > 0} {
         set value [::HWShortcut::moduleShortcut $key]
@@ -714,7 +996,7 @@ proc ::HWToolkit::refreshShortcutDisplays {} {
         if {![::HWToolkit::moduleVisible $info]} { continue }
         set button $content.r_$key.shortcut
         if {[winfo exists $button]} {
-            catch {$button configure -text [::HWToolkit::shortcutButtonText $key]}
+            catch {$button configure -text [::HWToolkit::shortcutText $key]}
         }
     }
 }
@@ -916,6 +1198,7 @@ proc ::HWToolkit::invokeModule {key {launchMode ui}} {
         return 0
     }
 
+    ::HWToolkit::rememberHomeModule $key
     set MODULE_BUSY 1
     set code [catch {uplevel #0 [list $procName]} err opts]
     set MODULE_BUSY 0
@@ -962,6 +1245,37 @@ proc ::HWToolkit::settingsModule {key} {
     if {$code} {
         tk_messageBox -icon error -title [::HWFlow::txt "HW 工作流" "HWToolkit"] -message [::HWFlow::txt "模块 $key 设置失败：\n$err" "Module $key settings error:\n$err"]
     }
+}
+
+proc ::HWToolkit::undoModule {key} {
+    variable MODULES
+    variable MODULE_BUSY
+    if {$MODULE_BUSY || ![dict exists $MODULES $key]} { return 0 }
+    set info [dict get $MODULES $key]
+    if {![dict exists $info undo_proc]} { return 0 }
+    if {![::HWToolkit::ensureCoreLoaded] ||
+        ![::HWToolkit::sourceOneModule $key $info]} {
+        return 0
+    }
+    if {[catch {::HWFlow::requireEngineeringContext} preflightError]} {
+        catch {hm_usermessage $preflightError}
+        return 0
+    }
+    set procName [dict get $info undo_proc]
+    if {[llength [info commands $procName]] == 0} { return 0 }
+    set MODULE_BUSY 1
+    set code [catch {uplevel #0 [list $procName]} err opts]
+    set MODULE_BUSY 0
+    catch {::HWFlow::refreshBrowser}
+    if {$code} {
+        if {[llength [info commands tk_messageBox]] > 0} {
+            tk_messageBox -icon error -title [::HWFlow::txt "撤回失败" "Undo Failed"] -message $err
+        } else {
+            catch {hm_usermessage $err}
+        }
+        return 0
+    }
+    return 1
 }
 
 # Show the enriched module description in a small scrollable dialog.  The

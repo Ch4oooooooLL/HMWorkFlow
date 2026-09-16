@@ -152,6 +152,28 @@ class ShortcutActionRegistryTests(unittest.TestCase):
             "Control-Shift-A",
         )
 
+    def test_letter_shortcuts_register_both_cases_with_or_without_shift(self) -> None:
+        self.tcl.eval(
+            "::HWShortcut::nativeRegister Control-Shift-A {set ::shiftedTriggered 1}"
+        )
+        self.tcl.eval(
+            "::HWShortcut::nativeRegister Control-B {set ::plainTriggered 1}"
+        )
+
+        bindings = set(self.tcl.splitlist(self.tcl.eval("array names ::nativeBinding")))
+        self.assertTrue(
+            {"Control-Shift-a", "Control-Shift-A", "Control-b", "Control-B"}
+            <= bindings
+        )
+        self.assertEqual(
+            self.tcl.eval("set ::nativeBinding(Control-Shift-a)"),
+            "set ::shiftedTriggered 1",
+        )
+        self.assertEqual(
+            self.tcl.eval("set ::nativeBinding(Control-Shift-A)"),
+            "set ::shiftedTriggered 1",
+        )
+
     def test_settings_ui_keeps_module_and_feature_sections_separate(self) -> None:
         manager_source = SHORTCUT_MANAGER.read_text(encoding="utf-8")
         core_source = TOOLKIT_CORE.read_text(encoding="utf-8")

@@ -61,6 +61,10 @@ class InstallerReloadTests(unittest.TestCase):
             batch_dir = project / "modules" / "batch_mesher"
             init_dir.mkdir(parents=True)
             batch_dir.mkdir(parents=True)
+            (project / "modules" / "node_patch_builder.tcl").write_text(
+                "namespace eval ::NodePatch { variable VERSION 1.0 }\n",
+                encoding="utf-8",
+            )
             shutil.copy2(ROOT / "install_update.tcl", project / "install_update.tcl")
             (project / "VERSION").write_text("test-update\n", encoding="utf-8")
             (batch_dir / "background_worker.tcl").write_text(
@@ -76,9 +80,16 @@ proc ::BatchMesherWorker::initializeBatchMeshProfile {release} {
                 """
 namespace eval ::HWToolkit {
     variable SCRIPT_DIR [file dirname [file normalize [info script]]]
+    variable MODULES [dict create node_patch_builder [dict create group Mesh proc ::NodePatch::runAction]]
+}
+proc ::HWToolkit::moduleVisible {info} { return 1 }
+proc ::HWToolkit::moduleFile {key info} {
+    return [file join $::HWToolkit::SCRIPT_DIR modules ${key}.tcl]
 }
 proc ::HWToolkit::ensureCoreLoaded {} { return 1 }
 proc ::HWToolkit::sourceModules {} {
+    source -encoding utf-8 [file join $::HWToolkit::SCRIPT_DIR modules node_patch_builder.tcl]
+    proc ::NodePatch::runAction {} { return node-patch-builder }
     namespace eval ::BatchMesher {
         variable MODULE_DIR [file join $::HWToolkit::SCRIPT_DIR modules batch_mesher]
         variable VERSION 2.6

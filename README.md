@@ -162,17 +162,18 @@ File > Run > Tcl/Tk Script > install_update.tcl
 File > Run > Tcl/Tk Script > hw_toolkit.tcl
 ```
 
-运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的扁平单层布局：所有工具按分类分组、一屏列出，点击工具名称直接运行，无需先选分类再选工具。模块归类为三部分显示：
+运行后会打开 `HyperMesh Toolkit` 主面板。2019 与 2022 使用相同的搜索式工作台：默认进入“常用”，只展示收藏工具和最多 4 个非重复的最近使用工具；顶部搜索会跨全部模块匹配中英文名称、用途说明和详细说明。主页分类为：
 
 ```text
-Geometry
-Mesh
-Connection
+几何准备 / Geometry
+网格处理 / Meshing
+焊缝 / Weld
+连接与载荷 / Connection & Loads
 ```
 
-每个工具一行：名称（点击即运行，悬停高亮）＋ 一句话说明 ＋ `设置` / `绑定快捷键` 两个按钮。未提供设置项的模块其 `设置` 按钮自动置灰；无快捷键绑定时按钮显示 `绑定快捷键`，已绑定时直接显示快捷键。窗口可拉伸，工具较多或屏幕较小时自动出现滚动条。模块运行结束后会自动刷新 Model Browser 并刷新图形窗口，不会改变已有 component 的显示/隐藏状态。
+每个工具一行：`☆/★` 收藏按钮、名称、一句话用途、快捷键状态、`运行` 和 `更多`。`更多` 菜单只显示该模块实际支持的设置，并统一提供模块说明、快捷键绑定和收藏操作；未绑定快捷键显示“未绑定”，不再以主按钮占用视觉空间。使用记录和收藏保存在 `%APPDATA%/HMWorkFlow/home.cfg`，更新软件不会覆盖。窗口可拉伸，当前分类内容超过可用高度时自动出现滚动条。模块运行结束后会自动刷新 Model Browser 和图形窗口，不会改变已有 component 的显示/隐藏状态。
 
-主面板底部的 `工具箱设置 / Toolbox Settings` 统一管理主入口、模块快捷键和非模块功能。页面将“模块快捷键”和“功能快捷键”分区显示；每个工具行的 `绑定快捷键` 按钮会直接打开设置页并选中对应模块，按钮上同时显示当前绑定状态。
+主面板底部的 `工具箱设置 / Toolbox Settings` 统一管理主入口、模块快捷键和非模块功能。页面将“模块快捷键”和“功能快捷键”分区显示；工具行的 `更多 → 设置快捷键` 会直接打开设置页并选中对应模块。标题栏的 `?` 菜单提供本地使用指南和诊断信息复制。
 
 功能快捷键当前包含 `By Face`、`By Attached` 和 `By Path Mode`。它们不是主页面模块，不会打开独立选择窗口，而是直接作用于 HyperMesh 2019/2022 当前活动的原生 Entity Selector。设置页还可整体启用/停用快速选择、打开调试记录，以及显式允许 By Path 在原位切换失败时使用 HyperMesh 原生 Path widget（默认关闭）。模块与功能使用同一按键映射、冲突检测和持久化文件，但在页面中保持独立分区。
 
@@ -358,7 +359,9 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 
 普通件只读取 `T` 后紧跟的数字作为厚度；存在材料字段时把最后一个下划线字段作为材料，例如 `V01_xxxx_T10_355` 生成 `355_T10`。没有材料字段的中面组件会留待后续材料识别或人工补充。
 
-材料必须已由用户创建。模块会先调用 HyperMesh 原生的 `*EntityPreviewEmpty` 一次性识别空 component；这些 component 不再检查 Property、解析名称或进入人工复核。已经关联 Property 的 component，以及名称中包含 `BEAM`、`RBE`、`BUSH`、`SPRING`（不区分大小写）的 1D component 也会直接跳过。无法识别、找不到材料、Property 创建失败或赋予校验失败的非空 component 不会被移动；模块只会在 `PROPERTY_ASSIGNMENT_REVIEW` assembly 中创建名为 `PROPERTY_REVIEW__<原component名>` 的空 component collector，作为人工复核名称清单，不复制网格、节点或几何。
+模块会先调用 HyperMesh 原生的 `*EntityPreviewEmpty` 一次性识别空 component；这些 component 不再检查 Property、解析名称或进入人工复核。已经关联 Property 的 component，以及名称中包含 `BEAM`、`RBE`、`BUSH`、`SPRING`（不区分大小写）的 1D component 也会直接跳过。名称可识别但材料不存在时，模块会创建同名空 MAT1 并继续赋予，完成后提示补全参数。
+
+失败的非空 component 保持原位，并按稳定错误码加入 `PROPERTY_ERROR__<错误码>` component set，例如 `PROPERTY_ERROR__THICKNESS_MISSING`、`PROPERTY_ERROR__MATERIAL_CREATE_FAILED`、`PROPERTY_ERROR__PROPERTY_THICKNESS_VERIFY_FAILED`。名称解析会区分版本前缀、件号缺失、厚度缺失、厚度非法、材料字段缺失及通用格式错误；执行阶段会区分材料创建、Property 卡片、Property 创建/查询、材料或厚度写入与校验、最终赋予校验等错误。模块不会为失败项复制 collector，也不会创建、移动或修改 assembly。
 
 ## 模块功能和用法
 
@@ -702,6 +705,8 @@ Vxx_..._Txx任意后缀_..._材料  ->  材料_Txx
 检测、后台规划、FEM 替换、原生 automesh、质量检查和完成态导出均显示进度。AUTO 必须通过覆盖、Physical Skin 残差、角度、目标歧义、孔洞/断口、投影连续性、曲率与实现风险 Hard Gate；`confidence` 仅用于排序。其余候选以及规划失败项进入 REVIEW，并携带固定 `reason_codes`。任务输出同时保留 `weld_recognition.json`、`recognition_summary.json` 与 `recognition_debug.csv` 供追溯。
 
 该模块使用独立配置 `fem_auto_seam` 和独立任务目录 `runtime/tasks/fem_auto_seam/`。设置页可单独配置搜索距离、置信度、小孔阈值、`.criteria`、Python 并行进程数、重绘尺寸、扩展层数、特征角和单批重绘上限。Python 不再移动节点或优化网格；HyperMesh 使用实机录制的 `*interactiveremeshelems`、`*automesh` 和 `*storemeshtodatabase 1` 流程分批重绘，并以原生 criteria 进行最终质量裁决。执行过程不建立候选 checkpoint，也不在 HyperMesh 内做任何增量导入；只有模型已经进入替换/重绘阶段且发生错误时，才使用任务级 `before.hm` 恢复一次整个批次。
+
+设置页提供“快速删除焊缝”：选择一个 `SEAM*` 焊缝单元后，只删除同一焊缝 Component 内与它通过公共边连续相连的焊缝壳单元；同一 Component 中的其他独立焊缝和所有原始 Component 均保留。随后仅对焊缝节点连接到的底面壳单元按 Component 做局部扩展和 remesh，失败时通过 HyperMesh 原生历史事务整体回滚。FEM 自动焊缝的模块快捷键直接进入此单元选取与删除流程，不再打开设置页。
 
 ## 公共机制
 

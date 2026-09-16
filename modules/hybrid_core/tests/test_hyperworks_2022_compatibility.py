@@ -122,30 +122,91 @@ class HyperWorks2022CompatibilityTests(unittest.TestCase):
                     tcl.splitlist(tcl.eval("set ::widget_calls")), ("tk",)
                 )
 
-    def test_home_panel_is_a_flat_shared_layout_for_both_generations(self) -> None:
+    def test_home_panel_is_a_searchable_sectioned_layout_for_both_generations(self) -> None:
         core = (ROOT / "hw_toolkit_core.tcl").read_text(encoding="utf-8")
         dispatcher = core[
             core.index("proc ::HWToolkit::showPanel") :
             core.index("proc ::HWToolkit::shortcutText")
         ]
-        # One flat builder for both host generations: no profile branch and no
-        # two-pane navigation/detail split anymore.
+        # One shared builder for both host generations: no profile branch or
+        # two-pane navigation/detail split.
         self.assertIn("return [::HWToolkit::showPanelHome]", dispatcher)
         self.assertNotIn('uiProfile] eq "hw2022"', dispatcher)
         self.assertNotIn("body.navigation", dispatcher)
         self.assertNotIn("select2022Group", dispatcher)
         self.assertNotIn("listbox", dispatcher)
-        # Every visible tool is one row: clicking the name runs it, and the
-        # two row buttons are settings and shortcut binding.
+        # Search and category filtering rebuild the same compact row type.
+        self.assertIn("-textvariable ::HWToolkit::HOME_FILTER", dispatcher)
+        self.assertIn("proc ::HWToolkit::selectHomeSection", dispatcher)
+        self.assertIn("proc ::HWToolkit::refreshHomeContent", dispatcher)
         self.assertIn("proc ::HWToolkit::buildHomeRow", dispatcher)
         self.assertIn("bind $row.name <Button-1>", dispatcher)
         self.assertIn("[list ::HWToolkit::runModule $key]", dispatcher)
+        # Run is the single row action; settings, help, and key binding live
+        # in the More menu while the shortcut itself is a status label.
         self.assertIn("::HWToolkit::settingsModule $key", dispatcher)
+        self.assertIn("::HWToolkit::helpModule $key", dispatcher)
         self.assertIn("::HWShortcut::showForModule $key", dispatcher)
-        # The shared row buttons keep their legacy widget paths so window
-        # cleanup and tests stay stable.
-        self.assertIn("$row.settings", dispatcher)
+        self.assertIn("$row.run", dispatcher)
+        self.assertIn("$row.more", dispatcher)
         self.assertIn("$row.shortcut", dispatcher)
+        self.assertNotIn("$row.settings", dispatcher)
+
+    def test_home_favorites_and_recents_persist_outside_the_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tcl = tkinter.Tcl()
+            tcl.eval(
+                f"source -encoding utf-8 {{{self.common_path.as_posix()}}}"
+            )
+            tcl.eval(
+                f"source -encoding utf-8 "
+                f"{{{(ROOT / 'hw_toolkit_core.tcl').as_posix()}}}"
+            )
+            tcl.eval(f"set ::env(APPDATA) {{{Path(temp_dir).as_posix()}}}")
+
+            defaults = tcl.splitlist(tcl.eval("::HWToolkit::homeCommonKeys"))
+            self.assertEqual(len(defaults), 6)
+            self.assertIn("midsurf", defaults)
+
+            tcl.eval("::HWToolkit::toggleHomeFavorite geometry_cleanup")
+            tcl.eval("::HWToolkit::rememberHomeModule cbush_creator")
+            state_file = Path(temp_dir) / "HMWorkFlow" / "home.cfg"
+            self.assertTrue(state_file.is_file())
+            self.assertIn(
+                "geometry_cleanup", state_file.read_text(encoding="utf-8")
+            )
+
+            tcl.eval("set ::HWToolkit::HOME_STATE_LOADED 0")
+            tcl.eval("set ::HWToolkit::HOME_FAVORITES {}")
+            tcl.eval("set ::HWToolkit::HOME_RECENTS {}")
+            reloaded = tcl.splitlist(tcl.eval("::HWToolkit::homeCommonKeys"))
+            self.assertIn("geometry_cleanup", reloaded)
+            self.assertIn("cbush_creator", reloaded)
+
+    def test_home_business_sections_cover_each_visible_module_once(self) -> None:
+        tcl = tkinter.Tcl()
+        tcl.eval(f"source -encoding utf-8 {{{self.common_path.as_posix()}}}")
+        tcl.eval(
+            f"source -encoding utf-8 "
+            f"{{{(ROOT / 'hw_toolkit_core.tcl').as_posix()}}}"
+        )
+        expected_counts = {
+            "Geometry": 4,
+            "Meshing": 5,
+            "Weld": 5,
+            "Connection": 9,
+        }
+        categorized: list[str] = []
+        for section, count in expected_counts.items():
+            keys = list(
+                tcl.splitlist(tcl.eval(f"::HWToolkit::homeSectionKeys {section}"))
+            )
+            self.assertEqual(len(keys), count, section)
+            categorized.extend(keys)
+
+        visible = list(tcl.splitlist(tcl.eval("::HWToolkit::visibleModuleKeys")))
+        self.assertEqual(len(categorized), len(set(categorized)))
+        self.assertEqual(set(categorized), set(visible))
 
     def test_2022_window_titles_use_ascii_without_changing_2019_titles(self) -> None:
         modern = tkinter.Tcl()

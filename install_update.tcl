@@ -23,7 +23,7 @@ proc ::HWInstaller::recordAction {message} {
 proc ::HWInstaller::cancelHmWorkflowCallbacks {} {
     set prefixes {
         ::HWToolkit ::HWFlow ::HWShortcut ::Toolbox::QuickSelector ::HybridCore ::BatchMesher
-        ::LocalMeshOptimizer ::SeamSurf ::MeshSeamWeld ::ContactSetup
+        ::LocalMeshOptimizer ::SeamSurf ::MeshSeamWeld ::NodePatch ::ContactSetup
         ::AdhesiveConnector ::SolidSeam ::WeldIntegrityCheck
     }
     set cancelled 0
@@ -106,7 +106,7 @@ proc ::HWInstaller::prepareLiveSession {} {
         ::AdhesiveConnector ::AutoHoleRBE2 ::BatchMesher
         ::BatchPropertyAssignment ::BatchTempNodes ::CBushCreator
         ::ContactSetup ::GeomCleanup ::LocalMeshOptimizer
-        ::MeshSeamWeld ::MidSurf ::RB2Bolt ::RB2W ::SeamSurf
+        ::MeshSeamWeld ::NodePatch ::MidSurf ::RB2Bolt ::RB2W ::SeamSurf
         ::BomMaterialAssignment ::SolidSeam ::SolidSeamCommandProfile ::WeldIntegrityCheck
         ::Toolbox::QuickSelector ::HWShortcut ::HWFlow ::HWToolkit
     } {
@@ -161,6 +161,28 @@ proc ::HWInstaller::readPackageVersion {} {
 proc ::HWInstaller::verifyLoadedSession {} {
     variable ROOT
     set expectedRoot [file normalize $ROOT]
+    if {![info exists ::HWToolkit::MODULES] ||
+        ![dict exists $::HWToolkit::MODULES node_patch_builder]} {
+        error "Node Patch Builder is missing from the toolkit registry."
+    }
+    set nodePatchInfo [dict get $::HWToolkit::MODULES node_patch_builder]
+    if {![::HWToolkit::moduleVisible $nodePatchInfo]} {
+        error "Node Patch Builder is registered but hidden."
+    }
+    set expectedNodePatchFile [file normalize [file join $ROOT modules node_patch_builder.tcl]]
+    set registeredNodePatchFile [file normalize [::HWToolkit::moduleFile node_patch_builder $nodePatchInfo]]
+    if {![string equal -nocase $expectedNodePatchFile $registeredNodePatchFile] ||
+        ![file isfile $registeredNodePatchFile]} {
+        error "Node Patch Builder registry path mismatch: expected $expectedNodePatchFile, registered $registeredNodePatchFile"
+    }
+    if {![namespace exists ::NodePatch] ||
+        [llength [info commands ::NodePatch::runAction]] == 0} {
+        error "Node Patch Builder was registered but its entry command was not loaded."
+    }
+    if {![info exists ::NodePatch::VERSION] ||
+        [package vcompare $::NodePatch::VERSION 1.0] < 0} {
+        error "Stale Node Patch Builder version is loaded."
+    }
     if {![namespace exists ::BatchMesher]} { error "BatchMesher namespace was not loaded from the update." }
     foreach command {
         ::BatchMesher::launchDetachedHmbatch
@@ -223,6 +245,8 @@ proc ::HWInstaller::verifyLoadedSession {} {
     return [dict create \
         package_version [::HWInstaller::readPackageVersion] \
         project_root $expectedRoot \
+        node_patch_builder_version $::NodePatch::VERSION \
+        node_patch_builder_file $registeredNodePatchFile \
         batch_mesher_version $::BatchMesher::VERSION \
         batch_temp_nodes_version $::BatchTempNodes::VERSION \
         batch_module_dir $loadedModuleDir \
@@ -251,6 +275,8 @@ proc ::HWInstaller::writeUpdateReport {verification} {
         "updated_ms=[clock milliseconds]" \
         "package_version=[dict get $verification package_version]" \
         "project_root=[file nativename [dict get $verification project_root]]" \
+        "node_patch_builder_version=[dict get $verification node_patch_builder_version]" \
+        "node_patch_builder_file=[file nativename [dict get $verification node_patch_builder_file]]" \
         "batch_mesher_version=[dict get $verification batch_mesher_version]" \
         "batch_temp_nodes_version=[dict get $verification batch_temp_nodes_version]" \
         "batch_module_dir=[file nativename [dict get $verification batch_module_dir]]" \

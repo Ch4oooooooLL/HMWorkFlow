@@ -552,11 +552,14 @@ proc ::HWShortcut::shortcutAliases {shortcut} {
     set shortcut [::HWShortcut::normalizeShortcut $shortcut]
     set parts [split $shortcut "-"]
     set key [lindex $parts end]
-    set hasShift [expr {[lsearch -exact $parts Shift] >= 0}]
-    if {!$hasShift && [string length $key] == 1 && [string is alpha $key]} {
+    if {[string length $key] == 1 && [string is alpha $key]} {
         set prefix [join [lrange $parts 0 end-1] "-"]
         if {$prefix ne ""} { append prefix "-" }
-        return [list "${prefix}[string tolower $key]" "${prefix}[string toupper $key]"]
+        set lower "${prefix}[string tolower $key]"
+        set upper "${prefix}[string toupper $key]"
+        if {$lower ne $upper} {
+            return [list $lower $upper]
+        }
     }
     return [list $shortcut]
 }
